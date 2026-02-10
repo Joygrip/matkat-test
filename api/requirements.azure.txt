@@ -1,0 +1,4 @@
+# Azure SQL dependencies (production)
+# Install with: pip install -r requirements.azure.txt
+-r requirements.txt
+pyodbc>=5.0.0  # For Azure SQL Server

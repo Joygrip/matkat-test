@@ -1,0 +1,463 @@
+/**
+ * Role-based Dashboard
+ * Non-admin: Action-focused cards
+ * Admin: Action cards + System panels
+ */
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  makeStyles,
+  tokens,
+  Title3,
+  Body1,
+  Badge,
+  Button,
+  Card,
+  Accordion,
+  AccordionItem,
+  AccordionHeader,
+  AccordionPanel,
+} from '@fluentui/react-components';
+import {
+  ClipboardTaskRegular,
+  CheckmarkCircleRegular,
+  CalendarRegular,
+  ChartMultipleRegular,
+  BuildingRegular,
+  ShieldCheckmarkRegular,
+  ArrowSyncRegular,
+} from '@fluentui/react-icons';
+import { useAuth } from '../auth/AuthProvider';
+import { apiClient } from '../api/client';
+import { useToast } from '../hooks/useToast';
+import { HealthResponse } from '../types';
+import { config } from '../config';
+import { ActionCard } from '../components/ActionCard';
+import { LoadingState } from '../components/LoadingState';
+import { approvalsApi } from '../api/approvals';
+import { periodsApi, Period } from '../api/periods';
+import { actualsApi } from '../api/actuals';
+import { planningApi } from '../api/planning';
+import { SupplyDemandChart } from '../components/SupplyDemandChart';
+import { lookupsApi, Project, Resource } from '../api/lookups';
+
+const useStyles = makeStyles({
+  container: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXL,
+    maxWidth: '1400px',
+    margin: '0 auto',
+  },
+  welcome: {
+    background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+    color: 'white',
+    padding: tokens.spacingHorizontalXL,
+    borderRadius: tokens.borderRadiusLarge,
+    boxShadow: tokens.shadow8,
+  },
+  welcomeTitle: {
+    color: 'white',
+    marginBottom: tokens.spacingVerticalS,
+  },
+  welcomeSubtitle: {
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  actionsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    gap: tokens.spacingVerticalL,
+  },
+  adminSection: {
+    marginTop: tokens.spacingVerticalXL,
+  },
+  adminCard: {
+    padding: tokens.spacingHorizontalL,
+    marginBottom: tokens.spacingVerticalL,
+  },
+  infoRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: `${tokens.spacingVerticalS} 0`,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    '&:last-child': {
+      borderBottom: 'none',
+    },
+  },
+  label: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
+  value: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  permissionList: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalXS,
+    marginTop: tokens.spacingVerticalS,
+  },
+  devBanner: {
+    marginTop: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalM,
+    background: 'rgba(255, 185, 0, 0.1)',
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid rgba(255, 185, 0, 0.3)`,
+  },
+});
+
+const monthNames = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+export function Dashboard() {
+  const styles = useStyles();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { showSuccess, showApiError } = useToast();
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [periods, setPeriods] = useState<Period[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
+  const [unsignedActuals, setUnsignedActuals] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+  const [demandLines, setDemandLines] = useState<any[]>([]);
+  const [supplyLines, setSupplyLines] = useState<any[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
+  const [selectedPeriodForChart, setSelectedPeriodForChart] = useState<string>('');
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [resources, setResources] = useState<Resource[]>([]);
+  const [selectedProject, setSelectedProject] = useState<string>('');
+  const [selectedResource, setSelectedResource] = useState<string>('');
+
+  const isAdmin = user?.role === 'Admin';
+  const isEmployee = user?.role === 'Employee';
+  const isRO = user?.role === 'RO';
+  const isDirector = user?.role === 'Director';
+  const isFinance = user?.role === 'Finance';
+  const isPM = user?.role === 'PM';
+
+  useEffect(() => {
+    loadDashboardData();
+    // Load projects and resources for filters
+    lookupsApi.listProjects().then(setProjects);
+    lookupsApi.listResources().then(setResources);
+  }, []);
+
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+      const [healthData, periodsData] = await Promise.all([
+        apiClient.getHealth().catch(() => null),
+        periodsApi.list().catch(() => []),
+      ]);
+
+      setHealth(healthData);
+      setPeriods(periodsData);
+
+      // Load role-specific data
+      if (isRO || isDirector) {
+        try {
+          const approvals = await approvalsApi.getInbox();
+          setPendingApprovals(approvals.length);
+        } catch (error) {
+          console.error('Failed to load approvals:', error);
+        }
+      }
+
+      if (isEmployee) {
+        try {
+          const now = new Date();
+          const actuals = await actualsApi.getMyActuals(now.getFullYear(), now.getMonth() + 1);
+          const unsigned = actuals.filter((a) => !a.employee_signed_at).length;
+          setUnsignedActuals(unsigned);
+        } catch (error) {
+          console.error('Failed to load actuals:', error);
+        }
+      }
+
+      // Load supply/demand data for chart (PM, RO, Director, Finance)
+      if (isPM || isRO || isDirector || isFinance) {
+        const openPeriod = periodsData.find((p: Period) => p.status === 'open') || periodsData[0];
+        if (openPeriod) {
+          setSelectedPeriodForChart(openPeriod.id);
+          loadChartData(openPeriod.id);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSeed = async () => {
+    setSeeding(true);
+    try {
+      const result = await apiClient.seedDatabase();
+      showSuccess('Database Seeded', result.message);
+    } catch (error) {
+      showApiError(error as Error, 'Failed to seed database');
+    } finally {
+      setSeeding(false);
+    }
+  };
+
+  const loadChartData = async (periodId: string, projectId?: string, resourceId?: string) => {
+    if (!periodId) return;
+    try {
+      setChartLoading(true);
+      let demandUrl = `/demand-lines?period_id=${periodId}`;
+      let supplyUrl = `/supply-lines?period_id=${periodId}`;
+      if (projectId) demandUrl += `&project_id=${projectId}`;
+      if (resourceId) {
+        demandUrl += `&resource_id=${resourceId}`;
+        supplyUrl += `&resource_id=${resourceId}`;
+      }
+      const [demands, supplies] = await Promise.all([
+        apiClient.get(demandUrl).catch((err) => { console.error('[Dashboard] Failed to load demand lines:', err); return []; }),
+        apiClient.get(supplyUrl).catch((err) => { console.error('[Dashboard] Failed to load supply lines:', err); return []; }),
+      ]);
+      setDemandLines(demands || []);
+      setSupplyLines(supplies || []);
+    } catch (error) {
+      console.error('[Dashboard] Failed to load chart data:', error);
+    } finally {
+      setChartLoading(false);
+    }
+  };
+
+  const handlePeriodChange = (periodId: string) => {
+    setSelectedPeriodForChart(periodId);
+    loadChartData(periodId);
+  };
+
+  const handleFilterChange = (projectId: string, resourceId: string) => {
+    setSelectedProject(projectId);
+    setSelectedResource(resourceId);
+    loadChartData(selectedPeriodForChart, projectId, resourceId);
+  };
+
+  if (loading) {
+    return <LoadingState message="Loading dashboard..." />;
+  }
+
+  const currentPeriod = periods.find((p) => p.status === 'open') || periods[0];
+  const currentPeriodLabel = currentPeriod
+    ? `${monthNames[currentPeriod.month - 1]} ${currentPeriod.year}`
+    : 'No period available';
+
+  return (
+    <div className={styles.container}>
+      {/* Welcome Banner */}
+      <div className={styles.welcome}>
+        <Title3 className={styles.welcomeTitle}>
+          Welcome back, {user?.display_name}!
+        </Title3>
+        <Body1 className={styles.welcomeSubtitle}>
+          You are logged in as <strong>{user?.role}</strong> for tenant{' '}
+          <strong>{user?.tenant_id}</strong>
+        </Body1>
+        {config.devAuthBypass && isAdmin && (
+          <div className={styles.devBanner}>
+            <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>
+              <strong>Development Mode</strong>
+            </Body1>
+            <Button
+              appearance="secondary"
+              icon={<ArrowSyncRegular />}
+              onClick={handleSeed}
+              disabled={seeding}
+            >
+              {seeding ? 'Seeding...' : 'Seed Database'}
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Supply/Demand Chart for PM, RO, Director, Finance */}
+      {(isPM || isRO || isDirector || isFinance) && periods.length > 0 && (
+        <div style={{ marginBottom: tokens.spacingVerticalXL }}>
+          {/* Filter Controls */}
+          <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+            <div>
+              <label>Project:&nbsp;</label>
+              <select value={selectedProject} onChange={e => handleFilterChange(e.target.value, selectedResource)}>
+                <option value=''>All</option>
+                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label>Resource:&nbsp;</label>
+              <select value={selectedResource} onChange={e => handleFilterChange(selectedProject, e.target.value)}>
+                <option value=''>All</option>
+                {resources.map(r => <option key={r.id} value={r.id}>{r.display_name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ marginBottom: tokens.spacingVerticalM, display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM }}>
+            <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>
+              Select Period:
+            </Body1>
+            <select
+              value={selectedPeriodForChart || ''}
+              onChange={(e) => handlePeriodChange(e.target.value)}
+              style={{ 
+                minWidth: '200px',
+                padding: tokens.spacingVerticalS,
+                borderRadius: tokens.borderRadiusSmall,
+                border: `1px solid ${tokens.colorNeutralStroke1}`,
+                fontSize: tokens.fontSizeBase300,
+              }}
+            >
+              {periods.map((period) => (
+                <option key={period.id} value={period.id}>
+                  {monthNames[period.month - 1]} {period.year}
+                </option>
+              ))}
+            </select>
+          </div>
+          {selectedPeriodForChart && (
+            <SupplyDemandChart
+              demandLines={demandLines}
+              supplyLines={supplyLines}
+              loading={chartLoading}
+              periodLabel={
+                selectedPeriodForChart
+                  ? (() => {
+                      const period = periods.find((p) => p.id === selectedPeriodForChart);
+                      return period ? `${monthNames[period.month - 1]} ${period.year}` : undefined;
+                    })()
+                  : undefined
+              }
+            />
+          )}
+        </div>
+      )}
+
+      {/* Action Cards */}
+      <div className={styles.actionsGrid}>
+        {isEmployee && unsignedActuals > 0 && (
+          <ActionCard
+            icon={<ClipboardTaskRegular />}
+            title="Sign Actuals"
+            value={unsignedActuals}
+            subtitle={`${unsignedActuals} unsigned actual line${unsignedActuals !== 1 ? 's' : ''}`}
+            onClick={() => navigate('/actuals')}
+          />
+        )}
+
+        {(isRO || isDirector) && pendingApprovals > 0 && (
+          <ActionCard
+            icon={<CheckmarkCircleRegular />}
+            title="Pending Approvals"
+            value={pendingApprovals}
+            subtitle={`${pendingApprovals} approval${pendingApprovals !== 1 ? 's' : ''} awaiting your action`}
+            onClick={() => navigate('/approvals')}
+          />
+        )}
+
+        {(isFinance || isAdmin) && (
+          <ActionCard
+            icon={<ChartMultipleRegular />}
+            title="Consolidation"
+            subtitle="View and publish consolidation snapshots"
+            onClick={() => navigate('/consolidation')}
+          />
+        )}
+
+        {(isRO || isFinance || isAdmin) && (
+          <ActionCard
+            icon={<CalendarRegular />}
+            title="Supply Planning"
+            subtitle="Manage supply lines"
+            onClick={() => navigate('/supply')}
+          />
+        )}
+
+        {!isEmployee && (
+          <ActionCard
+            icon={<CalendarRegular />}
+            title="Demand Planning"
+            subtitle="View demand lines"
+            onClick={() => navigate('/demand')}
+          />
+        )}
+      </div>
+
+      {/* Admin-Only System Panels */}
+      {isAdmin && (
+        <div className={styles.adminSection}>
+          <Card className={styles.adminCard}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM, marginBottom: tokens.spacingVerticalM }}>
+              <ShieldCheckmarkRegular style={{ fontSize: 24, color: tokens.colorBrandForeground1 }} />
+              <Title3>System Status</Title3>
+            </div>
+            <div className={styles.infoRow}>
+              <span className={styles.label}>API Status</span>
+              <Badge appearance="filled" color={health?.status === 'healthy' ? 'success' : 'danger'}>
+                {health?.status || 'Unknown'}
+              </Badge>
+            </div>
+            <div className={styles.infoRow}>
+              <span className={styles.label}>Version</span>
+              <span className={styles.value}>{health?.version || 'N/A'}</span>
+            </div>
+            <div className={styles.infoRow}>
+              <span className={styles.label}>Environment</span>
+              <Badge appearance="outline">{health?.environment || 'N/A'}</Badge>
+            </div>
+          </Card>
+
+          <Card className={styles.adminCard}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM, marginBottom: tokens.spacingVerticalM }}>
+              <BuildingRegular style={{ fontSize: 24, color: tokens.colorBrandForeground1 }} />
+              <Title3>Tenant Information</Title3>
+            </div>
+            <div className={styles.infoRow}>
+              <span className={styles.label}>Tenant ID</span>
+              <span className={styles.value} style={{ fontSize: tokens.fontSizeBase200 }}>
+                {user?.tenant_id}
+              </span>
+            </div>
+            <div className={styles.infoRow}>
+              <span className={styles.label}>User Email</span>
+              <span className={styles.value}>{user?.email}</span>
+            </div>
+            <div className={styles.infoRow}>
+              <span className={styles.label}>Object ID</span>
+              <span className={styles.value} style={{ fontSize: tokens.fontSizeBase200 }}>
+                {user?.object_id}
+              </span>
+            </div>
+          </Card>
+
+          <Card className={styles.adminCard}>
+            <Accordion collapsible>
+              <AccordionItem value="permissions">
+                <AccordionHeader>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM }}>
+                    <ShieldCheckmarkRegular style={{ fontSize: 20 }} />
+                    <Title3>Your Permissions</Title3>
+                  </div>
+                </AccordionHeader>
+                <AccordionPanel>
+                  <div className={styles.permissionList}>
+                    {user?.permissions.map((perm) => (
+                      <Badge key={perm} appearance="outline" size="small">
+                        {perm}
+                      </Badge>
+                    ))}
+                  </div>
+                </AccordionPanel>
+              </AccordionItem>
+            </Accordion>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}

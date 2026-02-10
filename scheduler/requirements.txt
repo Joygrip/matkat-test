@@ -1,0 +1,4 @@
+# Azure Functions scheduler dependencies
+azure-functions
+requests
+python-dotenv

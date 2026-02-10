@@ -1,0 +1,11 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "API_BASE_URL": "http://localhost:8000",
+    "DEV_AUTH_BYPASS": "true",
+    "DEV_TENANT": "dev-tenant-001",
+    "DEV_ROLE": "Admin"
+  }
+}

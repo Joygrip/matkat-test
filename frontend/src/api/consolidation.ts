@@ -3,39 +3,53 @@
  */
 import { apiClient } from './client';
 
-export interface Gap {
+// Department-grouped dashboard types
+export interface DashboardResource {
   resource_id: string;
   resource_name: string;
-  year: number;
-  month: number;
   demand_fte: number;
   supply_fte: number;
   gap_fte: number;
-  status: string;
+  status: 'balanced' | 'under' | 'over';
 }
 
-export interface OrphanDemand {
-  demand_line_id: string;
-  project_id: string;
-  project_name: string;
+export interface DashboardPlaceholder {
   placeholder_id: string;
   placeholder_name: string;
-  year: number;
-  month: number;
-  fte_percent: number;
+  demand_fte: number;
+  project_id: string;
+  project_name: string;
+}
+
+export interface DashboardCostCenter {
+  cost_center_id: string | null;
+  cost_center_name: string;
+  resources: DashboardResource[];
+  placeholders: DashboardPlaceholder[];
+}
+
+export interface DashboardDepartment {
+  department_id: string | null;
+  department_name: string;
+  total_demand_fte: number;
+  total_supply_fte: number;
+  gap_fte: number;
+  cost_centers: DashboardCostCenter[];
 }
 
 export interface OverAllocation {
   resource_id: string;
   resource_name: string;
-  year: number;
-  month: number;
+  department_id?: string;
+  department_name?: string;
   total_demand_fte: number;
 }
 
 export interface DashboardSummary {
-  total_resources: number;
-  gaps_count: number;
+  total_departments: number;
+  total_demand_fte: number;
+  total_supply_fte: number;
+  total_gap_fte: number;
   orphans_count: number;
   over_allocations_count: number;
 }
@@ -43,10 +57,9 @@ export interface DashboardSummary {
 export interface ConsolidationDashboard {
   period_id: string;
   period: string;
-  gaps: Gap[];
-  orphan_demands: OrphanDemand[];
-  over_allocations: OverAllocation[];
   summary: DashboardSummary;
+  departments: DashboardDepartment[];
+  over_allocations: OverAllocation[];
 }
 
 export interface SnapshotLine {

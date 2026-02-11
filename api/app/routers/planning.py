@@ -20,48 +20,109 @@ from api.app.services.planning import DemandService, SupplyService
 
 router = APIRouter(tags=["Planning"])
 
+
+def _enrich_demand(line) -> DemandLineResponse:
+    """Build an enriched DemandLineResponse with department/CC context."""
+    dept_id = dept_name = cc_id = cc_name = None
+    if line.resource and line.resource.cost_center:
+        cc = line.resource.cost_center
+        cc_id = cc.id
+        cc_name = cc.name
+        if cc.department:
+            dept_id = cc.department.id
+            dept_name = cc.department.name
+    elif line.placeholder:
+        dept_id = line.placeholder.department_id
+        dept_name = line.placeholder.department.name if line.placeholder.department else None
+        cc_id = line.placeholder.cost_center_id
+        cc_name = line.placeholder.cost_center.name if line.placeholder.cost_center else None
+
+    return DemandLineResponse(
+        id=line.id,
+        tenant_id=line.tenant_id,
+        period_id=line.period_id,
+        project_id=line.project_id,
+        resource_id=line.resource_id,
+        placeholder_id=line.placeholder_id,
+        year=line.year,
+        month=line.month,
+        fte_percent=line.fte_percent,
+        created_by=line.created_by,
+        created_at=line.created_at,
+        updated_at=line.updated_at,
+        project_name=line.project.name if line.project else None,
+        resource_name=line.resource.display_name if line.resource else None,
+        placeholder_name=line.placeholder.name if line.placeholder else None,
+        department_id=dept_id,
+        department_name=dept_name,
+        cost_center_id=cc_id,
+        cost_center_name=cc_name,
+    )
+
+
+def _enrich_supply(line) -> SupplyLineResponse:
+    """Build an enriched SupplyLineResponse with department/CC context."""
+    dept_id = dept_name = cc_id = cc_name = None
+    if line.resource and line.resource.cost_center:
+        cc = line.resource.cost_center
+        cc_id = cc.id
+        cc_name = cc.name
+        if cc.department:
+            dept_id = cc.department.id
+            dept_name = cc.department.name
+
+    return SupplyLineResponse(
+        id=line.id,
+        tenant_id=line.tenant_id,
+        period_id=line.period_id,
+        resource_id=line.resource_id,
+        project_id=line.project_id,
+        year=line.year,
+        month=line.month,
+        fte_percent=line.fte_percent,
+        created_by=line.created_by,
+        created_at=line.created_at,
+        updated_at=line.updated_at,
+        resource_name=line.resource.display_name if line.resource else None,
+        project_name=line.project.name if line.project else None,
+        department_id=dept_id,
+        department_name=dept_name,
+        cost_center_id=cc_id,
+        cost_center_name=cc_name,
+    )
+
 # ============== DEMAND LINES ==============
 
 @router.get("/demand-lines", response_model=list[DemandLineResponse])
 async def list_demand_lines(
+    period_id: Optional[str] = Query(None, description="Filter by period_id"),
     year: Optional[int] = Query(None, description="Filter by year"),
     month: Optional[int] = Query(None, ge=1, le=12, description="Filter by month"),
     project_id: Optional[str] = Query(None, description="Filter by project_id"),
     resource_id: Optional[str] = Query(None, description="Filter by resource_id"),
+    department_id: Optional[str] = Query(None, description="Filter by department_id"),
+    cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.RO, UserRole.DIRECTOR
     )),
 ):
     """
-    List demand lines. Filtered by tenant, project, resource.
+    List demand lines. Filtered by tenant, period, project, resource, department, cost center.
     
     Accessible to: Admin, Finance (read-only), PM, RO (read-only), Director
     """
     service = DemandService(db, current_user)
-    lines = service.get_all(year, month, project_id, resource_id)
+    lines = service.get_all(year, month, project_id, resource_id, period_id=period_id)
     
-    # Enrich with names
-    result = []
-    for line in lines:
-        resp = DemandLineResponse(
-            id=line.id,
-            tenant_id=line.tenant_id,
-            period_id=line.period_id,
-            project_id=line.project_id,
-            resource_id=line.resource_id,
-            placeholder_id=line.placeholder_id,
-            year=line.year,
-            month=line.month,
-            fte_percent=line.fte_percent,
-            created_by=line.created_by,
-            created_at=line.created_at,
-            updated_at=line.updated_at,
-            project_name=line.project.name if line.project else None,
-            resource_name=line.resource.display_name if line.resource else None,
-            placeholder_name=line.placeholder.name if line.placeholder else None,
-        )
-        result.append(resp)
+    # Enrich with department/CC context
+    result = [_enrich_demand(line) for line in lines]
+    
+    # Post-filter by department / cost center (applied after enrichment)
+    if department_id:
+        result = [r for r in result if r.department_id == department_id]
+    if cost_center_id:
+        result = [r for r in result if r.cost_center_id == cost_center_id]
     
     return result
 
@@ -81,23 +142,7 @@ async def get_demand_line(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Demand line not found"})
     
-    return DemandLineResponse(
-        id=line.id,
-        tenant_id=line.tenant_id,
-        period_id=line.period_id,
-        project_id=line.project_id,
-        resource_id=line.resource_id,
-        placeholder_id=line.placeholder_id,
-        year=line.year,
-        month=line.month,
-        fte_percent=line.fte_percent,
-        created_by=line.created_by,
-        created_at=line.created_at,
-        updated_at=line.updated_at,
-        project_name=line.project.name if line.project else None,
-        resource_name=line.resource.display_name if line.resource else None,
-        placeholder_name=line.placeholder.name if line.placeholder else None,
-    )
+    return _enrich_demand(line)
 
 
 @router.post("/demand-lines", response_model=DemandLineResponse)
@@ -127,23 +172,7 @@ async def create_demand_line(
         placeholder_id=data.placeholder_id,
     )
     
-    return DemandLineResponse(
-        id=line.id,
-        tenant_id=line.tenant_id,
-        period_id=line.period_id,
-        project_id=line.project_id,
-        resource_id=line.resource_id,
-        placeholder_id=line.placeholder_id,
-        year=line.year,
-        month=line.month,
-        fte_percent=line.fte_percent,
-        created_by=line.created_by,
-        created_at=line.created_at,
-        updated_at=line.updated_at,
-        project_name=line.project.name if line.project else None,
-        resource_name=line.resource.display_name if line.resource else None,
-        placeholder_name=line.placeholder.name if line.placeholder else None,
-    )
+    return _enrich_demand(line)
 
 
 @router.patch("/demand-lines/{demand_id}", response_model=DemandLineResponse)
@@ -161,23 +190,7 @@ async def update_demand_line(
     service = DemandService(db, current_user)
     line = service.update(demand_id, data.fte_percent)
     
-    return DemandLineResponse(
-        id=line.id,
-        tenant_id=line.tenant_id,
-        period_id=line.period_id,
-        project_id=line.project_id,
-        resource_id=line.resource_id,
-        placeholder_id=line.placeholder_id,
-        year=line.year,
-        month=line.month,
-        fte_percent=line.fte_percent,
-        created_by=line.created_by,
-        created_at=line.created_at,
-        updated_at=line.updated_at,
-        project_name=line.project.name if line.project else None,
-        resource_name=line.resource.display_name if line.resource else None,
-        placeholder_name=line.placeholder.name if line.placeholder else None,
-    )
+    return _enrich_demand(line)
 
 
 @router.delete("/demand-lines/{demand_id}")
@@ -257,38 +270,33 @@ async def bulk_demand_lines(
 
 @router.get("/supply-lines", response_model=list[SupplyLineResponse])
 async def list_supply_lines(
+    period_id: Optional[str] = Query(None, description="Filter by period_id"),
     year: Optional[int] = Query(None, description="Filter by year"),
     month: Optional[int] = Query(None, ge=1, le=12, description="Filter by month"),
     resource_id: Optional[str] = Query(None, description="Filter by resource_id"),
+    department_id: Optional[str] = Query(None, description="Filter by department_id"),
+    cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.RO, UserRole.DIRECTOR
     )),
 ):
     """
-    List supply lines. Filtered by tenant, resource.
+    List supply lines. Filtered by tenant, period, resource, department, cost center.
     
     Accessible to: Admin, Finance (read-only), PM (read-only), RO, Director
     """
     service = SupplyService(db, current_user)
-    lines = service.get_all(year, month, None, resource_id)
+    lines = service.get_all(year, month, None, resource_id, period_id=period_id)
     
-    result = []
-    for line in lines:
-        resp = SupplyLineResponse(
-            id=line.id,
-            tenant_id=line.tenant_id,
-            period_id=line.period_id,
-            resource_id=line.resource_id,
-            year=line.year,
-            month=line.month,
-            fte_percent=line.fte_percent,
-            created_by=line.created_by,
-            created_at=line.created_at,
-            updated_at=line.updated_at,
-            resource_name=line.resource.display_name if line.resource else None,
-        )
-        result.append(resp)
+    # Enrich with department/CC context
+    result = [_enrich_supply(line) for line in lines]
+    
+    # Post-filter by department / cost center
+    if department_id:
+        result = [r for r in result if r.department_id == department_id]
+    if cost_center_id:
+        result = [r for r in result if r.cost_center_id == cost_center_id]
     
     return result
 
@@ -308,19 +316,7 @@ async def get_supply_line(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Supply line not found"})
     
-    return SupplyLineResponse(
-        id=line.id,
-        tenant_id=line.tenant_id,
-        period_id=line.period_id,
-        resource_id=line.resource_id,
-        year=line.year,
-        month=line.month,
-        fte_percent=line.fte_percent,
-        created_by=line.created_by,
-        created_at=line.created_at,
-        updated_at=line.updated_at,
-        resource_name=line.resource.display_name if line.resource else None,
-    )
+    return _enrich_supply(line)
 
 
 @router.post("/supply-lines", response_model=SupplyLineResponse)
@@ -345,21 +341,10 @@ async def create_supply_line(
         year=data.year,
         month=data.month,
         fte_percent=data.fte_percent,
+        project_id=data.project_id,
     )
     
-    return SupplyLineResponse(
-        id=line.id,
-        tenant_id=line.tenant_id,
-        period_id=line.period_id,
-        resource_id=line.resource_id,
-        year=line.year,
-        month=line.month,
-        fte_percent=line.fte_percent,
-        created_by=line.created_by,
-        created_at=line.created_at,
-        updated_at=line.updated_at,
-        resource_name=line.resource.display_name if line.resource else None,
-    )
+    return _enrich_supply(line)
 
 
 @router.patch("/supply-lines/{supply_id}", response_model=SupplyLineResponse)
@@ -377,19 +362,7 @@ async def update_supply_line(
     service = SupplyService(db, current_user)
     line = service.update(supply_id, data.fte_percent)
     
-    return SupplyLineResponse(
-        id=line.id,
-        tenant_id=line.tenant_id,
-        period_id=line.period_id,
-        resource_id=line.resource_id,
-        year=line.year,
-        month=line.month,
-        fte_percent=line.fte_percent,
-        created_by=line.created_by,
-        created_at=line.created_at,
-        updated_at=line.updated_at,
-        resource_name=line.resource.display_name if line.resource else None,
-    )
+    return _enrich_supply(line)
 
 
 @router.delete("/supply-lines/{supply_id}")

@@ -113,7 +113,7 @@ def test_full_monthly_cycle(client, admin_headers, finance_headers, pm_headers, 
     )
     assert dash_resp.status_code == 200
     dashboard = dash_resp.json()
-    assert dashboard["summary"]["total_resources"] >= 1
+    assert dashboard["summary"]["total_departments"] >= 1
 
     # ── 6. Employee creates actuals ──
     actual_resp = client.post(

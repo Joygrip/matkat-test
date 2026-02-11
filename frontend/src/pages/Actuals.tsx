@@ -43,8 +43,8 @@ import {
   ClipboardTaskRegular,
 } from '@fluentui/react-icons';
 import { actualsApi, ActualLine, CreateActualLine } from '../api/actuals';
-import { periodsApi, Period } from '../api/periods';
 import { lookupsApi, Project, Resource } from '../api/lookups';
+import { usePeriod } from '../contexts/PeriodContext';
 import { planningApi, DemandLine, SupplyLine } from '../api/planning';
 import { useToast } from '../hooks/useToast';
 import { formatApiError } from '../utils/errors';
@@ -202,11 +202,11 @@ export const Actuals: React.FC = () => {
   const { showSuccess, showError, showApiError } = useToast();
   const { user } = useAuth();
   
+  const { selectedPeriodId, selectedPeriod: ctxPeriod } = usePeriod();
+
   const [actuals, setActuals] = useState<ActualLine[]>([]);
-  const [periods, setPeriods] = useState<Period[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
-  const [selectedPeriod, setSelectedPeriod] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overLimitIds, setOverLimitIds] = useState<string[]>([]);
@@ -245,28 +245,21 @@ export const Actuals: React.FC = () => {
   }, [isEmployee]);
   
   useEffect(() => {
-    if (selectedPeriod) {
+    if (selectedPeriodId) {
       loadActuals();
     }
-  }, [selectedPeriod]);
+  }, [selectedPeriodId]);
   
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const [periodsData, projectsData, resourcesData] = await Promise.all([
-        periodsApi.list(),
+      const [projectsData, resourcesData] = await Promise.all([
         lookupsApi.listProjects(),
         lookupsApi.listResources(),
       ]);
       
-      setPeriods(periodsData);
       setProjects(projectsData);
       setResources(resourcesData);
-      
-      if (periodsData.length > 0) {
-        const openPeriod = periodsData.find((p: Period) => p.status === 'open');
-        setSelectedPeriod(openPeriod?.id || periodsData[0].id);
-      }
     } catch (err: unknown) {
       setError(formatApiError(err, 'Failed to load data'));
     } finally {
@@ -276,21 +269,20 @@ export const Actuals: React.FC = () => {
   
   const loadActuals = async () => {
     try {
-      const currentPeriod = periods.find(p => p.id === selectedPeriod);
       // Employee role uses /actuals/my to see their own lines (filtered by year/month if period selected)
       // Other roles (RO, Finance, Admin) use /actuals?year=X&month=Y to see all lines
       const data = isEmployee 
-        ? await actualsApi.getMyActuals(currentPeriod?.year, currentPeriod?.month)
-        : await actualsApi.getActualLines(undefined, currentPeriod?.year, currentPeriod?.month);
+        ? await actualsApi.getMyActuals(ctxPeriod?.year, ctxPeriod?.month)
+        : await actualsApi.getActualLines(undefined, ctxPeriod?.year, ctxPeriod?.month);
       setActuals(data);
       setOverLimitIds([]);
       
       // For employees, also load demand and supply lines for their resource
-      if (isEmployee && selectedPeriod) {
+      if (isEmployee && selectedPeriodId) {
         try {
           const [demands, supplies] = await Promise.all([
-            planningApi.getDemandLines(selectedPeriod).catch(() => []),
-            planningApi.getSupplyLines(selectedPeriod).catch(() => []),
+            planningApi.getDemandLines(selectedPeriodId).catch(() => []),
+            planningApi.getSupplyLines(selectedPeriodId).catch(() => []),
           ]);
           setDemandLines(demands || []);
           setSupplyLines(supplies || []);
@@ -306,8 +298,7 @@ export const Actuals: React.FC = () => {
   };
   
   const handleCreate = async () => {
-    const period = periods.find(p => p.id === selectedPeriod);
-    if (!period) {
+    if (!selectedPeriodId || !ctxPeriod) {
       showError('No period selected', 'Please select a period first.');
       return;
     }
@@ -323,11 +314,11 @@ export const Actuals: React.FC = () => {
     }
     try {
       await actualsApi.createActualLine({
-        period_id: selectedPeriod,
+        period_id: selectedPeriodId,
         resource_id: resourceId,
         project_id: formData.project_id,
-        year: period.year,
-        month: period.month,
+        year: ctxPeriod.year,
+        month: ctxPeriod.month,
         actual_fte_percent: formData.actual_fte_percent,
         // planned_fte_percent is omitted - backend will calculate it automatically
       });
@@ -337,7 +328,7 @@ export const Actuals: React.FC = () => {
       
       // Reset form
       setFormData({
-        period_id: selectedPeriod,
+        period_id: selectedPeriodId,
         resource_id: '',
         project_id: '',
         actual_fte_percent: 50,
@@ -400,7 +391,7 @@ export const Actuals: React.FC = () => {
   const getProjectName = (id: string) => projects.find(p => p.id === id)?.name || 'Unknown';
   const getResourceName = (id: string) => resources.find(r => r.id === id)?.display_name || 'Unknown';
   
-  const currentPeriod = periods.find(p => p.id === selectedPeriod);
+  const currentPeriod = ctxPeriod;
   const isLocked = currentPeriod?.status === 'locked';
   
   // Calculate total by resource
@@ -429,17 +420,6 @@ export const Actuals: React.FC = () => {
         </div>
         
         <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
-          <Select
-            value={selectedPeriod}
-            onChange={(_, data) => setSelectedPeriod(data.value)}
-          >
-            {periods.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.year}-{String(p.month).padStart(2, '0')} ({p.status})
-              </option>
-            ))}
-          </Select>
-          
           {!isLocked && (
             <Dialog 
               open={isDialogOpen} 
@@ -550,7 +530,7 @@ export const Actuals: React.FC = () => {
       )}
       
       {/* Demand and Supply Summary for Employees */}
-      {isEmployee && selectedPeriod && (demandLines.length > 0 || supplyLines.length > 0) && (
+      {isEmployee && selectedPeriodId && (demandLines.length > 0 || supplyLines.length > 0) && (
         <Card className={styles.card} style={{ marginBottom: tokens.spacingVerticalL }}>
           <CardHeader header={<Title1>Planning Summary</Title1>} />
           <div className={styles.planningSummary}>

@@ -71,11 +71,13 @@ class DemandService:
         
         return period
     
-    def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None) -> list[DemandLine]:
-        """Get all demand lines, optionally filtered by year/month/project/resource."""
+    def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None, *, period_id: Optional[str] = None) -> list[DemandLine]:
+        """Get all demand lines, optionally filtered by period/year/month/project/resource."""
         query = self.db.query(DemandLine).filter(
             DemandLine.tenant_id == self.current_user.tenant_id
         )
+        if period_id:
+            query = query.filter(DemandLine.period_id == period_id)
         if year:
             query = query.filter(DemandLine.year == year)
         if month:
@@ -343,11 +345,13 @@ class SupplyService:
         
         return period
     
-    def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None) -> list[SupplyLine]:
-        """Get all supply lines, optionally filtered by year/month/resource."""
+    def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None, *, period_id: Optional[str] = None) -> list[SupplyLine]:
+        """Get all supply lines, optionally filtered by period/year/month/resource."""
         query = self.db.query(SupplyLine).filter(
             SupplyLine.tenant_id == self.current_user.tenant_id
         )
+        if period_id:
+            query = query.filter(SupplyLine.period_id == period_id)
         if year:
             query = query.filter(SupplyLine.year == year)
         if month:
@@ -371,6 +375,7 @@ class SupplyService:
         year: int,
         month: int,
         fte_percent: int,
+        project_id: Optional[str] = None,
     ) -> SupplyLine:
         """Create a new supply line."""
         # Validate period is open
@@ -399,22 +404,40 @@ class SupplyService:
                 detail={"code": "NOT_FOUND", "message": "Resource not found"}
             )
         
-        # Check for duplicate
-        existing = self.db.query(SupplyLine).filter(
-            and_(
-                SupplyLine.tenant_id == self.current_user.tenant_id,
-                SupplyLine.resource_id == resource_id,
-                SupplyLine.year == year,
-                SupplyLine.month == month,
-            )
-        ).first()
+        # Validate project exists (if provided)
+        if project_id:
+            project = self.db.query(Project).filter(
+                and_(
+                    Project.id == project_id,
+                    Project.tenant_id == self.current_user.tenant_id,
+                )
+            ).first()
+            if not project:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "NOT_FOUND", "message": "Project not found"}
+                )
+        
+        # Check for duplicate (resource + project + month)
+        dup_filters = [
+            SupplyLine.tenant_id == self.current_user.tenant_id,
+            SupplyLine.resource_id == resource_id,
+            SupplyLine.year == year,
+            SupplyLine.month == month,
+        ]
+        if project_id:
+            dup_filters.append(SupplyLine.project_id == project_id)
+        else:
+            dup_filters.append(SupplyLine.project_id.is_(None))
+        
+        existing = self.db.query(SupplyLine).filter(and_(*dup_filters)).first()
         
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
                     "code": "CONFLICT",
-                    "message": "A supply line already exists for this resource/month combination",
+                    "message": "A supply line already exists for this resource/project/month combination",
                 }
             )
         
@@ -423,6 +446,7 @@ class SupplyService:
             tenant_id=self.current_user.tenant_id,
             period_id=period.id,
             resource_id=resource_id,
+            project_id=project_id or None,
             year=year,
             month=month,
             fte_percent=fte_percent,
@@ -439,6 +463,7 @@ class SupplyService:
             entity_id=supply.id,
             new_values={
                 "resource_id": resource_id,
+                "project_id": project_id,
                 "year": year,
                 "month": month,
                 "fte_percent": fte_percent,

@@ -63,6 +63,10 @@ export interface Placeholder {
   id: string;
   tenant_id: string;
   name: string;
+  department_id: string | null;
+  cost_center_id: string | null;
+  department_name: string | null;
+  cost_center_name: string | null;
   description: string | null;
   skill_profile: string | null;
   estimated_cost: number | null;

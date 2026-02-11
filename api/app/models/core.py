@@ -198,6 +198,8 @@ class Placeholder(Base):
     
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    department_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("departments.id"), nullable=True)
+    cost_center_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("cost_centers.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     skill_profile: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -206,8 +208,12 @@ class Placeholder(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    # Relationships
+    department: Mapped[Optional["Department"]] = relationship("Department")
+    cost_center: Mapped[Optional["CostCenter"]] = relationship("CostCenter")
+    
     __table_args__ = (
-        Index("ix_placeholders_tenant_name", "tenant_id", "name", unique=True),
+        Index("ix_placeholders_tenant_name_dept", "tenant_id", "name", "department_id", unique=True),
     )
 
 

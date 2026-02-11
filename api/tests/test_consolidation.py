@@ -42,10 +42,11 @@ def test_dashboard_with_empty_period(client, db):
     data = response.json()
     
     assert data["period_id"] == "period-1"
-    assert data["gaps"] == []
-    assert data["orphan_demands"] == []
+    assert data["departments"] == []
     assert data["over_allocations"] == []
-    assert data["summary"]["total_resources"] == 0
+    assert data["summary"]["total_departments"] == 0
+    assert data["summary"]["total_demand_fte"] == 0
+    assert data["summary"]["total_supply_fte"] == 0
 
 
 def test_dashboard_shows_gaps(client, db):
@@ -101,13 +102,19 @@ def test_dashboard_shows_gaps(client, db):
     assert response.status_code == 200
     data = response.json()
     
-    assert len(data["gaps"]) == 1
-    gap = data["gaps"][0]
-    assert gap["resource_id"] == "res-1"
-    assert gap["demand_fte"] == 80
-    assert gap["supply_fte"] == 60
-    assert gap["gap_fte"] == -20
-    assert gap["status"] == "under"
+    # New department-grouped structure
+    assert len(data["departments"]) >= 1
+    dept = data["departments"][0]
+    assert dept["department_name"] == "Test Dept"
+    assert len(dept["cost_centers"]) >= 1
+    cc_data = dept["cost_centers"][0]
+    assert len(cc_data["resources"]) >= 1
+    res = cc_data["resources"][0]
+    assert res["resource_id"] == "res-1"
+    assert res["demand_fte"] == 80
+    assert res["supply_fte"] == 60
+    assert res["gap_fte"] == -20
+    assert res["status"] == "under"
 
 
 def test_publish_snapshot(client, db):

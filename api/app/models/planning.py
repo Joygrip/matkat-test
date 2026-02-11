@@ -79,6 +79,7 @@ class SupplyLine(Base):
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     period_id: Mapped[str] = mapped_column(String(36), ForeignKey("periods.id"), nullable=False)
     resource_id: Mapped[str] = mapped_column(String(36), ForeignKey("resources.id"), nullable=False)
+    project_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("projects.id"), nullable=True)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     month: Mapped[int] = mapped_column(Integer, nullable=False)
     fte_percent: Mapped[int] = mapped_column(Integer, nullable=False)  # 5-100, step 5
@@ -88,16 +89,17 @@ class SupplyLine(Base):
     
     # Relationships
     resource: Mapped["Resource"] = relationship("Resource")
+    project: Mapped[Optional["Project"]] = relationship("Project")
     
     __table_args__ = (
         # FTE must be between 5 and 100
         CheckConstraint('fte_percent >= 5 AND fte_percent <= 100', name='ck_supply_fte_range'),
         # FTE must be divisible by 5
         CheckConstraint('fte_percent % 5 = 0', name='ck_supply_fte_step'),
-        # Unique per resource per month
+        # Unique per resource per project per month (project_id can be NULL = general availability)
         Index(
             'ix_supply_unique',
-            'tenant_id', 'resource_id', 'year', 'month',
+            'tenant_id', 'resource_id', 'project_id', 'year', 'month',
             unique=True,
         ),
         Index('ix_supply_tenant_period', 'tenant_id', 'year', 'month'),

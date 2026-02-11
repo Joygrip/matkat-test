@@ -162,19 +162,22 @@ def seed_database_for_tenant(db: Session, tenant_id: str) -> str:
         ),
     ]
     db.add_all(resources)
-    # Create placeholders
+    # Create placeholders (with department/cost center context)
     placeholders = [
         Placeholder(
             tenant_id=tenant_id,
             name="Senior Developer TBH",
             description="Senior developer to be hired",
             skill_profile="Senior Full-Stack",
+            department_id=dept_engineering.id,
+            cost_center_id=cc_software.id,
         ),
         Placeholder(
             tenant_id=tenant_id,
             name="Junior Developer TBH",
             description="Junior developer to be hired",
             skill_profile="Junior Backend",
+            department_id=dept_engineering.id,
         ),
     ]
     db.add_all(placeholders)

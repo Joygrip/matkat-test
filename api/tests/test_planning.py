@@ -45,10 +45,10 @@ def setup_planning_data(client, admin_headers, finance_headers, db):
     )
     resource_id = resource_resp.json()["id"]
     
-    # Create placeholder
+    # Create placeholder (with department)
     placeholder_resp = client.post(
         "/admin/placeholders",
-        json={"name": "Test Placeholder"},
+        json={"name": "Test Placeholder", "department_id": dept_id, "cost_center_id": cc_id},
         headers=admin_headers,
     )
     placeholder_id = placeholder_resp.json()["id"]

@@ -5,6 +5,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { Spinner, makeStyles } from '@fluentui/react-components';
 import { useAuth } from './auth/AuthProvider';
 import { ToastProvider } from './hooks/useToast';
+import { PeriodProvider } from './contexts/PeriodContext';
 import { AppShell } from './components/AppShell';
 import { DevLoginPanel } from './components/DevLoginPanel';
 import { Dashboard } from './pages/Dashboard';
@@ -12,9 +13,8 @@ import { Demand } from './pages/Demand';
 import { Supply } from './pages/Supply';
 import { Actuals } from './pages/Actuals';
 import { Approvals } from './pages/Approvals';
-import { Consolidation } from './pages/Consolidation';
 import { Admin } from './pages/Admin';
-import { FinanceDashboard } from './pages/FinanceDashboard';
+import { Finance } from './pages/Finance';
 import { config } from './config';
 
 const useStyles = makeStyles({
@@ -54,19 +54,23 @@ function App() {
 
   return (
     <ToastProvider>
+      <PeriodProvider>
       <AppShell>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/demand" element={<Demand />} />
           <Route path="/supply" element={<Supply />} />
           <Route path="/actuals" element={<Actuals />} />
-          <Route path="/finance-dashboard" element={<FinanceDashboard />} />
+          <Route path="/finance" element={<Finance />} />
           <Route path="/approvals" element={<Approvals />} />
-          <Route path="/consolidation" element={<Consolidation />} />
+          {/* Redirects for old routes */}
+          <Route path="/finance-dashboard" element={<Navigate to="/finance" replace />} />
+          <Route path="/consolidation" element={<Navigate to="/finance" replace />} />
           <Route path="/admin" element={<Admin />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppShell>
+      </PeriodProvider>
     </ToastProvider>
   );
 }

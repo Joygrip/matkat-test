@@ -3,11 +3,13 @@
  * 
  * RO/Finance: Create and edit supply lines (resource availability)
  * Admin/PM: Read-only view
+ * 
+ * Features: Department/CC filters, grouped table
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Title1,
   Body1,
+  Title3,
   Card,
   CardHeader,
   Button,
@@ -17,7 +19,6 @@ import {
   TableHeaderCell,
   TableBody,
   TableCell,
-  Spinner,
   Badge,
   tokens,
   makeStyles,
@@ -37,14 +38,16 @@ import {
   ToolbarButton,
 } from '@fluentui/react-components';
 import { Add24Regular, Delete24Regular, PeopleRegular } from '@fluentui/react-icons';
+import { BreakdownChart, BreakdownRow } from '../components/BreakdownChart';
 import { planningApi, SupplyLine, CreateSupplyLine } from '../api/planning';
-import { periodsApi, Period } from '../api/periods';
-import { lookupsApi, Resource } from '../api/lookups';
+import { usePeriod } from '../contexts/PeriodContext';
+import { lookupsApi, Resource, Department, Project } from '../api/lookups';
 import { useToast } from '../hooks/useToast';
 import { formatApiError } from '../utils/errors';
 import { useAuth } from '../auth/AuthProvider';
-import { ReadOnlyBanner } from '../components/ReadOnlyBanner';
 import { EmptyState } from '../components/EmptyState';
+import { StatusBanner } from '../components/StatusBanner';
+import { LoadingState } from '../components/LoadingState';
 
 const useStyles = makeStyles({
   container: {
@@ -75,6 +78,25 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase400,
     color: tokens.colorNeutralForeground3,
     fontWeight: tokens.fontWeightRegular,
+  },
+  filters: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalM,
+    alignItems: 'center',
+    marginBottom: tokens.spacingVerticalL,
+    flexWrap: 'wrap' as const,
+  },
+  filterLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  filterGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
   },
   card: {
     marginBottom: tokens.spacingVerticalL,
@@ -115,11 +137,14 @@ const useStyles = makeStyles({
       },
     },
   },
-  formRow: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalM,
-    alignItems: 'flex-end',
-    marginBottom: tokens.spacingVerticalM,
+  groupHeader: {
+    backgroundColor: tokens.colorNeutralBackground3,
+    fontWeight: tokens.fontWeightSemibold,
+    '& td': {
+      padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+      borderBottom: `2px solid ${tokens.colorBrandStroke1}`,
+      fontSize: tokens.fontSizeBase400,
+    },
   },
   formField: {
     display: 'flex',
@@ -133,22 +158,58 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     marginBottom: tokens.spacingVerticalXXS,
   },
-  loading: {
-    display: 'flex',
-    justifyContent: 'center',
-    padding: tokens.spacingVerticalXXL,
+  chartCard: {
+    marginBottom: tokens.spacingVerticalL,
+    borderRadius: tokens.borderRadiusLarge,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    boxShadow: tokens.shadow4,
+    overflow: 'hidden',
+  },
+  chartCardHeader: {
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  chartCardBody: {
+    padding: tokens.spacingHorizontalL,
   },
 });
+
+interface GroupedSupplies {
+  departmentId: string | undefined;
+  departmentName: string;
+  supplies: SupplyLine[];
+}
+
+function groupSuppliesByDept(supplies: SupplyLine[]): GroupedSupplies[] {
+  const deptMap = new Map<string, GroupedSupplies>();
+
+  for (const s of supplies) {
+    const deptKey = s.department_id || '__none__';
+    const deptName = s.department_name || 'Unassigned';
+    if (!deptMap.has(deptKey)) {
+      deptMap.set(deptKey, { departmentId: s.department_id, departmentName: deptName, supplies: [] });
+    }
+    deptMap.get(deptKey)!.supplies.push(s);
+  }
+
+  const result = Array.from(deptMap.values());
+  result.sort((a, b) => a.departmentName.localeCompare(b.departmentName));
+  return result;
+}
 
 export const Supply: React.FC = () => {
   const styles = useStyles();
   const { showSuccess, showApiError, showError } = useToast();
   const { user } = useAuth();
   
+  const { selectedPeriodId, selectedPeriod: currentPeriod } = usePeriod();
+  
   const [supplies, setSupplies] = useState<SupplyLine[]>([]);
-  const [periods, setPeriods] = useState<Period[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
-  const [selectedPeriod, setSelectedPeriod] = useState<string>('');
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [selectedDept, setSelectedDept] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -164,32 +225,48 @@ export const Supply: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
   const [bulkEditFte, setBulkEditFte] = useState<number>(100);
+
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const isLocked = currentPeriod?.status === 'locked';
+  const canEdit = user?.role === 'Finance' || user?.role === 'RO';
+
+  const groupedSupplies = useMemo(() => groupSuppliesByDept(supplies), [supplies]);
+  const totalColumns = canEdit ? 8 : 7;
+
+  // Breakdown chart data: supply grouped by department
+  const deptBreakdown: BreakdownRow[] = useMemo(() => {
+    const deptMap = new Map<string, number>();
+    for (const s of supplies) {
+      const name = s.department_name || 'Unassigned';
+      deptMap.set(name, (deptMap.get(name) || 0) + (s.fte_percent || 0));
+    }
+    return Array.from(deptMap.entries())
+      .map(([label, fte]) => ({ label, demandFte: 0, supplyFte: fte }))
+      .sort((a, b) => b.supplyFte - a.supplyFte);
+  }, [supplies]);
   
   useEffect(() => {
     loadInitialData();
   }, []);
   
   useEffect(() => {
-    if (selectedPeriod) {
-      loadSupplies();
+    if (selectedPeriodId) {
+      loadSupplies(selectedPeriodId, selectedDept);
     }
-  }, [selectedPeriod]);
+  }, [selectedPeriodId, selectedDept]);
   
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const [periodsData, resourcesData] = await Promise.all([
-        periodsApi.list(),
+      const [resourcesData, projectsData, deptsData] = await Promise.all([
         lookupsApi.listResources(),
+        lookupsApi.listProjects(),
+        lookupsApi.listDepartments(),
       ]);
       
-      setPeriods(periodsData);
       setResources(resourcesData);
-      
-      if (periodsData.length > 0) {
-        const openPeriod = periodsData.find((p: Period) => p.status === 'open');
-        setSelectedPeriod(openPeriod?.id || periodsData[0].id);
-      }
+      setProjects(projectsData);
+      setDepartments(deptsData);
     } catch (err: unknown) {
       setError(formatApiError(err, 'Failed to load data'));
     } finally {
@@ -197,9 +274,13 @@ export const Supply: React.FC = () => {
     }
   };
   
-  const loadSupplies = async () => {
+  const loadSupplies = async (periodId?: string, deptId?: string) => {
+    const pid = periodId || selectedPeriodId;
+    if (!pid) return;
     try {
-      const data = await planningApi.getSupplyLines(selectedPeriod);
+      const data = await planningApi.getSupplyLines(pid, {
+        departmentId: deptId ?? (selectedDept || undefined),
+      });
       setSupplies(data);
     } catch (err: unknown) {
       showApiError(err as Error, 'Failed to load supply lines');
@@ -215,19 +296,15 @@ export const Supply: React.FC = () => {
       showError('Missing resource', 'Please select a resource.');
       return;
     }
-    if (!selectedPeriod) {
+    if (!selectedPeriodId || !currentPeriod) {
       showError('Missing period', 'Please select a period.');
-      return;
-    }
-    const currentPeriod = periods.find(p => p.id === selectedPeriod);
-    if (!currentPeriod) {
-      showError('Invalid period', 'Selected period not found.');
       return;
     }
     try {
       await planningApi.createSupplyLine({
-        period_id: selectedPeriod,
+        period_id: selectedPeriodId,
         resource_id: formData.resource_id,
+        project_id: formData.project_id || undefined,
         fte_percent: formData.fte_percent,
         year: currentPeriod.year,
         month: currentPeriod.month,
@@ -235,13 +312,7 @@ export const Supply: React.FC = () => {
       showSuccess('Supply line created');
       setIsDialogOpen(false);
       loadSupplies();
-      
-      // Reset form
-      setFormData({
-        period_id: selectedPeriod,
-        resource_id: '',
-        fte_percent: 100,
-      });
+      setFormData({ period_id: selectedPeriodId, resource_id: '', project_id: '', fte_percent: 100 });
     } catch (err: unknown) {
       showApiError(err as Error, 'Failed to create supply line');
     }
@@ -249,7 +320,6 @@ export const Supply: React.FC = () => {
   
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this supply line?')) return;
-    
     try {
       await planningApi.deleteSupplyLine(id);
       showSuccess('Supply line deleted');
@@ -258,14 +328,6 @@ export const Supply: React.FC = () => {
       showApiError(err as Error, 'Failed to delete supply line');
     }
   };
-  
-  const getResourceName = (id: string) => resources.find(r => r.id === id)?.display_name || 'Unknown';
-  
-  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  const currentPeriod = periods.find(p => p.id === selectedPeriod);
-  const isLocked = currentPeriod?.status === 'locked';
-  const canEdit = user?.role === 'Finance' || user?.role === 'RO';
-  const isReadOnly = user?.role === 'PM' || user?.role === 'Admin';
   
   const allSelected = supplies.length > 0 && selectedIds.length === supplies.length;
   const toggleSelectAll = () => {
@@ -302,11 +364,7 @@ export const Supply: React.FC = () => {
   };
   
   if (loading) {
-    return (
-      <div className={styles.loading}>
-        <Spinner size="large" label="Loading..." />
-      </div>
-    );
+    return <LoadingState message="Loading supply planning data..." />;
   }
   
   return (
@@ -314,21 +372,10 @@ export const Supply: React.FC = () => {
       <div className={styles.header}>
         <div className={styles.headerContent}>
           <h1 className={styles.pageTitle}>Supply Planning</h1>
-          <p className={styles.pageSubtitle}>Manage resource availability</p>
+          <p className={styles.pageSubtitle}>Manage resource availability by department</p>
         </div>
         
         <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
-          <Select
-            value={selectedPeriod}
-            onChange={(_, data) => setSelectedPeriod(data.value)}
-          >
-            {periods.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.year}-{String(p.month).padStart(2, '0')} ({p.status})
-              </option>
-            ))}
-          </Select>
-          
           {!isLocked && canEdit && (
             <Dialog open={isDialogOpen} onOpenChange={(_, data) => setIsDialogOpen(data.open)}>
               <DialogTrigger>
@@ -341,15 +388,15 @@ export const Supply: React.FC = () => {
                   <DialogTitle>Add Supply Line</DialogTitle>
                   <DialogContent>
                     {currentPeriod && (
-                      <div className={styles.formField} style={{ marginBottom: tokens.spacingVerticalM }}>
-                        <label>Period</label>
-                        <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
+                      <div className={styles.formField}>
+                        <label className={styles.formLabel}>Period</label>
+                        <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
                           {monthNames[currentPeriod.month - 1]} {currentPeriod.year} ({currentPeriod.status})
                         </Body1>
                       </div>
                     )}
                     <div className={styles.formField}>
-                      <label>Resource</label>
+                      <label className={styles.formLabel}>Resource</label>
                       <Select
                         value={formData.resource_id}
                         onChange={(_, data) => setFormData({ ...formData, resource_id: data.value })}
@@ -361,20 +408,33 @@ export const Supply: React.FC = () => {
                       </Select>
                     </div>
                     
-                    <div className={styles.formField} style={{ marginTop: tokens.spacingVerticalM }}>
-                      <label>FTE %</label>
+                    <div className={styles.formField}>
+                      <label className={styles.formLabel}>Project (optional)</label>
+                      <Select
+                        value={formData.project_id || ''}
+                        onChange={(_, data) => setFormData({ ...formData, project_id: data.value })}
+                      >
+                        <option value="">General availability</option>
+                        {projects.map(p => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </Select>
+                    </div>
+
+                    <div className={styles.formField}>
+                      <label className={styles.formLabel}>FTE %</label>
                       <Select
                         value={String(formData.fte_percent)}
                         onChange={(_, data) => setFormData({ ...formData, fte_percent: parseInt(data.value || '100') })}
                       >
-                        {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map(val => (
+                        {[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100].map(val => (
                           <option key={val} value={val}>{val}%</option>
                         ))}
                       </Select>
                     </div>
                     
                     <MessageBar intent="info" style={{ marginTop: tokens.spacingVerticalM }}>
-                      <MessageBarBody>Supply indicates resource availability (100% = full time)</MessageBarBody>
+                      <MessageBarBody>Supply indicates resource availability. Optionally assign to a project.</MessageBarBody>
                     </MessageBar>
                   </DialogContent>
                   <DialogActions>
@@ -387,17 +447,28 @@ export const Supply: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Filters bar */}
+      <div className={styles.filters}>
+        <div className={styles.filterGroup}>
+          <span className={styles.filterLabel}>Department</span>
+          <Select
+            value={selectedDept}
+            onChange={(_, data) => setSelectedDept(data.value)}
+          >
+            <option value="">All departments</option>
+            {departments.map(d => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))}
+          </Select>
+        </div>
+      </div>
       
       {isLocked && (
-        <MessageBar intent="warning" style={{ marginBottom: tokens.spacingVerticalM }}>
-          <MessageBarBody>Period is locked. Editing is disabled.</MessageBarBody>
-        </MessageBar>
+        <StatusBanner intent="warning" title="Period Locked" message="This period is locked. Editing is disabled." />
       )}
-      
       {error && (
-        <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
-          <MessageBarBody>{error}</MessageBarBody>
-        </MessageBar>
+        <StatusBanner intent="error" title="Error" message={error} />
       )}
       
       {selectedIds.length > 0 && canEdit && (
@@ -432,6 +503,18 @@ export const Supply: React.FC = () => {
         </Dialog>
       )}
       
+      {/* Supply by Department chart */}
+      {supplies.length > 0 && (
+        <Card className={styles.chartCard}>
+          <div className={styles.chartCardHeader}>
+            <Title3 style={{ margin: 0 }}>Supply by Department</Title3>
+          </div>
+          <div className={styles.chartCardBody}>
+            <BreakdownChart rows={deptBreakdown} supplyOnly />
+          </div>
+        </Card>
+      )}
+
       <Card className={styles.card}>
         <CardHeader header={<Body1><strong>Supply Lines ({supplies.length})</strong></Body1>} />
         
@@ -443,7 +526,9 @@ export const Supply: React.FC = () => {
                   <Checkbox checked={allSelected} onChange={toggleSelectAll} />
                 </TableHeaderCell>
               )}
+              <TableHeaderCell>Department</TableHeaderCell>
               <TableHeaderCell>Resource</TableHeaderCell>
+              <TableHeaderCell>Project</TableHeaderCell>
               <TableHeaderCell>Period</TableHeaderCell>
               <TableHeaderCell>FTE %</TableHeaderCell>
               <TableHeaderCell>Actions</TableHeaderCell>
@@ -452,18 +537,14 @@ export const Supply: React.FC = () => {
           <TableBody>
             {supplies.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={canEdit ? 5 : 4} style={{ padding: tokens.spacingVerticalXXL }}>
+                <TableCell colSpan={totalColumns} style={{ padding: tokens.spacingVerticalXXL }}>
                   <EmptyState
                     icon={<PeopleRegular style={{ fontSize: 48 }} />}
                     title="No supply lines"
-                    message="No supply lines found for this period. Create one to get started."
+                    message="No supply lines found for the selected filters. Create one to get started."
                     action={
                       !isLocked && canEdit ? (
-                        <Button
-                          appearance="primary"
-                          icon={<Add24Regular />}
-                          onClick={() => setIsDialogOpen(true)}
-                        >
+                        <Button appearance="primary" icon={<Add24Regular />} onClick={() => setIsDialogOpen(true)}>
                           Add Supply Line
                         </Button>
                       ) : undefined
@@ -472,28 +553,42 @@ export const Supply: React.FC = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              supplies.map(s => (
-                <TableRow key={s.id}>
-                  {canEdit && (
-                    <TableCell>
-                      <Checkbox checked={selectedIds.includes(s.id)} onChange={() => toggleSelect(s.id)} />
+              groupedSupplies.map(dept => (
+                <React.Fragment key={dept.departmentId || '__none__'}>
+                  <TableRow className={styles.groupHeader}>
+                    <TableCell colSpan={totalColumns}>
+                      {dept.departmentName}
+                      <Badge appearance="outline" style={{ marginLeft: 8 }}>
+                        {dept.supplies.length} lines
+                      </Badge>
                     </TableCell>
-                  )}
-                  <TableCell>{getResourceName(s.resource_id)}</TableCell>
-                  <TableCell>{s.year}-{String(s.month).padStart(2, '0')}</TableCell>
-                  <TableCell>
-                    <Badge appearance="filled" color="success">{s.fte_percent}%</Badge>
-                  </TableCell>
-                  <TableCell>
-                    {!isLocked && canEdit && (
-                      <Button
-                        icon={<Delete24Regular />}
-                        appearance="subtle"
-                        onClick={() => handleDelete(s.id)}
-                      />
-                    )}
-                  </TableCell>
-                </TableRow>
+                  </TableRow>
+                  {dept.supplies.map(s => (
+                    <TableRow key={s.id}>
+                      {canEdit && (
+                        <TableCell>
+                          <Checkbox checked={selectedIds.includes(s.id)} onChange={() => toggleSelect(s.id)} />
+                        </TableCell>
+                      )}
+                      <TableCell>{s.department_name || '-'}</TableCell>
+                      <TableCell>{s.resource_name || 'Unknown'}</TableCell>
+                      <TableCell>{s.project_name || '—'}</TableCell>
+                      <TableCell>{s.year}-{String(s.month).padStart(2, '0')}</TableCell>
+                      <TableCell>
+                        <Badge appearance="filled" color="success">{s.fte_percent}%</Badge>
+                      </TableCell>
+                      <TableCell>
+                        {!isLocked && canEdit && (
+                          <Button
+                            icon={<Delete24Regular />}
+                            appearance="subtle"
+                            onClick={() => handleDelete(s.id)}
+                          />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </React.Fragment>
               ))
             )}
           </TableBody>

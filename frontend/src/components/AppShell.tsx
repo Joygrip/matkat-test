@@ -1,7 +1,8 @@
 /**
  * Enterprise AppShell with MatKat branding
  */
-import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode, useState } from 'react';
+import { usePeriod } from '../contexts/PeriodContext';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   makeStyles,
@@ -35,11 +36,9 @@ import {
   SignOutRegular,
   PersonRegular,
   bundleIcon,
-  MoneyRegular,
 } from '@fluentui/react-icons';
 import { useAuth } from '../auth/AuthProvider';
 import { config } from '../config';
-import { periodsApi, Period } from '../api/periods';
 
 const Home = bundleIcon(HomeFilled, HomeRegular);
 const Demand = bundleIcon(CalendarFilled, CalendarRegular);
@@ -218,28 +217,18 @@ const useStyles = makeStyles({
     position: 'relative',
   },
   logoImage: {
-    width: '200px',
+    width: '140px',
     height: 'auto',
-    opacity: 1,
-    transition: 'opacity 0.2s ease, transform 0.2s ease',
-    filter: 'drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2))',
+    opacity: 0.85,
     display: 'block',
     backgroundColor: 'transparent',
-    '&:hover': {
-      opacity: 0.9,
-      transform: 'scale(1.05)',
-    },
+    filter: 'drop-shadow(0 1px 3px rgba(0, 0, 0, 0.3))',
   },
   logoContainer: {
-    position: 'fixed',
-    bottom: '20px',
-    right: '24px',
-    zIndex: 9999,
-    pointerEvents: 'none',
-    backgroundColor: 'transparent',
-    '& img': {
-      pointerEvents: 'auto',
-    },
+    display: 'flex',
+    justifyContent: 'center',
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
+    borderTop: '1px solid rgba(255, 255, 255, 0.1)',
   },
 });
 
@@ -253,12 +242,11 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { path: '/', label: 'Dashboard', icon: Home, section: 'overview' },
-  { path: '/demand', label: 'Demand', icon: Demand, roles: ['Admin', 'Finance', 'PM', 'RO'], section: 'planning' },
-  { path: '/supply', label: 'Supply', icon: Supply, roles: ['Admin', 'Finance', 'PM', 'RO'], section: 'planning' },
+  { path: '/demand', label: 'Demand', icon: Demand, roles: ['Admin', 'Finance', 'PM', 'RO', 'Director'], section: 'planning' },
+  { path: '/supply', label: 'Supply', icon: Supply, roles: ['Admin', 'Finance', 'PM', 'RO', 'Director'], section: 'planning' },
   { path: '/actuals', label: 'Actuals', icon: Actuals, roles: ['Admin', 'Finance', 'RO', 'Employee'], section: 'operations' },
-  { path: '/finance-dashboard', label: 'Finance', icon: MoneyRegular, roles: ['Finance'], section: 'operations' },
+  { path: '/finance', label: 'Finance', icon: Consolidation, roles: ['Admin', 'Finance', 'Director'], section: 'operations' },
   { path: '/approvals', label: 'Approvals', icon: Approvals, roles: ['Admin', 'RO', 'Director'], section: 'operations' },
-  { path: '/consolidation', label: 'Consolidation', icon: Consolidation, roles: ['Admin', 'Finance', 'Director'], section: 'operations' },
   { path: '/admin', label: 'Admin', icon: Admin, roles: ['Admin', 'Finance'], section: 'admin' },
 ];
 
@@ -274,9 +262,8 @@ const pageTitles: Record<string, string> = {
   '/demand': 'Demand Planning',
   '/supply': 'Supply Planning',
   '/actuals': 'Actuals Entry',
-  '/finance-dashboard': 'Finance Dashboard',
+  '/finance': 'Finance',
   '/approvals': 'Approvals',
-  '/consolidation': 'Consolidation',
   '/admin': 'Administration',
 };
 
@@ -285,20 +272,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  // Period selector state
-  const [periods, setPeriods] = useState<Period[]>([]);
-  const [selectedPeriod, setSelectedPeriod] = useState<string>('');
+  const { periods, selectedPeriodId, setSelectedPeriodId } = usePeriod();
   const [sidebarOpen, setSidebarOpen] = useState(true);
-
-  useEffect(() => {
-    periodsApi.list().then((data) => {
-      setPeriods(data);
-      if (data.length > 0) {
-        const openPeriod = data.find((p: Period) => p.status === 'open');
-        setSelectedPeriod(openPeriod?.id || data[0].id);
-      }
-    });
-  }, []);
 
   const visibleNavItems = navItems.filter((item) => {
     if (!item.roles) return true;
@@ -355,6 +330,18 @@ export function AppShell({ children }: { children: ReactNode }) {
           })()}
         </nav>
 
+        <div className={styles.logoContainer}>
+          <img
+            src="/logo.svg"
+            alt="Ferrosan Medical Devices Logo"
+            className={styles.logoImage}
+            onError={(e) => {
+              const target = e.target as HTMLImageElement;
+              console.error('Logo failed to load. Attempted path:', target.src);
+            }}
+          />
+        </div>
+
         <div className={styles.userSection}>
           <Menu>
             <MenuTrigger disableButtonEnhancement>
@@ -405,8 +392,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Tooltip>
             {/* Period selector */}
             <Select
-              value={selectedPeriod}
-              onChange={(_, data) => setSelectedPeriod(data.value)}
+              value={selectedPeriodId}
+              onChange={(_, data) => setSelectedPeriodId(data.value)}
               style={{ minWidth: 120 }}
             >
               {periods.map((p) => (
@@ -420,27 +407,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <div className={styles.content}>
           {children}
-        </div>
-        <div className={styles.logoContainer}>
-          <img
-            src="/logo.svg"
-            alt="Ferrosan Medical Devices Logo"
-            className={styles.logoImage}
-            style={{ 
-              display: 'block',
-              width: '200px',
-              height: 'auto'
-            }}
-            onError={(e) => {
-              const target = e.target as HTMLImageElement;
-              console.error('Logo failed to load. Attempted path:', target.src);
-              console.error('Error event:', e);
-              // Don't hide, just log the error
-            }}
-            onLoad={() => {
-              console.log('Logo loaded successfully from /logo.svg');
-            }}
-          />
         </div>
       </main>
     </div>

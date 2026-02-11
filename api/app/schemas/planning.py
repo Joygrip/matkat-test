@@ -62,6 +62,12 @@ class DemandLineResponse(DemandLineBase):
     resource_name: Optional[str] = None
     placeholder_name: Optional[str] = None
     
+    # Department / cost center context (resolved from resource or placeholder)
+    department_id: Optional[str] = None
+    department_name: Optional[str] = None
+    cost_center_id: Optional[str] = None
+    cost_center_name: Optional[str] = None
+    
     class Config:
         from_attributes = True
 
@@ -70,6 +76,7 @@ class DemandLineResponse(DemandLineBase):
 
 class SupplyLineBase(BaseModel):
     resource_id: str
+    project_id: Optional[str] = None
     year: int
     month: int
     fte_percent: int
@@ -95,6 +102,13 @@ class SupplyLineResponse(SupplyLineBase):
     
     # Include related names for display
     resource_name: Optional[str] = None
+    project_name: Optional[str] = None
+    
+    # Department / cost center context (resolved from resource)
+    department_id: Optional[str] = None
+    department_name: Optional[str] = None
+    cost_center_id: Optional[str] = None
+    cost_center_name: Optional[str] = None
     
     class Config:
         from_attributes = True

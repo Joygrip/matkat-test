@@ -386,15 +386,36 @@ async def delete_resource(
 
 # ============== PLACEHOLDERS ==============
 
+def _enrich_placeholder(placeholder: Placeholder) -> dict:
+    """Enrich a placeholder ORM object with department/cost-center names."""
+    data = {
+        "id": placeholder.id,
+        "tenant_id": placeholder.tenant_id,
+        "name": placeholder.name,
+        "department_id": placeholder.department_id,
+        "cost_center_id": placeholder.cost_center_id,
+        "description": placeholder.description,
+        "skill_profile": placeholder.skill_profile,
+        "estimated_cost": placeholder.estimated_cost,
+        "is_active": placeholder.is_active,
+        "created_at": placeholder.created_at,
+        "updated_at": placeholder.updated_at,
+        "department_name": placeholder.department.name if placeholder.department else None,
+        "cost_center_name": placeholder.cost_center.name if placeholder.cost_center else None,
+    }
+    return data
+
+
 @router.get("/placeholders", response_model=list[PlaceholderResponse])
 async def list_placeholders(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(*PLANNING_READ_ROLES)),
 ):
     """List all placeholders. Accessible to Admin, Finance, PM, RO."""
-    return db.query(Placeholder).filter(
+    placeholders = db.query(Placeholder).filter(
         Placeholder.tenant_id == current_user.tenant_id
     ).all()
+    return [_enrich_placeholder(p) for p in placeholders]
 
 
 @router.get("/placeholders/{placeholder_id}", response_model=PlaceholderResponse)
@@ -409,7 +430,7 @@ async def get_placeholder(
     ).first()
     if not placeholder:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Placeholder not found"})
-    return placeholder
+    return _enrich_placeholder(placeholder)
 
 
 @router.post("/placeholders", response_model=PlaceholderResponse)
@@ -424,7 +445,7 @@ async def create_placeholder(
     db.commit()
     db.refresh(placeholder)
     log_audit(db, current_user, "create", "Placeholder", placeholder.id, new_values=data.model_dump())
-    return placeholder
+    return _enrich_placeholder(placeholder)
 
 
 @router.patch("/placeholders/{placeholder_id}", response_model=PlaceholderResponse)
@@ -450,7 +471,7 @@ async def update_placeholder(
     db.commit()
     db.refresh(placeholder)
     log_audit(db, current_user, "update", "Placeholder", placeholder.id, old_values=old_values, new_values=update_data)
-    return placeholder
+    return _enrich_placeholder(placeholder)
 
 
 @router.delete("/placeholders/{placeholder_id}")

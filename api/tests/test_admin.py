@@ -248,18 +248,29 @@ def test_oop_resource_flag(client, admin_headers, db):
 
 
 def test_crud_placeholder(client, admin_headers, db):
-    """Test CRUD for placeholders."""
+    """Test CRUD for placeholders with department_id."""
+    # Create a department first (required for placeholder)
+    dept_resp = client.post(
+        "/admin/departments",
+        json={"code": "PH-DEPT", "name": "Placeholder Dept"},
+        headers=admin_headers,
+    )
+    dept_id = dept_resp.json()["id"]
+
     # Create
     create_resp = client.post(
         "/admin/placeholders",
         json={
             "name": "Senior Developer TBH",
             "skill_profile": "Full-Stack Senior",
+            "department_id": dept_id,
         },
         headers=admin_headers,
     )
     assert create_resp.status_code == 200
     placeholder_id = create_resp.json()["id"]
+    assert create_resp.json()["department_id"] == dept_id
+    assert create_resp.json()["department_name"] == "Placeholder Dept"
     
     # List
     list_resp = client.get("/admin/placeholders", headers=admin_headers)
@@ -399,12 +410,20 @@ def test_finance_can_crud_resource(client, finance_headers, db):
     assert delete_resp.status_code == 200
 
 
-def test_finance_can_crud_placeholder(client, finance_headers, db):
+def test_finance_can_crud_placeholder(client, finance_headers, admin_headers, db):
     """Finance can create, update, delete placeholders."""
+    # Create a department first
+    dept_resp = client.post(
+        "/admin/departments",
+        json={"code": "FIN-PH", "name": "Finance PH Dept"},
+        headers=admin_headers,
+    )
+    dept_id = dept_resp.json()["id"]
+
     # Create
     create_resp = client.post(
         "/admin/placeholders",
-        json={"name": "Finance Placeholder", "skill_profile": "Skill"},
+        json={"name": "Finance Placeholder", "skill_profile": "Skill", "department_id": dept_id},
         headers=finance_headers,
     )
     ph_id = create_resp.json()["id"]

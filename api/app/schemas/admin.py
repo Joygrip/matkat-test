@@ -144,17 +144,21 @@ class ResourceResponse(ResourceBase):
 # Placeholder schemas
 class PlaceholderBase(BaseModel):
     name: str
+    department_id: Optional[str] = None
+    cost_center_id: Optional[str] = None
     description: Optional[str] = None
     skill_profile: Optional[str] = None
     estimated_cost: Optional[int] = None
 
 
 class PlaceholderCreate(PlaceholderBase):
-    pass
+    department_id: str  # Required on create
 
 
 class PlaceholderUpdate(BaseModel):
     name: Optional[str] = None
+    department_id: Optional[str] = None
+    cost_center_id: Optional[str] = None
     description: Optional[str] = None
     skill_profile: Optional[str] = None
     estimated_cost: Optional[int] = None
@@ -164,6 +168,10 @@ class PlaceholderUpdate(BaseModel):
 class PlaceholderResponse(PlaceholderBase):
     id: str
     tenant_id: str
+    department_id: Optional[str] = None
+    cost_center_id: Optional[str] = None
+    department_name: Optional[str] = None
+    cost_center_name: Optional[str] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime

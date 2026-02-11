@@ -80,7 +80,9 @@ class ConsolidationService:
             gap = supply - demand
             
             if gap != 0:
-                resource = self.db.query(Resource).filter(Resource.id == resource_id).first()
+                resource = self.db.query(Resource).filter(
+                    and_(Resource.id == resource_id, Resource.tenant_id == self.current_user.tenant_id)
+                ).first()
                 gaps.append({
                     "resource_id": resource_id,
                     "resource_name": resource.display_name if resource else "Unknown",
@@ -103,8 +105,12 @@ class ConsolidationService:
         
         orphans = []
         for od in orphan_demands:
-            placeholder = self.db.query(Placeholder).filter(Placeholder.id == od.placeholder_id).first()
-            project = self.db.query(Project).filter(Project.id == od.project_id).first()
+            placeholder = self.db.query(Placeholder).filter(
+                and_(Placeholder.id == od.placeholder_id, Placeholder.tenant_id == self.current_user.tenant_id)
+            ).first()
+            project = self.db.query(Project).filter(
+                and_(Project.id == od.project_id, Project.tenant_id == self.current_user.tenant_id)
+            ).first()
             orphans.append({
                 "demand_line_id": od.id,
                 "project_id": od.project_id,
@@ -121,7 +127,9 @@ class ConsolidationService:
         for key, demand in demand_by_resource.items():
             if demand > 100:
                 resource_id, year, month = key
-                resource = self.db.query(Resource).filter(Resource.id == resource_id).first()
+                resource = self.db.query(Resource).filter(
+                    and_(Resource.id == resource_id, Resource.tenant_id == self.current_user.tenant_id)
+                ).first()
                 over_allocations.append({
                     "resource_id": resource_id,
                     "resource_name": resource.display_name if resource else "Unknown",
@@ -179,9 +187,15 @@ class ConsolidationService:
         ).all()
         
         for d in demands:
-            project = self.db.query(Project).filter(Project.id == d.project_id).first()
-            resource = self.db.query(Resource).filter(Resource.id == d.resource_id).first() if d.resource_id else None
-            placeholder = self.db.query(Placeholder).filter(Placeholder.id == d.placeholder_id).first() if d.placeholder_id else None
+            project = self.db.query(Project).filter(
+                and_(Project.id == d.project_id, Project.tenant_id == self.current_user.tenant_id)
+            ).first()
+            resource = self.db.query(Resource).filter(
+                and_(Resource.id == d.resource_id, Resource.tenant_id == self.current_user.tenant_id)
+            ).first() if d.resource_id else None
+            placeholder = self.db.query(Placeholder).filter(
+                and_(Placeholder.id == d.placeholder_id, Placeholder.tenant_id == self.current_user.tenant_id)
+            ).first() if d.placeholder_id else None
             
             line = PublishSnapshotLine(
                 snapshot_id=snapshot.id,
@@ -207,7 +221,9 @@ class ConsolidationService:
         ).all()
         
         for s in supplies:
-            resource = self.db.query(Resource).filter(Resource.id == s.resource_id).first()
+            resource = self.db.query(Resource).filter(
+                and_(Resource.id == s.resource_id, Resource.tenant_id == self.current_user.tenant_id)
+            ).first()
             
             line = PublishSnapshotLine(
                 snapshot_id=snapshot.id,
@@ -229,8 +245,12 @@ class ConsolidationService:
         ).all()
         
         for a in actuals:
-            project = self.db.query(Project).filter(Project.id == a.project_id).first()
-            resource = self.db.query(Resource).filter(Resource.id == a.resource_id).first()
+            project = self.db.query(Project).filter(
+                and_(Project.id == a.project_id, Project.tenant_id == self.current_user.tenant_id)
+            ).first()
+            resource = self.db.query(Resource).filter(
+                and_(Resource.id == a.resource_id, Resource.tenant_id == self.current_user.tenant_id)
+            ).first()
             
             line = PublishSnapshotLine(
                 snapshot_id=snapshot.id,
@@ -254,8 +274,12 @@ class ConsolidationService:
         ).all()
         
         for o in oops:
-            project = self.db.query(Project).filter(Project.id == o.project_id).first()
-            resource = self.db.query(Resource).filter(Resource.id == o.resource_id).first()
+            project = self.db.query(Project).filter(
+                and_(Project.id == o.project_id, Project.tenant_id == self.current_user.tenant_id)
+            ).first()
+            resource = self.db.query(Resource).filter(
+                and_(Resource.id == o.resource_id, Resource.tenant_id == self.current_user.tenant_id)
+            ).first()
             
             line = PublishSnapshotLine(
                 snapshot_id=snapshot.id,

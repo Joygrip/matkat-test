@@ -31,9 +31,12 @@ class ApprovalsService:
         1. RO approval
         2. Director approval (skipped if RO == Director)
         """
-        # Get the resource's RO
+        # Get the resource's RO (tenant-scoped)
         resource = self.db.query(Resource).filter(
-            Resource.id == actual_line.resource_id
+            and_(
+                Resource.id == actual_line.resource_id,
+                Resource.tenant_id == self.current_user.tenant_id,
+            )
         ).first()
         
         if not resource:

@@ -20,6 +20,46 @@ class ActualsService:
         self.db = db
         self.current_user = current_user
     
+    def _check_employee_owns_resource(self, resource_id: str) -> None:
+        """
+        If the current user is an Employee, verify they own the resource.
+        Other roles (RO, Finance, Admin) are not restricted.
+        """
+        if self.current_user.role != UserRole.EMPLOYEE:
+            return
+
+        # Find the user record
+        user = self.db.query(User).filter(
+            and_(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            )
+        ).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "UNAUTHORIZED_RESOURCE",
+                    "message": "User record not found",
+                }
+            )
+
+        # Find the resource and check ownership
+        resource = self.db.query(Resource).filter(
+            and_(
+                Resource.id == resource_id,
+                Resource.tenant_id == self.current_user.tenant_id,
+            )
+        ).first()
+        if not resource or resource.user_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "UNAUTHORIZED_RESOURCE",
+                    "message": "Employees can only manage their own actuals",
+                }
+            )
+
     def _check_period_open(self, year: int, month: int) -> Period:
         """Check if the period exists and is open."""
         period = self.db.query(Period).filter(
@@ -200,6 +240,9 @@ class ActualsService:
                 detail={"code": "NOT_FOUND", "message": "Resource not found"}
             )
         
+        # Employees can only create actuals for their own resource
+        self._check_employee_owns_resource(resource_id)
+        
         # Validate project exists
         project = self.db.query(Project).filter(
             and_(
@@ -277,6 +320,9 @@ class ActualsService:
                 detail={"code": "NOT_FOUND", "message": "Actual line not found"}
             )
         
+        # Employees can only update their own actuals
+        self._check_employee_owns_resource(actual.resource_id)
+        
         # Check if already signed
         if actual.employee_signed_at:
             raise HTTPException(
@@ -331,6 +377,9 @@ class ActualsService:
                 detail={"code": "NOT_FOUND", "message": "Actual line not found"}
             )
         
+        # Employees can only delete their own actuals
+        self._check_employee_owns_resource(actual.resource_id)
+        
         # Check if already signed
         if actual.employee_signed_at:
             raise HTTPException(
@@ -362,6 +411,9 @@ class ActualsService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "NOT_FOUND", "message": "Actual line not found"}
             )
+        
+        # Employees can only sign their own actuals
+        self._check_employee_owns_resource(actual.resource_id)
         
         if actual.employee_signed_at:
             raise HTTPException(

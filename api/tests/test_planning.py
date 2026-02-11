@@ -367,8 +367,8 @@ def test_finance_can_read_demand(client, finance_headers, pm_headers, setup_plan
     assert len(response.json()) >= 1
 
 
-def test_finance_cannot_create_demand(client, finance_headers, setup_planning_data):
-    """Finance cannot create demand lines."""
+def test_finance_can_create_demand(client, finance_headers, setup_planning_data):
+    """Finance can create demand lines."""
     data = setup_planning_data
     response = client.post(
         "/demand-lines",
@@ -380,5 +380,88 @@ def test_finance_cannot_create_demand(client, finance_headers, setup_planning_da
             "fte_percent": 50,
         },
         headers=finance_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["fte_percent"] == 50
+
+
+def test_finance_can_create_supply(client, finance_headers, setup_planning_data):
+    """Finance can create supply lines."""
+    data = setup_planning_data
+    response = client.post(
+        "/supply-lines",
+        json={
+            "resource_id": data["resource_id"],
+            "year": data["current_year"],
+            "month": data["current_month"],
+            "fte_percent": 100,
+        },
+        headers=finance_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["fte_percent"] == 100
+
+
+def test_finance_demand_still_enforces_xor(client, finance_headers, setup_planning_data):
+    """Finance demand creation still enforces XOR rule."""
+    data = setup_planning_data
+    response = client.post(
+        "/demand-lines",
+        json={
+            "project_id": data["project_id"],
+            "resource_id": data["resource_id"],
+            "placeholder_id": data["placeholder_id"],
+            "year": data["future_year"],
+            "month": data["future_month"],
+            "fte_percent": 50,
+        },
+        headers=finance_headers,
+    )
+    assert response.status_code == 400
+
+
+def test_finance_demand_still_enforces_period_lock(client, finance_headers, setup_planning_data):
+    """Finance demand creation still blocked by locked periods."""
+    data = setup_planning_data
+
+    # Lock the current period
+    periods_resp = client.get("/periods", headers=finance_headers)
+    period = next(
+        (p for p in periods_resp.json()
+         if p["year"] == data["current_year"] and p["month"] == data["current_month"]),
+        None
+    )
+    assert period is not None
+    client.post(f"/periods/{period['id']}/lock", headers=finance_headers)
+
+    # Try to create demand in locked period
+    response = client.post(
+        "/demand-lines",
+        json={
+            "project_id": data["project_id"],
+            "resource_id": data["resource_id"],
+            "year": data["current_year"],
+            "month": data["current_month"],
+            "fte_percent": 50,
+        },
+        headers=finance_headers,
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "PERIOD_LOCKED"
+
+
+def test_employee_cannot_create_demand(client, employee_headers, setup_planning_data):
+    """Employee cannot create demand lines."""
+    data = setup_planning_data
+    response = client.post(
+        "/demand-lines",
+        json={
+            "project_id": data["project_id"],
+            "resource_id": data["resource_id"],
+            "year": data["current_year"],
+            "month": data["current_month"],
+            "fte_percent": 50,
+        },
+        headers=employee_headers,
     )
     assert response.status_code == 403

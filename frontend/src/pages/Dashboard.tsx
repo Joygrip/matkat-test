@@ -17,6 +17,7 @@ import {
   AccordionItem,
   AccordionHeader,
   AccordionPanel,
+  Select,
   Skeleton,
   MessageBar,
   MessageBarBody,
@@ -297,43 +298,43 @@ export function Dashboard() {
       {(isPM || isRO || isDirector || isFinance) && periods.length > 0 && (
         <div style={{ marginBottom: tokens.spacingVerticalXL }}>
           {/* Filter Controls */}
-          <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
-            <div>
-              <label>Project:&nbsp;</label>
-              <select value={selectedProject} onChange={e => handleFilterChange(e.target.value, selectedResource)}>
-                <option value=''>All</option>
-                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+          <div style={{ display: 'flex', gap: tokens.spacingHorizontalL, marginBottom: tokens.spacingVerticalM, flexWrap: 'wrap', alignItems: 'end' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS }}>
+              <Body1 style={{ fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>Period</Body1>
+              <Select
+                value={selectedPeriodForChart || ''}
+                onChange={(_, data) => handlePeriodChange(data.value)}
+                style={{ minWidth: '200px' }}
+              >
+                {periods.map((period) => (
+                  <option key={period.id} value={period.id}>
+                    {monthNames[period.month - 1]} {period.year}
+                  </option>
+                ))}
+              </Select>
             </div>
-            <div>
-              <label>Resource:&nbsp;</label>
-              <select value={selectedResource} onChange={e => handleFilterChange(selectedProject, e.target.value)}>
-                <option value=''>All</option>
-                {resources.map(r => <option key={r.id} value={r.id}>{r.display_name}</option>)}
-              </select>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS }}>
+              <Body1 style={{ fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>Project</Body1>
+              <Select
+                value={selectedProject}
+                onChange={(_, data) => handleFilterChange(data.value, selectedResource)}
+                style={{ minWidth: '180px' }}
+              >
+                <option value="">All Projects</option>
+                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </Select>
             </div>
-          </div>
-          <div style={{ marginBottom: tokens.spacingVerticalM, display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM }}>
-            <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>
-              Select Period:
-            </Body1>
-            <select
-              value={selectedPeriodForChart || ''}
-              onChange={(e) => handlePeriodChange(e.target.value)}
-              style={{ 
-                minWidth: '200px',
-                padding: tokens.spacingVerticalS,
-                borderRadius: tokens.borderRadiusSmall,
-                border: `1px solid ${tokens.colorNeutralStroke1}`,
-                fontSize: tokens.fontSizeBase300,
-              }}
-            >
-              {periods.map((period) => (
-                <option key={period.id} value={period.id}>
-                  {monthNames[period.month - 1]} {period.year}
-                </option>
-              ))}
-            </select>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS }}>
+              <Body1 style={{ fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>Resource</Body1>
+              <Select
+                value={selectedResource}
+                onChange={(_, data) => handleFilterChange(selectedProject, data.value)}
+                style={{ minWidth: '180px' }}
+              >
+                <option value="">All Resources</option>
+                {resources.map((r) => <option key={r.id} value={r.id}>{r.display_name}</option>)}
+              </Select>
+            </div>
           </div>
           {selectedPeriodForChart && (
             <SupplyDemandChart

@@ -14,12 +14,58 @@ def test_admin_can_create_department(client, admin_headers, db):
     assert response.json()["code"] == "IT"
 
 
-def test_finance_cannot_create_department(client, finance_headers, db):
-    """Finance cannot create departments (read-only)."""
+def test_finance_can_create_project(client, finance_headers, db):
+    """Finance can create projects (master data write access)."""
     response = client.post(
-        "/admin/departments",
-        json={"code": "IT", "name": "Information Technology"},
+        "/admin/projects",
+        json={"code": "FIN-PRJ", "name": "Finance Project"},
         headers=finance_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["code"] == "FIN-PRJ"
+
+
+def test_finance_can_crud_project(client, finance_headers, db):
+    """Finance can create, update, and delete projects."""
+    # Create
+    create_resp = client.post(
+        "/admin/projects",
+        json={"code": "FP-001", "name": "Finance Project 1"},
+        headers=finance_headers,
+    )
+    assert create_resp.status_code == 200
+    project_id = create_resp.json()["id"]
+
+    # Update
+    update_resp = client.patch(
+        f"/admin/projects/{project_id}",
+        json={"name": "Updated Finance Project"},
+        headers=finance_headers,
+    )
+    assert update_resp.status_code == 200
+    assert update_resp.json()["name"] == "Updated Finance Project"
+
+    # Delete
+    delete_resp = client.delete(f"/admin/projects/{project_id}", headers=finance_headers)
+    assert delete_resp.status_code == 200
+
+
+def test_finance_cannot_manage_settings(client, finance_headers, db):
+    """Finance cannot create/update/delete settings (Admin-only)."""
+    response = client.post(
+        "/admin/settings",
+        json={"key": "test_key", "value": "test_value"},
+        headers=finance_headers,
+    )
+    assert response.status_code == 403
+
+
+def test_pm_cannot_create_project(client, pm_headers, db):
+    """PM cannot create projects (restricted to Admin/Finance)."""
+    response = client.post(
+        "/admin/projects",
+        json={"code": "PM-PRJ", "name": "PM Project"},
+        headers=pm_headers,
     )
     assert response.status_code == 403
 

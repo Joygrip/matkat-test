@@ -77,7 +77,18 @@ def test_full_approval_workflow(client, db):
     )
     db.add(cost_center)
     
-    # Create resource
+    # Create employee user (needed for ownership check)
+    employee_user = User(
+        id="employee-user-1",
+        tenant_id=tenant_id,
+        object_id="employee-oid",
+        email="employee@test.com",
+        display_name="Employee User",
+        role="Employee",
+    )
+    db.add(employee_user)
+
+    # Create resource linked to employee user
     resource = Resource(
         id="res-1",
         tenant_id=tenant_id,
@@ -200,7 +211,19 @@ def test_skip_director_when_ro_equals_director(client, db):
     )
     db.add(cost_center)
 
-    # Create resource
+    # Create employee user (needed for ownership check)
+    employee_user = User(
+        id="employee-user-2",
+        tenant_id=tenant_id,
+        object_id="employee-oid",
+        email="employee@test.com",
+        display_name="Employee User 2",
+        role="Employee",
+        department_id="dept-2",
+    )
+    db.add(employee_user)
+
+    # Create resource linked to employee user
     resource = Resource(
         id="res-2",
         tenant_id=tenant_id,

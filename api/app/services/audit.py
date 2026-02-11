@@ -1,10 +1,19 @@
 """Audit logging service."""
 import json
+from datetime import datetime, date
 from typing import Optional, Any
 from sqlalchemy.orm import Session
 
 from api.app.models.audit import AuditLog
 from api.app.auth.dependencies import CurrentUser
+
+
+class _AuditEncoder(json.JSONEncoder):
+    """JSON encoder that handles date/datetime objects."""
+    def default(self, obj):
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        return super().default(obj)
 
 
 def log_audit(
@@ -39,8 +48,8 @@ def log_audit(
         action=action,
         entity_type=entity_type,
         entity_id=entity_id,
-        old_values=json.dumps(old_values) if old_values else None,
-        new_values=json.dumps(new_values) if new_values else None,
+        old_values=json.dumps(old_values, cls=_AuditEncoder) if old_values else None,
+        new_values=json.dumps(new_values, cls=_AuditEncoder) if new_values else None,
         reason=reason,
         ip_address=ip_address,
     )

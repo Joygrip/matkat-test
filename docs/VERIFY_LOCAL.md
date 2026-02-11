@@ -192,12 +192,81 @@ This document provides step-by-step manual verification steps for testing the ap
 - ✅ Can view consolidation dashboard
 - ✅ Can publish snapshots
 - ✅ Can read all master data
+- ✅ Can create/edit/delete departments, cost centers, resources, placeholders, holidays
+- ✅ Can create/edit/delete projects
+- ✅ Can create/edit/delete demand lines
+- ✅ Can create/edit/delete supply lines
+- ✅ Cannot manage settings (Admin-only)
+- ✅ Can view audit logs
 
 ### Employee
 - ✅ Can read projects/resources (via `/lookups/*`)
-- ✅ Can create/edit own actuals
+- ✅ Can create/edit own actuals (only own resource)
 - ✅ Can sign own actuals
 - ✅ Cannot edit signed actuals
+- ✅ Cannot create actuals for other employees' resources
+
+### 8. Finance: Create Master Data
+
+**Steps:**
+1. Login as **Finance** (via Dev Login Panel)
+2. Navigate to **Admin** page
+3. Create a new Department (code: "TEST-FIN", name: "Finance Test Dept")
+4. Create a new Cost Center linked to that department
+5. Create a new Resource linked to the cost center
+6. Create a new Placeholder
+7. Create a new Holiday
+8. Create a new Project (code: "FIN-TEST", name: "Finance Test Project")
+9. Verify all created entities appear in their respective tabs
+
+**Expected:**
+- ✅ No 403 errors for Finance creating any master data
+- ✅ All entities are created successfully
+- ✅ Finance cannot access Settings tab (Admin-only)
+
+### 9. Finance: Edit Demand/Supply Lines
+
+**Steps:**
+1. Login as **Finance** (via Dev Login Panel)
+2. Navigate to **Demand** page
+3. Verify "Add Demand" button is visible (not read-only)
+4. Create a new demand line
+5. Edit the demand line's FTE
+6. Delete the demand line
+7. Navigate to **Supply** page
+8. Repeat: create, edit, delete a supply line
+
+**Expected:**
+- ✅ Finance can create demand/supply lines
+- ✅ Finance edits still enforce XOR, 4MFC, period lock rules
+- ✅ No read-only banner for Finance on planning pages
+
+### 10. Audit Trail Verification
+
+**Steps:**
+1. Login as **Admin** or **Finance**
+2. Perform some CRUD operations (create department, create project, etc.)
+3. Navigate to audit log endpoint (`/audit-logs/`)
+4. Verify audit entries show actions, timestamps, and user info
+5. Verify audit logs are tenant-scoped (only current tenant's logs shown)
+
+**Expected:**
+- ✅ Audit trail captures CRUD operations
+- ✅ Employee/PM cannot access audit logs (403)
+- ✅ Audit logs properly serialize datetime values
+
+### 11. Employee Ownership Checks
+
+**Steps:**
+1. Login as **Employee** (via Dev Login Panel)
+2. Navigate to **Actuals** page
+3. Create actuals for your own resource
+4. Try creating actuals for another employee's resource
+5. Verify 403 error with "Employees can only manage their own actuals"
+
+**Expected:**
+- ✅ Employee can only manage actuals for their own resource
+- ✅ Clear error message for unauthorized resource access
 
 ## Troubleshooting
 

@@ -2,10 +2,29 @@
 import pytest
 from datetime import datetime
 
+from api.app.models.core import User, UserRole
+
 
 @pytest.fixture
 def setup_actuals_data(client, admin_headers, finance_headers, db):
-    """Set up test data for actuals tests."""
+    """Set up test data for actuals tests.
+    
+    Creates a User record for the employee and links the Resource to it,
+    ensuring employee ownership checks pass.
+    """
+    # Create a User record for the employee (matching employee_headers object_id)
+    employee_user = User(
+        tenant_id="test-tenant-001",
+        object_id="employee-001",
+        email="employee@test.com",
+        display_name="Employee User",
+        role=UserRole.EMPLOYEE,
+    )
+    db.add(employee_user)
+    db.commit()
+    db.refresh(employee_user)
+    employee_user_id = employee_user.id
+
     # Create department
     dept_resp = client.post(
         "/admin/departments",
@@ -37,17 +56,30 @@ def setup_actuals_data(client, admin_headers, finance_headers, db):
     )
     project2_id = project2_resp.json()["id"]
     
-    # Create resource
+    # Create resource linked to the employee user
     resource_resp = client.post(
         "/admin/resources",
         json={
             "cost_center_id": cc_id,
             "employee_id": "EMP-ACT",
             "display_name": "Actuals Employee",
+            "user_id": employee_user_id,
         },
         headers=admin_headers,
     )
     resource_id = resource_resp.json()["id"]
+
+    # Create a second resource NOT linked to the employee (for ownership tests)
+    other_resource_resp = client.post(
+        "/admin/resources",
+        json={
+            "cost_center_id": cc_id,
+            "employee_id": "EMP-OTHER",
+            "display_name": "Other Employee",
+        },
+        headers=admin_headers,
+    )
+    other_resource_id = other_resource_resp.json()["id"]
     
     # Create period for current month
     now = datetime.utcnow()
@@ -61,6 +93,7 @@ def setup_actuals_data(client, admin_headers, finance_headers, db):
         "project1_id": project1_id,
         "project2_id": project2_id,
         "resource_id": resource_id,
+        "other_resource_id": other_resource_id,
         "year": now.year,
         "month": now.month,
     }
@@ -367,3 +400,21 @@ def test_get_resource_monthly_total(client, employee_headers, setup_actuals_data
     result = response.json()
     assert result["total_percent"] == 55
     assert result["remaining_percent"] == 45
+
+
+def test_employee_cannot_create_actuals_for_other_resource(client, employee_headers, setup_actuals_data):
+    """Employee cannot create actuals for a resource they don't own."""
+    data = setup_actuals_data
+    response = client.post(
+        "/actuals",
+        json={
+            "resource_id": data["other_resource_id"],
+            "project_id": data["project1_id"],
+            "year": data["year"],
+            "month": data["month"],
+            "actual_fte_percent": 50,
+        },
+        headers=employee_headers,
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "UNAUTHORIZED_RESOURCE"

@@ -35,7 +35,14 @@ def get_permissions_for_role(role: UserRole) -> list[str]:
             "read:consolidation",
             "publish:consolidation",
             "read:approvals",
-            # Expanded permissions for planning lines:
+            # Master data management (same as Admin for these entities):
+            "manage:departments",
+            "manage:cost_centers",
+            "manage:projects",
+            "manage:resources",
+            "manage:placeholders",
+            "manage:holidays",
+            # Planning line write access:
             "write:demand",
             "write:supply",
             "read:projects",

@@ -36,7 +36,7 @@ import {
   Toolbar,
   ToolbarButton,
 } from '@fluentui/react-components';
-import { Add24Regular, Delete24Regular } from '@fluentui/react-icons';
+import { Add24Regular, Delete24Regular, PeopleRegular } from '@fluentui/react-icons';
 import { planningApi, SupplyLine, CreateSupplyLine } from '../api/planning';
 import { periodsApi, Period } from '../api/periods';
 import { lookupsApi, Resource } from '../api/lookups';
@@ -44,6 +44,7 @@ import { useToast } from '../hooks/useToast';
 import { formatApiError } from '../utils/errors';
 import { useAuth } from '../auth/AuthProvider';
 import { ReadOnlyBanner } from '../components/ReadOnlyBanner';
+import { EmptyState } from '../components/EmptyState';
 
 const useStyles = makeStyles({
   container: {
@@ -89,6 +90,9 @@ const useStyles = makeStyles({
     width: '100%',
     '& thead': {
       backgroundColor: tokens.colorNeutralBackground2,
+      position: 'sticky' as const,
+      top: 0,
+      zIndex: 1,
     },
     '& th': {
       fontWeight: tokens.fontWeightSemibold,
@@ -98,6 +102,7 @@ const useStyles = makeStyles({
       textTransform: 'uppercase',
       letterSpacing: '0.5px',
       borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+      backgroundColor: tokens.colorNeutralBackground2,
     },
     '& td': {
       padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
@@ -447,8 +452,23 @@ export const Supply: React.FC = () => {
           <TableBody>
             {supplies.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={canEdit ? 5 : 4}>
-                  <Body1>No supply lines for this period</Body1>
+                <TableCell colSpan={canEdit ? 5 : 4} style={{ padding: tokens.spacingVerticalXXL }}>
+                  <EmptyState
+                    icon={<PeopleRegular style={{ fontSize: 48 }} />}
+                    title="No supply lines"
+                    message="No supply lines found for this period. Create one to get started."
+                    action={
+                      !isLocked && canEdit ? (
+                        <Button
+                          appearance="primary"
+                          icon={<Add24Regular />}
+                          onClick={() => setIsDialogOpen(true)}
+                        >
+                          Add Supply Line
+                        </Button>
+                      ) : undefined
+                    }
+                  />
                 </TableCell>
               </TableRow>
             ) : (

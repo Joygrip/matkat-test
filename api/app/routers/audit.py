@@ -1,7 +1,7 @@
 """Audit log API endpoints."""
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from api.app.auth.dependencies import get_current_user, CurrentUser
+from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
 from api.app.db.engine import get_db
 from api.app.models.audit import AuditLog
 from api.app.models.core import UserRole
@@ -12,14 +12,19 @@ router = APIRouter(prefix="/audit-logs", tags=["Audit"])
 @router.get("/", response_model=List[dict])
 def list_audit_logs(
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE)),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
-    """List audit logs (Admin/Finance only)."""
-    if current_user.role not in (UserRole.ADMIN, UserRole.FINANCE):
-        raise Exception("Forbidden")
-    logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).offset(offset).limit(limit).all()
+    """List audit logs (Admin/Finance only). Tenant-scoped."""
+    logs = (
+        db.query(AuditLog)
+        .filter(AuditLog.tenant_id == current_user.tenant_id)
+        .order_by(AuditLog.timestamp.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
     return [
         {
             "timestamp": log.timestamp,

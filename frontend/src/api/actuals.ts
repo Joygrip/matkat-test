@@ -65,7 +65,7 @@ export const actualsApi = {
   },
   
   async getResourceMonthlyTotal(resourceId: string, year: number, month: number): Promise<ResourceMonthlyTotal> {
-    return apiClient.get<ResourceMonthlyTotal>(`/actuals/resource/${resourceId}/month?year=${year}&month=${month}`);
+    return apiClient.get<ResourceMonthlyTotal>(`/actuals/resource/${resourceId}/total?year=${year}&month=${month}`);
   },
   
   async createActualLine(data: CreateActualLine): Promise<ActualLine> {

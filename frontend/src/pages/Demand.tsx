@@ -92,6 +92,9 @@ const useStyles = makeStyles({
     width: '100%',
     '& thead': {
       backgroundColor: tokens.colorNeutralBackground2,
+      position: 'sticky' as const,
+      top: 0,
+      zIndex: 1,
     },
     '& th': {
       fontWeight: tokens.fontWeightSemibold,
@@ -101,6 +104,7 @@ const useStyles = makeStyles({
       textTransform: 'uppercase',
       letterSpacing: '0.5px',
       borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+      backgroundColor: tokens.colorNeutralBackground2,
     },
     '& td': {
       padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,

@@ -119,6 +119,15 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalM,
     overflowY: 'auto',
   },
+  navSectionLabel: {
+    color: 'rgba(255, 255, 255, 0.4)',
+    fontSize: tokens.fontSizeBase100,
+    fontWeight: tokens.fontWeightSemibold,
+    textTransform: 'uppercase',
+    letterSpacing: '1px',
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL} ${tokens.spacingVerticalXS}`,
+    marginTop: tokens.spacingVerticalS,
+  },
   navLink: {
     display: 'flex',
     alignItems: 'center',
@@ -239,18 +248,26 @@ interface NavItem {
   label: string;
   icon: typeof Home;
   roles?: string[];
+  section: 'overview' | 'planning' | 'operations' | 'admin';
 }
 
 const navItems: NavItem[] = [
-  { path: '/', label: 'Dashboard', icon: Home },
-  { path: '/demand', label: 'Demand', icon: Demand, roles: ['Admin', 'Finance', 'PM', 'RO'] },
-  { path: '/supply', label: 'Supply', icon: Supply, roles: ['Admin', 'Finance', 'PM', 'RO'] },
-  { path: '/actuals', label: 'Actuals', icon: Actuals, roles: ['Admin', 'Finance', 'RO', 'Employee'] },
-  { path: '/finance-dashboard', label: 'Finance', icon: MoneyRegular, roles: ['Finance'] },
-  { path: '/approvals', label: 'Approvals', icon: Approvals, roles: ['Admin', 'RO', 'Director'] },
-  { path: '/consolidation', label: 'Consolidation', icon: Consolidation, roles: ['Admin', 'Finance', 'Director'] },
-  { path: '/admin', label: 'Admin', icon: Admin, roles: ['Admin', 'Finance'] },
+  { path: '/', label: 'Dashboard', icon: Home, section: 'overview' },
+  { path: '/demand', label: 'Demand', icon: Demand, roles: ['Admin', 'Finance', 'PM', 'RO'], section: 'planning' },
+  { path: '/supply', label: 'Supply', icon: Supply, roles: ['Admin', 'Finance', 'PM', 'RO'], section: 'planning' },
+  { path: '/actuals', label: 'Actuals', icon: Actuals, roles: ['Admin', 'Finance', 'RO', 'Employee'], section: 'operations' },
+  { path: '/finance-dashboard', label: 'Finance', icon: MoneyRegular, roles: ['Finance'], section: 'operations' },
+  { path: '/approvals', label: 'Approvals', icon: Approvals, roles: ['Admin', 'RO', 'Director'], section: 'operations' },
+  { path: '/consolidation', label: 'Consolidation', icon: Consolidation, roles: ['Admin', 'Finance', 'Director'], section: 'operations' },
+  { path: '/admin', label: 'Admin', icon: Admin, roles: ['Admin', 'Finance'], section: 'admin' },
 ];
+
+const sectionLabels: Record<string, string> = {
+  overview: '',
+  planning: 'Planning',
+  operations: 'Operations',
+  admin: 'Management',
+};
 
 const pageTitles: Record<string, string> = {
   '/': 'Dashboard',
@@ -313,18 +330,29 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
 
         <nav className={styles.nav}>
-          {visibleNavItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) =>
-                `${styles.navLink} ${isActive ? styles.navLinkActive : ''}`
-              }
-            >
-              <item.icon style={{ fontSize: 20 }} />
-              {item.label}
-            </NavLink>
-          ))}
+          {(() => {
+            let lastSection = '';
+            return visibleNavItems.map((item) => {
+              const showLabel = item.section !== lastSection && sectionLabels[item.section];
+              lastSection = item.section;
+              return (
+                <div key={item.path}>
+                  {showLabel && (
+                    <div className={styles.navSectionLabel}>{sectionLabels[item.section]}</div>
+                  )}
+                  <NavLink
+                    to={item.path}
+                    className={({ isActive }) =>
+                      `${styles.navLink} ${isActive ? styles.navLinkActive : ''}`
+                    }
+                  >
+                    <item.icon style={{ fontSize: 20 }} />
+                    {item.label}
+                  </NavLink>
+                </div>
+              );
+            });
+          })()}
         </nav>
 
         <div className={styles.userSection}>

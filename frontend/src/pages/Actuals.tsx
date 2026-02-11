@@ -40,6 +40,7 @@ import {
   Delete24Regular, 
   Signature24Regular,
   CheckmarkCircle24Regular,
+  ClipboardTaskRegular,
 } from '@fluentui/react-icons';
 import { actualsApi, ActualLine, CreateActualLine } from '../api/actuals';
 import { periodsApi, Period } from '../api/periods';
@@ -48,6 +49,7 @@ import { planningApi, DemandLine, SupplyLine } from '../api/planning';
 import { useToast } from '../hooks/useToast';
 import { formatApiError } from '../utils/errors';
 import { ApiError } from '../types';
+import { EmptyState } from '../components/EmptyState';
 import { useAuth } from '../auth/AuthProvider';
 
 const useStyles = makeStyles({
@@ -94,6 +96,9 @@ const useStyles = makeStyles({
     width: '100%',
     '& thead': {
       backgroundColor: tokens.colorNeutralBackground2,
+      position: 'sticky' as const,
+      top: 0,
+      zIndex: 1,
     },
     '& th': {
       fontWeight: tokens.fontWeightSemibold,
@@ -103,6 +108,7 @@ const useStyles = makeStyles({
       textTransform: 'uppercase',
       letterSpacing: '0.5px',
       borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+      backgroundColor: tokens.colorNeutralBackground2,
     },
     '& td': {
       padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
@@ -636,8 +642,12 @@ export const Actuals: React.FC = () => {
           <TableBody>
             {actuals.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7}>
-                  <Body1>No actuals for this period</Body1>
+                <TableCell colSpan={7} style={{ padding: tokens.spacingVerticalXXL }}>
+                  <EmptyState
+                    icon={<ClipboardTaskRegular style={{ fontSize: 48 }} />}
+                    title="No actuals"
+                    message="No actual lines found for this period. Create one to start logging time."
+                  />
                 </TableCell>
               </TableRow>
             ) : (

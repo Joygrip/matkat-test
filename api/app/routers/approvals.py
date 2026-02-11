@@ -117,6 +117,34 @@ async def approve_step(
     return _to_response(instance)
 
 
+@router.post("/{instance_id}/steps/{step_id}/proxy-approve", response_model=ApprovalInstanceResponse)
+async def proxy_approve_step(
+    instance_id: str,
+    step_id: str,
+    data: ActionRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(
+        UserRole.RO, UserRole.DIRECTOR
+    )),
+):
+    """
+    Proxy-approve a Director step (e.g. when Director is unavailable).
+    
+    Requires a comment/explanation. The RO step must already be approved.
+    
+    Accessible to: RO, Director
+    """
+    from fastapi import HTTPException
+    if not data.comment or not data.comment.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "VALIDATION_ERROR", "message": "Comment is required for proxy-approve"}
+        )
+    service = ApprovalsService(db, current_user)
+    instance = service.approve_step(instance_id, step_id, f"[PROXY-APPROVE] {data.comment}")
+    return _to_response(instance)
+
+
 @router.post("/{instance_id}/steps/{step_id}/reject", response_model=ApprovalInstanceResponse)
 async def reject_step(
     instance_id: str,

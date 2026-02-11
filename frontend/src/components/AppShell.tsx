@@ -1,7 +1,7 @@
 /**
  * Enterprise AppShell with MatKat branding
  */
-import { ReactNode } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   makeStyles,
@@ -39,6 +39,7 @@ import {
 } from '@fluentui/react-icons';
 import { useAuth } from '../auth/AuthProvider';
 import { config } from '../config';
+import { periodsApi, Period } from '../api/periods';
 
 const Home = bundleIcon(HomeFilled, HomeRegular);
 const Demand = bundleIcon(CalendarFilled, CalendarRegular);
@@ -267,6 +268,21 @@ export function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { user, logout } = useAuth();
 
+  // Period selector state
+  const [periods, setPeriods] = useState<Period[]>([]);
+  const [selectedPeriod, setSelectedPeriod] = useState<string>('');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  useEffect(() => {
+    periodsApi.list().then((data) => {
+      setPeriods(data);
+      if (data.length > 0) {
+        const openPeriod = data.find((p: Period) => p.status === 'open');
+        setSelectedPeriod(openPeriod?.id || data[0].id);
+      }
+    });
+  }, []);
+
   const visibleNavItems = navItems.filter((item) => {
     if (!item.roles) return true;
     return user && item.roles.includes(user.role);
@@ -274,10 +290,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const pageTitle = pageTitles[location.pathname] || 'MatKat 2.0';
 
+  // Responsive sidebar toggle
+  const handleSidebarToggle = () => setSidebarOpen((open) => !open);
 
   return (
     <div className={styles.container}>
-      <aside className={styles.sidebar}>
+      {/* Responsive sidebar: hide on small screens */}
+      <aside className={styles.sidebar} style={{ display: sidebarOpen ? 'flex' : 'none' }}>
         <div className={styles.logoSection}>
           <div className={styles.logoSlot}>
             <div className={styles.logoIcon}>MK</div>
@@ -340,13 +359,35 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className={styles.main}>
         <header className={styles.header}>
           <div className={styles.headerLeft}>
+            {/* Hamburger for mobile */}
+            <Button
+              icon={<span style={{ fontSize: 24 }}>&#9776;</span>}
+              appearance="subtle"
+              onClick={handleSidebarToggle}
+              style={{ display: 'inline-flex', marginRight: 16 }}
+            />
             <h1 className={styles.pageTitle}>{pageTitle}</h1>
           </div>
-                <div className={styles.headerRight}>
-                  <Tooltip content={`Tenant: ${user?.tenant_id}`} relationship="description">
-                    <Badge appearance="outline">{user?.tenant_id}</Badge>
-                  </Tooltip>
-                </div>
+          <div className={styles.headerRight}>
+            <Tooltip content={`Tenant: ${user?.tenant_id}`} relationship="description">
+              <Badge appearance="outline">{user?.tenant_id}</Badge>
+            </Tooltip>
+            <Tooltip content={`Role: ${user?.role}`} relationship="description">
+              <Badge appearance="outline" color="brand">{user?.role}</Badge>
+            </Tooltip>
+            {/* Period selector */}
+            <Select
+              value={selectedPeriod}
+              onChange={(_, data) => setSelectedPeriod(data.value)}
+              style={{ minWidth: 120 }}
+            >
+              {periods.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.year}-{String(p.month).padStart(2, '0')} ({p.status})
+                </option>
+              ))}
+            </Select>
+          </div>
         </header>
 
         <div className={styles.content}>

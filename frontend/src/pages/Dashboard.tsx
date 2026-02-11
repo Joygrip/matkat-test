@@ -17,6 +17,9 @@ import {
   AccordionItem,
   AccordionHeader,
   AccordionPanel,
+  Skeleton,
+  MessageBar,
+  MessageBarBody,
 } from '@fluentui/react-components';
 import {
   ClipboardTaskRegular,
@@ -26,6 +29,7 @@ import {
   BuildingRegular,
   ShieldCheckmarkRegular,
   ArrowSyncRegular,
+  SettingsRegular,
 } from '@fluentui/react-icons';
 import { useAuth } from '../auth/AuthProvider';
 import { apiClient } from '../api/client';
@@ -132,6 +136,7 @@ export function Dashboard() {
   const [resources, setResources] = useState<Resource[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>('');
   const [selectedResource, setSelectedResource] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
 
   const isAdmin = user?.role === 'Admin';
   const isEmployee = user?.role === 'Employee';
@@ -150,6 +155,7 @@ export function Dashboard() {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
+      setError(null);
       const [healthData, periodsData] = await Promise.all([
         apiClient.getHealth().catch(() => null),
         periodsApi.list().catch(() => []),
@@ -188,6 +194,7 @@ export function Dashboard() {
         }
       }
     } catch (error) {
+      setError('Failed to load dashboard data.');
       console.error('Failed to load dashboard data:', error);
     } finally {
       setLoading(false);
@@ -242,7 +249,16 @@ export function Dashboard() {
   };
 
   if (loading) {
-    return <LoadingState message="Loading dashboard..." />;
+    return (
+      <div className={styles.container}>
+        <Skeleton style={{ height: 120, marginBottom: 32 }} />
+        <div className={styles.actionsGrid}>
+          {[1,2,3,4].map(i => (
+            <Skeleton key={i} style={{ height: 180, borderRadius: 12 }} />
+          ))}
+        </div>
+      </div>
+    );
   }
 
   const currentPeriod = periods.find((p) => p.status === 'open') || periods[0];
@@ -252,6 +268,20 @@ export function Dashboard() {
 
   return (
     <div className={styles.container}>
+      {/* Prominent Dev/Test Banner for all roles */}
+      {config.devAuthBypass && (
+        <MessageBar intent="warning" style={{ marginBottom: tokens.spacingVerticalL }}>
+          <MessageBarBody>
+            <strong>Development Mode:</strong> This environment is for development/testing only.
+          </MessageBarBody>
+        </MessageBar>
+      )}
+      {/* Error Bar */}
+      {error && (
+        <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalL }}>
+          <MessageBarBody>{error}</MessageBarBody>
+        </MessageBar>
+      )}
       {/* Welcome Banner */}
       <div className={styles.welcome}>
         <Title3 className={styles.welcomeTitle}>
@@ -261,21 +291,6 @@ export function Dashboard() {
           You are logged in as <strong>{user?.role}</strong> for tenant{' '}
           <strong>{user?.tenant_id}</strong>
         </Body1>
-        {config.devAuthBypass && isAdmin && (
-          <div className={styles.devBanner}>
-            <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>
-              <strong>Development Mode</strong>
-            </Body1>
-            <Button
-              appearance="secondary"
-              icon={<ArrowSyncRegular />}
-              onClick={handleSeed}
-              disabled={seeding}
-            >
-              {seeding ? 'Seeding...' : 'Seed Database'}
-            </Button>
-          </div>
-        )}
       </div>
 
       {/* Supply/Demand Chart for PM, RO, Director, Finance */}
@@ -338,8 +353,8 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Action Cards */}
-      <div className={styles.actionsGrid}>
+      {/* Action Cards: explicit role logic, improved spacing */}
+      <div className={styles.actionsGrid} style={{ marginTop: tokens.spacingVerticalXL }}>
         {isEmployee && unsignedActuals > 0 && (
           <ActionCard
             icon={<ClipboardTaskRegular />}
@@ -360,7 +375,7 @@ export function Dashboard() {
           />
         )}
 
-        {(isFinance || isAdmin) && (
+        {isFinance && (
           <ActionCard
             icon={<ChartMultipleRegular />}
             title="Consolidation"
@@ -369,7 +384,7 @@ export function Dashboard() {
           />
         )}
 
-        {(isRO || isFinance || isAdmin) && (
+        {(isRO || isFinance) && (
           <ActionCard
             icon={<CalendarRegular />}
             title="Supply Planning"
@@ -378,12 +393,21 @@ export function Dashboard() {
           />
         )}
 
-        {!isEmployee && (
+        {(isPM || isFinance) && (
           <ActionCard
             icon={<CalendarRegular />}
             title="Demand Planning"
-            subtitle="View demand lines"
+            subtitle="View and manage demand lines"
             onClick={() => navigate('/demand')}
+          />
+        )}
+
+        {isAdmin && (
+          <ActionCard
+            icon={<SettingsRegular />}
+            title="Admin Panel"
+            subtitle="Manage master data and settings"
+            onClick={() => navigate('/admin')}
           />
         )}
       </div>

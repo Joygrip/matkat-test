@@ -22,7 +22,7 @@ This guide explains how to start the backend and frontend services for local dev
 cd C:\Users\pawel\Documents\GitHub\ResourceAllocation
 
 # Set environment variables
-$env:PYTHONPATH = "C:\Users\pawel\Documents\GitHub\ResourceAllocation"
+$env:PYTHONPATH = "C:\VSCode\ResourceAllocation-master"
 $env:ENV = "dev"
 $env:DEV_AUTH_BYPASS = "true"
 $env:DATABASE_URL = "sqlite:///./api/dev.db"

@@ -248,7 +248,7 @@ const navItems: NavItem[] = [
   { path: '/finance-dashboard', label: 'Finance', icon: MoneyRegular, roles: ['Finance'] },
   { path: '/approvals', label: 'Approvals', icon: Approvals, roles: ['Admin', 'RO', 'Director'] },
   { path: '/consolidation', label: 'Consolidation', icon: Consolidation, roles: ['Admin', 'Finance', 'Director'] },
-  { path: '/admin', label: 'Admin', icon: Admin, roles: ['Admin'] },
+  { path: '/admin', label: 'Admin', icon: Admin, roles: ['Admin', 'Finance'] },
 ];
 
 const pageTitles: Record<string, string> = {

@@ -242,26 +242,3 @@ class Holiday(Base):
     __table_args__ = (
         Index("ix_holidays_tenant_date", "tenant_id", "date", unique=True),
     )
-
-
-class AuditLog(Base):
-    """Audit log for all mutations."""
-    __tablename__ = "audit_logs"
-    
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    user_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    user_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    action: Mapped[str] = mapped_column(String(100), nullable=False)
-    entity_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    entity_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    old_values: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
-    new_values: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
-    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    
-    __table_args__ = (
-        Index("ix_audit_logs_tenant_created", "tenant_id", "created_at"),
-        Index("ix_audit_logs_entity", "tenant_id", "entity_type", "entity_id"),
-    )

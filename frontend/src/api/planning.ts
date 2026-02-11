@@ -72,6 +72,10 @@ export const planningApi = {
     return apiClient.delete(`/demand-lines/${id}`);
   },
   
+  async bulkDemandLines(body: any): Promise<any> {
+    return apiClient.post('/demand-lines/bulk', body);
+  },
+  
   // Supply Lines
   async getSupplyLines(periodId?: string): Promise<SupplyLine[]> {
     const params = periodId ? `?period_id=${periodId}` : '';
@@ -88,6 +92,10 @@ export const planningApi = {
   
   async deleteSupplyLine(id: string): Promise<void> {
     return apiClient.delete(`/supply-lines/${id}`);
+  },
+  
+  async bulkSupplyLines(body: any): Promise<any> {
+    return apiClient.post('/supply-lines/bulk', body);
   },
   
 };

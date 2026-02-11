@@ -1,8 +1,8 @@
 /**
  * Supply Planning Page
  * 
- * RO role: Create and edit supply lines (resource availability)
- * Finance/Admin/PM: Read-only view
+ * RO/Finance: Create and edit supply lines (resource availability)
+ * Admin/PM: Read-only view
  */
 import React, { useState, useEffect } from 'react';
 import {
@@ -32,6 +32,9 @@ import {
   DialogActions,
   MessageBar,
   MessageBarBody,
+  Checkbox,
+  Toolbar,
+  ToolbarButton,
 } from '@fluentui/react-components';
 import { Add24Regular, Delete24Regular } from '@fluentui/react-icons';
 import { planningApi, SupplyLine, CreateSupplyLine } from '../api/planning';
@@ -152,6 +155,11 @@ export const Supply: React.FC = () => {
     fte_percent: 100,
   });
   
+  // Bulk actions state
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [bulkEditFte, setBulkEditFte] = useState<number>(100);
+  
   useEffect(() => {
     loadInitialData();
   }, []);
@@ -251,8 +259,42 @@ export const Supply: React.FC = () => {
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const currentPeriod = periods.find(p => p.id === selectedPeriod);
   const isLocked = currentPeriod?.status === 'locked';
-  const canEdit = user?.role === 'RO' || user?.role === 'Finance';
+  const canEdit = user?.role === 'Finance' || user?.role === 'RO';
   const isReadOnly = user?.role === 'PM' || user?.role === 'Admin';
+  
+  const allSelected = supplies.length > 0 && selectedIds.length === supplies.length;
+  const toggleSelectAll = () => {
+    setSelectedIds(allSelected ? [] : supplies.map(s => s.id));
+  };
+  const toggleSelect = (id: string) => {
+    setSelectedIds(selectedIds.includes(id) ? selectedIds.filter(x => x !== id) : [...selectedIds, id]);
+  };
+  
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`Delete ${selectedIds.length} supply lines?`)) return;
+    try {
+      const actions = selectedIds.map(id => ({ action: 'delete', data: { id } }));
+      await planningApi.bulkSupplyLines({ actions, all_or_nothing: true });
+      showSuccess('Bulk delete successful');
+      setSelectedIds([]);
+      loadSupplies();
+    } catch (err) {
+      showApiError(err, 'Bulk delete failed');
+    }
+  };
+  
+  const handleBulkEdit = async () => {
+    try {
+      const actions = selectedIds.map(id => ({ action: 'update', data: { id, fte_percent: bulkEditFte } }));
+      await planningApi.bulkSupplyLines({ actions, all_or_nothing: true });
+      showSuccess('Bulk edit successful');
+      setSelectedIds([]);
+      setIsBulkEditOpen(false);
+      loadSupplies();
+    } catch (err) {
+      showApiError(err, 'Bulk edit failed');
+    }
+  };
   
   if (loading) {
     return (
@@ -347,14 +389,42 @@ export const Supply: React.FC = () => {
         </MessageBar>
       )}
       
-      {isReadOnly && !isLocked && (
-        <ReadOnlyBanner message="Only ROs and Finance can edit supply lines. You can view all supply data." />
-      )}
-      
       {error && (
         <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
           <MessageBarBody>{error}</MessageBarBody>
         </MessageBar>
+      )}
+      
+      {selectedIds.length > 0 && canEdit && (
+        <Toolbar style={{ marginBottom: 16 }}>
+          <ToolbarButton onClick={handleBulkDelete} icon={<Delete24Regular />}>Delete Selected</ToolbarButton>
+          <ToolbarButton onClick={() => setIsBulkEditOpen(true)}>Edit FTE %</ToolbarButton>
+        </Toolbar>
+      )}
+      
+      {canEdit && (
+        <Dialog open={isBulkEditOpen} onOpenChange={(_, data) => setIsBulkEditOpen(data.open)}>
+          <DialogSurface>
+            <DialogBody>
+              <DialogTitle>Bulk Edit FTE %</DialogTitle>
+              <DialogContent>
+                <Input
+                  type="number"
+                  min={5}
+                  max={100}
+                  step={5}
+                  value={bulkEditFte}
+                  onChange={e => setBulkEditFte(Number(e.target.value))}
+                  style={{ width: 120 }}
+                />
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setIsBulkEditOpen(false)}>Cancel</Button>
+                <Button appearance="primary" onClick={handleBulkEdit}>Apply</Button>
+              </DialogActions>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
       )}
       
       <Card className={styles.card}>
@@ -363,6 +433,11 @@ export const Supply: React.FC = () => {
         <Table className={styles.table}>
           <TableHeader>
             <TableRow>
+              {canEdit && (
+                <TableHeaderCell>
+                  <Checkbox checked={allSelected} onChange={toggleSelectAll} />
+                </TableHeaderCell>
+              )}
               <TableHeaderCell>Resource</TableHeaderCell>
               <TableHeaderCell>Period</TableHeaderCell>
               <TableHeaderCell>FTE %</TableHeaderCell>
@@ -372,13 +447,18 @@ export const Supply: React.FC = () => {
           <TableBody>
             {supplies.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4}>
+                <TableCell colSpan={canEdit ? 5 : 4}>
                   <Body1>No supply lines for this period</Body1>
                 </TableCell>
               </TableRow>
             ) : (
               supplies.map(s => (
                 <TableRow key={s.id}>
+                  {canEdit && (
+                    <TableCell>
+                      <Checkbox checked={selectedIds.includes(s.id)} onChange={() => toggleSelect(s.id)} />
+                    </TableCell>
+                  )}
                   <TableCell>{getResourceName(s.resource_id)}</TableCell>
                   <TableCell>{s.year}-{String(s.month).padStart(2, '0')}</TableCell>
                   <TableCell>

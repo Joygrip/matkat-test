@@ -1,8 +1,8 @@
 /**
  * Demand Planning Page
  * 
- * PM role: Create and edit demand lines (project + resource/placeholder + FTE)
- * Finance/Admin: Read-only view
+ * PM/Finance: Create and edit demand lines (project + resource/placeholder + FTE)
+ * Admin: Read-only view
  */
 import React, { useState, useEffect } from 'react';
 import {
@@ -31,6 +31,9 @@ import {
   MessageBar,
   MessageBarBody,
   Title3,
+  Checkbox,
+  Toolbar,
+  ToolbarButton,
 } from '@fluentui/react-components';
 import { Add24Regular, Delete24Regular, CalendarRegular } from '@fluentui/react-icons';
 import { planningApi, DemandLine, CreateDemandLine } from '../api/planning';
@@ -158,6 +161,14 @@ export const Demand: React.FC = () => {
   });
   const [useResource, setUseResource] = useState(true);
   
+  // Selection state
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  
+  // Bulk Edit Dialog State
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [bulkEditForm, setBulkEditForm] = useState<Partial<CreateDemandLine>>({});
+  const [bulkEditUseResource, setBulkEditUseResource] = useState<'resource' | 'placeholder' | ''>('');
+
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const currentPeriod = periods.find(p => p.id === selectedPeriod);
   
@@ -299,8 +310,68 @@ export const Demand: React.FC = () => {
   const getPlaceholderName = (id?: string) => id ? placeholders.find(p => p.id === id)?.name || 'Unknown' : '-';
   
   const isLocked = currentPeriod?.status === 'locked';
-  const canEdit = user?.role === 'PM' || user?.role === 'Finance';
+  const canEdit = user?.role === 'Finance' || user?.role === 'PM';
   const isReadOnly = !canEdit && user?.role === 'Admin';
+  
+  const allSelected = demands.length > 0 && selectedIds.length === demands.length;
+  const toggleSelectAll = () => {
+    setSelectedIds(allSelected ? [] : demands.map(d => d.id));
+  };
+  const toggleSelect = (id: string) => {
+    setSelectedIds(selectedIds.includes(id) ? selectedIds.filter(x => x !== id) : [...selectedIds, id]);
+  };
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`Delete ${selectedIds.length} demand lines?`)) return;
+    try {
+      // Call bulk API
+      const actions = selectedIds.map(id => ({ action: 'delete', data: { id } }));
+      // Replace with your API client call
+      await planningApi.bulkDemandLines({ actions, all_or_nothing: true });
+      showSuccess('Bulk delete successful');
+      setSelectedIds([]);
+      loadDemands();
+    } catch (err) {
+      showApiError(err, 'Bulk delete failed');
+    }
+  };
+  
+  // Bulk Edit
+  const handleOpenBulkEdit = () => {
+    setBulkEditForm({});
+    setBulkEditUseResource('');
+    setIsBulkEditOpen(true);
+  };
+  const handleCloseBulkEdit = () => setIsBulkEditOpen(false);
+
+  const handleBulkEditSubmit = async () => {
+    if (!canEdit) {
+      showError('Read-only', 'Only PM/Finance can bulk edit demand lines.');
+      return;
+    }
+    if (Object.keys(bulkEditForm).length === 0 && !bulkEditUseResource) {
+      showError('No changes', 'Please select at least one field to update.');
+      return;
+    }
+    try {
+      const actions = selectedIds.map(id => ({
+        action: 'update',
+        data: {
+          id,
+          ...bulkEditForm,
+          // XOR logic for resource/placeholder
+          ...(bulkEditUseResource === 'resource' ? { resource_id: bulkEditForm.resource_id, placeholder_id: undefined } : {}),
+          ...(bulkEditUseResource === 'placeholder' ? { placeholder_id: bulkEditForm.placeholder_id, resource_id: undefined } : {}),
+        },
+      }));
+      await planningApi.bulkDemandLines({ actions, all_or_nothing: true });
+      showSuccess('Bulk edit successful');
+      setIsBulkEditOpen(false);
+      setSelectedIds([]);
+      loadDemands();
+    } catch (err) {
+      showApiError(err, 'Bulk edit failed');
+    }
+  };
   
   if (loading) {
     return <LoadingState message="Loading demand planning data..." />;
@@ -434,21 +505,116 @@ export const Demand: React.FC = () => {
         />
       )}
       
-      {isReadOnly && !isLocked && (
-        <ReadOnlyBanner message="Only PMs and Finance can edit demand lines. You can view all demand data." />
-      )}
-      
       {error && (
         <StatusBanner intent="danger" title="Error" message={error} />
       )}
 
+      {selectedIds.length > 0 && canEdit && (
+        <Toolbar style={{ marginBottom: 16 }}>
+          <ToolbarButton onClick={handleBulkDelete} icon={<Delete24Regular />}>Delete Selected</ToolbarButton>
+          <ToolbarButton onClick={handleOpenBulkEdit}>Edit Selected</ToolbarButton>
+          {/* Add more bulk actions here (Import, Export) */}
+        </Toolbar>
+      )}
 
+      {/* Bulk Edit Dialog */}
+      {canEdit && (
+        <Dialog open={isBulkEditOpen} onOpenChange={(_, d) => setIsBulkEditOpen(d.open)}>
+          <DialogSurface>
+            <DialogBody>
+              <DialogTitle>Bulk Edit Demand Lines</DialogTitle>
+              <DialogContent>
+                <div className={styles.formField}>
+                  <label>Project</label>
+                  <Select
+                    value={bulkEditForm.project_id || ''}
+                    onChange={(_, data) => setBulkEditForm(f => ({ ...f, project_id: data.value }))}
+                  >
+                    <option value="">No change</option>
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </Select>
+                </div>
+                <div className={styles.formField}>
+                  <label>Assignment Type</label>
+                  <Select
+                    value={bulkEditUseResource}
+                    onChange={(_, data) => {
+                      setBulkEditUseResource(data.value as 'resource' | 'placeholder' | '');
+                      setBulkEditForm(f => ({
+                        ...f,
+                        resource_id: data.value === 'resource' ? '' : f.resource_id,
+                        placeholder_id: data.value === 'placeholder' ? '' : f.placeholder_id,
+                      }));
+                    }}
+                  >
+                    <option value="">No change</option>
+                    <option value="resource">Named Resource</option>
+                    <option value="placeholder">Placeholder (TBD)</option>
+                  </Select>
+                </div>
+                {bulkEditUseResource === 'resource' && (
+                  <div className={styles.formField}>
+                    <label>Resource</label>
+                    <Select
+                      value={bulkEditForm.resource_id || ''}
+                      onChange={(_, data) => setBulkEditForm(f => ({ ...f, resource_id: data.value }))}
+                    >
+                      <option value="">No change</option>
+                      {resources.map(r => (
+                        <option key={r.id} value={r.id}>{r.display_name}</option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
+                {bulkEditUseResource === 'placeholder' && (
+                  <div className={styles.formField}>
+                    <label>Placeholder</label>
+                    <Select
+                      value={bulkEditForm.placeholder_id || ''}
+                      onChange={(_, data) => setBulkEditForm(f => ({ ...f, placeholder_id: data.value }))}
+                    >
+                      <option value="">No change</option>
+                      {placeholders.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
+                <div className={styles.formField}>
+                  <label>FTE %</label>
+                  <Select
+                    value={bulkEditForm.fte_percent ? String(bulkEditForm.fte_percent) : ''}
+                    onChange={(_, data) => setBulkEditForm(f => ({ ...f, fte_percent: data.value ? parseInt(data.value) : undefined }))}
+                  >
+                    <option value="">No change</option>
+                    {[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100].map(val => (
+                      <option key={val} value={val}>{val}%</option>
+                    ))}
+                  </Select>
+                </div>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={handleCloseBulkEdit}>Cancel</Button>
+                <Button appearance="primary" onClick={handleBulkEditSubmit}>Apply Changes</Button>
+              </DialogActions>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
+      )}
+      
       <Card className={styles.card}>
         <CardHeader header={<Body1><strong>Demand Lines ({demands.length})</strong></Body1>} />
         
         <Table className={styles.table}>
           <TableHeader>
             <TableRow>
+              {canEdit && (
+                <TableHeaderCell>
+                  <Checkbox checked={allSelected} onChange={toggleSelectAll} />
+                </TableHeaderCell>
+              )}
               <TableHeaderCell>Project</TableHeaderCell>
               <TableHeaderCell>Resource</TableHeaderCell>
               <TableHeaderCell>Placeholder</TableHeaderCell>
@@ -460,7 +626,7 @@ export const Demand: React.FC = () => {
           <TableBody>
             {demands.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} style={{ padding: tokens.spacingVerticalXXL }}>
+                <TableCell colSpan={canEdit ? 7 : 6} style={{ padding: tokens.spacingVerticalXXL }}>
                   <EmptyState
                     icon={<CalendarRegular style={{ fontSize: 48 }} />}
                     title="No demand lines"
@@ -482,6 +648,11 @@ export const Demand: React.FC = () => {
             ) : (
               demands.map(d => (
                 <TableRow key={d.id}>
+                  {canEdit && (
+                    <TableCell>
+                      <Checkbox checked={selectedIds.includes(d.id)} onChange={() => toggleSelect(d.id)} />
+                    </TableCell>
+                  )}
                   <TableCell>{getProjectName(d.project_id)}</TableCell>
                   <TableCell>{getResourceName(d.resource_id)}</TableCell>
                   <TableCell>

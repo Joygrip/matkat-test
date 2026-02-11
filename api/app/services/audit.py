@@ -3,7 +3,7 @@ import json
 from typing import Optional, Any
 from sqlalchemy.orm import Session
 
-from api.app.models.core import AuditLog
+from api.app.models.audit import AuditLog
 from api.app.auth.dependencies import CurrentUser
 
 

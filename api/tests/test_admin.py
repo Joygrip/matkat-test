@@ -254,3 +254,167 @@ def test_crud_settings(client, admin_headers, db):
     # Get by key
     get_resp = client.get("/admin/settings/notification_days", headers=admin_headers)
     assert get_resp.status_code == 200
+
+
+def test_finance_can_create_department(client, finance_headers, db):
+    """Finance can create departments (write access)."""
+    response = client.post(
+        "/admin/departments",
+        json={"code": "FIN", "name": "Finance"},
+        headers=finance_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["code"] == "FIN"
+
+
+def test_finance_can_update_and_delete_department(client, finance_headers, db):
+    """Finance can update and delete departments."""
+    # Create
+    create_resp = client.post(
+        "/admin/departments",
+        json={"code": "FIN2", "name": "Finance2"},
+        headers=finance_headers,
+    )
+    dept_id = create_resp.json()["id"]
+    # Update
+    update_resp = client.patch(
+        f"/admin/departments/{dept_id}",
+        json={"name": "Finance Updated"},
+        headers=finance_headers,
+    )
+    assert update_resp.status_code == 200
+    assert update_resp.json()["name"] == "Finance Updated"
+    # Delete
+    delete_resp = client.delete(f"/admin/departments/{dept_id}", headers=finance_headers)
+    assert delete_resp.status_code == 200
+
+
+def test_finance_can_crud_cost_center(client, finance_headers, db):
+    """Finance can create, update, delete cost centers."""
+    # Create department first
+    dept_resp = client.post(
+        "/admin/departments",
+        json={"code": "FCCD", "name": "CC Dept"},
+        headers=finance_headers,
+    )
+    dept_id = dept_resp.json()["id"]
+    # Create cost center
+    cc_resp = client.post(
+        "/admin/cost-centers",
+        json={"department_id": dept_id, "code": "FCC", "name": "Finance CC"},
+        headers=finance_headers,
+    )
+    cc_id = cc_resp.json()["id"]
+    assert cc_resp.status_code == 200
+    # Update
+    update_resp = client.patch(
+        f"/admin/cost-centers/{cc_id}",
+        json={"name": "Updated CC"},
+        headers=finance_headers,
+    )
+    assert update_resp.status_code == 200
+    # Delete
+    delete_resp = client.delete(f"/admin/cost-centers/{cc_id}", headers=finance_headers)
+    assert delete_resp.status_code == 200
+
+
+def test_finance_can_crud_resource(client, finance_headers, db):
+    """Finance can create, update, delete resources."""
+    # Create department and cost center
+    dept_resp = client.post(
+        "/admin/departments",
+        json={"code": "FRES", "name": "Res Dept"},
+        headers=finance_headers,
+    )
+    dept_id = dept_resp.json()["id"]
+    cc_resp = client.post(
+        "/admin/cost-centers",
+        json={"department_id": dept_id, "code": "FRESCC", "name": "Res CC"},
+        headers=finance_headers,
+    )
+    cc_id = cc_resp.json()["id"]
+    # Create resource
+    res_resp = client.post(
+        "/admin/resources",
+        json={"cost_center_id": cc_id, "employee_id": "FEMP-1", "display_name": "Finance Emp"},
+        headers=finance_headers,
+    )
+    res_id = res_resp.json()["id"]
+    assert res_resp.status_code == 200
+    # Update
+    update_resp = client.patch(
+        f"/admin/resources/{res_id}",
+        json={"display_name": "Updated Emp"},
+        headers=finance_headers,
+    )
+    assert update_resp.status_code == 200
+    # Delete
+    delete_resp = client.delete(f"/admin/resources/{res_id}", headers=finance_headers)
+    assert delete_resp.status_code == 200
+
+
+def test_finance_can_crud_placeholder(client, finance_headers, db):
+    """Finance can create, update, delete placeholders."""
+    # Create
+    create_resp = client.post(
+        "/admin/placeholders",
+        json={"name": "Finance Placeholder", "skill_profile": "Skill"},
+        headers=finance_headers,
+    )
+    ph_id = create_resp.json()["id"]
+    assert create_resp.status_code == 200
+    # Update
+    update_resp = client.patch(
+        f"/admin/placeholders/{ph_id}",
+        json={"name": "Updated Placeholder"},
+        headers=finance_headers,
+    )
+    assert update_resp.status_code == 200
+    # Delete
+    delete_resp = client.delete(f"/admin/placeholders/{ph_id}", headers=finance_headers)
+    assert delete_resp.status_code == 200
+
+
+def test_finance_can_crud_holiday(client, finance_headers, db):
+    """Finance can create and delete holidays."""
+    # Create
+    create_resp = client.post(
+        "/admin/holidays",
+        json={"date": "2026-12-25", "name": "Finance Holiday"},
+        headers=finance_headers,
+    )
+    holiday_id = create_resp.json()["id"]
+    assert create_resp.status_code == 200
+    # Delete
+    delete_resp = client.delete(f"/admin/holidays/{holiday_id}", headers=finance_headers)
+    assert delete_resp.status_code == 200
+
+
+def test_pm_cannot_create_department(client, pm_headers, db):
+    """PM cannot create departments (still forbidden)."""
+    response = client.post(
+        "/admin/departments",
+        json={"code": "PMD", "name": "PM Dept"},
+        headers=pm_headers,
+    )
+    assert response.status_code == 403
+
+
+def test_ro_cannot_create_department(client, ro_headers, db):
+    """RO cannot create departments (still forbidden)."""
+    response = client.post(
+        "/admin/departments",
+        json={"code": "ROD", "name": "RO Dept"},
+        headers=ro_headers,
+    )
+    assert response.status_code == 403
+
+
+def test_employee_cannot_create_department(client, employee_headers, db):
+    """Employee cannot create departments (still forbidden)."""
+    response = client.post(
+        "/admin/departments",
+        json={"code": "EMPD", "name": "Emp Dept"},
+        headers=employee_headers,
+    )
+    assert response.status_code == 403

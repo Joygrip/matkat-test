@@ -1,6 +1,6 @@
 """Planning schemas - Demand and Supply lines."""
 from datetime import datetime
-from typing import Optional
+from typing import List, Literal, Optional, Union
 from pydantic import BaseModel, field_validator
 
 from api.app.schemas.common import ErrorCode
@@ -98,3 +98,63 @@ class SupplyLineResponse(SupplyLineBase):
     
     class Config:
         from_attributes = True
+
+
+# ============== BULK DEMAND ==============
+
+class BulkDemandLineCreate(DemandLineCreate):
+    pass
+
+class BulkDemandLineUpdate(BaseModel):
+    id: str
+    fte_percent: int
+
+class BulkDemandLineDelete(BaseModel):
+    id: str
+
+class BulkDemandLineAction(BaseModel):
+    action: Literal['create', 'update', 'delete']
+    data: Union[BulkDemandLineCreate, BulkDemandLineUpdate, BulkDemandLineDelete]
+
+class BulkDemandLineRequest(BaseModel):
+    actions: List[BulkDemandLineAction]
+    all_or_nothing: bool = True
+
+class BulkDemandLineResult(BaseModel):
+    action: str
+    id: str | None
+    status: Literal['success', 'error']
+    error: str | None = None
+
+class BulkDemandLineResponse(BaseModel):
+    results: List[BulkDemandLineResult]
+
+
+# ============== BULK SUPPLY ==============
+
+class BulkSupplyLineCreate(SupplyLineCreate):
+    pass
+
+class BulkSupplyLineUpdate(BaseModel):
+    id: str
+    fte_percent: int
+
+class BulkSupplyLineDelete(BaseModel):
+    id: str
+
+class BulkSupplyLineAction(BaseModel):
+    action: Literal['create', 'update', 'delete']
+    data: Union[BulkSupplyLineCreate, BulkSupplyLineUpdate, BulkSupplyLineDelete]
+
+class BulkSupplyLineRequest(BaseModel):
+    actions: List[BulkSupplyLineAction]
+    all_or_nothing: bool = True
+
+class BulkSupplyLineResult(BaseModel):
+    action: str
+    id: str | None
+    status: Literal['success', 'error']
+    error: str | None = None
+
+class BulkSupplyLineResponse(BaseModel):
+    results: List[BulkSupplyLineResult]

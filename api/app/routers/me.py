@@ -1,4 +1,7 @@
-"""Current user endpoints."""
+"""Current user endpoints.
+
+Finance role: Can manage all master data and planning lines (demand/supply), same as Admin for these areas.
+"""
 from fastapi import APIRouter, Depends
 
 from api.app.auth.dependencies import get_current_user, CurrentUser
@@ -32,6 +35,13 @@ def get_permissions_for_role(role: UserRole) -> list[str]:
             "read:consolidation",
             "publish:consolidation",
             "read:approvals",
+            # Expanded permissions for planning lines:
+            "write:demand",
+            "write:supply",
+            "read:projects",
+            "read:supply",
+            "read:demand",
+            "read:actuals",
         ],
         UserRole.PM: [
             "read:projects",

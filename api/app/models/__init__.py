@@ -9,7 +9,6 @@ from api.app.models.core import (
     Placeholder,
     Settings,
     Holiday,
-    AuditLog,
 )
 from api.app.models.planning import (
     DemandLine,
@@ -46,7 +45,6 @@ __all__ = [
     "Placeholder",
     "Settings",
     "Holiday",
-    "AuditLog",
     "DemandLine",
     "SupplyLine",
     "ActualLine",

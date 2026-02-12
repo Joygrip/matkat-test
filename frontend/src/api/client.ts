@@ -45,6 +45,15 @@ class ApiClient {
   }
 
   private async handleResponse<T>(response: Response): Promise<T> {
+    if (response.status === 0) {
+      throw new ApiError({
+        type: 'about:blank',
+        title: 'Network Error',
+        status: 0,
+        detail: `Cannot reach the API at ${this.baseUrl}. Ensure the backend is running and CORS is configured for this origin.`,
+        code: 'NETWORK_ERROR',
+      });
+    }
     if (!response.ok) {
       let problem: ProblemDetail;
       

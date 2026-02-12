@@ -22,6 +22,7 @@ This guide explains how to start the backend and frontend services for local dev
 cd C:\Users\pawel\Documents\GitHub\ResourceAllocation
 
 # Set environment variables
+$env:PYTHONPATH = "C:\Users\pawel\Documents\GitHub\matkat-test"
 $env:PYTHONPATH = "C:\VSCode\ResourceAllocation-master"
 $env:ENV = "dev"
 $env:DEV_AUTH_BYPASS = "true"
@@ -89,6 +90,14 @@ After starting both services:
 3. **Verify environment files:**
    - `api/.env` should have `DEV_AUTH_BYPASS=true`
    - `frontend/.env.local` should have `VITE_DEV_AUTH_BYPASS=true`
+
+### "Cannot reach API" or HTTP 0 (NETWORK_ERROR)
+
+If the app shows "Cannot reach the API at http://localhost:8000" or requests fail with a network error:
+
+1. **Backend must be running** at the URL the frontend uses. Default is `http://localhost:8000`. Check `http://localhost:8000/healthz` in a browser.
+2. **Match frontend and backend URL:** Set `VITE_API_BASE_URL` in `frontend/.env.local` to the same host/port as the backend (e.g. `http://localhost:8000`). If you start the backend on a different host or port, update this and restart the frontend.
+3. **CORS:** The backend allows `http://localhost:5173`, `http://127.0.0.1:5173`, and ports 3000. If you open the app from another origin (e.g. `http://192.168.x.x:5173`), add that origin to `allow_origins` in `api/app/main.py` or run the frontend from localhost/127.0.0.1.
 
 ### Import errors
 

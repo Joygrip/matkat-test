@@ -18,15 +18,23 @@ app = FastAPI(
     redoc_url="/redoc" if get_settings().is_dev else None,
 )
 
-# CORS middleware for frontend
+# CORS middleware for frontend. If you run the frontend from another origin
+# (e.g. http://192.168.x.x:5173), add it here or the browser will block API calls.
+allow_origins = [
+    "http://localhost:5173",  # Vite dev server (default)
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
+if get_settings().is_dev:
+    # In dev, allow common alternate hosts for local debugging
+    allow_origins = allow_origins + [
+        "http://[::1]:5173",
+        "http://[::1]:3000",
+    ]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Vite dev server (default)
-        "http://localhost:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=[

@@ -344,7 +344,7 @@ export const Actuals: React.FC = () => {
           setOverLimitIds(offending.filter((id): id is string => typeof id === 'string'));
         }
       }
-      showApiError(err as Error, 'Failed to create actual line');
+      showApiError(err as Error, 'Create actual line');
     }
   };
   
@@ -423,7 +423,14 @@ export const Actuals: React.FC = () => {
           <p className={styles.pageSubtitle}>Record actual time spent on projects</p>
         </div>
         
-        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center', flexWrap: 'wrap' }}>
+          {isLocked && (
+            <MessageBar intent="warning" style={{ flex: '1 1 100%' }}>
+              <MessageBarBody>
+                This period is locked. Select an open period in the dropdown above, or ask Finance to unlock this period.
+              </MessageBarBody>
+            </MessageBar>
+          )}
           {!isLocked && (
             <Dialog 
               open={isDialogOpen} 

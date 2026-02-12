@@ -533,7 +533,7 @@ export const Finance: React.FC = () => {
       params.append('year', String(currentPeriod.year));
       params.append('month', String(currentPeriod.month));
       if (actualsProjectId) params.append('project_id', actualsProjectId);
-      if (actualsApprovalStatus) params.append('approval_status', actualsApprovalStatus);
+      if (actualsApprovalStatus) params.append('approval_status', actualsApprovalStatus.toLowerCase());
       const result = await apiClient.get<FinanceActualRow[]>(
         `/finance/actuals-dashboard?${params.toString()}`
       );
@@ -582,8 +582,8 @@ export const Finance: React.FC = () => {
 
   const totalActualsLines = actualsData.length;
   const totalActualsFte = actualsData.reduce((s, d) => s + d.fte_percent, 0);
-  const pendingCount = actualsData.filter(d => d.approval_status === 'PENDING').length;
-  const approvedCount = actualsData.filter(d => d.approval_status === 'APPROVED').length;
+  const pendingCount = actualsData.filter(d => (d.approval_status?.toUpperCase?.() ?? '') === 'PENDING').length;
+  const approvedCount = actualsData.filter(d => (d.approval_status?.toUpperCase?.() ?? '') === 'APPROVED').length;
 
   // ── Render ──
 
@@ -649,7 +649,10 @@ export const Finance: React.FC = () => {
       {/* Tabs */}
       <TabList
         selectedValue={activeTab}
-        onTabSelect={(_, data) => setActiveTab(data.value as string)}
+        onTabSelect={(_, data) => {
+          setActiveTab(data.value as string);
+          if (data.value === 'actuals') loadActuals();
+        }}
         style={{ marginBottom: tokens.spacingVerticalL }}
       >
         <Tab value="dashboard" icon={<DocumentBulletList24Regular />}>Dashboard</Tab>

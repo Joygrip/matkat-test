@@ -344,7 +344,6 @@ export const Approvals: React.FC = () => {
           <div className={styles.emptyState}>
             <CheckmarkCircle24Regular className={styles.emptyStateIcon} />
             <Title1 style={{ marginTop: tokens.spacingVerticalM, marginBottom: tokens.spacingVerticalXS }}>All caught up!</Title1>
-            <Body1 style={{ color: tokens.colorNeutralForeground3 }}>No pending approvals in your inbox.</Body1>
           </div>
         </Card>
       ) : (

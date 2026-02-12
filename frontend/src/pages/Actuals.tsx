@@ -48,6 +48,7 @@ import { usePeriod } from '../contexts/PeriodContext';
 import { planningApi, DemandLine, SupplyLine } from '../api/planning';
 import { useToast } from '../hooks/useToast';
 import { formatApiError } from '../utils/errors';
+import { config } from '../config';
 import { ApiError } from '../types';
 import { EmptyState } from '../components/EmptyState';
 import { useAuth } from '../auth/AuthProvider';
@@ -464,9 +465,16 @@ export const Actuals: React.FC = () => {
                             {resources.find(r => r.id === myResourceId)?.display_name || 'You'}
                           </Body1>
                         ) : (
-                          <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorPaletteRedForeground1 }}>
-                            No resource linked to your account. Contact your administrator.
-                          </Body1>
+                          <>
+                            <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorPaletteRedForeground1 }}>
+                              No resource linked to your account. Contact your administrator.
+                            </Body1>
+                            {config.devAuthBypass && (
+                              <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3, fontSize: '12px' }}>
+                                In dev: use Dev Login and sign in as an Employee (e.g. Dev User or Alice Developer), or run Seed to create linked users.
+                              </Body1>
+                            )}
+                          </>
                         )
                       ) : (
                         <Select

@@ -4,11 +4,13 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from api.app.db.engine import get_db
-from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
+from api.app.auth.dependencies import (
+    get_current_user, require_roles, CurrentUser,
+)
 from api.app.models.core import UserRole
 from api.app.schemas.actuals import (
     ActualLineCreate, ActualLineUpdate, ActualLineResponse,
-    SignRequest, ProxySignRequest,
+    ProxySignRequest,
 )
 from api.app.services.actuals import ActualsService
 
@@ -58,6 +60,20 @@ async def get_my_actuals(
     return [_to_response(line) for line in lines]
 
 
+@router.get("/my-resource")
+async def get_my_resource(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Get the resource id linked to the current user (for Employees).
+    Returns null if the user has no linked resource.
+    """
+    service = ActualsService(db, current_user)
+    resource_id = service.get_my_resource_id()
+    return {"resource_id": resource_id}
+
+
 @router.get("", response_model=list[ActualLineResponse])
 async def list_actuals(
     year: Optional[int] = Query(None),
@@ -89,7 +105,10 @@ async def get_actual(
     line = service.get_by_id(actual_id)
     if not line:
         from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Actual line not found"})
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": "Actual line not found"},
+        )
     return _to_response(line)
 
 

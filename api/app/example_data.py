@@ -162,10 +162,10 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
     # Create actuals for January 2026
     jan_period = periods[1]
     actual_lines = [
-        ActualLine(tenant_id=tenant_id, period_id=jan_period.id, resource_id=resources[0].id, project_id=projects[0].id, year=2026, month=1, actual_fte_percent=50, created_by="system"),
-        ActualLine(tenant_id=tenant_id, period_id=jan_period.id, resource_id=resources[0].id, project_id=projects[1].id, year=2026, month=1, actual_fte_percent=25, created_by="system"),
-        ActualLine(tenant_id=tenant_id, period_id=jan_period.id, resource_id=resources[1].id, project_id=projects[0].id, year=2026, month=1, actual_fte_percent=75, created_by="system"),
-        ActualLine(tenant_id=tenant_id, period_id=jan_period.id, resource_id=resources[3].id, project_id=projects[1].id, year=2026, month=1, actual_fte_percent=50, created_by="system"),
+        ActualLine(tenant_id=tenant_id, period_id=jan_period.id, resource_id=resources[0].id, project_id=projects[0].id, year=2026, month=1, planned_fte_percent=50, actual_fte_percent=50, created_by="system"),
+        ActualLine(tenant_id=tenant_id, period_id=jan_period.id, resource_id=resources[0].id, project_id=projects[1].id, year=2026, month=1, planned_fte_percent=25, actual_fte_percent=25, created_by="system"),
+        ActualLine(tenant_id=tenant_id, period_id=jan_period.id, resource_id=resources[1].id, project_id=projects[0].id, year=2026, month=1, planned_fte_percent=75, actual_fte_percent=75, created_by="system"),
+        ActualLine(tenant_id=tenant_id, period_id=jan_period.id, resource_id=resources[3].id, project_id=projects[1].id, year=2026, month=1, planned_fte_percent=50, actual_fte_percent=50, created_by="system"),
     ]
     db.add_all(actual_lines)
     db.flush()

@@ -160,7 +160,7 @@ class ActualsService:
         
         if not resource:
             return []
-        
+
         query = self.db.query(ActualLine).filter(
             and_(
                 ActualLine.tenant_id == self.current_user.tenant_id,
@@ -174,7 +174,25 @@ class ActualsService:
             query = query.filter(ActualLine.month == month)
         
         return query.all()
-    
+
+    def get_my_resource_id(self) -> Optional[str]:
+        """Return the resource id linked to the current user, or None."""
+        user = self.db.query(User).filter(
+            and_(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            )
+        ).first()
+        if not user:
+            return None
+        resource = self.db.query(Resource).filter(
+            and_(
+                Resource.tenant_id == self.current_user.tenant_id,
+                Resource.user_id == user.id,
+            )
+        ).first()
+        return resource.id if resource else None
+
     def get_all(
         self,
         year: Optional[int] = None,

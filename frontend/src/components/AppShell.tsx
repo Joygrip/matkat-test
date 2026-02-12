@@ -1,7 +1,7 @@
 /**
  * Enterprise AppShell with MatKat branding
  */
-import { ReactNode, useState } from 'react';
+import { ReactNode, useState, useEffect, useMemo } from 'react';
 import { usePeriod } from '../contexts/PeriodContext';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
@@ -280,6 +280,21 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { periods, selectedPeriodId, setSelectedPeriodId } = usePeriod();
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  // Only Finance and Admin see locked periods in the dropdown; others see only open periods
+  const visiblePeriods = useMemo(() => {
+    if (user?.role === 'Finance' || user?.role === 'Admin') return periods;
+    return periods.filter((p) => p.status === 'open');
+  }, [periods, user?.role]);
+
+  // If current selection is not in visible list (e.g. user switched to Employee), select first visible period
+  useEffect(() => {
+    if (visiblePeriods.length === 0) return;
+    const isSelectedVisible = visiblePeriods.some((p) => p.id === selectedPeriodId);
+    if (!isSelectedVisible) {
+      setSelectedPeriodId(visiblePeriods[0].id);
+    }
+  }, [visiblePeriods, selectedPeriodId, setSelectedPeriodId]);
+
   const visibleNavItems = navItems.filter((item) => {
     if (!item.roles) return true;
     return user && item.roles.includes(user.role);
@@ -395,13 +410,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Tooltip content={`Role: ${user?.role}`} relationship="description">
               <Badge appearance="outline" color="brand">{user?.role}</Badge>
             </Tooltip>
-            {/* Period selector */}
+            {/* Period selector: Finance/Admin see all periods; others see only open */}
             <Select
-              value={selectedPeriodId}
+              value={visiblePeriods.some((p) => p.id === selectedPeriodId) ? selectedPeriodId : visiblePeriods[0]?.id ?? ''}
               onChange={(_, data) => setSelectedPeriodId(data.value)}
               style={{ minWidth: 120 }}
             >
-              {periods.map((p) => (
+              {visiblePeriods.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.year}-{String(p.month).padStart(2, '0')} ({p.status})
                 </option>

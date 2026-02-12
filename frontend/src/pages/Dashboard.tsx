@@ -16,10 +16,18 @@ import {
   AccordionPanel,
   Skeleton,
   SkeletonItem,
+  Button,
+  Dialog,
+  DialogSurface,
+  DialogBody,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@fluentui/react-components';
 import {
   BuildingRegular,
   ShieldCheckmarkRegular,
+  FullScreenMaximizeRegular,
 } from '@fluentui/react-icons';
 import { useAuth } from '../auth/AuthProvider';
 import { apiClient } from '../api/client';
@@ -119,6 +127,22 @@ const useStyles = makeStyles({
   chartCardBody: {
     padding: tokens.spacingHorizontalL,
   },
+  chartCardHeaderRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    gap: tokens.spacingHorizontalM,
+  },
+  chartModalSurface: {
+    maxWidth: '90vw',
+    width: '90vw',
+    height: '80vh',
+  },
+  chartModalBody: {
+    overflow: 'auto',
+    padding: tokens.spacingHorizontalL,
+  },
   chartsGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
@@ -196,6 +220,8 @@ export function Dashboard() {
   const [demandLines, setDemandLines] = useState<any[]>([]);
   const [supplyLines, setSupplyLines] = useState<any[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
+  type ChartModalKey = 'dept' | 'project' | 'supply' | null;
+  const [chartModalOpen, setChartModalOpen] = useState<ChartModalKey>(null);
 
   const isAdmin = user?.role === 'Admin';
 
@@ -435,7 +461,16 @@ export function Dashboard() {
             {/* Department breakdown */}
             <Card className={styles.chartCard}>
               <div className={styles.chartCardHeader}>
-                <Title3 style={{ margin: 0 }}>Demand vs Supply by Department</Title3>
+                <div className={styles.chartCardHeaderRow}>
+                  <Title3 style={{ margin: 0 }}>Demand vs Supply by Department</Title3>
+                  <Button
+                    appearance="subtle"
+                    icon={<FullScreenMaximizeRegular />}
+                    title="Expand to full view"
+                    onClick={() => setChartModalOpen('dept')}
+                    disabled={chartLoading}
+                  />
+                </div>
               </div>
               <div className={styles.chartCardBody}>
                 {chartLoading ? (
@@ -443,15 +478,37 @@ export function Dashboard() {
                     <SkeletonItem />
                   </Skeleton>
                 ) : (
-                  <BreakdownChart rows={deptBreakdown} />
+                  <BreakdownChart rows={deptBreakdown} maxRows={10} />
                 )}
               </div>
             </Card>
+            <Dialog open={chartModalOpen === 'dept'} onOpenChange={(_, data) => setChartModalOpen(data.open ? 'dept' : null)}>
+              <DialogSurface className={styles.chartModalSurface}>
+                <DialogBody>
+                  <DialogTitle>Demand vs Supply by Department</DialogTitle>
+                  <DialogContent className={styles.chartModalBody}>
+                    {!chartLoading && <BreakdownChart rows={deptBreakdown} />}
+                  </DialogContent>
+                  <DialogActions>
+                    <Button appearance="secondary" onClick={() => setChartModalOpen(null)}>Close</Button>
+                  </DialogActions>
+                </DialogBody>
+              </DialogSurface>
+            </Dialog>
 
             {/* Demand by Project */}
             <Card className={styles.chartCard}>
               <div className={styles.chartCardHeader}>
-                <Title3 style={{ margin: 0 }}>Demand by Project</Title3>
+                <div className={styles.chartCardHeaderRow}>
+                  <Title3 style={{ margin: 0 }}>Demand by Project</Title3>
+                  <Button
+                    appearance="subtle"
+                    icon={<FullScreenMaximizeRegular />}
+                    title="Expand to full view"
+                    onClick={() => setChartModalOpen('project')}
+                    disabled={chartLoading}
+                  />
+                </div>
               </div>
               <div className={styles.chartCardBody}>
                 {chartLoading ? (
@@ -459,15 +516,37 @@ export function Dashboard() {
                     <SkeletonItem />
                   </Skeleton>
                 ) : (
-                  <BreakdownChart rows={projectBreakdown} demandOnly />
+                  <BreakdownChart rows={projectBreakdown} demandOnly maxRows={10} />
                 )}
               </div>
             </Card>
+            <Dialog open={chartModalOpen === 'project'} onOpenChange={(_, data) => setChartModalOpen(data.open ? 'project' : null)}>
+              <DialogSurface className={styles.chartModalSurface}>
+                <DialogBody>
+                  <DialogTitle>Demand by Project</DialogTitle>
+                  <DialogContent className={styles.chartModalBody}>
+                    {!chartLoading && <BreakdownChart rows={projectBreakdown} demandOnly />}
+                  </DialogContent>
+                  <DialogActions>
+                    <Button appearance="secondary" onClick={() => setChartModalOpen(null)}>Close</Button>
+                  </DialogActions>
+                </DialogBody>
+              </DialogSurface>
+            </Dialog>
 
             {/* Supply by Department */}
             <Card className={styles.chartCard}>
               <div className={styles.chartCardHeader}>
-                <Title3 style={{ margin: 0 }}>Supply by Department</Title3>
+                <div className={styles.chartCardHeaderRow}>
+                  <Title3 style={{ margin: 0 }}>Supply by Department</Title3>
+                  <Button
+                    appearance="subtle"
+                    icon={<FullScreenMaximizeRegular />}
+                    title="Expand to full view"
+                    onClick={() => setChartModalOpen('supply')}
+                    disabled={chartLoading}
+                  />
+                </div>
               </div>
               <div className={styles.chartCardBody}>
                 {chartLoading ? (
@@ -475,10 +554,23 @@ export function Dashboard() {
                     <SkeletonItem />
                   </Skeleton>
                 ) : (
-                  <BreakdownChart rows={supplyByDept} supplyOnly />
+                  <BreakdownChart rows={supplyByDept} supplyOnly maxRows={10} />
                 )}
               </div>
             </Card>
+            <Dialog open={chartModalOpen === 'supply'} onOpenChange={(_, data) => setChartModalOpen(data.open ? 'supply' : null)}>
+              <DialogSurface className={styles.chartModalSurface}>
+                <DialogBody>
+                  <DialogTitle>Supply by Department</DialogTitle>
+                  <DialogContent className={styles.chartModalBody}>
+                    {!chartLoading && <BreakdownChart rows={supplyByDept} supplyOnly />}
+                  </DialogContent>
+                  <DialogActions>
+                    <Button appearance="secondary" onClick={() => setChartModalOpen(null)}>Close</Button>
+                  </DialogActions>
+                </DialogBody>
+              </DialogSurface>
+            </Dialog>
           </div>
         </div>
       )}

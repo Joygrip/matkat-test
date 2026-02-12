@@ -2,9 +2,11 @@
  * BreakdownChart – modern grouped horizontal bar chart
  *
  * Shows demand vs supply (or single-mode) per row label.
- * Features: inline value labels, row hover, summary totals, gap indicators.
+ * Features: value labels outside bars, row hover, summary totals, gap indicators.
+ * Optional maxRows: show top N by default with "Show all" expand.
  */
-import { makeStyles, tokens, Badge } from '@fluentui/react-components';
+import { useState } from 'react';
+import { makeStyles, tokens, Badge, Button } from '@fluentui/react-components';
 
 export interface BreakdownRow {
   label: string;
@@ -20,6 +22,8 @@ interface BreakdownChartProps {
   supplyOnly?: boolean;
   /** Maximum value for scaling bars. Auto-detected if omitted. */
   maxValue?: number;
+  /** When set, show only this many rows by default with "Show all" expand. */
+  maxRows?: number;
 }
 
 const useStyles = makeStyles({
@@ -129,20 +133,12 @@ const useStyles = makeStyles({
     paddingRight: '8px',
     minWidth: '0px',
   },
-  barValueInside: {
-    fontSize: '11px',
-    fontWeight: '700',
-    color: 'white',
-    whiteSpace: 'nowrap',
-    textShadow: '0 1px 2px rgba(0,0,0,0.3)',
-    lineHeight: 1,
-  },
   barValueOutside: {
-    fontSize: '11px',
+    fontSize: '12px',
     fontWeight: '700',
-    color: tokens.colorNeutralForeground2,
+    color: tokens.colorNeutralForeground1,
     whiteSpace: 'nowrap',
-    minWidth: '36px',
+    minWidth: '40px',
     lineHeight: 1,
   },
   gapCell: {
@@ -166,14 +162,20 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase300,
   },
+  showAllWrap: {
+    marginTop: tokens.spacingVerticalS,
+  },
+  scrollableRows: {
+    maxHeight: '400px',
+    overflowY: 'auto' as const,
+    marginTop: tokens.spacingVerticalS,
+  },
 });
 
-// A bar is "wide enough" for inside text when it fills > 18% of the track
-const INSIDE_THRESHOLD = 0.18;
-
-export function BreakdownChart({ rows, demandOnly, supplyOnly, maxValue: maxValueProp }: BreakdownChartProps) {
+export function BreakdownChart({ rows, demandOnly, supplyOnly, maxValue: maxValueProp, maxRows }: BreakdownChartProps) {
   const singleMode = demandOnly || supplyOnly;
   const styles = useStyles();
+  const [expanded, setExpanded] = useState(false);
 
   if (rows.length === 0) {
     return <div className={styles.empty}>No data available</div>;
@@ -186,23 +188,22 @@ export function BreakdownChart({ rows, demandOnly, supplyOnly, maxValue: maxValu
   const pctNum = (v: number) => Math.min(v / maxValue, 1);
   const pctStr = (v: number) => `${pctNum(v) * 100}%`;
 
-  // Summary totals
-  const totalDemand = rows.reduce((s, r) => s + r.demandFte, 0);
-  const totalSupply = rows.reduce((s, r) => s + r.supplyFte, 0);
+  const useLimit = Boolean(maxRows && rows.length > maxRows);
+  const visibleRows = useLimit && !expanded ? rows.slice(0, maxRows!) : rows;
+  const totalDemandAll = rows.reduce((s, r) => s + r.demandFte, 0);
+  const totalSupplyAll = rows.reduce((s, r) => s + r.supplyFte, 0);
+  const totalGapAll = totalSupplyAll - totalDemandAll;
+  const totalDemand = visibleRows.reduce((s, r) => s + r.demandFte, 0);
+  const totalSupply = visibleRows.reduce((s, r) => s + r.supplyFte, 0);
   const totalGap = totalSupply - totalDemand;
 
   const renderBar = (value: number, barClass: string) => {
-    const wide = pctNum(value) > INSIDE_THRESHOLD;
     return (
       <div className={styles.barRow}>
         <div className={styles.barTrack}>
-          <div className={barClass} style={{ width: pctStr(value) }}>
-            {wide && value > 0 && (
-              <span className={styles.barValueInside}>{value}%</span>
-            )}
-          </div>
+          <div className={barClass} style={{ width: pctStr(value) }} />
         </div>
-        {!wide && value > 0 && (
+        {value > 0 && (
           <span className={styles.barValueOutside}>{value}%</span>
         )}
       </div>
@@ -255,21 +256,41 @@ export function BreakdownChart({ rows, demandOnly, supplyOnly, maxValue: maxValu
       </div>
 
       {/* Data Rows */}
-      {rows.map((row) => {
-        const gap = row.supplyFte - row.demandFte;
-        return (
-          <div key={row.label} className={styles.row}>
-            <span className={styles.label} title={row.label}>
-              {row.label}
-            </span>
-            <div className={styles.barGroup}>
-              {!supplyOnly && renderBar(row.demandFte, styles.demandBar)}
-              {!demandOnly && renderBar(row.supplyFte, styles.supplyBar)}
+      {useLimit && expanded ? (
+        <div className={styles.scrollableRows}>
+          {rows.map((row) => {
+            const gap = row.supplyFte - row.demandFte;
+            return (
+              <div key={row.label} className={styles.row}>
+                <span className={styles.label} title={row.label}>
+                  {row.label}
+                </span>
+                <div className={styles.barGroup}>
+                  {!supplyOnly && renderBar(row.demandFte, styles.demandBar)}
+                  {!demandOnly && renderBar(row.supplyFte, styles.supplyBar)}
+                </div>
+                {singleMode ? <span /> : renderGapCell(gap)}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        visibleRows.map((row) => {
+          const gap = row.supplyFte - row.demandFte;
+          return (
+            <div key={row.label} className={styles.row}>
+              <span className={styles.label} title={row.label}>
+                {row.label}
+              </span>
+              <div className={styles.barGroup}>
+                {!supplyOnly && renderBar(row.demandFte, styles.demandBar)}
+                {!demandOnly && renderBar(row.supplyFte, styles.supplyBar)}
+              </div>
+              {singleMode ? <span /> : renderGapCell(gap)}
             </div>
-            {singleMode ? <span /> : renderGapCell(gap)}
-          </div>
-        );
-      })}
+          );
+        })
+      )}
 
       {/* Summary Total Row */}
       {rows.length > 1 && (
@@ -278,16 +299,29 @@ export function BreakdownChart({ rows, demandOnly, supplyOnly, maxValue: maxValu
           <div className={styles.barGroup}>
             {!supplyOnly && (
               <span style={{ fontSize: tokens.fontSizeBase300, fontWeight: tokens.fontWeightBold as any, color: '#4f6bed' }}>
-                {totalDemand}% demand
+                {expanded ? totalDemandAll : totalDemand}% demand
               </span>
             )}
             {!demandOnly && (
               <span style={{ fontSize: tokens.fontSizeBase300, fontWeight: tokens.fontWeightBold as any, color: '#0ea573' }}>
-                {totalSupply}% supply
+                {expanded ? totalSupplyAll : totalSupply}% supply
               </span>
             )}
           </div>
-          {singleMode ? <span /> : renderGapCell(totalGap)}
+          {singleMode ? <span /> : renderGapCell(expanded ? totalGapAll : totalGap)}
+        </div>
+      )}
+
+      {/* Show all / Show less when maxRows and more than maxRows */}
+      {useLimit && (
+        <div className={styles.showAllWrap}>
+          <Button
+            appearance="subtle"
+            size="small"
+            onClick={() => setExpanded((e) => !e)}
+          >
+            {expanded ? 'Show less' : `Show all (${rows.length})`}
+          </Button>
         </div>
       )}
     </div>

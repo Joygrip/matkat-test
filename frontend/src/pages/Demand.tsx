@@ -233,7 +233,7 @@ export const Demand: React.FC = () => {
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
   const groupedDemands = useMemo(() => groupDemandsByDept(demands), [demands]);
-  const totalColumns = (user?.role === 'Finance' || user?.role === 'PM') ? 8 : 7;
+  const totalColumns = (user?.role === 'Finance' || user?.role === 'PM') ? 7 : 6;
 
   // Breakdown chart data: demand grouped by project
   const projectBreakdown: BreakdownRow[] = useMemo(() => {
@@ -642,7 +642,6 @@ export const Demand: React.FC = () => {
               <TableHeaderCell>Department</TableHeaderCell>
               <TableHeaderCell>Project</TableHeaderCell>
               <TableHeaderCell>Resource</TableHeaderCell>
-              <TableHeaderCell>Placeholder</TableHeaderCell>
               <TableHeaderCell>Period</TableHeaderCell>
               <TableHeaderCell>FTE %</TableHeaderCell>
               <TableHeaderCell>Actions</TableHeaderCell>
@@ -687,12 +686,16 @@ export const Demand: React.FC = () => {
                       )}
                       <TableCell>{d.department_name || '-'}</TableCell>
                       <TableCell>{d.project_name || 'Unknown'}</TableCell>
-                      <TableCell>{d.resource_name || '-'}</TableCell>
                       <TableCell>
-                        {d.placeholder_name && (
-                          <Badge appearance="outline" color="warning">
+                        {d.resource_name ? (
+                          d.resource_name
+                        ) : d.placeholder_name ? (
+                          <>
                             {d.placeholder_name}
-                          </Badge>
+                            <Badge appearance="outline" color="warning" style={{ marginLeft: 6 }}>Placeholder</Badge>
+                          </>
+                        ) : (
+                          '-'
                         )}
                       </TableCell>
                       <TableCell>{d.year}-{String(d.month).padStart(2, '0')}</TableCell>

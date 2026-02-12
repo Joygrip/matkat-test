@@ -57,6 +57,7 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
         User(tenant_id=tenant_id, object_id="emp-003", email="emp3@example.com", display_name="Charlie DevOps", role=UserRole.EMPLOYEE, cost_center_id=cc_devops.id),
         User(tenant_id=tenant_id, object_id="emp-004", email="emp4@example.com", display_name="Diana Developer", role=UserRole.EMPLOYEE, cost_center_id=cc_software.id),
         User(tenant_id=tenant_id, object_id="emp-005", email="emp5@example.com", display_name="Eve Support", role=UserRole.EMPLOYEE, cost_center_id=cc_support.id),
+        User(tenant_id=tenant_id, object_id="dev-user-001", email="dev@example.com", display_name="Dev User", role=UserRole.EMPLOYEE, cost_center_id=cc_software.id),
     ]
     
     # Set manager relationships
@@ -98,6 +99,7 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
         Resource(tenant_id=tenant_id, cost_center_id=cc_software.id, employee_id="EMP-006", display_name="Frank Developer", email="frank@example.com", is_active=True),
         Resource(tenant_id=tenant_id, cost_center_id=cc_qa.id, employee_id="EMP-007", display_name="Grace Tester", email="grace@example.com", is_active=True),
         Resource(tenant_id=tenant_id, cost_center_id=cc_software.id, employee_id="EXT-001", display_name="External Contractor", is_external=True, is_active=True),
+        Resource(tenant_id=tenant_id, user_id=users[14].id, cost_center_id=cc_software.id, employee_id="DEV-001", display_name="Dev User", email="dev@example.com", is_active=True),
     ]
     db.add_all(resources)
     db.flush()

@@ -230,17 +230,20 @@ export const Actuals: React.FC = () => {
     actual_fte_percent: 50,
   });
   const [myResourceId, setMyResourceId] = useState<string | null>(null);
+  const [myResourceLoading, setMyResourceLoading] = useState(false);
   
   useEffect(() => {
     loadInitialData();
   }, []);
   
-  // Load employee's resource ID
+  // Load employee's resource ID (no dropdown for employee—identity from login)
   useEffect(() => {
     if (isEmployee) {
+      setMyResourceLoading(true);
       actualsApi.getMyResource()
         .then(data => setMyResourceId(data.resource_id))
-        .catch(() => setMyResourceId(null));
+        .catch(() => setMyResourceId(null))
+        .finally(() => setMyResourceLoading(false));
     }
   }, [isEmployee]);
   
@@ -451,16 +454,20 @@ export const Actuals: React.FC = () => {
                     
                     <div className={styles.formField}>
                       <label>Resource</label>
-                      {isEmployee && myResourceId ? (
-                        <div>
+                      {isEmployee ? (
+                        myResourceLoading ? (
+                          <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
+                            Identifying your resource...
+                          </Body1>
+                        ) : myResourceId ? (
                           <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground1, fontWeight: tokens.fontWeightSemibold }}>
-                            {resources.find(r => r.id === myResourceId)?.display_name || 'Your Resource'}
+                            {resources.find(r => r.id === myResourceId)?.display_name || 'You'}
                           </Body1>
-                          <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-                            (Auto-selected - you can only enter actuals for your own resource)
+                        ) : (
+                          <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorPaletteRedForeground1 }}>
+                            No resource linked to your account. Contact your administrator.
                           </Body1>
-                          <input type="hidden" value={myResourceId} />
-                        </div>
+                        )
                       ) : (
                         <Select
                           value={formData.resource_id}
@@ -508,7 +515,13 @@ export const Actuals: React.FC = () => {
                   </DialogContent>
                   <DialogActions>
                     <Button onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-                    <Button appearance="primary" onClick={handleCreate}>Create</Button>
+                    <Button
+                      appearance="primary"
+                      onClick={handleCreate}
+                      disabled={isEmployee && !myResourceId}
+                    >
+                      Create
+                    </Button>
                   </DialogActions>
                 </DialogBody>
               </DialogSurface>

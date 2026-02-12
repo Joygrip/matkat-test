@@ -130,6 +130,40 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow4,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
   },
+  sectionTitle: {
+    fontSize: tokens.fontSizeBase500,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    marginBottom: tokens.spacingVerticalM,
+  },
+  kpiRow: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+    gap: tokens.spacingHorizontalM,
+    marginBottom: tokens.spacingVerticalXL,
+  },
+  kpiCard: {
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
+    borderRadius: tokens.borderRadiusLarge,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    boxShadow: tokens.shadow2,
+    textAlign: 'center' as const,
+  },
+  kpiLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    marginBottom: tokens.spacingVerticalXXS,
+  },
+  kpiValue: {
+    fontSize: tokens.fontSizeHero700,
+    fontWeight: tokens.fontWeightBold,
+    color: tokens.colorNeutralForeground1,
+    lineHeight: '1.2',
+  },
   summaryBar: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
@@ -137,22 +171,27 @@ const useStyles = makeStyles({
     marginBottom: tokens.spacingVerticalXL,
   },
   summaryItem: {
-    padding: tokens.spacingVerticalL,
-    textAlign: 'center',
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground2,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
+    textAlign: 'center' as const,
+    borderRadius: tokens.borderRadiusLarge,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    boxShadow: tokens.shadow2,
   },
-  summaryNumber: { fontSize: '2rem', fontWeight: 'bold', lineHeight: '1.2' },
+  summaryNumber: { fontSize: tokens.fontSizeHero700, fontWeight: tokens.fontWeightBold, lineHeight: '1.2' },
   summaryLabel: {
     fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
     marginTop: tokens.spacingVerticalXS,
   },
   deptCard: {
     marginBottom: tokens.spacingVerticalM,
-    borderRadius: tokens.borderRadiusMedium,
+    borderRadius: tokens.borderRadiusLarge,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
+    boxShadow: tokens.shadow2,
     overflow: 'hidden',
   },
   deptHeader: {
@@ -160,13 +199,13 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     alignItems: 'center',
     width: '100%',
-    padding: `${tokens.spacingVerticalS} 0`,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
   },
   deptName: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  deptStats: { display: 'flex', gap: tokens.spacingHorizontalL, alignItems: 'center' },
-  deptStat: { display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '80px' },
+  deptStats: { display: 'flex', gap: tokens.spacingHorizontalXL, alignItems: 'center' },
+  deptStat: { display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '72px' },
   ccSection: {
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground2,
   },
@@ -223,34 +262,50 @@ const useStyles = makeStyles({
     letterSpacing: '0.5px',
   },
   actualsSummaryRow: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalL,
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+    gap: tokens.spacingHorizontalM,
     marginBottom: tokens.spacingVerticalL,
   },
   actualsSummaryCard: {
-    flex: 1,
-    padding: tokens.spacingHorizontalM,
-    borderRadius: tokens.borderRadiusMedium,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
+    borderRadius: tokens.borderRadiusLarge,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
-    textAlign: 'center',
+    backgroundColor: tokens.colorNeutralBackground1,
+    boxShadow: tokens.shadow2,
+    textAlign: 'center' as const,
   },
   actualsSummaryValue: {
     fontSize: tokens.fontSizeHero700,
     fontWeight: tokens.fontWeightBold,
-    color: tokens.colorBrandForeground1,
+    color: tokens.colorNeutralForeground1,
+    lineHeight: '1.2',
   },
   actualsSummaryLabel: {
     fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground3,
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
+    marginTop: tokens.spacingVerticalXXS,
+  },
+  filtersCardLabel: {
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    marginBottom: tokens.spacingVerticalS,
   },
 
   /* ── Shared ── */
   table: { width: '100%' },
   sortableTable: {
     width: '100%',
-    '& thead': { backgroundColor: tokens.colorNeutralBackground2 },
+    '& thead': {
+      backgroundColor: tokens.colorNeutralBackground2,
+      position: 'sticky' as const,
+      top: 0,
+      zIndex: 1,
+    },
     '& th': {
       fontWeight: tokens.fontWeightSemibold,
       fontSize: tokens.fontSizeBase300,
@@ -605,6 +660,7 @@ export const Finance: React.FC = () => {
       {/* ═══════════════ Dashboard Tab ═══════════════ */}
       {activeTab === 'dashboard' && dashboard && (
         <>
+          <div className={styles.sectionTitle}>Overview</div>
           <div className={styles.summaryBar}>
             <div className={styles.summaryItem}>
               <div className={styles.summaryNumber}>{dashboard.summary.total_departments}</div>
@@ -623,7 +679,7 @@ export const Finance: React.FC = () => {
                 ? tokens.colorPaletteRedBackground2
                 : dashboard.summary.total_gap_fte > 0
                 ? tokens.colorPaletteGreenBackground2
-                : tokens.colorNeutralBackground2,
+                : tokens.colorNeutralBackground1,
             }}>
               <div className={styles.summaryNumber}>
                 {dashboard.summary.total_gap_fte > 0 ? '+' : ''}{dashboard.summary.total_gap_fte}%
@@ -633,7 +689,7 @@ export const Finance: React.FC = () => {
             <div className={styles.summaryItem} style={{
               backgroundColor: dashboard.summary.orphans_count > 0
                 ? tokens.colorPaletteDarkOrangeBackground2
-                : tokens.colorNeutralBackground2,
+                : tokens.colorNeutralBackground1,
             }}>
               <div className={styles.summaryNumber}>{dashboard.summary.orphans_count}</div>
               <div className={styles.summaryLabel}>Orphan Demands</div>
@@ -641,13 +697,14 @@ export const Finance: React.FC = () => {
             <div className={styles.summaryItem} style={{
               backgroundColor: dashboard.summary.over_allocations_count > 0
                 ? tokens.colorPaletteRedBackground2
-                : tokens.colorNeutralBackground2,
+                : tokens.colorNeutralBackground1,
             }}>
               <div className={styles.summaryNumber}>{dashboard.summary.over_allocations_count}</div>
               <div className={styles.summaryLabel}>Over-allocations</div>
             </div>
           </div>
 
+          <div className={styles.sectionTitle}>Resource overview</div>
           {dashboard.departments.length > 0 ? (
             dashboard.departments.map((dept, i) => (
               <DepartmentCard key={dept.department_id || i} dept={dept} />
@@ -666,7 +723,7 @@ export const Finance: React.FC = () => {
                 header={<Body1><strong>Over-allocations (&gt;100%)</strong></Body1>}
                 action={<Warning24Regular color={tokens.colorPaletteRedForeground1} />}
               />
-              <Table className={styles.table}>
+              <Table className={styles.sortableTable}>
                 <TableHeader>
                   <TableRow>
                     <TableHeaderCell>Resource</TableHeaderCell>
@@ -695,27 +752,29 @@ export const Finance: React.FC = () => {
       {activeTab === 'actuals' && (
         <>
           {/* Summary cards */}
+          <div className={styles.sectionTitle}>Summary</div>
           <div className={styles.actualsSummaryRow}>
-            <Card className={styles.actualsSummaryCard}>
+            <div className={styles.actualsSummaryCard}>
               <div className={styles.actualsSummaryValue}>{totalActualsLines}</div>
               <div className={styles.actualsSummaryLabel}>Total Lines</div>
-            </Card>
-            <Card className={styles.actualsSummaryCard}>
+            </div>
+            <div className={styles.actualsSummaryCard}>
               <div className={styles.actualsSummaryValue}>{totalActualsFte}%</div>
               <div className={styles.actualsSummaryLabel}>Total FTE</div>
-            </Card>
-            <Card className={styles.actualsSummaryCard}>
-              <div className={styles.actualsSummaryValue}>{pendingCount}</div>
+            </div>
+            <div className={styles.actualsSummaryCard} style={{ borderColor: tokens.colorPaletteYellowBorder1, backgroundColor: tokens.colorPaletteYellowBackground1 }}>
+              <div className={styles.actualsSummaryValue} style={{ color: tokens.colorPaletteYellowForeground1 }}>{pendingCount}</div>
               <div className={styles.actualsSummaryLabel}>Pending Approval</div>
-            </Card>
-            <Card className={styles.actualsSummaryCard}>
-              <div className={styles.actualsSummaryValue}>{approvedCount}</div>
+            </div>
+            <div className={styles.actualsSummaryCard} style={{ borderColor: tokens.colorPaletteGreenBorder1, backgroundColor: tokens.colorPaletteGreenBackground1 }}>
+              <div className={styles.actualsSummaryValue} style={{ color: tokens.colorPaletteGreenForeground1 }}>{approvedCount}</div>
               <div className={styles.actualsSummaryLabel}>Approved</div>
-            </Card>
+            </div>
           </div>
 
           {/* Filters */}
           <Card className={styles.filtersCard}>
+            <div className={styles.filtersCardLabel}>Filter by</div>
             <div className={styles.filtersRow}>
               <div className={styles.filterField}>
                 <span className={styles.filterLabel}>Project</span>
@@ -743,6 +802,7 @@ export const Finance: React.FC = () => {
 
           {/* Data table */}
           <Card className={styles.card}>
+            <CardHeader header={<Body1><strong>Employee actuals</strong></Body1>} />
             {actualsLoading ? (
               <LoadingState message="Loading actuals..." />
             ) : sortedActuals.length === 0 ? (

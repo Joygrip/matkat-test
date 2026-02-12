@@ -222,6 +222,22 @@ class ApiClient {
   }>> {
     return this.get('/dev/resources-with-users');
   }
+
+  async getAuditLogs(limit: number = 100, offset: number = 0): Promise<AuditLogEntry[]> {
+    return this.get<AuditLogEntry[]>(`/audit-logs/?limit=${limit}&offset=${offset}`);
+  }
+}
+
+export interface AuditLogEntry {
+  timestamp: string;
+  user_email: string;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  old_values: string | null;
+  new_values: string | null;
+  reason: string | null;
+  ip_address: string | null;
 }
 
 export const apiClient = new ApiClient();

@@ -33,6 +33,8 @@ import {
   ChartMultipleFilled,
   SettingsRegular,
   SettingsFilled,
+  DocumentBulletListRegular,
+  DocumentBulletListFilled,
   SignOutRegular,
   PersonRegular,
   bundleIcon,
@@ -47,6 +49,7 @@ const Actuals = bundleIcon(ClipboardTaskFilled, ClipboardTaskRegular);
 const Approvals = bundleIcon(CheckmarkCircleFilled, CheckmarkCircleRegular);
 const Consolidation = bundleIcon(ChartMultipleFilled, ChartMultipleRegular);
 const Admin = bundleIcon(SettingsFilled, SettingsRegular);
+const AuditLogsIcon = bundleIcon(DocumentBulletListFilled, DocumentBulletListRegular);
 
 const useStyles = makeStyles({
   container: {
@@ -248,6 +251,7 @@ const navItems: NavItem[] = [
   { path: '/finance', label: 'Finance', icon: Consolidation, roles: ['Admin', 'Finance', 'Director'], section: 'operations' },
   { path: '/approvals', label: 'Approvals', icon: Approvals, roles: ['Admin', 'RO', 'Director'], section: 'operations' },
   { path: '/admin', label: 'Admin', icon: Admin, roles: ['Admin', 'Finance'], section: 'admin' },
+  { path: '/audit-logs', label: 'Audit logs', icon: AuditLogsIcon, roles: ['Admin', 'Finance'], section: 'admin' },
 ];
 
 const sectionLabels: Record<string, string> = {
@@ -265,6 +269,7 @@ const pageTitles: Record<string, string> = {
   '/finance': 'Finance',
   '/approvals': 'Approvals',
   '/admin': 'Administration',
+  '/audit-logs': 'Audit logs',
 };
 
 export function AppShell({ children }: { children: ReactNode }) {

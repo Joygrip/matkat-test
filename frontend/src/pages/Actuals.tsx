@@ -533,7 +533,11 @@ export const Actuals: React.FC = () => {
                     <Button
                       appearance="primary"
                       onClick={handleCreate}
-                      disabled={isEmployee && !myResourceId}
+                      disabled={
+                        (isEmployee && !myResourceId) ||
+                        (!isEmployee && !formData.resource_id) ||
+                        !formData.project_id
+                      }
                     >
                       Create
                     </Button>
@@ -664,8 +668,8 @@ export const Actuals: React.FC = () => {
                   key={a.id}
                   className={overLimitIds.includes(a.id) ? styles.overLimitRow : undefined}
                 >
-                  <TableCell>{getResourceName(a.resource_id)}</TableCell>
-                  <TableCell>{getProjectName(a.project_id)}</TableCell>
+                  <TableCell>{a.resource_name ?? getResourceName(a.resource_id)}</TableCell>
+                  <TableCell>{a.project_name ?? getProjectName(a.project_id)}</TableCell>
                   <TableCell>{a.year}-{String(a.month).padStart(2, '0')}</TableCell>
                   <TableCell>
                     {a.planned_fte_percent !== null && a.planned_fte_percent !== undefined 

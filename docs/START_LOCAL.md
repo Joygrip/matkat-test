@@ -65,6 +65,15 @@ After starting both services:
 2. **Frontend**: http://localhost:5173 should load the app
 3. **API Docs**: http://localhost:8000/docs should show Swagger UI
 
+## Testing actuals in dev
+
+To enter and test actuals locally:
+
+1. Ensure the backend has run at least once (startup auto-seeds example data when `DEV_AUTH_BYPASS=true`), or call **POST /dev/seed** (e.g. from API docs) to create example data.
+2. Open the app and use **Dev Login**: choose role **Employee** and pick a resource that has a linked user (e.g. Dev User or Alice Developer), or choose **Admin** to add actuals for any employee.
+3. In the app, select an **open period** in the period dropdown (e.g. Feb 2026). Locked periods do not allow new actuals.
+4. Go to **Actuals**, click **Add Actual**, select resource (if Admin), project, and FTE %, then **Create**.
+
 ## Troubleshooting
 
 ### Services won't start
@@ -93,11 +102,11 @@ After starting both services:
 
 ### "Cannot reach API" or HTTP 0 (NETWORK_ERROR)
 
-If the app shows "Cannot reach the API at http://localhost:8000" or requests fail with a network error:
+If the app shows "Cannot reach the API" or requests fail with a network error when adding actuals or calling the API:
 
-1. **Backend must be running** at the URL the frontend uses. Default is `http://localhost:8000`. Check `http://localhost:8000/healthz` in a browser.
-2. **Match frontend and backend URL:** Set `VITE_API_BASE_URL` in `frontend/.env.local` to the same host/port as the backend (e.g. `http://localhost:8000`). If you start the backend on a different host or port, update this and restart the frontend.
-3. **CORS:** The backend allows `http://localhost:5173`, `http://127.0.0.1:5173`, and ports 3000. If you open the app from another origin (e.g. `http://192.168.x.x:5173`), add that origin to `allow_origins` in `api/app/main.py` or run the frontend from localhost/127.0.0.1.
+1. **Use the Vite proxy in dev (recommended):** When you run `npm run dev`, the frontend defaults to `apiBaseUrl: '/api'`, so requests go to the same origin and Vite proxies them to the backend. **Do not set** `VITE_API_BASE_URL` in `frontend/.env.local` (or leave it unset) so this proxy is used and CORS is avoided.
+2. **Backend must be running:** The proxy forwards to `http://localhost:8000`. Start the backend (e.g. `uvicorn api.app.main:app --reload --host 0.0.0.0 --port 8000`). You can check `http://localhost:8000/healthz` in a browser.
+3. **If you set VITE_API_BASE_URL:** Then the frontend calls the API directly (cross-origin). Ensure CORS allows your origin: the backend allows `http://localhost:5173`, `http://127.0.0.1:5173`. For another origin (e.g. `http://192.168.x.x:5173`), set `ADDITIONAL_CORS_ORIGINS` in `api/.env`.
 
 ### Import errors
 
@@ -113,11 +122,14 @@ $env:PYTHONPATH = "C:\Users\pawel\Documents\GitHub\ResourceAllocation"
 ENV=dev
 DEV_AUTH_BYPASS=true
 DATABASE_URL=sqlite:///./dev.db
+# Optional: if you open the frontend from another host (e.g. http://192.168.1.10:5173), add it here to fix CORS:
+# ADDITIONAL_CORS_ORIGINS=http://192.168.1.10:5173
 ```
 
 ### Frontend (`frontend/.env.local`)
 ```env
-VITE_API_BASE_URL=http://localhost:8000
+# Leave VITE_API_BASE_URL unset in dev so the Vite proxy is used (avoids CORS / HTTP 0 errors).
+# VITE_API_BASE_URL=http://localhost:8000
 VITE_DEV_AUTH_BYPASS=true
 ```
 

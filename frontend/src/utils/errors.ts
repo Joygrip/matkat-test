@@ -12,7 +12,7 @@ const codeMessages: Record<string, string> = {
   UNAUTHORIZED_RESOURCE: 'No resource linked to your account, or you can only manage your own actuals. Contact your administrator.',
   VALIDATION_ERROR: 'Validation error. Please check your input.',
   CONFLICT: 'An actual line already exists for this resource, project, and month.',
-  NETWORK_ERROR: 'Cannot reach the API. Ensure the backend is running and CORS is configured for this origin.',
+  NETWORK_ERROR: 'Ensure the backend is running (e.g. uvicorn on port 8000) and you open the app from http://localhost:5173 or another allowed origin. Check the browser Network tab (F12) for the failed request.',
   TIMEOUT: 'The request took too long. The server may be slow or overloaded.',
 };
 

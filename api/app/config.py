@@ -22,7 +22,10 @@ class Settings(BaseSettings):
     
     # Notifications
     notify_mode: str = "stub"
-    
+
+    # CORS (dev): comma-separated extra origins, e.g. "http://192.168.1.10:5173"
+    additional_cors_origins: str = ""
+
     # Azure Application Insights
     appinsights_connection_string: str = ""
     
@@ -30,6 +33,12 @@ class Settings(BaseSettings):
     def is_dev(self) -> bool:
         return self.env == "dev"
     
+    @property
+    def additional_cors_origins_list(self) -> list[str]:
+        if not self.additional_cors_origins:
+            return []
+        return [o.strip() for o in self.additional_cors_origins.split(",") if o.strip()]
+
     @property
     def tenant_allowlist(self) -> list[str]:
         if not self.azure_tenant_allowlist:

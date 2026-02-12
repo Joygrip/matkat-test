@@ -39,7 +39,7 @@ def test_audit_logs_are_tenant_scoped(client, admin_headers, db):
         action="create",
         entity_type="Department",
         entity_id="dept-1",
-        timestamp=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
     )
     log_other = AuditLog(
         tenant_id="other-tenant",
@@ -48,7 +48,7 @@ def test_audit_logs_are_tenant_scoped(client, admin_headers, db):
         action="create",
         entity_type="Department",
         entity_id="dept-2",
-        timestamp=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
     )
     db.add_all([log_own, log_other])
     db.commit()
@@ -73,7 +73,7 @@ def test_audit_logs_pagination(client, admin_headers, db):
             action="create",
             entity_type="Resource",
             entity_id=f"res-{i}",
-            timestamp=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc),
         ))
     db.commit()
 
@@ -124,7 +124,7 @@ def test_audit_log_returns_ordered_by_timestamp(client, admin_headers, db):
         action="create",
         entity_type="A",
         entity_id="old",
-        timestamp=now - timedelta(hours=1),
+        created_at=now - timedelta(hours=1),
     ))
     db.add(AuditLog(
         tenant_id="test-tenant-001",
@@ -133,7 +133,7 @@ def test_audit_log_returns_ordered_by_timestamp(client, admin_headers, db):
         action="create",
         entity_type="A",
         entity_id="new",
-        timestamp=now,
+        created_at=now,
     ))
     db.commit()
 

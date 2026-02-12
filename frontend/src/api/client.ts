@@ -50,7 +50,7 @@ class ApiClient {
         type: 'about:blank',
         title: 'Network Error',
         status: 0,
-        detail: `Cannot reach the API at ${this.baseUrl}. Ensure the backend is running and CORS is configured for this origin.`,
+        detail: `Cannot reach the API at ${this.baseUrl}. Ensure the backend is running and you use an allowed origin (e.g. http://localhost:5173). Check the Network tab (F12) for details.`,
         code: 'NETWORK_ERROR',
       });
     }
@@ -102,12 +102,12 @@ class ApiClient {
           code: 'TIMEOUT',
         });
       }
-      // Network error or fetch failed
+      // Network error or fetch failed (connection refused, CORS, or blocked)
       throw new ApiError({
         type: 'about:blank',
         title: 'Network Error',
         status: 0,
-        detail: `Cannot reach API at ${this.baseUrl}. Check that the backend is running and CORS is configured correctly.`,
+        detail: `Cannot reach the API at ${this.baseUrl}. Ensure the backend is running (e.g. uvicorn on port 8000), and that you open the app from an allowed origin (e.g. http://localhost:5173). Check the browser Network tab (F12) for the failed request.`,
         code: 'NETWORK_ERROR',
       });
     }
@@ -134,7 +134,7 @@ class ApiClient {
         type: 'about:blank',
         title: 'Network Error',
         status: 0,
-        detail: `Cannot reach API at ${this.baseUrl}. Check that the backend is running and CORS is configured correctly.`,
+        detail: `Cannot reach the API at ${this.baseUrl}. Ensure the backend is running and you use an allowed origin (e.g. http://localhost:5173). Check the Network tab (F12) for details.`,
         code: 'NETWORK_ERROR',
       });
     }
@@ -157,7 +157,7 @@ class ApiClient {
         type: 'about:blank',
         title: 'Network Error',
         status: 0,
-        detail: `Cannot reach API at ${this.baseUrl}. Check that the backend is running and CORS is configured correctly.`,
+        detail: `Cannot reach the API at ${this.baseUrl}. Ensure the backend is running and you use an allowed origin. Check the Network tab (F12) for details.`,
         code: 'NETWORK_ERROR',
       });
     }
@@ -180,7 +180,7 @@ class ApiClient {
         type: 'about:blank',
         title: 'Network Error',
         status: 0,
-        detail: `Cannot reach API at ${this.baseUrl}. Check that the backend is running and CORS is configured correctly.`,
+        detail: `Cannot reach the API at ${this.baseUrl}. Ensure the backend is running and you use an allowed origin. Check the Network tab (F12) for details.`,
         code: 'NETWORK_ERROR',
       });
     }
@@ -202,7 +202,7 @@ class ApiClient {
         type: 'about:blank',
         title: 'Network Error',
         status: 0,
-        detail: `Cannot reach API at ${this.baseUrl}. Check that the backend is running and CORS is configured correctly.`,
+        detail: `Cannot reach the API at ${this.baseUrl}. Ensure the backend is running and you use an allowed origin. Check the Network tab (F12) for details.`,
         code: 'NETWORK_ERROR',
       });
     }

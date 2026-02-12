@@ -19,33 +19,38 @@ app = FastAPI(
 )
 
 # CORS middleware for frontend. If you run the frontend from another origin
-# (e.g. http://192.168.x.x:5173), add it here or the browser will block API calls.
+# (e.g. http://192.168.x.x:5173), set ADDITIONAL_CORS_ORIGINS in .env or add it below.
+_settings = get_settings()
 allow_origins = [
     "http://localhost:5173",  # Vite dev server (default)
     "http://localhost:3000",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
 ]
-if get_settings().is_dev:
-    # In dev, allow common alternate hosts for local debugging
+if _settings.is_dev:
     allow_origins = allow_origins + [
         "http://[::1]:5173",
         "http://[::1]:3000",
     ]
+    extra = _settings.additional_cors_origins_list
+    if extra:
+        allow_origins = allow_origins + extra
+# In dev, allow all request headers to avoid CORS preflight rejection (e.g. on POST)
+allow_headers = ["*"] if _settings.is_dev else [
+    "Authorization",
+    "Content-Type",
+    "X-Dev-Role",
+    "X-Dev-Tenant",
+    "X-Dev-User-Id",
+    "X-Dev-Email",
+    "X-Dev-Name",
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=[
-        "Authorization",
-        "Content-Type",
-        "X-Dev-Role",
-        "X-Dev-Tenant",
-        "X-Dev-User-Id",
-        "X-Dev-Email",
-        "X-Dev-Name",
-    ],
+    allow_headers=allow_headers,
 )
 
 

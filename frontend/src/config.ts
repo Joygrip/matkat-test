@@ -7,8 +7,8 @@ export const config = {
   authAuthority: import.meta.env.VITE_AUTH_AUTHORITY || 'https://login.microsoftonline.com/common',
   apiScope: import.meta.env.VITE_API_SCOPE || '',
   
-  // API
-  apiBaseUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
+  // API: in dev always use Vite proxy (/api -> backend) to avoid CORS and HTTP 0; production uses env
+  apiBaseUrl: import.meta.env.DEV ? '/api' : (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'),
   
   // Dev mode
   devAuthBypass: import.meta.env.VITE_DEV_AUTH_BYPASS === 'true',

@@ -104,13 +104,13 @@ async def list_demand_lines(
     cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.RO, UserRole.DIRECTOR
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.RO, UserRole.DIRECTOR,
+        UserRole.EMPLOYEE,
     )),
 ):
     """
     List demand lines. Filtered by tenant, period, project, resource, department, cost center.
-    
-    Accessible to: Admin, Finance (read-only), PM, RO (read-only), Director
+    Accessible to: Admin, Finance, PM, RO, Director, Employee (read-only for dashboard).
     """
     service = DemandService(db, current_user)
     lines = service.get_all(year, month, project_id, resource_id, period_id=period_id)
@@ -278,13 +278,13 @@ async def list_supply_lines(
     cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.RO, UserRole.DIRECTOR
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.RO, UserRole.DIRECTOR,
+        UserRole.EMPLOYEE,
     )),
 ):
     """
     List supply lines. Filtered by tenant, period, resource, department, cost center.
-    
-    Accessible to: Admin, Finance (read-only), PM (read-only), RO, Director
+    Accessible to: Admin, Finance, PM, RO, Director, Employee (read-only for dashboard).
     """
     service = SupplyService(db, current_user)
     lines = service.get_all(year, month, None, resource_id, period_id=period_id)

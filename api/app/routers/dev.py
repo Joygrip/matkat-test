@@ -227,3 +227,32 @@ async def get_dev_config():
         "dev_auth_bypass": settings.dev_auth_bypass,
         "database_url": settings.database_url.split("@")[-1] if "@" in settings.database_url else settings.database_url,
     }
+
+
+@router.get("/resources-with-users", dependencies=[Depends(require_dev_mode)])
+async def get_resources_with_users(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    List resources with linked user info for Dev Login dropdown.
+    Returns resource_id, display_name, employee_id, email, user_object_id, user_id.
+    """
+    rows = (
+        db.query(Resource, User)
+        .outerjoin(User, Resource.user_id == User.id)
+        .filter(Resource.tenant_id == current_user.tenant_id, Resource.is_active == True)
+        .order_by(Resource.display_name)
+        .all()
+    )
+    result = []
+    for resource, user in rows:
+        result.append({
+            "resource_id": resource.id,
+            "display_name": resource.display_name or "",
+            "employee_id": resource.employee_id or "",
+            "email": resource.email if resource.email is not None else (user.email if user else None),
+            "user_object_id": user.object_id if user else None,
+            "user_id": str(user.id) if user else None,
+        })
+    return result

@@ -1,12 +1,13 @@
 """Approvals endpoints."""
 from typing import Optional
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 
 from api.app.db.engine import get_db
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
 from api.app.models.core import UserRole
+from api.app.models.actuals import ActualLine
 from api.app.services.approvals import ApprovalsService
 
 router = APIRouter(prefix="/approvals", tags=["Approvals"])
@@ -32,13 +33,46 @@ class ApprovalInstanceResponse(BaseModel):
     steps: list[ApprovalStepResponse]
     created_by: str
     created_at: str
+    # Enriched for actuals: who the actual is for (employee/resource) and project/period
+    resource_name: Optional[str] = None
+    resource_id: Optional[str] = None
+    project_name: Optional[str] = None
+    project_id: Optional[str] = None
+    period_label: Optional[str] = None
 
 
 class ActionRequest(BaseModel):
     comment: Optional[str] = None
 
 
-def _to_response(instance) -> ApprovalInstanceResponse:
+def _enrich_for_actuals(db: Session, instance) -> dict:
+    """For subject_type actuals, load ActualLine with resource/project and return display fields."""
+    if getattr(instance, "subject_type", None) != "actuals":
+        return {}
+    line = (
+        db.query(ActualLine)
+        .options(
+            joinedload(ActualLine.resource),
+            joinedload(ActualLine.project),
+        )
+        .filter(
+            ActualLine.id == instance.subject_id,
+            ActualLine.tenant_id == instance.tenant_id,
+        )
+        .first()
+    )
+    if not line:
+        return {}
+    return {
+        "resource_name": line.resource.display_name if line.resource else None,
+        "resource_id": line.resource_id,
+        "project_name": line.project.name if line.project else None,
+        "project_id": line.project_id,
+        "period_label": f"{line.year}-{line.month:02d}" if line.year and line.month else None,
+    }
+
+
+def _to_response(instance, **enrichment) -> ApprovalInstanceResponse:
     return ApprovalInstanceResponse(
         id=instance.id,
         tenant_id=instance.tenant_id,
@@ -60,6 +94,7 @@ def _to_response(instance) -> ApprovalInstanceResponse:
         ],
         created_by=instance.created_by,
         created_at=str(instance.created_at),
+        **enrichment,
     )
 
 
@@ -77,7 +112,7 @@ async def get_inbox(
     """
     service = ApprovalsService(db, current_user)
     instances = service.get_inbox()
-    return [_to_response(i) for i in instances]
+    return [_to_response(i, **_enrich_for_actuals(db, i)) for i in instances]
 
 
 @router.get("/{instance_id}", response_model=ApprovalInstanceResponse)
@@ -94,7 +129,7 @@ async def get_approval(
     if not instance:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Approval not found"})
-    return _to_response(instance)
+    return _to_response(instance, **_enrich_for_actuals(db, instance))
 
 
 @router.post("/{instance_id}/steps/{step_id}/approve", response_model=ApprovalInstanceResponse)
@@ -114,7 +149,7 @@ async def approve_step(
     """
     service = ApprovalsService(db, current_user)
     instance = service.approve_step(instance_id, step_id, data.comment)
-    return _to_response(instance)
+    return _to_response(instance, **_enrich_for_actuals(db, instance))
 
 
 @router.post("/{instance_id}/steps/{step_id}/proxy-approve", response_model=ApprovalInstanceResponse)
@@ -142,7 +177,7 @@ async def proxy_approve_step(
         )
     service = ApprovalsService(db, current_user)
     instance = service.approve_step(instance_id, step_id, f"[PROXY-APPROVE] {data.comment}")
-    return _to_response(instance)
+    return _to_response(instance, **_enrich_for_actuals(db, instance))
 
 
 @router.post("/{instance_id}/steps/{step_id}/reject", response_model=ApprovalInstanceResponse)
@@ -162,4 +197,4 @@ async def reject_step(
     """
     service = ApprovalsService(db, current_user)
     instance = service.reject_step(instance_id, step_id, data.comment)
-    return _to_response(instance)
+    return _to_response(instance, **_enrich_for_actuals(db, instance))

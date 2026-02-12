@@ -20,14 +20,14 @@ def list_audit_logs(
     logs = (
         db.query(AuditLog)
         .filter(AuditLog.tenant_id == current_user.tenant_id)
-        .order_by(AuditLog.timestamp.desc())
+        .order_by(AuditLog.created_at.desc())
         .offset(offset)
         .limit(limit)
         .all()
     )
     return [
         {
-            "timestamp": log.timestamp,
+            "timestamp": log.created_at,
             "user_email": log.user_email,
             "action": log.action,
             "entity_type": log.entity_type,

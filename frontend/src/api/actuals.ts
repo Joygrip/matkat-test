@@ -21,6 +21,10 @@ export interface ActualLine {
   ro_approved_by?: string;
   created_by: string;
   created_at: string;
+  /** Display name for the resource/employee (from API when listing as RO/Director/Admin) */
+  resource_name?: string | null;
+  /** Display name for the project (from API) */
+  project_name?: string | null;
 }
 
 export interface CreateActualLine {

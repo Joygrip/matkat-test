@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, func
 
 from api.app.models.actuals import ActualLine
@@ -210,7 +210,11 @@ class ActualsService:
             query = query.filter(ActualLine.month == month)
         if resource_id:
             query = query.filter(ActualLine.resource_id == resource_id)
-        
+
+        query = query.options(
+            joinedload(ActualLine.resource),
+            joinedload(ActualLine.project),
+        )
         return query.all()
     
     def get_by_id(self, actual_id: str) -> Optional[ActualLine]:

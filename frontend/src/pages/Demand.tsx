@@ -34,7 +34,7 @@ import {
   Toolbar,
   ToolbarButton,
 } from '@fluentui/react-components';
-import { Add24Regular, Delete24Regular, CalendarRegular } from '@fluentui/react-icons';
+import { Add24Regular, Delete24Regular, CalendarRegular, Edit24Regular } from '@fluentui/react-icons';
 import { BreakdownChart, BreakdownRow } from '../components/BreakdownChart';
 import { planningApi, DemandLine, CreateDemandLine } from '../api/planning';
 import { usePeriod } from '../contexts/PeriodContext';
@@ -218,6 +218,7 @@ export const Demand: React.FC = () => {
     project_id: '',
     fte_percent: 50,
   });
+  const [editId, setEditId] = useState<string | null>(null); // Track editing line
   const [useResource, setUseResource] = useState(true);
   const [dialogDept, setDialogDept] = useState<string>('');
   const [filteredPlaceholders, setFilteredPlaceholders] = useState<Placeholder[]>([]);
@@ -345,6 +346,71 @@ export const Demand: React.FC = () => {
     }
   };
   
+  const handleEdit = (d: DemandLine) => {
+    setEditId(d.id);
+    setFormData({
+      period_id: d.period_id,
+      project_id: d.project_id,
+      fte_percent: d.fte_percent,
+      resource_id: d.resource_id,
+      placeholder_id: d.placeholder_id,
+      year: d.year,
+      month: d.month,
+    });
+    setUseResource(!!d.resource_id);
+    setDialogDept(d.department_id || '');
+    setIsDialogOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editId) return;
+    if (!canEdit) {
+      showError('Read-only', 'Only PMs can edit demand lines.');
+      return;
+    }
+    if (!formData.project_id) {
+      showError('Missing project', 'Please select a project.');
+      return;
+    }
+    if (!selectedPeriodId || !currentPeriod) {
+      showError('Missing period', 'Please select a period.');
+      return;
+    }
+    if (useResource && !formData.resource_id) {
+      showError('Missing resource', 'Please select a resource.');
+      return;
+    }
+    if (!useResource && !formData.placeholder_id) {
+      showError('Missing placeholder', 'Please select a placeholder.');
+      return;
+    }
+    try {
+      const data: any = {
+        id: editId,
+        project_id: formData.project_id,
+        fte_percent: formData.fte_percent,
+        year: currentPeriod.year,
+        month: currentPeriod.month,
+      };
+      if (useResource) {
+        data.resource_id = formData.resource_id;
+        data.placeholder_id = undefined;
+      } else {
+        data.placeholder_id = formData.placeholder_id;
+        data.resource_id = undefined;
+      }
+      await planningApi.updateDemandLine(editId, data);
+      showSuccess('Demand line updated');
+      setIsDialogOpen(false);
+      setEditId(null);
+      loadDemands();
+      setFormData({ period_id: selectedPeriodId, project_id: '', fte_percent: 50 });
+      setDialogDept('');
+    } catch (err: any) {
+      showApiError(err, 'Failed to update demand line');
+    }
+  };
+  
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this demand line?')) return;
     try {
@@ -424,7 +490,10 @@ export const Demand: React.FC = () => {
         </div>
         <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
           {!isLocked && canEdit && (
-            <Dialog open={isDialogOpen} onOpenChange={(_, data) => setIsDialogOpen(data.open)}>
+            <Dialog open={isDialogOpen} onOpenChange={(_, data) => {
+              setIsDialogOpen(data.open);
+              if (!data.open) setEditId(null);
+            }}>
               <DialogTrigger>
                 <Button appearance="primary" icon={<Add24Regular />}>
                   Add Demand
@@ -432,7 +501,7 @@ export const Demand: React.FC = () => {
               </DialogTrigger>
               <DialogSurface>
                 <DialogBody>
-                  <DialogTitle>Add Demand Line</DialogTitle>
+                  <DialogTitle>{editId ? 'Edit Demand Line' : 'Add Demand Line'}</DialogTitle>
                   <DialogContent>
                     {currentPeriod && (
                       <div className={styles.formField}>
@@ -535,8 +604,12 @@ export const Demand: React.FC = () => {
                     </div>
                   </DialogContent>
                   <DialogActions>
-                    <Button onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-                    <Button appearance="primary" onClick={handleCreate}>Create</Button>
+                    <Button onClick={() => { setIsDialogOpen(false); setEditId(null); }}>Cancel</Button>
+                    {editId ? (
+                      <Button appearance="primary" onClick={handleSaveEdit}>Save</Button>
+                    ) : (
+                      <Button appearance="primary" onClick={handleCreate}>Create</Button>
+                    )}
                   </DialogActions>
                 </DialogBody>
               </DialogSurface>
@@ -704,11 +777,21 @@ export const Demand: React.FC = () => {
                       </TableCell>
                       <TableCell>
                         {!isLocked && canEdit && (
-                          <Button
-                            icon={<Delete24Regular />}
-                            appearance="subtle"
-                            onClick={() => handleDelete(d.id)}
-                          />
+                          <>
+                            <Button
+                              icon={<Edit24Regular />}
+                              appearance="subtle"
+                              onClick={() => handleEdit(d)}
+                              title="Edit line"
+                              style={{ marginRight: 4 }}
+                            />
+                            <Button
+                              icon={<Delete24Regular />}
+                              appearance="subtle"
+                              onClick={() => handleDelete(d.id)}
+                              title="Delete line"
+                            />
+                          </>
                         )}
                       </TableCell>
                     </TableRow>

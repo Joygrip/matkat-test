@@ -37,7 +37,7 @@ import {
   Toolbar,
   ToolbarButton,
 } from '@fluentui/react-components';
-import { Add24Regular, Delete24Regular, PeopleRegular } from '@fluentui/react-icons';
+import { Add24Regular, Delete24Regular, PeopleRegular, Edit24Regular } from '@fluentui/react-icons';
 import { BreakdownChart, BreakdownRow } from '../components/BreakdownChart';
 import { planningApi, SupplyLine, CreateSupplyLine } from '../api/planning';
 import { usePeriod } from '../contexts/PeriodContext';
@@ -220,6 +220,7 @@ export const Supply: React.FC = () => {
     resource_id: '',
     fte_percent: 100,
   });
+  const [editId, setEditId] = useState<string | null>(null); // Track editing line
   
   // Bulk actions state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -318,6 +319,53 @@ export const Supply: React.FC = () => {
     }
   };
   
+  const handleEdit = (s: SupplyLine) => {
+    setEditId(s.id);
+    setFormData({
+      period_id: s.period_id,
+      resource_id: s.resource_id,
+      project_id: s.project_id,
+      fte_percent: s.fte_percent,
+      year: s.year,
+      month: s.month,
+    });
+    setIsDialogOpen(true);
+  };
+  
+  const handleSaveEdit = async () => {
+    if (!editId) return;
+    if (!canEdit) {
+      showError('Read-only', 'Only ROs can edit supply lines.');
+      return;
+    }
+    if (!formData.resource_id) {
+      showError('Missing resource', 'Please select a resource.');
+      return;
+    }
+    if (!selectedPeriodId || !currentPeriod) {
+      showError('Missing period', 'Please select a period.');
+      return;
+    }
+    try {
+      const data: any = {
+        id: editId,
+        resource_id: formData.resource_id,
+        project_id: formData.project_id || undefined,
+        fte_percent: formData.fte_percent,
+        year: currentPeriod.year,
+        month: currentPeriod.month,
+      };
+      await planningApi.updateSupplyLine(editId, data);
+      showSuccess('Supply line updated');
+      setIsDialogOpen(false);
+      setEditId(null);
+      loadSupplies();
+      setFormData({ period_id: selectedPeriodId, resource_id: '', project_id: '', fte_percent: 100 });
+    } catch (err: any) {
+      showApiError(err, 'Failed to update supply line');
+    }
+  };
+  
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this supply line?')) return;
     try {
@@ -377,7 +425,10 @@ export const Supply: React.FC = () => {
         
         <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
           {!isLocked && canEdit && (
-            <Dialog open={isDialogOpen} onOpenChange={(_, data) => setIsDialogOpen(data.open)}>
+            <Dialog open={isDialogOpen} onOpenChange={(_, data) => {
+              setIsDialogOpen(data.open);
+              if (!data.open) setEditId(null);
+            }}>
               <DialogTrigger>
                 <Button appearance="primary" icon={<Add24Regular />}>
                   Add Supply
@@ -385,7 +436,7 @@ export const Supply: React.FC = () => {
               </DialogTrigger>
               <DialogSurface>
                 <DialogBody>
-                  <DialogTitle>Add Supply Line</DialogTitle>
+                  <DialogTitle>{editId ? 'Edit Supply Line' : 'Add Supply Line'}</DialogTitle>
                   <DialogContent>
                     {currentPeriod && (
                       <div className={styles.formField}>
@@ -438,8 +489,12 @@ export const Supply: React.FC = () => {
                     </MessageBar>
                   </DialogContent>
                   <DialogActions>
-                    <Button onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-                    <Button appearance="primary" onClick={handleCreate}>Create</Button>
+                    <Button onClick={() => { setIsDialogOpen(false); setEditId(null); }}>Cancel</Button>
+                    {editId ? (
+                      <Button appearance="primary" onClick={handleSaveEdit}>Save</Button>
+                    ) : (
+                      <Button appearance="primary" onClick={handleCreate}>Create</Button>
+                    )}
                   </DialogActions>
                 </DialogBody>
               </DialogSurface>
@@ -579,11 +634,21 @@ export const Supply: React.FC = () => {
                       </TableCell>
                       <TableCell>
                         {!isLocked && canEdit && (
-                          <Button
-                            icon={<Delete24Regular />}
-                            appearance="subtle"
-                            onClick={() => handleDelete(s.id)}
-                          />
+                          <>
+                            <Button
+                              icon={<Edit24Regular />}
+                              appearance="subtle"
+                              onClick={() => handleEdit(s)}
+                              title="Edit line"
+                              style={{ marginRight: 4 }}
+                            />
+                            <Button
+                              icon={<Delete24Regular />}
+                              appearance="subtle"
+                              onClick={() => handleDelete(s.id)}
+                              title="Delete line"
+                            />
+                          </>
                         )}
                       </TableCell>
                     </TableRow>

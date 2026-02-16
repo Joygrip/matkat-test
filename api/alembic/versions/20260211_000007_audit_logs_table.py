@@ -17,18 +17,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        'audit_logs',
-        sa.Column('id', sa.String(length=36), primary_key=True),
-        sa.Column('timestamp', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('user_id', sa.String(length=36), nullable=False),
-        sa.Column('user_email', sa.String(length=255), nullable=False),
-        sa.Column('action', sa.String(length=64), nullable=False),
-        sa.Column('entity', sa.String(length=64), nullable=False),
-        sa.Column('entity_id', sa.String(length=36), nullable=False),
-        sa.Column('before', sa.Text(), nullable=True),
-        sa.Column('after', sa.Text(), nullable=True),
-    )
+    # audit_logs table already created in initial migration; nothing to do here
+    pass
 
 def downgrade() -> None:
-    op.drop_table('audit_logs')
+    # audit_logs table already created in initial migration; nothing to do here
+    pass

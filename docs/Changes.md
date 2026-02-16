@@ -154,5 +154,10 @@
 - Forbidden roles see a clean, read-only view with no unnecessary controls.
 - UI and backend are now fully consistent for role-based access to planning line bulk operations.
 
+## 2026-02-16: Migration Fix - Duplicate audit_logs Table
+- Fixed Alembic migration error: duplicate creation of `audit_logs` table.
+- Removed `op.create_table('audit_logs', ...)` from `20260211_000007_audit_logs_table.py` (table is already created in `20260202_000001_initial_core_tables.py`).
+- This resolves migration conflicts and allows a clean DB setup for local development.
+
 ---
 Add further changes and fixes below as needed.

@@ -9,6 +9,7 @@ import {
   tokens,
   Title3,
   Badge,
+  Body1,
   Card,
   Accordion,
   AccordionItem,
@@ -23,11 +24,18 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  Table,
+  TableHeader,
+  TableRow,
+  TableHeaderCell,
+  TableBody,
+  TableCell,
 } from '@fluentui/react-components';
 import {
   BuildingRegular,
   ShieldCheckmarkRegular,
   FullScreenMaximizeRegular,
+  Info24Regular,
 } from '@fluentui/react-icons';
 import { useAuth } from '../auth/AuthProvider';
 import { apiClient } from '../api/client';
@@ -107,6 +115,51 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
     marginTop: tokens.spacingVerticalXXS,
+  },
+  kpiCardClickable: {
+    cursor: 'pointer',
+    transition: 'box-shadow 0.2s ease, border-color 0.2s ease',
+    '&:hover': {
+      boxShadow: tokens.shadow8,
+    },
+    '&:focus-visible': {
+      outline: `2px solid ${tokens.colorStrokeFocus2}`,
+      outlineOffset: '2px',
+    },
+  },
+  kpiCardViewDetails: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    marginTop: tokens.spacingVerticalS,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorBrandForeground1,
+  },
+  kpiDetailTableWrap: {
+    maxHeight: '320px',
+    overflow: 'auto',
+    marginTop: tokens.spacingVerticalM,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+  },
+  kpiDetailDefinition: {
+    marginBottom: tokens.spacingVerticalS,
+    color: tokens.colorNeutralForeground2,
+  },
+  kpiDetailFormula: {
+    marginBottom: tokens.spacingVerticalM,
+    fontFamily: 'monospace',
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground3,
+  },
+  kpiDetailPeriod: {
+    marginBottom: tokens.spacingVerticalM,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
+  kpiDetailSummaryRow: {
+    fontWeight: tokens.fontWeightSemibold,
+    backgroundColor: tokens.colorNeutralBackground3,
   },
 
   /* ── Charts ── */
@@ -222,8 +275,17 @@ export function Dashboard() {
   const [chartLoading, setChartLoading] = useState(false);
   type ChartModalKey = 'dept' | 'project' | 'supply' | null;
   const [chartModalOpen, setChartModalOpen] = useState<ChartModalKey>(null);
+  type KpiDetailModalKey = 'demand' | 'supply' | 'gap' | 'utilization' | null;
+  const [kpiDetailModal, setKpiDetailModal] = useState<KpiDetailModalKey>(null);
 
   const isAdmin = user?.role === 'Admin';
+
+  const handleKpiCardKeyDown = (e: React.KeyboardEvent, key: KpiDetailModalKey) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setKpiDetailModal(key);
+    }
+  };
 
   /* ── KPI computed values ── */
   const totalDemand = useMemo(
@@ -393,21 +455,43 @@ export function Dashboard() {
               </div>
             )}
           </Card>
-          <Card className={styles.kpiCard}>
+          <Card
+            className={`${styles.kpiCard} ${styles.kpiCardClickable}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => setKpiDetailModal('demand')}
+            onKeyDown={(e) => handleKpiCardKeyDown(e, 'demand')}
+          >
             <div className={styles.kpiLabel}>Total Demand</div>
             <div className={styles.kpiValue}>{totalDemand.toFixed(0)}%</div>
             <div className={styles.kpiMeta}>{(demandLines || []).length} lines</div>
+            <div className={styles.kpiCardViewDetails}>
+              <Info24Regular /> View details
+            </div>
           </Card>
-          <Card className={styles.kpiCard}>
+          <Card
+            className={`${styles.kpiCard} ${styles.kpiCardClickable}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => setKpiDetailModal('supply')}
+            onKeyDown={(e) => handleKpiCardKeyDown(e, 'supply')}
+          >
             <div className={styles.kpiLabel}>Total Supply</div>
             <div className={styles.kpiValue}>{totalSupply.toFixed(0)}%</div>
             <div className={styles.kpiMeta}>{(supplyLines || []).length} lines</div>
+            <div className={styles.kpiCardViewDetails}>
+              <Info24Regular /> View details
+            </div>
           </Card>
           <Card
-            className={styles.kpiCard}
+            className={`${styles.kpiCard} ${styles.kpiCardClickable}`}
             style={{
               borderLeft: `4px solid ${gap < 0 ? tokens.colorPaletteRedBorderActive : gap > 0 ? tokens.colorPaletteGreenBorderActive : tokens.colorNeutralStroke2}`,
             }}
+            role="button"
+            tabIndex={0}
+            onClick={() => setKpiDetailModal('gap')}
+            onKeyDown={(e) => handleKpiCardKeyDown(e, 'gap')}
           >
             <div className={styles.kpiLabel}>Gap</div>
             <div
@@ -425,14 +509,21 @@ export function Dashboard() {
               {gap.toFixed(0)}%
             </div>
             <div className={styles.kpiMeta}>Supply &minus; Demand</div>
+            <div className={styles.kpiCardViewDetails}>
+              <Info24Regular /> View details
+            </div>
           </Card>
 
           {/* Utilization KPI */}
           <Card
-            className={styles.kpiCard}
+            className={`${styles.kpiCard} ${styles.kpiCardClickable}`}
             style={{
               borderLeft: `4px solid ${utilizationColor}`,
             }}
+            role="button"
+            tabIndex={0}
+            onClick={() => setKpiDetailModal('utilization')}
+            onKeyDown={(e) => handleKpiCardKeyDown(e, 'utilization')}
           >
             <div className={styles.kpiLabel}>Utilization</div>
             <div className={styles.kpiValue} style={{ color: utilizationColor }}>
@@ -449,9 +540,173 @@ export function Dashboard() {
                       ? 'Under-utilized'
                       : 'No supply data'}
             </div>
+            <div className={styles.kpiCardViewDetails}>
+              <Info24Regular /> View details
+            </div>
           </Card>
         </div>
       </div>
+
+      {/* ── KPI Detail Modal ── */}
+      <Dialog open={kpiDetailModal !== null} onOpenChange={(_, data) => !data.open && setKpiDetailModal(null)}>
+        <DialogSurface style={{ maxWidth: '560px' }}>
+          <DialogBody>
+            <DialogTitle>
+              {kpiDetailModal === 'demand' && 'Total Demand'}
+              {kpiDetailModal === 'supply' && 'Total Supply'}
+              {kpiDetailModal === 'gap' && 'Gap'}
+              {kpiDetailModal === 'utilization' && 'Utilization'}
+            </DialogTitle>
+            <DialogContent>
+              <div className={styles.kpiDetailPeriod}>
+                For period: {currentPeriodLabel}
+              </div>
+
+              {kpiDetailModal === 'demand' && (
+                <>
+                  <Body1 className={styles.kpiDetailDefinition}>
+                    Total FTE % requested for the selected period across all demand lines (project allocations).
+                  </Body1>
+                  <div className={styles.kpiDetailFormula}>Formula: Sum of all demand line FTE %.</div>
+                  <div className={styles.kpiDetailTableWrap}>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHeaderCell>Project</TableHeaderCell>
+                          <TableHeaderCell>Resource / Placeholder</TableHeaderCell>
+                          <TableHeaderCell>Department</TableHeaderCell>
+                          <TableHeaderCell>FTE %</TableHeaderCell>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(demandLines || []).map((d: any) => (
+                          <TableRow key={d.id}>
+                            <TableCell>{d.project_name || 'Unknown'}</TableCell>
+                            <TableCell>{d.resource_name || d.placeholder_name || '—'}</TableCell>
+                            <TableCell>{d.department_name || 'Unassigned'}</TableCell>
+                            <TableCell>{d.fte_percent ?? 0}%</TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow className={styles.kpiDetailSummaryRow}>
+                          <TableCell colSpan={3}>Total</TableCell>
+                          <TableCell>{totalDemand.toFixed(0)}%</TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </div>
+                </>
+              )}
+
+              {kpiDetailModal === 'supply' && (
+                <>
+                  <Body1 className={styles.kpiDetailDefinition}>
+                    Total FTE % available for the selected period across all supply lines (resource capacity).
+                  </Body1>
+                  <div className={styles.kpiDetailFormula}>Formula: Sum of all supply line FTE %.</div>
+                  <div className={styles.kpiDetailTableWrap}>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHeaderCell>Resource</TableHeaderCell>
+                          <TableHeaderCell>Department</TableHeaderCell>
+                          <TableHeaderCell>Project</TableHeaderCell>
+                          <TableHeaderCell>FTE %</TableHeaderCell>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(supplyLines || []).map((s: any) => (
+                          <TableRow key={s.id}>
+                            <TableCell>{s.resource_name || 'Unknown'}</TableCell>
+                            <TableCell>{s.department_name || 'Unassigned'}</TableCell>
+                            <TableCell>{s.project_name || '—'}</TableCell>
+                            <TableCell>{s.fte_percent ?? 0}%</TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow className={styles.kpiDetailSummaryRow}>
+                          <TableCell colSpan={3}>Total</TableCell>
+                          <TableCell>{totalSupply.toFixed(0)}%</TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </div>
+                </>
+              )}
+
+              {kpiDetailModal === 'gap' && (
+                <>
+                  <Body1 className={styles.kpiDetailDefinition}>
+                    Difference between available capacity (Supply) and requested allocation (Demand).
+                  </Body1>
+                  <div className={styles.kpiDetailFormula}>
+                    Gap = Total Supply − Total Demand. Positive = surplus capacity; negative = over-committed.
+                  </div>
+                  <Table>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell>Total Demand</TableCell>
+                        <TableCell>{totalDemand.toFixed(0)}%</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>Total Supply</TableCell>
+                        <TableCell>{totalSupply.toFixed(0)}%</TableCell>
+                      </TableRow>
+                      <TableRow className={styles.kpiDetailSummaryRow}>
+                        <TableCell>Gap (Supply − Demand)</TableCell>
+                        <TableCell style={{ color: gap < 0 ? tokens.colorPaletteRedForeground1 : gap > 0 ? tokens.colorPaletteGreenForeground1 : undefined }}>
+                          {gap >= 0 ? '+' : ''}{gap.toFixed(0)}%
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </>
+              )}
+
+              {kpiDetailModal === 'utilization' && (
+                <>
+                  <Body1 className={styles.kpiDetailDefinition}>
+                    Share of available capacity that is allocated to demand (Demand / Supply).
+                  </Body1>
+                  <div className={styles.kpiDetailFormula}>
+                    Utilization = (Total Demand ÷ Total Supply) × 100%. Over 100% means over-committed.
+                  </div>
+                  <Table>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell>Total Demand</TableCell>
+                        <TableCell>{totalDemand.toFixed(0)}%</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>Total Supply</TableCell>
+                        <TableCell>{totalSupply.toFixed(0)}%</TableCell>
+                      </TableRow>
+                      <TableRow className={styles.kpiDetailSummaryRow}>
+                        <TableCell>Utilization</TableCell>
+                        <TableCell style={{ color: utilizationColor }}>
+                          {totalSupply > 0 ? `${utilization}%` : '—'}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                  <Body1 className={styles.kpiDetailDefinition} style={{ marginTop: tokens.spacingVerticalM }}>
+                    {utilization > 120
+                      ? 'Over-committed: demand exceeds supply by more than 20%.'
+                      : utilization > 100
+                        ? 'Slightly over: demand exceeds supply.'
+                        : utilization >= 70
+                          ? 'Healthy: most capacity is allocated.'
+                          : totalSupply > 0
+                            ? 'Under-utilized: significant capacity is not allocated to demand.'
+                            : 'No supply data for this period.'}
+                  </Body1>
+                </>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="secondary" onClick={() => setKpiDetailModal(null)}>Close</Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
 
       {/* ── Breakdown Charts (all roles) ── */}
       {selectedPeriodId && (

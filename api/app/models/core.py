@@ -162,6 +162,7 @@ class Resource(Base):
     cost_center_id: Mapped[str] = mapped_column(String(36), ForeignKey("cost_centers.id"), nullable=False)
     employee_id: Mapped[str] = mapped_column(String(50), nullable=False)  # HR employee ID
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    initials: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     resource_type: Mapped[ResourceType] = mapped_column(
         SQLEnum(ResourceType, values_callable=lambda x: [e.value for e in x]),

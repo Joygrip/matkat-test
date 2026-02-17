@@ -48,6 +48,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { EmptyState } from '../components/EmptyState';
 import { StatusBanner } from '../components/StatusBanner';
 import { LoadingState } from '../components/LoadingState';
+import { ResourcePicker } from '../components/ResourcePicker';
 
 const useStyles = makeStyles({
   container: {
@@ -448,15 +449,12 @@ export const Supply: React.FC = () => {
                     )}
                     <div className={styles.formField}>
                       <label className={styles.formLabel}>Resource</label>
-                      <Select
-                        value={formData.resource_id}
-                        onChange={(_, data) => setFormData({ ...formData, resource_id: data.value })}
-                      >
-                        <option value="">Select resource...</option>
-                        {resources.map(r => (
-                          <option key={r.id} value={r.id}>{r.display_name}</option>
-                        ))}
-                      </Select>
+                      <ResourcePicker
+                        resources={resources}
+                        value={formData.resource_id || ''}
+                        onChange={(id) => setFormData({ ...formData, resource_id: id })}
+                        placeholder="Type name or initials..."
+                      />
                     </div>
                     
                     <div className={styles.formField}>

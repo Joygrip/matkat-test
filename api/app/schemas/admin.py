@@ -105,6 +105,7 @@ class ResourceBase(BaseModel):
     cost_center_id: str
     employee_id: str
     display_name: str
+    initials: Optional[str] = None
     email: Optional[str] = None
     user_id: Optional[str] = None
     resource_type: str = "Employee"  # Employee | External | Student | OOP
@@ -119,6 +120,7 @@ class ResourceUpdate(BaseModel):
     cost_center_id: Optional[str] = None
     employee_id: Optional[str] = None
     display_name: Optional[str] = None
+    initials: Optional[str] = None
     email: Optional[str] = None
     user_id: Optional[str] = None
     resource_type: Optional[str] = None

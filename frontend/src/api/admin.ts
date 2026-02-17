@@ -48,6 +48,7 @@ export interface Resource {
   cost_center_id: string;
   employee_id: string;
   display_name: string;
+  initials?: string | null;
   email: string | null;
   user_id: string | null;
   resource_type: ResourceType;

@@ -45,6 +45,8 @@ import { useAuth } from '../auth/AuthProvider';
 import { StatusBanner } from '../components/StatusBanner';
 import { EmptyState } from '../components/EmptyState';
 import { LoadingState } from '../components/LoadingState';
+import { ResourcePicker } from '../components/ResourcePicker';
+import { PlaceholderPicker } from '../components/PlaceholderPicker';
 
 const useStyles = makeStyles({
   container: {
@@ -547,15 +549,12 @@ export const Demand: React.FC = () => {
                     {useResource ? (
                       <div className={styles.formField}>
                         <label className={styles.formLabel}>Resource</label>
-                        <Select
+                        <ResourcePicker
+                          resources={resources}
                           value={formData.resource_id || ''}
-                          onChange={(_, data) => setFormData({ ...formData, resource_id: data.value })}
-                        >
-                          <option value="">Select resource...</option>
-                          {resources.map(r => (
-                            <option key={r.id} value={r.id}>{r.display_name}</option>
-                          ))}
-                        </Select>
+                          onChange={(id) => setFormData({ ...formData, resource_id: id })}
+                          placeholder="Type name or initials..."
+                        />
                       </div>
                     ) : (
                       <>
@@ -576,17 +575,12 @@ export const Demand: React.FC = () => {
                         </div>
                         <div className={styles.formField}>
                           <label className={styles.formLabel}>Placeholder</label>
-                          <Select
+                          <PlaceholderPicker
+                            placeholders={filteredPlaceholders}
                             value={formData.placeholder_id || ''}
-                            onChange={(_, data) => setFormData({ ...formData, placeholder_id: data.value })}
-                          >
-                            <option value="">Select placeholder...</option>
-                            {filteredPlaceholders.map(p => (
-                              <option key={p.id} value={p.id}>
-                                {p.name}{p.department_name ? ` (${p.department_name})` : ''}
-                              </option>
-                            ))}
-                          </Select>
+                            onChange={(id) => setFormData({ ...formData, placeholder_id: id })}
+                            placeholder="Type placeholder name..."
+                          />
                         </div>
                       </>
                     )}

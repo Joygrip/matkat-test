@@ -100,6 +100,34 @@ To enter and test actuals locally:
    - `api/.env` should have `DEV_AUTH_BYPASS=true`
    - `frontend/.env.local` should have `VITE_DEV_AUTH_BYPASS=true`
 
+### "no such column" or HTTP 500 (INTERNAL_ERROR) on resources
+
+If you see an error like `no such column: resources.initials`, the database your backend uses does not have the new column yet. Fix it by adding the column to **the same database file the backend uses**.
+
+**Option A – Script with full path to your database (most reliable):**
+
+1. Find the database file. If you use `DATABASE_URL=sqlite:///./api/dev.db` and start the backend from the repo root, the file is `api\dev.db` under that root (e.g. `C:\Users\pawel\Documents\GitHub\matkat-test\api\dev.db`).
+2. From the repo root, run (use your actual path):
+```powershell
+$env:PYTHONPATH = (Get-Location).Path
+python api/script_add_initials_column.py "C:\Users\pawel\Documents\GitHub\matkat-test\api\dev.db"
+```
+3. Restart the backend and reload the app.
+
+**Option B – Alembic:**  
+Run from the **same directory** you use when starting the backend (so the same `dev.db` is used):
+```powershell
+cd api
+python -m alembic upgrade head
+```
+
+**Option C – Script without path:**  
+From repo root, same `DATABASE_URL` as the backend. The script tries `api/dev.db`, `dev.db`, and `test.db` under the repo:
+```powershell
+$env:PYTHONPATH = (Get-Location).Path
+python api/script_add_initials_column.py
+```
+
 ### "Cannot reach API" or HTTP 0 (NETWORK_ERROR)
 
 If the app shows "Cannot reach the API" or requests fail with a network error when adding actuals or calling the API:

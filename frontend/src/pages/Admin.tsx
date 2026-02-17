@@ -106,6 +106,8 @@ export function Admin() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<unknown>(null);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
+  const [detailItem, setDetailItem] = useState<Resource | Placeholder | null>(null);
+  const [detailType, setDetailType] = useState<'resource' | 'placeholder' | null>(null);
   
   useEffect(() => {
     loadData();
@@ -205,6 +207,7 @@ export function Admin() {
               cost_center_id: string;
               employee_id: string;
               display_name: string;
+              initials?: string;
               resource_type?: string;
             });
           }
@@ -407,6 +410,7 @@ export function Admin() {
               <TableRow>
                 <TableHeaderCell>Employee ID</TableHeaderCell>
                 <TableHeaderCell>Name</TableHeaderCell>
+                <TableHeaderCell>Initials</TableHeaderCell>
                 <TableHeaderCell>Cost Center</TableHeaderCell>
                 <TableHeaderCell>Type</TableHeaderCell>
                 <TableHeaderCell>Actions</TableHeaderCell>
@@ -414,16 +418,21 @@ export function Admin() {
             </TableHeader>
             <TableBody>
               {resources.map((resource) => (
-                <TableRow key={resource.id}>
+                <TableRow
+                  key={resource.id}
+                  onClick={() => { setDetailItem(resource); setDetailType('resource'); }}
+                  style={{ cursor: 'pointer' }}
+                >
                   <TableCell>{resource.employee_id}</TableCell>
                   <TableCell>{resource.display_name}</TableCell>
+                  <TableCell>{resource.initials ?? '-'}</TableCell>
                   <TableCell>{costCenters.find(cc => cc.id === resource.cost_center_id)?.name || '-'}</TableCell>
                   <TableCell>
                     <Badge color={resource.resource_type === 'Employee' ? 'brand' : 'warning'}>
                       {resource.resource_type}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     {canManageMasterData && (
                       <>
                         <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(resource)} />
@@ -451,7 +460,11 @@ export function Admin() {
             </TableHeader>
             <TableBody>
               {placeholders.map((ph) => (
-                <TableRow key={ph.id}>
+                <TableRow
+                  key={ph.id}
+                  onClick={() => { setDetailItem(ph); setDetailType('placeholder'); }}
+                  style={{ cursor: 'pointer' }}
+                >
                   <TableCell>{ph.cost_center_name || '-'}</TableCell>
                   <TableCell>{ph.name}</TableCell>
                   <TableCell>{ph.skill_profile || '-'}</TableCell>
@@ -460,7 +473,7 @@ export function Admin() {
                       {ph.is_active ? 'Active' : 'Inactive'}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     {canManageMasterData && (
                       <>
                         <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(ph)} />
@@ -638,6 +651,13 @@ export function Admin() {
               <Input
                 value={String(formData.display_name || '')}
                 onChange={(_, d) => setFormData({ ...formData, display_name: d.value })}
+              />
+            </div>
+            <div className={styles.dialogField}>
+              <Label>Initials</Label>
+              <Input
+                value={String(formData.initials ?? '')}
+                onChange={(_, d) => setFormData({ ...formData, initials: d.value })}
               />
             </div>
             <div className={styles.dialogField}>
@@ -839,6 +859,49 @@ export function Admin() {
               <Button appearance="primary" onClick={handleSave}>
                 Save
               </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+      
+      {/* Detail dialog for resource or placeholder */}
+      <Dialog open={detailItem != null} onOpenChange={(_, data) => { if (!data.open) { setDetailItem(null); setDetailType(null); } }}>
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>
+              {detailType === 'resource' ? 'Resource details' : 'Placeholder details'}
+            </DialogTitle>
+            <DialogContent>
+              {detailType === 'resource' && detailItem && 'display_name' in detailItem && (
+                <div className={styles.dialogField}>
+                  <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: '120px 1fr' }}>
+                    <span style={{ fontWeight: 600 }}>Employee ID</span><span>{(detailItem as Resource).employee_id}</span>
+                    <span style={{ fontWeight: 600 }}>Display name</span><span>{(detailItem as Resource).display_name}</span>
+                    <span style={{ fontWeight: 600 }}>Initials</span><span>{(detailItem as Resource).initials ?? '-'}</span>
+                    <span style={{ fontWeight: 600 }}>Email</span><span>{(detailItem as Resource).email ?? '-'}</span>
+                    <span style={{ fontWeight: 600 }}>Cost Center</span><span>{costCenters.find(cc => cc.id === (detailItem as Resource).cost_center_id)?.name ?? '-'}</span>
+                    <span style={{ fontWeight: 600 }}>Type</span><span>{(detailItem as Resource).resource_type}</span>
+                    <span style={{ fontWeight: 600 }}>Hourly cost</span><span>{(detailItem as Resource).hourly_cost != null ? (detailItem as Resource).hourly_cost : '-'}</span>
+                    <span style={{ fontWeight: 600 }}>Active</span><span>{(detailItem as Resource).is_active ? 'Yes' : 'No'}</span>
+                  </div>
+                </div>
+              )}
+              {detailType === 'placeholder' && detailItem && 'cost_center_id' in detailItem && (
+                <div className={styles.dialogField}>
+                  <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: '120px 1fr' }}>
+                    <span style={{ fontWeight: 600 }}>Name</span><span>{(detailItem as Placeholder).name}</span>
+                    <span style={{ fontWeight: 600 }}>Cost Center</span><span>{(detailItem as Placeholder).cost_center_name ?? '-'}</span>
+                    <span style={{ fontWeight: 600 }}>Department</span><span>{(detailItem as Placeholder).department_name ?? '-'}</span>
+                    <span style={{ fontWeight: 600 }}>Description</span><span>{(detailItem as Placeholder).description ?? '-'}</span>
+                    <span style={{ fontWeight: 600 }}>Skill profile</span><span>{(detailItem as Placeholder).skill_profile ?? '-'}</span>
+                    <span style={{ fontWeight: 600 }}>Estimated cost</span><span>{(detailItem as Placeholder).estimated_cost != null ? (detailItem as Placeholder).estimated_cost : '-'}</span>
+                    <span style={{ fontWeight: 600 }}>Active</span><span>{(detailItem as Placeholder).is_active ? 'Yes' : 'No'}</span>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="primary" onClick={() => { setDetailItem(null); setDetailType(null); }}>Close</Button>
             </DialogActions>
           </DialogBody>
         </DialogSurface>

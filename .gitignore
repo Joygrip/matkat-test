@@ -17,10 +17,10 @@ htmlcov/
 *.log
 
 # Database
-*.db
+#*.db
 *.sqlite
 *.sqlite3
-dev.db
+#dev.db
 test.db
 
 # Environment variables

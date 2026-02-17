@@ -112,6 +112,11 @@ class CostCenter(Base):
         foreign_keys=[ro_user_id],
     )
     resources: Mapped[list["Resource"]] = relationship(back_populates="cost_center")
+    placeholders: Mapped[list["Placeholder"]] = relationship(
+        "Placeholder",
+        back_populates="cost_center",
+        foreign_keys="[Placeholder.cost_center_id]",
+    )
     
     __table_args__ = (
         Index("ix_cost_centers_tenant_code", "tenant_id", "code", unique=True),
@@ -139,6 +144,14 @@ class Project(Base):
     )
 
 
+class ResourceType(str, enum.Enum):
+    """Resource type: Employee, External, Student, or OOP (out-of-pool e.g. colleagues from Poland)."""
+    EMPLOYEE = "Employee"
+    EXTERNAL = "External"
+    STUDENT = "Student"
+    OOP = "OOP"
+
+
 class Resource(Base):
     """Resource entity - an assignable person."""
     __tablename__ = "resources"
@@ -150,10 +163,11 @@ class Resource(Base):
     employee_id: Mapped[str] = mapped_column(String(50), nullable=False)  # HR employee ID
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    is_external: Mapped[bool] = mapped_column(Boolean, default=False)
-    is_student: Mapped[bool] = mapped_column(Boolean, default=False)
-    is_operator: Mapped[bool] = mapped_column(Boolean, default=False)
-    is_equipment: Mapped[bool] = mapped_column(Boolean, default=False)
+    resource_type: Mapped[ResourceType] = mapped_column(
+        SQLEnum(ResourceType, values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+        default=ResourceType.EMPLOYEE,
+    )
     hourly_cost: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # For OoP tracking
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -169,7 +183,7 @@ class Resource(Base):
     @property
     def is_oop(self) -> bool:
         """Check if resource is Out of Pool (excluded from internal FTE)."""
-        return self.is_external or self.is_student or self.is_operator or self.is_equipment
+        return self.resource_type != ResourceType.EMPLOYEE
 
 
 class Period(Base):
@@ -193,13 +207,13 @@ class Period(Base):
 
 
 class Placeholder(Base):
-    """Placeholder for future/unknown resource allocation."""
+    """Placeholder for future/unknown resource allocation. One per cost center."""
     __tablename__ = "placeholders"
     
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     department_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("departments.id"), nullable=True)
-    cost_center_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("cost_centers.id"), nullable=True)
+    cost_center_id: Mapped[str] = mapped_column(String(36), ForeignKey("cost_centers.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     skill_profile: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -210,10 +224,14 @@ class Placeholder(Base):
     
     # Relationships
     department: Mapped[Optional["Department"]] = relationship("Department")
-    cost_center: Mapped[Optional["CostCenter"]] = relationship("CostCenter")
+    cost_center: Mapped["CostCenter"] = relationship(
+        "CostCenter",
+        back_populates="placeholders",
+        foreign_keys=[cost_center_id],
+    )
     
     __table_args__ = (
-        Index("ix_placeholders_tenant_name_dept", "tenant_id", "name", "department_id", unique=True),
+        Index("ix_placeholders_tenant_cost_center", "tenant_id", "cost_center_id", unique=True),
     )
 
 

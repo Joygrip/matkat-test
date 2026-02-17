@@ -97,17 +97,17 @@ class ProjectResponse(ProjectBase):
         from_attributes = True
 
 
-# Resource schemas
+# Resource schemas - resource_type: Employee | External | Student | OOP
+ResourceTypeLiteral = str  # "Employee" | "External" | "Student" | "OOP"
+
+
 class ResourceBase(BaseModel):
     cost_center_id: str
     employee_id: str
     display_name: str
     email: Optional[str] = None
     user_id: Optional[str] = None
-    is_external: bool = False
-    is_student: bool = False
-    is_operator: bool = False
-    is_equipment: bool = False
+    resource_type: str = "Employee"  # Employee | External | Student | OOP
     hourly_cost: Optional[int] = None
 
 
@@ -121,10 +121,7 @@ class ResourceUpdate(BaseModel):
     display_name: Optional[str] = None
     email: Optional[str] = None
     user_id: Optional[str] = None
-    is_external: Optional[bool] = None
-    is_student: Optional[bool] = None
-    is_operator: Optional[bool] = None
-    is_equipment: Optional[bool] = None
+    resource_type: Optional[str] = None
     hourly_cost: Optional[int] = None
     is_active: Optional[bool] = None
 
@@ -133,7 +130,7 @@ class ResourceResponse(ResourceBase):
     id: str
     tenant_id: str
     is_active: bool
-    is_oop: bool  # Computed property
+    is_oop: bool  # Computed: resource_type != "Employee"
     created_at: datetime
     updated_at: datetime
     
@@ -141,24 +138,28 @@ class ResourceResponse(ResourceBase):
         from_attributes = True
 
 
-# Placeholder schemas
+# Placeholder schemas - one placeholder per cost center; cost_center_id required
 class PlaceholderBase(BaseModel):
     name: str
     department_id: Optional[str] = None
-    cost_center_id: Optional[str] = None
+    cost_center_id: str  # Required; one placeholder per cost center
     description: Optional[str] = None
     skill_profile: Optional[str] = None
     estimated_cost: Optional[int] = None
 
 
-class PlaceholderCreate(PlaceholderBase):
-    department_id: str  # Required on create
+class PlaceholderCreate(BaseModel):
+    """Create placeholder (e.g. when adding a cost center). Requires cost_center_id."""
+    cost_center_id: str
+    name: Optional[str] = None  # Default "Placeholder" if not set
+    description: Optional[str] = None
+    skill_profile: Optional[str] = None
+    estimated_cost: Optional[int] = None
 
 
 class PlaceholderUpdate(BaseModel):
+    """Update placeholder; cost_center_id cannot be changed."""
     name: Optional[str] = None
-    department_id: Optional[str] = None
-    cost_center_id: Optional[str] = None
     description: Optional[str] = None
     skill_profile: Optional[str] = None
     estimated_cost: Optional[int] = None
@@ -169,7 +170,7 @@ class PlaceholderResponse(PlaceholderBase):
     id: str
     tenant_id: str
     department_id: Optional[str] = None
-    cost_center_id: Optional[str] = None
+    cost_center_id: str
     department_name: Optional[str] = None
     cost_center_name: Optional[str] = None
     is_active: bool

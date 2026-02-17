@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from api.app.config import get_settings
 from api.app.db.engine import get_db
 from api.app.models.core import (
-    User, Department, CostCenter, Project, Resource, Period, Placeholder,
+    User, Department, CostCenter, Project, Resource, ResourceType, Period, Placeholder,
     UserRole, PeriodStatus,
 )
 from api.app.schemas.common import MessageResponse
@@ -158,26 +158,18 @@ def seed_database_for_tenant(db: Session, tenant_id: str) -> str:
             cost_center_id=cc_software.id,
             employee_id="EXT-001",
             display_name="External Contractor",
-            is_external=True,
+            resource_type=ResourceType.EXTERNAL,
         ),
     ]
     db.add_all(resources)
-    # Create placeholders (with department/cost center context)
+    # One placeholder per cost center
     placeholders = [
         Placeholder(
             tenant_id=tenant_id,
-            name="Senior Developer TBH",
+            cost_center_id=cc_software.id,
+            name="Placeholder: Software Development",
             description="Senior developer to be hired",
             skill_profile="Senior Full-Stack",
-            department_id=dept_engineering.id,
-            cost_center_id=cc_software.id,
-        ),
-        Placeholder(
-            tenant_id=tenant_id,
-            name="Junior Developer TBH",
-            description="Junior developer to be hired",
-            skill_profile="Junior Backend",
-            department_id=dept_engineering.id,
         ),
     ]
     db.add_all(placeholders)

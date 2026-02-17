@@ -239,7 +239,7 @@ def test_oop_resource_flag(client, admin_headers, db):
             "cost_center_id": cc_id,
             "employee_id": "EXT-100",
             "display_name": "External Contractor",
-            "is_external": True,
+            "resource_type": "External",
         },
         headers=admin_headers,
     )
@@ -248,33 +248,39 @@ def test_oop_resource_flag(client, admin_headers, db):
 
 
 def test_crud_placeholder(client, admin_headers, db):
-    """Test CRUD for placeholders with department_id."""
-    # Create a department first (required for placeholder)
+    """Test placeholders: one per cost center; create cost center auto-creates placeholder; update placeholder."""
+    # Create department and cost center (cost center create auto-creates a placeholder)
     dept_resp = client.post(
         "/admin/departments",
         json={"code": "PH-DEPT", "name": "Placeholder Dept"},
         headers=admin_headers,
     )
     dept_id = dept_resp.json()["id"]
-
-    # Create
-    create_resp = client.post(
-        "/admin/placeholders",
-        json={
-            "name": "Senior Developer TBH",
-            "skill_profile": "Full-Stack Senior",
-            "department_id": dept_id,
-        },
+    cc_resp = client.post(
+        "/admin/cost-centers",
+        json={"department_id": dept_id, "code": "CC-PH", "name": "Placeholder CC"},
         headers=admin_headers,
     )
-    assert create_resp.status_code == 200
-    placeholder_id = create_resp.json()["id"]
-    assert create_resp.json()["department_id"] == dept_id
-    assert create_resp.json()["department_name"] == "Placeholder Dept"
-    
-    # List
+    assert cc_resp.status_code == 200
+    cc_id = cc_resp.json()["id"]
+
+    # List placeholders - should include the one auto-created for the cost center
     list_resp = client.get("/admin/placeholders", headers=admin_headers)
-    assert len(list_resp.json()) >= 1
+    assert list_resp.status_code == 200
+    placeholders = [p for p in list_resp.json() if p.get("cost_center_id") == cc_id]
+    assert len(placeholders) >= 1
+    placeholder_id = placeholders[0]["id"]
+    assert "Placeholder:" in placeholders[0]["name"]
+
+    # Update placeholder name and skill profile
+    update_resp = client.patch(
+        f"/admin/placeholders/{placeholder_id}",
+        json={"name": "Senior Developer TBH", "skill_profile": "Full-Stack Senior"},
+        headers=admin_headers,
+    )
+    assert update_resp.status_code == 200
+    assert update_resp.json()["name"] == "Senior Developer TBH"
+    assert update_resp.json()["cost_center_id"] == cc_id
 
 
 def test_crud_settings(client, admin_headers, db):

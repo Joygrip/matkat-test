@@ -154,9 +154,17 @@ async def create_cost_center(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(*MASTER_DATA_WRITE_ROLES)),
 ):
-    """Create a new cost center. (Admin, Finance)"""
+    """Create a new cost center. (Admin, Finance) Auto-creates one placeholder per cost center."""
     cc = CostCenter(tenant_id=current_user.tenant_id, **data.model_dump())
     db.add(cc)
+    db.flush()
+    # One placeholder per cost center
+    placeholder = Placeholder(
+        tenant_id=current_user.tenant_id,
+        cost_center_id=cc.id,
+        name=f"Placeholder: {cc.name}",
+    )
+    db.add(placeholder)
     db.commit()
     db.refresh(cc)
     log_audit(db, current_user, "create", "CostCenter", cc.id, new_values=data.model_dump())
@@ -203,6 +211,14 @@ async def delete_cost_center(
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Cost center not found"})
     
     cc.is_active = False
+    # Soft-deactivate the cost center's placeholder
+    for ph in db.query(Placeholder).filter(
+        and_(
+            Placeholder.cost_center_id == cost_center_id,
+            Placeholder.tenant_id == current_user.tenant_id,
+        )
+    ).all():
+        ph.is_active = False
     db.commit()
     log_audit(db, current_user, "delete", "CostCenter", cc.id)
     return {"message": "Cost center deleted"}
@@ -439,8 +455,17 @@ async def create_placeholder(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(*MASTER_DATA_WRITE_ROLES)),
 ):
-    """Create a new placeholder. (Admin, Finance)"""
-    placeholder = Placeholder(tenant_id=current_user.tenant_id, **data.model_dump())
+    """Create a new placeholder for a cost center. (Admin, Finance) One per cost center."""
+    dump = data.model_dump(exclude_unset=True)
+    name = dump.pop("name", None) or "Placeholder"
+    placeholder = Placeholder(
+        tenant_id=current_user.tenant_id,
+        cost_center_id=data.cost_center_id,
+        name=name,
+        description=dump.get("description"),
+        skill_profile=dump.get("skill_profile"),
+        estimated_cost=dump.get("estimated_cost"),
+    )
     db.add(placeholder)
     db.commit()
     db.refresh(placeholder)

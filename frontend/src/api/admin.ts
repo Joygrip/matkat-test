@@ -40,6 +40,8 @@ export interface Project {
   updated_at: string;
 }
 
+export type ResourceType = 'Employee' | 'External' | 'Student' | 'OOP';
+
 export interface Resource {
   id: string;
   tenant_id: string;
@@ -48,10 +50,7 @@ export interface Resource {
   display_name: string;
   email: string | null;
   user_id: string | null;
-  is_external: boolean;
-  is_student: boolean;
-  is_operator: boolean;
-  is_equipment: boolean;
+  resource_type: ResourceType;
   hourly_cost: number | null;
   is_active: boolean;
   is_oop: boolean;
@@ -130,10 +129,7 @@ export const adminApi = {
     employee_id: string;
     display_name: string;
     email?: string;
-    is_external?: boolean;
-    is_student?: boolean;
-    is_operator?: boolean;
-    is_equipment?: boolean;
+    resource_type?: ResourceType;
     hourly_cost?: number;
   }) => apiClient.post<Resource>('/admin/resources', data),
   updateResource: (id: string, data: Partial<Resource>) =>
@@ -143,7 +139,7 @@ export const adminApi = {
 
   // Placeholders
   listPlaceholders: () => apiClient.get<Placeholder[]>('/admin/placeholders'),
-  createPlaceholder: (data: { name: string; description?: string; skill_profile?: string; estimated_cost?: number }) =>
+  createPlaceholder: (data: { cost_center_id: string; name?: string; description?: string; skill_profile?: string; estimated_cost?: number }) =>
     apiClient.post<Placeholder>('/admin/placeholders', data),
   updatePlaceholder: (id: string, data: Partial<Placeholder>) =>
     apiClient.patch<Placeholder>(`/admin/placeholders/${id}`, data),

@@ -205,14 +205,13 @@ export function Admin() {
               cost_center_id: string;
               employee_id: string;
               display_name: string;
+              resource_type?: string;
             });
           }
           break;
         case 'placeholders':
           if (editItem) {
             await adminApi.updatePlaceholder((editItem as Placeholder).id, formData as Partial<Placeholder>);
-          } else {
-            await adminApi.createPlaceholder(formData as { name: string });
           }
           break;
         case 'holidays':
@@ -408,11 +407,9 @@ export function Admin() {
                   <TableCell>{resource.display_name}</TableCell>
                   <TableCell>{costCenters.find(cc => cc.id === resource.cost_center_id)?.name || '-'}</TableCell>
                   <TableCell>
-                    {resource.is_oop ? (
-                      <Badge color="warning">OoP</Badge>
-                    ) : (
-                      <Badge color="brand">Internal</Badge>
-                    )}
+                    <Badge color={resource.resource_type === 'Employee' ? 'brand' : 'warning'}>
+                      {resource.resource_type}
+                    </Badge>
                   </TableCell>
                   <TableCell>
                     {canManageMasterData && (
@@ -433,7 +430,8 @@ export function Admin() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>Name</TableHeaderCell>
+                <TableHeaderCell>Cost Center</TableHeaderCell>
+                <TableHeaderCell>Placeholder Name</TableHeaderCell>
                 <TableHeaderCell>Skill Profile</TableHeaderCell>
                 <TableHeaderCell>Status</TableHeaderCell>
                 <TableHeaderCell>Actions</TableHeaderCell>
@@ -442,6 +440,7 @@ export function Admin() {
             <TableBody>
               {placeholders.map((ph) => (
                 <TableRow key={ph.id}>
+                  <TableCell>{ph.cost_center_name || '-'}</TableCell>
                   <TableCell>{ph.name}</TableCell>
                   <TableCell>{ph.skill_profile || '-'}</TableCell>
                   <TableCell>
@@ -453,7 +452,7 @@ export function Admin() {
                     {canManageMasterData && (
                       <>
                         <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(ph)} />
-                        <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(ph)} />
+                        <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(ph)} title="Deactivate" />
                       </>
                     )}
                   </TableCell>
@@ -636,27 +635,18 @@ export function Admin() {
                 onChange={(_, d) => setFormData({ ...formData, email: d.value })}
               />
             </div>
-            <div className={styles.checkboxGroup}>
-              <Checkbox
-                label="External"
-                checked={Boolean(formData.is_external)}
-                onChange={(_, d) => setFormData({ ...formData, is_external: d.checked })}
-              />
-              <Checkbox
-                label="Student"
-                checked={Boolean(formData.is_student)}
-                onChange={(_, d) => setFormData({ ...formData, is_student: d.checked })}
-              />
-              <Checkbox
-                label="Operator"
-                checked={Boolean(formData.is_operator)}
-                onChange={(_, d) => setFormData({ ...formData, is_operator: d.checked })}
-              />
-              <Checkbox
-                label="Equipment"
-                checked={Boolean(formData.is_equipment)}
-                onChange={(_, d) => setFormData({ ...formData, is_equipment: d.checked })}
-              />
+            <div className={styles.dialogField}>
+              <Label>Resource type</Label>
+              <select
+                value={String(formData.resource_type || 'Employee')}
+                onChange={(e) => setFormData({ ...formData, resource_type: e.target.value })}
+                style={{ padding: '8px', borderRadius: '4px' }}
+              >
+                <option value="Employee">Employee</option>
+                <option value="External">External</option>
+                <option value="Student">Student</option>
+                <option value="OOP">OOP</option>
+              </select>
             </div>
           </>
         );
@@ -664,6 +654,12 @@ export function Admin() {
       case 'placeholders':
         return (
           <>
+            {editItem && (
+              <div className={styles.dialogField}>
+                <Label>Cost Center</Label>
+                <Input value={String((editItem as Placeholder).cost_center_name || '-')} readOnly disabled />
+              </div>
+            )}
             <div className={styles.dialogField}>
               <Label required>Name</Label>
               <Input
@@ -772,8 +768,20 @@ export function Admin() {
         
         <div className={styles.tabContent}>
           <div className={styles.header}>
-            <Title3>{tabLabels[selectedTab]}</Title3>
-            {(canManageMasterData || (selectedTab === 'settings' && canManageSettings)) && (
+            <div>
+              <Title3>{tabLabels[selectedTab]}</Title3>
+              {selectedTab === 'cost-centers' && (
+                <p style={{ fontSize: '12px', color: tokens.colorNeutralForeground3, margin: '4px 0 0 0' }}>
+                  A placeholder is created automatically for each cost center.
+                </p>
+              )}
+              {selectedTab === 'placeholders' && (
+                <p style={{ fontSize: '12px', color: tokens.colorNeutralForeground3, margin: '4px 0 0 0' }}>
+                  One placeholder per cost center. Edit name and details here; create cost centers to add placeholders.
+                </p>
+              )}
+            </div>
+            {(canManageMasterData || (selectedTab === 'settings' && canManageSettings)) && selectedTab !== 'placeholders' && (
               <Button
                 appearance="primary"
                 icon={<AddRegular />}

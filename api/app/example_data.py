@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from api.app.models.core import (
-    User, Department, CostCenter, Project, Resource, Period, Placeholder,
+    User, Department, CostCenter, Project, Resource, ResourceType, Period, Placeholder,
     UserRole, PeriodStatus,
 )
 from api.app.models.planning import DemandLine, SupplyLine
@@ -98,18 +98,17 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
         Resource(tenant_id=tenant_id, user_id=users[13].id, cost_center_id=cc_support.id, employee_id="EMP-005", display_name="Eve Support", email="emp5@example.com", is_active=True),
         Resource(tenant_id=tenant_id, cost_center_id=cc_software.id, employee_id="EMP-006", display_name="Frank Developer", email="frank@example.com", is_active=True),
         Resource(tenant_id=tenant_id, cost_center_id=cc_qa.id, employee_id="EMP-007", display_name="Grace Tester", email="grace@example.com", is_active=True),
-        Resource(tenant_id=tenant_id, cost_center_id=cc_software.id, employee_id="EXT-001", display_name="External Contractor", is_external=True, is_active=True),
+        Resource(tenant_id=tenant_id, cost_center_id=cc_software.id, employee_id="EXT-001", display_name="External Contractor", resource_type=ResourceType.EXTERNAL, is_active=True),
         Resource(tenant_id=tenant_id, user_id=users[14].id, cost_center_id=cc_software.id, employee_id="DEV-001", display_name="Dev User", email="dev@example.com", is_active=True),
     ]
     db.add_all(resources)
     db.flush()
     
-    # Create placeholders
+    # Create one placeholder per cost center
+    cost_centers_list = [cc_software, cc_qa, cc_infra, cc_devops, cc_marketing, cc_support]
     placeholders = [
-        Placeholder(tenant_id=tenant_id, name="Senior Full-Stack Developer TBH", description="Senior developer to be hired", skill_profile="Senior Full-Stack"),
-        Placeholder(tenant_id=tenant_id, name="Junior Backend Developer TBH", description="Junior developer to be hired", skill_profile="Junior Backend"),
-        Placeholder(tenant_id=tenant_id, name="QA Engineer TBH", description="QA engineer to be hired", skill_profile="QA Automation"),
-        Placeholder(tenant_id=tenant_id, name="DevOps Engineer TBH", description="DevOps engineer to be hired", skill_profile="DevOps/SRE"),
+        Placeholder(tenant_id=tenant_id, cost_center_id=cc.id, name=f"Placeholder: {cc.name}")
+        for cc in cost_centers_list
     ]
     db.add_all(placeholders)
     db.flush()

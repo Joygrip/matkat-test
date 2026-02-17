@@ -212,6 +212,18 @@ export function Admin() {
         case 'placeholders':
           if (editItem) {
             await adminApi.updatePlaceholder((editItem as Placeholder).id, formData as Partial<Placeholder>);
+          } else {
+            const cost_center_id = formData.cost_center_id as string;
+            if (!cost_center_id?.trim()) {
+              showApiError(new Error('Cost center is required'), 'Validation');
+              return;
+            }
+            await adminApi.createPlaceholder({
+              cost_center_id: cost_center_id.trim(),
+              name: (formData.name as string) || undefined,
+              description: (formData.description as string) || undefined,
+              skill_profile: (formData.skill_profile as string) || undefined,
+            });
           }
           break;
         case 'holidays':
@@ -654,10 +666,24 @@ export function Admin() {
       case 'placeholders':
         return (
           <>
-            {editItem && (
+            {editItem ? (
               <div className={styles.dialogField}>
                 <Label>Cost Center</Label>
                 <Input value={String((editItem as Placeholder).cost_center_name || '-')} readOnly disabled />
+              </div>
+            ) : (
+              <div className={styles.dialogField}>
+                <Label required>Cost Center</Label>
+                <select
+                  value={String(formData.cost_center_id || '')}
+                  onChange={(e) => setFormData({ ...formData, cost_center_id: e.target.value })}
+                  style={{ padding: '8px', borderRadius: '4px' }}
+                >
+                  <option value="">Select Cost Center</option>
+                  {costCenters.map((cc) => (
+                    <option key={cc.id} value={cc.id}>{cc.name}</option>
+                  ))}
+                </select>
               </div>
             )}
             <div className={styles.dialogField}>
@@ -781,7 +807,7 @@ export function Admin() {
                 </p>
               )}
             </div>
-            {(canManageMasterData || (selectedTab === 'settings' && canManageSettings)) && selectedTab !== 'placeholders' && (
+            {(canManageMasterData || (selectedTab === 'settings' && canManageSettings)) && (
               <Button
                 appearance="primary"
                 icon={<AddRegular />}

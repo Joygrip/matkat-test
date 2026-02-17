@@ -456,6 +456,17 @@ async def create_placeholder(
     current_user: CurrentUser = Depends(require_roles(*MASTER_DATA_WRITE_ROLES)),
 ):
     """Create a new placeholder for a cost center. (Admin, Finance) One per cost center."""
+    existing = db.query(Placeholder).filter(
+        and_(
+            Placeholder.tenant_id == current_user.tenant_id,
+            Placeholder.cost_center_id == data.cost_center_id,
+        )
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "PLACEHOLDER_EXISTS", "message": "This cost center already has a placeholder."},
+        )
     dump = data.model_dump(exclude_unset=True)
     name = dump.pop("name", None) or "Placeholder"
     placeholder = Placeholder(

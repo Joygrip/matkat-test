@@ -15,3 +15,10 @@ class FinanceActualsDashboardResponse(BaseModel):
     approval_status: str
     current_approval_step: Optional[str]
     current_approver_name: Optional[str]
+
+class FinanceCostCenterStatsResponse(BaseModel):
+    cost_center_id: str
+    cost_center_name: str
+    demand_fte: float
+    supply_fte: float
+    actuals_fte: float

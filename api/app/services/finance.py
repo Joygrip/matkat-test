@@ -5,7 +5,7 @@ from api.app.auth.dependencies import CurrentUser
 from api.app.models.actuals import ActualLine
 from api.app.models.core import User, Project, Resource, CostCenter
 from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalStatus, StepStatus
-from api.app.schemas.finance import FinanceActualsDashboardResponse
+from api.app.schemas.finance import FinanceActualsDashboardResponse, FinanceCostCenterStatsResponse
 
 class FinanceService:
     def __init__(self, db: Session, current_user: CurrentUser):
@@ -70,3 +70,95 @@ class FinanceService:
                 current_approver_name=current_approver_name,
             ))
         return results
+
+    def get_cost_center_stats(
+        self,
+        year: int,
+        month: int,
+        department_id: Optional[str] = None,
+    ) -> List[FinanceCostCenterStatsResponse]:
+        from api.app.models.planning import DemandLine, SupplyLine
+        from api.app.models.actuals import ActualLine
+        from api.app.models.core import CostCenter, Resource
+        from sqlalchemy import func, and_
+
+        # Join Resource to User to get department_id
+        from api.app.models.core import User
+        resource_filters = [Resource.tenant_id == self.current_user.tenant_id]
+        if department_id:
+            resource_filters.append(User.department_id == department_id)
+
+        # Subqueries for demand, supply, actuals
+        demand_subq = (
+            self.db.query(
+                Resource.cost_center_id.label("cost_center_id"),
+                func.sum(DemandLine.fte_percent).label("demand_fte")
+            )
+            .join(Resource, DemandLine.resource_id == Resource.id)
+            .join(User, Resource.user_id == User.id)
+            .filter(
+                DemandLine.tenant_id == self.current_user.tenant_id,
+                DemandLine.year == year,
+                DemandLine.month == month,
+                *resource_filters
+            )
+            .group_by(Resource.cost_center_id)
+            .subquery()
+        )
+        supply_subq = (
+            self.db.query(
+                Resource.cost_center_id.label("cost_center_id"),
+                func.sum(SupplyLine.fte_percent).label("supply_fte")
+            )
+            .join(Resource, SupplyLine.resource_id == Resource.id)
+            .join(User, Resource.user_id == User.id)
+            .filter(
+                SupplyLine.tenant_id == self.current_user.tenant_id,
+                SupplyLine.year == year,
+                SupplyLine.month == month,
+                *resource_filters
+            )
+            .group_by(Resource.cost_center_id)
+            .subquery()
+        )
+        actuals_subq = (
+            self.db.query(
+                Resource.cost_center_id.label("cost_center_id"),
+                func.sum(ActualLine.actual_fte_percent).label("actuals_fte")
+            )
+            .join(Resource, ActualLine.resource_id == Resource.id)
+            .join(User, Resource.user_id == User.id)
+            .filter(
+                ActualLine.tenant_id == self.current_user.tenant_id,
+                ActualLine.year == year,
+                ActualLine.month == month,
+                *resource_filters
+            )
+            .group_by(Resource.cost_center_id)
+            .subquery()
+        )
+        # Join all subqueries on cost_center_id
+        q = (
+            self.db.query(
+                CostCenter.id.label("cost_center_id"),
+                CostCenter.name.label("cost_center_name"),
+                func.coalesce(demand_subq.c.demand_fte, 0).label("demand_fte"),
+                func.coalesce(supply_subq.c.supply_fte, 0).label("supply_fte"),
+                func.coalesce(actuals_subq.c.actuals_fte, 0).label("actuals_fte"),
+            )
+            .outerjoin(demand_subq, CostCenter.id == demand_subq.c.cost_center_id)
+            .outerjoin(supply_subq, CostCenter.id == supply_subq.c.cost_center_id)
+            .outerjoin(actuals_subq, CostCenter.id == actuals_subq.c.cost_center_id)
+            .filter(CostCenter.tenant_id == self.current_user.tenant_id)
+        )
+        results = q.all()
+        return [
+            FinanceCostCenterStatsResponse(
+                cost_center_id=row.cost_center_id,
+                cost_center_name=row.cost_center_name,
+                demand_fte=float(row.demand_fte or 0),
+                supply_fte=float(row.supply_fte or 0),
+                actuals_fte=float(row.actuals_fte or 0),
+            )
+            for row in results
+        ]

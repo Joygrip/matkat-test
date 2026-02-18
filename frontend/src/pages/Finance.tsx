@@ -63,6 +63,8 @@ import { PeriodPanel } from '../components/PeriodPanel';
 import { EmptyState } from '../components/EmptyState';
 import { LoadingState } from '../components/LoadingState';
 import { useToast } from '../hooks/useToast';
+import { useAuth, useHasRole } from '../auth/AuthProvider';
+import { useCostCenterStats } from '../hooks/useCostCenterStats';
 
 // ─── Actuals types ──────────────────────────────────────────────────────────
 
@@ -454,6 +456,8 @@ function DepartmentCard({ dept }: { dept: DashboardDepartment }) {
 export const Finance: React.FC = () => {
   const styles = useStyles();
   const { showSuccess, showError, showApiError } = useToast();
+  const { user } = useAuth();
+  const canSeeStats = useHasRole('Finance', 'Director');
 
   // ── Shared state ──
   const { selectedPeriodId, selectedPeriod: currentPeriod, loading: periodsLoading } = usePeriod();
@@ -479,6 +483,12 @@ export const Finance: React.FC = () => {
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
   const [publishName, setPublishName] = useState('');
   const [publishDescription, setPublishDescription] = useState('');
+
+  // ── Department stats state ──
+  const { selectedDept, setSelectedDept } = useState<string>('');
+  const year = currentPeriod?.year || new Date().getFullYear();
+  const month = currentPeriod?.month || new Date().getMonth() + 1;
+  const { data: ccStats, loading: ccStatsLoading, error: ccStatsError } = useCostCenterStats(year, month, selectedDept);
 
   // ── Initial load ──
   useEffect(() => {
@@ -870,6 +880,33 @@ export const Finance: React.FC = () => {
               </Table>
             )}
           </Card>
+
+          {/* Actuals vs Demand/Supply by Cost Center */}
+          {canSeeStats && (
+            <Card className={styles.card}>
+              <CardHeader header={<Body1><strong>Actuals vs Demand/Supply by Cost Center</strong></Body1>} />
+              <div style={{ marginBottom: 16, display: 'flex', gap: 16 }}>
+                {/* Department selector (optional) */}
+                <Select value={selectedDept} onChange={e => setSelectedDept(e.target.value)}>
+                  <option value="">All Departments</option>
+                  {/* TODO: Map department options here */}
+                </Select>
+                {/* Period selector can be reused if available */}
+              </div>
+              {ccStatsLoading ? (
+                <LoadingState message="Loading cost center stats..." />
+              ) : ccStatsError ? (
+                <MessageBar intent="error"><MessageBarBody>{ccStatsError}</MessageBarBody></MessageBar>
+              ) : ccStats && ccStats.length > 0 ? (
+                <div style={{ height: 320 }}>
+                  {/* TODO: Insert Fluent UI Preview BarChart here, mapping ccStats to chart data */}
+                  <div style={{textAlign:'center',color:'#888'}}>Bar chart placeholder</div>
+                </div>
+              ) : (
+                <EmptyState title="No data" message="No cost center stats for this period." />
+              )}
+            </Card>
+          )}
         </>
       )}
 

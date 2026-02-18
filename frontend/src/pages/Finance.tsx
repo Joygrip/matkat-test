@@ -65,6 +65,7 @@ import { LoadingState } from '../components/LoadingState';
 import { useToast } from '../hooks/useToast';
 import { useAuth, useHasRole } from '../auth/AuthProvider';
 import { useCostCenterStats } from '../hooks/useCostCenterStats';
+import { BreakdownChart } from '../components/BreakdownChart';
 
 // ─── Actuals types ──────────────────────────────────────────────────────────
 
@@ -490,6 +491,12 @@ export const Finance: React.FC = () => {
   const month = currentPeriod?.month || new Date().getMonth() + 1;
   const { data: ccStats, loading: ccStatsLoading, error: ccStatsError } = useCostCenterStats(year, month, selectedDept);
 
+  // ── Department selector options
+  const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    lookupsApi.listDepartments().then(setDepartments);
+  }, []);
+
   // ── Initial load ──
   useEffect(() => {
     lookupsApi.listProjects().then(setProjects);
@@ -889,7 +896,9 @@ export const Finance: React.FC = () => {
                 {/* Department selector (optional) */}
                 <Select value={selectedDept} onChange={e => setSelectedDept(e.target.value)}>
                   <option value="">All Departments</option>
-                  {/* TODO: Map department options here */}
+                  {departments.map(d => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
                 </Select>
                 {/* Period selector can be reused if available */}
               </div>
@@ -899,8 +908,15 @@ export const Finance: React.FC = () => {
                 <MessageBar intent="error"><MessageBarBody>{ccStatsError}</MessageBarBody></MessageBar>
               ) : ccStats && ccStats.length > 0 ? (
                 <div style={{ height: 320 }}>
-                  {/* TODO: Insert Fluent UI Preview BarChart here, mapping ccStats to chart data */}
-                  <div style={{textAlign:'center',color:'#888'}}>Bar chart placeholder</div>
+                  <BreakdownChart
+                    rows={ccStats.map(row => ({
+                      label: row.cost_center_name,
+                      demandFte: row.demand_fte,
+                      supplyFte: row.supply_fte,
+                      actualsFte: row.actuals_fte, // Not shown by default, but can be added
+                    }))}
+                    // Optionally, you can add a prop to show actuals as a third bar if you extend BreakdownChart
+                  />
                 </div>
               ) : (
                 <EmptyState title="No data" message="No cost center stats for this period." />

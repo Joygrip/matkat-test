@@ -159,5 +159,31 @@
 - Removed `op.create_table('audit_logs', ...)` from `20260211_000007_audit_logs_table.py` (table is already created in `20260202_000001_initial_core_tables.py`).
 - This resolves migration conflicts and allows a clean DB setup for local development.
 
+## 2026-02-18: Finance Tab Chart, Targeted Seeding, and Migration Troubleshooting
+
+### Summary
+- Implemented Finance tab chart for actuals, demand, and supply by cost center.
+- Added targeted seed script for signed actuals (Feb 2026) to support chart visualization.
+- Began troubleshooting Alembic migration/configuration issues to update dev DB schema.
+
+### Steps Taken
+1. **Finance Tab Chart Feature**
+   - Added new Finance tab in `frontend/src/pages/Finance.tsx` with a `BreakdownChart` and selectors for department/period.
+   - Connected chart to backend endpoints for dynamic data.
+2. **Backend Data Seeding for Visualization**
+   - Created `api/scripts/seed_signed_actuals.py` to add signed actuals for February 2026 (idempotent, safe to rerun).
+3. **Environment and Migration Troubleshooting**
+   - Attempted to run the seed script; encountered missing Python packages, PYTHONPATH issues, and out-of-date DB schema.
+   - Identified missing `resource_type` column (schema out of date).
+   - Attempted Alembic migrations; encountered config errors (missing `script_location`, migration scripts directory issues).
+
+### Next Steps
+1. Fix Alembic configuration in `api/alembic.ini` and ensure `script_location` points to the correct migrations directory.
+2. Verify migration scripts exist in `api/alembic/versions/`.
+3. Run Alembic migrations to update the dev database schema.
+4. Re-run the seed script to add signed actuals for February 2026.
+5. Validate that the Finance tab chart displays the expected data.
+6. Update documentation and clean up any temporary scripts/config changes.
+
 ---
 Add further changes and fixes below as needed.

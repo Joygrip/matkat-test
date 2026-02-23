@@ -49,6 +49,9 @@ import { EmptyState } from '../components/EmptyState';
 import { StatusBanner } from '../components/StatusBanner';
 import { LoadingState } from '../components/LoadingState';
 import { ResourcePicker } from '../components/ResourcePicker';
+import { periodsApi } from '../api/periods';
+import { Period } from '../types';
+import { Dropdown, Option } from '@fluentui/react-components';
 
 const useStyles = makeStyles({
   container: {
@@ -228,6 +231,14 @@ export const Supply: React.FC = () => {
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
   const [bulkEditFte, setBulkEditFte] = useState<number>(100);
 
+  // Bulk Add Dialog State
+  const [isBulkAddOpen, setIsBulkAddOpen] = useState(false);
+  const [bulkAddResources, setBulkAddResources] = useState<string[]>([]);
+  const [bulkAddPeriods, setBulkAddPeriods] = useState<Period[]>([]);
+  const [bulkAddFte, setBulkAddFte] = useState<number>(100);
+  const [bulkAddPreview, setBulkAddPreview] = useState<any[]>([]);
+  const [openPeriods, setOpenPeriods] = useState<Period[]>([]);
+
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const isLocked = currentPeriod?.status === 'locked';
   const canEdit = user?.role === 'Finance' || user?.role === 'RO';
@@ -256,6 +267,14 @@ export const Supply: React.FC = () => {
       loadSupplies(selectedPeriodId, selectedDept);
     }
   }, [selectedPeriodId, selectedDept]);
+  
+  useEffect(() => {
+    if (isBulkAddOpen) {
+      periodsApi.list().then((periods: Period[]) => {
+        setOpenPeriods(periods.filter(p => p.status === 'open'));
+      });
+    }
+  }, [isBulkAddOpen]);
   
   const loadInitialData = async () => {
     try {
@@ -412,6 +431,46 @@ export const Supply: React.FC = () => {
     }
   };
   
+  const handleOpenBulkAdd = () => {
+    setBulkAddResources([]);
+    setBulkAddPeriods([]);
+    setBulkAddFte(100);
+    setBulkAddPreview([]);
+    setIsBulkAddOpen(true);
+  };
+
+  const handleBulkAddPreview = () => {
+    // Preview lines
+    const preview = [];
+    for (const resourceId of bulkAddResources) {
+      for (const period of bulkAddPeriods) {
+        preview.push({
+          resource_id: resourceId,
+          year: period.year,
+          month: period.month,
+          fte_percent: bulkAddFte,
+        });
+      }
+    }
+    setBulkAddPreview(preview);
+  };
+
+  const handleBulkAddSubmit = async () => {
+    if (!canEdit || bulkAddResources.length === 0 || bulkAddPeriods.length === 0) {
+      showError('Missing fields', 'Please fill all fields and preview before submitting.');
+      return;
+    }
+    try {
+      const actions = bulkAddPreview.map(line => ({ action: 'create', data: line }));
+      await planningApi.bulkSupplyLines({ actions, all_or_nothing: true });
+      showSuccess('Bulk supply lines created');
+      setIsBulkAddOpen(false);
+      loadSupplies();
+    } catch (err) {
+      showApiError(err, 'Bulk add failed');
+    }
+  };
+  
   if (loading) {
     return <LoadingState message="Loading supply planning data..." />;
   }
@@ -426,77 +485,14 @@ export const Supply: React.FC = () => {
         
         <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
           {!isLocked && canEdit && (
-            <Dialog open={isDialogOpen} onOpenChange={(_, data) => {
-              setIsDialogOpen(data.open);
-              if (!data.open) setEditId(null);
-            }}>
-              <DialogTrigger>
-                <Button appearance="primary" icon={<Add24Regular />}>
-                  Add Supply
-                </Button>
-              </DialogTrigger>
-              <DialogSurface>
-                <DialogBody>
-                  <DialogTitle>{editId ? 'Edit Supply Line' : 'Add Supply Line'}</DialogTitle>
-                  <DialogContent>
-                    {currentPeriod && (
-                      <div className={styles.formField}>
-                        <label className={styles.formLabel}>Period</label>
-                        <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
-                          {monthNames[currentPeriod.month - 1]} {currentPeriod.year} ({currentPeriod.status})
-                        </Body1>
-                      </div>
-                    )}
-                    <div className={styles.formField}>
-                      <label className={styles.formLabel}>Resource</label>
-                      <ResourcePicker
-                        resources={resources}
-                        value={formData.resource_id || ''}
-                        onChange={(id) => setFormData({ ...formData, resource_id: id })}
-                        placeholder="Type name or initials..."
-                      />
-                    </div>
-                    
-                    <div className={styles.formField}>
-                      <label className={styles.formLabel}>Project (optional)</label>
-                      <Select
-                        value={formData.project_id || ''}
-                        onChange={(_, data) => setFormData({ ...formData, project_id: data.value })}
-                      >
-                        <option value="">General availability</option>
-                        {projects.map(p => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </Select>
-                    </div>
-
-                    <div className={styles.formField}>
-                      <label className={styles.formLabel}>FTE %</label>
-                      <Select
-                        value={String(formData.fte_percent)}
-                        onChange={(_, data) => setFormData({ ...formData, fte_percent: parseInt(data.value || '100') })}
-                      >
-                        {[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100].map(val => (
-                          <option key={val} value={val}>{val}%</option>
-                        ))}
-                      </Select>
-                    </div>
-                    
-                    <MessageBar intent="info" style={{ marginTop: tokens.spacingVerticalM }}>
-                      <MessageBarBody>Supply indicates resource availability. Optionally assign to a project.</MessageBarBody>
-                    </MessageBar>
-                  </DialogContent>
-                  <DialogActions>
-                    <Button onClick={() => { setIsDialogOpen(false); setEditId(null); }}>Cancel</Button>
-                    {editId ? (
-                      <Button appearance="primary" onClick={handleSaveEdit}>Save</Button>
-                    ) : (
-                      <Button appearance="primary" onClick={handleCreate}>Create</Button>
-                    )}
-                  </DialogActions>
-                </DialogBody>
-              </DialogSurface>
-            </Dialog>
+            <>
+              <Button appearance="primary" icon={<Add24Regular />} onClick={() => setIsDialogOpen(true)}>
+                Add Supply
+              </Button>
+              <Button appearance="subtle" icon={<Add24Regular />} onClick={handleOpenBulkAdd}>
+                Bulk Add
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -556,6 +552,149 @@ export const Supply: React.FC = () => {
         </Dialog>
       )}
       
+      {/* Bulk Add Dialog */}
+      {canEdit && (
+        <Dialog open={isBulkAddOpen} onOpenChange={(_, d) => setIsBulkAddOpen(d.open)}>
+          <DialogSurface>
+            <DialogBody>
+              <DialogTitle>Bulk Add Supply Lines</DialogTitle>
+              <DialogContent>
+                <div className={styles.formField}>
+                  <label className={styles.formLabel}>Resources</label>
+                  <Dropdown
+                    multiselect
+                    selectedOptions={bulkAddResources}
+                    onOptionSelect={(_, data) => setBulkAddResources(data.selectedOptions as string[])}
+                    placeholder="Select resources..."
+                  >
+                    {resources.map(r => (
+                      <Option key={r.id} value={r.id}>{r.display_name}</Option>
+                    ))}
+                  </Dropdown>
+                </div>
+                <div className={styles.formField}>
+                  <label className={styles.formLabel}>Periods</label>
+                  <Dropdown
+                    multiselect
+                    selectedOptions={bulkAddPeriods.map(p => p.id)}
+                    onOptionSelect={(_, data) => {
+                      setBulkAddPeriods(openPeriods.filter(p => data.selectedOptions.includes(p.id)));
+                    }}
+                    placeholder="Select open periods..."
+                  >
+                    {openPeriods.map(p => (
+                      <Option key={p.id} value={p.id}>
+                        {monthNames[p.month - 1]} {p.year}
+                      </Option>
+                    ))}
+                  </Dropdown>
+                </div>
+                <div className={styles.formField}>
+                  <label className={styles.formLabel}>FTE %</label>
+                  <Select value={String(bulkAddFte)} onChange={(_, data) => setBulkAddFte(parseInt(data.value))}>
+                    {[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100].map(val => (
+                      <option key={val} value={val}>{val}%</option>
+                    ))}
+                  </Select>
+                </div>
+                <Button appearance="secondary" onClick={handleBulkAddPreview} disabled={bulkAddResources.length === 0 || bulkAddPeriods.length === 0}>Preview</Button>
+                {bulkAddPreview.length > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <strong>Preview ({bulkAddPreview.length} lines):</strong>
+                    <Table className={styles.table}>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHeaderCell>Resource</TableHeaderCell>
+                          <TableHeaderCell>Year</TableHeaderCell>
+                          <TableHeaderCell>Month</TableHeaderCell>
+                          <TableHeaderCell>FTE %</TableHeaderCell>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {bulkAddPreview.map((line, idx) => (
+                          <TableRow key={idx}>
+                            <TableCell>{resources.find(r => r.id === line.resource_id)?.display_name || line.resource_id}</TableCell>
+                            <TableCell>{line.year}</TableCell>
+                            <TableCell>{String(line.month).padStart(2, '0')}</TableCell>
+                            <TableCell>{line.fte_percent}%</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setIsBulkAddOpen(false)}>Cancel</Button>
+                <Button appearance="primary" onClick={handleBulkAddSubmit} disabled={bulkAddPreview.length === 0}>Create All</Button>
+              </DialogActions>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
+      )}
+      
+      {/* Single Add/Edit Supply Dialog */}
+      {canEdit && (
+        <Dialog open={isDialogOpen} onOpenChange={(_, data) => setIsDialogOpen(data.open)}>
+          <DialogSurface>
+            <DialogBody>
+              <DialogTitle>{editId ? 'Edit Supply Line' : 'Add Supply Line'}</DialogTitle>
+              <DialogContent>
+                {currentPeriod && (
+                  <div className={styles.formField}>
+                    <label className={styles.formLabel}>Period</label>
+                    <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
+                      {monthNames[currentPeriod.month - 1]} {currentPeriod.year} ({currentPeriod.status})
+                    </Body1>
+                  </div>
+                )}
+                <div className={styles.formField}>
+                  <label className={styles.formLabel}>Resource</label>
+                  <Dropdown
+                    selectedOptions={formData.resource_id ? [formData.resource_id] : []}
+                    onOptionSelect={(_, data) => setFormData(f => ({ ...f, resource_id: data.selectedOptions[0] }))}
+                    placeholder="Select resource..."
+                  >
+                    {resources.map(r => (
+                      <Option key={r.id} value={r.id}>{r.display_name}</Option>
+                    ))}
+                  </Dropdown>
+                </div>
+                <div className={styles.formField}>
+                  <label className={styles.formLabel}>Project (optional)</label>
+                  <Dropdown
+                    selectedOptions={formData.project_id ? [formData.project_id] : []}
+                    onOptionSelect={(_, data) => setFormData(f => ({ ...f, project_id: data.selectedOptions[0] }))}
+                    placeholder="Select project..."
+                  >
+                    <Option value="">None</Option>
+                    {projects.map(p => (
+                      <Option key={p.id} value={p.id}>{p.name}</Option>
+                    ))}
+                  </Dropdown>
+                </div>
+                <div className={styles.formField}>
+                  <label className={styles.formLabel}>FTE %</label>
+                  <Select value={String(formData.fte_percent)} onChange={(_, data) => setFormData(f => ({ ...f, fte_percent: parseInt(data.value) }))}>
+                    {[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100].map(val => (
+                      <option key={val} value={val}>{val}%</option>
+                    ))}
+                  </Select>
+                </div>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => { setIsDialogOpen(false); setEditId(null); }}>Cancel</Button>
+                {editId ? (
+                  <Button appearance="primary" onClick={handleSaveEdit}>Save</Button>
+                ) : (
+                  <Button appearance="primary" onClick={handleCreate}>Create</Button>
+                )}
+              </DialogActions>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
+      )}
+      
       {/* Supply by Department chart */}
       {supplies.length > 0 && (
         <Card className={styles.chartCard}>
@@ -606,53 +745,55 @@ export const Supply: React.FC = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              groupedSupplies.map(dept => (
-                <React.Fragment key={dept.departmentId || '__none__'}>
-                  <TableRow className={styles.groupHeader}>
-                    <TableCell colSpan={totalColumns}>
-                      {dept.departmentName}
-                      <Badge appearance="outline" style={{ marginLeft: 8 }}>
-                        {dept.supplies.length} lines
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                  {dept.supplies.map(s => (
-                    <TableRow key={s.id}>
-                      {canEdit && (
-                        <TableCell>
-                          <Checkbox checked={selectedIds.includes(s.id)} onChange={() => toggleSelect(s.id)} />
-                        </TableCell>
-                      )}
-                      <TableCell>{s.department_name || '-'}</TableCell>
-                      <TableCell>{s.resource_name || 'Unknown'}</TableCell>
-                      <TableCell>{s.project_name || '—'}</TableCell>
-                      <TableCell>{s.year}-{String(s.month).padStart(2, '0')}</TableCell>
-                      <TableCell>
-                        <Badge appearance="filled" color="success">{s.fte_percent}%</Badge>
-                      </TableCell>
-                      <TableCell>
-                        {!isLocked && canEdit && (
-                          <>
-                            <Button
-                              icon={<Edit24Regular />}
-                              appearance="subtle"
-                              onClick={() => handleEdit(s)}
-                              title="Edit line"
-                              style={{ marginRight: 4 }}
-                            />
-                            <Button
-                              icon={<Delete24Regular />}
-                              appearance="subtle"
-                              onClick={() => handleDelete(s.id)}
-                              title="Delete line"
-                            />
-                          </>
-                        )}
+              <>
+                {groupedSupplies.map(dept => (
+                  <React.Fragment key={dept.departmentId || '__none__'}>
+                    <TableRow className={styles.groupHeader}>
+                      <TableCell colSpan={totalColumns}>
+                        {dept.departmentName}
+                        <Badge appearance="outline" style={{ marginLeft: 8 }}>
+                          {dept.supplies.length} lines
+                        </Badge>
                       </TableCell>
                     </TableRow>
-                  ))}
-                </React.Fragment>
-              ))
+                    {dept.supplies.map(s => (
+                      <TableRow key={s.id}>
+                        {canEdit && (
+                          <TableCell>
+                            <Checkbox checked={selectedIds.includes(s.id)} onChange={() => toggleSelect(s.id)} />
+                          </TableCell>
+                        )}
+                        <TableCell>{s.department_name || '-'}</TableCell>
+                        <TableCell>{s.resource_name || 'Unknown'}</TableCell>
+                        <TableCell>{s.project_name || '—'}</TableCell>
+                        <TableCell>{s.year}-{String(s.month).padStart(2, '0')}</TableCell>
+                        <TableCell>
+                          <Badge appearance="filled" color="success">{s.fte_percent}%</Badge>
+                        </TableCell>
+                        <TableCell>
+                          {!isLocked && canEdit && (
+                            <>
+                              <Button
+                                icon={<Edit24Regular />}
+                                appearance="subtle"
+                                onClick={() => handleEdit(s)}
+                                title="Edit line"
+                                style={{ marginRight: 4 }}
+                              />
+                              <Button
+                                icon={<Delete24Regular />}
+                                appearance="subtle"
+                                onClick={() => handleDelete(s.id)}
+                                title="Delete line"
+                              />
+                            </>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </>
             )}
           </TableBody>
         </Table>

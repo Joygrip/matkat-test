@@ -233,6 +233,13 @@ export const Actuals: React.FC = () => {
   const [myResourceId, setMyResourceId] = useState<string | null>(null);
   const [myResourceLoading, setMyResourceLoading] = useState(false);
   
+  // Add state for edit dialog
+  const [editActual, setEditActual] = useState<ActualLine | null>(null);
+  const [editFte, setEditFte] = useState<number | undefined>(undefined);
+  const [editPlannedFte, setEditPlannedFte] = useState<number | undefined>(undefined);
+  const [editProjectId, setEditProjectId] = useState<string | undefined>(undefined);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  
   useEffect(() => {
     loadInitialData();
   }, []);
@@ -390,6 +397,47 @@ export const Actuals: React.FC = () => {
     setSelectedActual(actual);
     setIsProxySign(proxy);
     setIsSignDialogOpen(true);
+  };
+  
+  // New function to reload actuals after edit/save
+  const reloadActuals = async () => {
+    try {
+      setLoading(true);
+      const data = isEmployee 
+        ? await actualsApi.getMyActuals(ctxPeriod?.year, ctxPeriod?.month)
+        : await actualsApi.getActualLines(undefined, ctxPeriod?.year, ctxPeriod?.month);
+      setActuals(data);
+      setOverLimitIds([]);
+    } catch (err: unknown) {
+      showApiError(err as Error, 'Failed to load actuals');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const openEditDialog = (actual: ActualLine) => {
+    setEditActual(actual);
+    setEditFte(actual.actual_fte_percent);
+    setEditPlannedFte(actual.planned_fte_percent ?? undefined);
+    setEditProjectId(actual.project_id);
+    setIsEditDialogOpen(true);
+  };
+  
+  const handleEditSave = async () => {
+    if (!editActual) return;
+    try {
+      await actualsApi.updateActualLine(editActual.id, {
+        actual_fte_percent: editFte,
+        planned_fte_percent: editPlannedFte,
+        project_id: editProjectId,
+      });
+      showSuccess('Actual line updated');
+      setIsEditDialogOpen(false);
+      setEditActual(null);
+      await reloadActuals();
+    } catch (err) {
+      showApiError(err as Error, 'Failed to update actual line');
+    }
   };
   
   const getProjectName = (id: string) => projects.find(p => p.id === id)?.name || 'Unknown';
@@ -690,27 +738,31 @@ export const Actuals: React.FC = () => {
                   </TableCell>
                   <TableCell>
                     <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
-                      {!a.employee_signed_at && !isLocked && (
-                        <>
-                          {/* Employee can sign their own actuals */}
-                          {isEmployee && (
-                            <Button
-                              icon={<Signature24Regular />}
-                              appearance="subtle"
-                              title="Sign"
-                              onClick={() => openSignDialog(a, false)}
-                            />
-                          )}
-                          {/* RO can proxy-sign for absent employees */}
-                          {isRO && (
-                            <Button
-                              icon={<Signature24Regular />}
-                              appearance="subtle"
-                              title="Proxy Sign (RO)"
-                              onClick={() => openSignDialog(a, true)}
-                            />
-                          )}
-                        </>
+                      {!a.employee_signed_at && !isLocked && isEmployee && (
+                        <Button
+                          icon={<ClipboardTaskRegular />}
+                          appearance="subtle"
+                          title="Edit"
+                          onClick={() => openEditDialog(a)}
+                        />
+                      )}
+                      {/* Employee can sign their own actuals */}
+                      {isEmployee && (
+                        <Button
+                          icon={<Signature24Regular />}
+                          appearance="subtle"
+                          title="Sign"
+                          onClick={() => openSignDialog(a, false)}
+                        />
+                      )}
+                      {/* RO can proxy-sign for absent employees */}
+                      {isRO && (
+                        <Button
+                          icon={<Signature24Regular />}
+                          appearance="subtle"
+                          title="Proxy Sign (RO)"
+                          onClick={() => openSignDialog(a, true)}
+                        />
                       )}
                       {!a.employee_signed_at && !isLocked && (
                         <Button
@@ -729,7 +781,7 @@ export const Actuals: React.FC = () => {
       </Card>
       
       {/* Sign Dialog */}
-      <Dialog open={isSignDialogOpen} onOpenChange={(_, data) => setIsSignDialogOpen(data.open)}>
+      <Dialog open={isSignDialogOpen} onOpenChange={(_e: unknown, data: { open: boolean }) => setIsSignDialogOpen(data.open)}>
         <DialogSurface>
           <DialogBody>
             <DialogTitle>{isProxySign ? 'Proxy Sign Actuals' : 'Sign Actuals'}</DialogTitle>
@@ -761,6 +813,56 @@ export const Actuals: React.FC = () => {
               <Button appearance="primary" onClick={handleSign}>
                 {isProxySign ? 'Proxy Sign' : 'Sign'}
               </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+      
+      {/* Edit Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={(_e: unknown, data: { open: boolean }) => setIsEditDialogOpen(data.open)}>
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Edit Actual Line</DialogTitle>
+            <DialogContent>
+              <div className={styles.formField}>
+                <label>Project</label>
+                <Select
+                  value={editProjectId}
+                  onChange={(_, data) => setEditProjectId(data.value)}
+                >
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </Select>
+              </div>
+              <div className={styles.formField}>
+                <label>Planned FTE (%)</label>
+                <Input
+                  type="number"
+                  value={editPlannedFte !== undefined ? String(editPlannedFte) : ''}
+                  onChange={(_, data) => setEditPlannedFte(data.value ? Number(data.value) : undefined)}
+                  min={0}
+                  max={100}
+                  step={5}
+                  placeholder="Optional"
+                />
+              </div>
+              <div className={styles.formField}>
+                <label>Actual FTE (%)</label>
+                <Input
+                  type="number"
+                  value={editFte !== undefined ? String(editFte) : ''}
+                  onChange={(_, data) => setEditFte(data.value ? Number(data.value) : undefined)}
+                  min={0}
+                  max={100}
+                  step={5}
+                  required
+                />
+              </div>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
+              <Button appearance="primary" onClick={handleEditSave}>Save</Button>
             </DialogActions>
           </DialogBody>
         </DialogSurface>

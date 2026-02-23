@@ -333,8 +333,8 @@ class ActualsService:
         
         return actual
     
-    def update(self, actual_id: str, actual_fte_percent: int) -> ActualLine:
-        """Update an actual line's FTE."""
+    def update(self, actual_id: str, data: dict) -> ActualLine:
+        """Update an actual line's editable fields before signing."""
         actual = self.get_by_id(actual_id)
         if not actual:
             raise HTTPException(
@@ -358,24 +358,41 @@ class ActualsService:
         # Check period is open
         self._check_period_open(actual.year, actual.month)
         
-        # Validate FTE
-        if actual_fte_percent != 0 and (actual_fte_percent < 5 or actual_fte_percent > 100 or actual_fte_percent % 5 != 0):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "code": ErrorCode.FTE_INVALID,
-                    "message": "FTE must be 0 or between 5 and 100 in steps of 5",
-                }
+        old_values = {}
+        new_values = {}
+        
+        # Update actual_fte_percent if provided
+        if data.get("actual_fte_percent") is not None:
+            new_fte = data["actual_fte_percent"]
+            # Validate FTE
+            if new_fte != 0 and (new_fte < 5 or new_fte > 100 or new_fte % 5 != 0):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": ErrorCode.FTE_INVALID,
+                        "message": "FTE must be 0 or between 5 and 100 in steps of 5",
+                    }
+                )
+            self._check_100_percent_limit(
+                actual.resource_id, actual.year, actual.month,
+                new_fte, exclude_line_id=actual.id
             )
+            old_values["actual_fte_percent"] = actual.actual_fte_percent
+            actual.actual_fte_percent = new_fte
+            new_values["actual_fte_percent"] = new_fte
         
-        # Check 100% limit (excluding this line's current value)
-        self._check_100_percent_limit(
-            actual.resource_id, actual.year, actual.month,
-            actual_fte_percent, exclude_line_id=actual.id
-        )
+        # Update planned_fte_percent if provided
+        if data.get("planned_fte_percent") is not None:
+            old_values["planned_fte_percent"] = actual.planned_fte_percent
+            actual.planned_fte_percent = data["planned_fte_percent"]
+            new_values["planned_fte_percent"] = data["planned_fte_percent"]
         
-        old_fte = actual.actual_fte_percent
-        actual.actual_fte_percent = actual_fte_percent
+        # Update project_id if provided
+        if data.get("project_id") is not None:
+            old_values["project_id"] = actual.project_id
+            actual.project_id = data["project_id"]
+            new_values["project_id"] = data["project_id"]
+        
         self.db.commit()
         self.db.refresh(actual)
         
@@ -384,8 +401,8 @@ class ActualsService:
             action="update",
             entity_type="ActualLine",
             entity_id=actual.id,
-            old_values={"actual_fte_percent": old_fte},
-            new_values={"actual_fte_percent": actual_fte_percent},
+            old_values=old_values,
+            new_values=new_values,
         )
         
         return actual

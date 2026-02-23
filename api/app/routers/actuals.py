@@ -152,14 +152,12 @@ async def update_actual(
     )),
 ):
     """
-    Update an actual line's FTE.
-    
+    Update an actual line's editable fields before signing.
     Cannot edit signed actuals.
-    
     Accessible to: Admin, Employee (own), RO
     """
     service = ActualsService(db, current_user)
-    line = service.update(actual_id, data.actual_fte_percent)
+    line = service.update(actual_id, data.model_dump(exclude_unset=True))
     return _to_response(line)
 
 

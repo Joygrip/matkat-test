@@ -29,12 +29,16 @@ class ActualLineCreate(ActualLineBase):
 
 
 class ActualLineUpdate(BaseModel):
-    """Update actual line - only FTE can be updated before signing."""
-    actual_fte_percent: int
-    
+    """Update actual line - allow editing FTE, planned FTE, and project before signing."""
+    actual_fte_percent: Optional[int] = None
+    planned_fte_percent: Optional[int] = None
+    project_id: Optional[str] = None
+
     @field_validator('actual_fte_percent')
     @classmethod
     def validate_fte(cls, v: int) -> int:
+        if v is None:
+            return v
         if v != 0 and (v < 5 or v > 100):
             raise ValueError(f'{ErrorCode.FTE_INVALID}: FTE must be 0 or between 5 and 100')
         if v % 5 != 0:

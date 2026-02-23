@@ -76,8 +76,8 @@ export const actualsApi = {
     return apiClient.post<ActualLine>('/actuals', data);
   },
   
-  async updateActualLine(id: string, data: Partial<CreateActualLine>): Promise<ActualLine> {
-    return apiClient.put<ActualLine>(`/actuals/${id}`, data);
+  async updateActualLine(id: string, data: Partial<Pick<ActualLine, 'actual_fte_percent' | 'planned_fte_percent' | 'project_id'>>): Promise<ActualLine> {
+    return apiClient.patch<ActualLine>(`/actuals/${id}`, data);
   },
   
   async deleteActualLine(id: string): Promise<void> {

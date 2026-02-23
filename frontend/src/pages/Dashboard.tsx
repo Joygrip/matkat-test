@@ -41,6 +41,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { apiClient } from '../api/client';
 import { HealthResponse } from '../types';
 import { planningApi } from '../api/planning';
+import { dashboardApi, DemandSupplyByCostCenter, DemandSupplyByProject } from '../api/dashboard';
 import { usePeriod } from '../contexts/PeriodContext';
 import { BreakdownChart, BreakdownRow } from '../components/BreakdownChart';
 
@@ -273,6 +274,9 @@ export function Dashboard() {
   const [demandLines, setDemandLines] = useState<any[]>([]);
   const [supplyLines, setSupplyLines] = useState<any[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
+  const [aggLoading, setAggLoading] = useState(false);
+  const [aggByCostCenter, setAggByCostCenter] = useState<DemandSupplyByCostCenter[]>([]);
+  const [aggByProject, setAggByProject] = useState<DemandSupplyByProject[]>([]);
   type ChartModalKey = 'dept' | 'project' | 'supply' | null;
   const [chartModalOpen, setChartModalOpen] = useState<ChartModalKey>(null);
   type KpiDetailModalKey = 'demand' | 'supply' | 'gap' | 'utilization' | null;
@@ -362,6 +366,21 @@ export function Dashboard() {
       loadChartData(selectedPeriodId);
     }
   }, [selectedPeriodId]);
+
+  // Load dashboard aggregation on mount
+  useEffect(() => {
+    setAggLoading(true);
+    dashboardApi.getDemandSupplyAggregation()
+      .then((resp) => {
+        setAggByCostCenter(resp.by_cost_center);
+        setAggByProject(resp.by_project);
+      })
+      .catch(() => {
+        setAggByCostCenter([]);
+        setAggByProject([]);
+      })
+      .finally(() => setAggLoading(false));
+  }, []);
 
   const loadMiscData = async () => {
     try {
@@ -829,6 +848,55 @@ export function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* ── New Aggregation Charts (all open periods) ── */}
+      <div className={styles.section}>
+        <div className={styles.sectionTitle}>All Open Periods: Demand & Supply by Cost Center</div>
+        <div className={styles.chartsGrid}>
+          <Card className={styles.chartCard}>
+            <div className={styles.chartCardHeader}>
+              <div className={styles.chartCardHeaderRow}>
+                <Title3 style={{ margin: 0 }}>Demand vs Supply by Cost Center (All Open Periods)</Title3>
+              </div>
+            </div>
+            <div className={styles.chartCardBody}>
+              {aggLoading ? (
+                <Skeleton style={{ height: 200 }}><SkeletonItem /></Skeleton>
+              ) : (
+                <BreakdownChart
+                  rows={aggByCostCenter.map(row => ({
+                    label: `${row.cost_center_name || row.cost_center_id} (${monthNames[row.month - 1]} ${row.year})`,
+                    demandFte: row.demand_fte,
+                    supplyFte: row.supply_fte,
+                  }))}
+                  maxRows={12}
+                />
+              )}
+            </div>
+          </Card>
+          <Card className={styles.chartCard}>
+            <div className={styles.chartCardHeader}>
+              <div className={styles.chartCardHeaderRow}>
+                <Title3 style={{ margin: 0 }}>Demand vs Supply by Project (All Open Periods)</Title3>
+              </div>
+            </div>
+            <div className={styles.chartCardBody}>
+              {aggLoading ? (
+                <Skeleton style={{ height: 200 }}><SkeletonItem /></Skeleton>
+              ) : (
+                <BreakdownChart
+                  rows={aggByProject.map(row => ({
+                    label: `${row.project_name || row.project_id} (${monthNames[row.month - 1]} ${row.year})`,
+                    demandFte: row.demand_fte,
+                    supplyFte: row.supply_fte,
+                  }))}
+                  maxRows={12}
+                />
+              )}
+            </div>
+          </Card>
+        </div>
+      </div>
 
       {/* ── Admin-Only System Panels ── */}
       {isAdmin && (

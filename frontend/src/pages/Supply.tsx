@@ -235,6 +235,7 @@ export const Supply: React.FC = () => {
   const [isBulkAddOpen, setIsBulkAddOpen] = useState(false);
   const [bulkAddResources, setBulkAddResources] = useState<string[]>([]);
   const [bulkAddPeriods, setBulkAddPeriods] = useState<Period[]>([]);
+  const [bulkAddProjectId, setBulkAddProjectId] = useState<string>('');
   const [bulkAddFte, setBulkAddFte] = useState<number>(100);
   const [bulkAddPreview, setBulkAddPreview] = useState<any[]>([]);
   const [openPeriods, setOpenPeriods] = useState<Period[]>([]);
@@ -434,6 +435,7 @@ export const Supply: React.FC = () => {
   const handleOpenBulkAdd = () => {
     setBulkAddResources([]);
     setBulkAddPeriods([]);
+    setBulkAddProjectId('');
     setBulkAddFte(100);
     setBulkAddPreview([]);
     setIsBulkAddOpen(true);
@@ -448,6 +450,7 @@ export const Supply: React.FC = () => {
           resource_id: resourceId,
           year: period.year,
           month: period.month,
+          project_id: bulkAddProjectId || undefined,
           fte_percent: bulkAddFte,
         });
       }
@@ -590,6 +593,19 @@ export const Supply: React.FC = () => {
                   </Dropdown>
                 </div>
                 <div className={styles.formField}>
+                  <label className={styles.formLabel}>Project (optional)</label>
+                  <Dropdown
+                    selectedOptions={bulkAddProjectId ? [bulkAddProjectId] : []}
+                    onOptionSelect={(_, data) => setBulkAddProjectId(data.selectedOptions[0] || '')}
+                    placeholder="Select project or leave blank for general availability..."
+                  >
+                    <Option value="">None (General Availability)</Option>
+                    {projects.map(p => (
+                      <Option key={p.id} value={p.id}>{p.name}</Option>
+                    ))}
+                  </Dropdown>
+                </div>
+                <div className={styles.formField}>
                   <label className={styles.formLabel}>FTE %</label>
                   <Select value={String(bulkAddFte)} onChange={(_, data) => setBulkAddFte(parseInt(data.value))}>
                     {[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100].map(val => (
@@ -607,6 +623,7 @@ export const Supply: React.FC = () => {
                           <TableHeaderCell>Resource</TableHeaderCell>
                           <TableHeaderCell>Year</TableHeaderCell>
                           <TableHeaderCell>Month</TableHeaderCell>
+                          <TableHeaderCell>Project</TableHeaderCell>
                           <TableHeaderCell>FTE %</TableHeaderCell>
                         </TableRow>
                       </TableHeader>
@@ -616,6 +633,7 @@ export const Supply: React.FC = () => {
                             <TableCell>{resources.find(r => r.id === line.resource_id)?.display_name || line.resource_id}</TableCell>
                             <TableCell>{line.year}</TableCell>
                             <TableCell>{String(line.month).padStart(2, '0')}</TableCell>
+                            <TableCell>{projects.find(p => p.id === line.project_id)?.name || '—'}</TableCell>
                             <TableCell>{line.fte_percent}%</TableCell>
                           </TableRow>
                         ))}

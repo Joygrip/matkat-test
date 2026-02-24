@@ -273,7 +273,7 @@ const monthNames = [
 export function Dashboard() {
   const styles = useStyles();
   const { user } = useAuth();
-  const { selectedPeriodId, selectedPeriod: ctxPeriod, loading: periodsLoading } = usePeriod();
+  const { selectedPeriodId, selectedPeriod: ctxPeriod, loading: periodsLoading, periods } = usePeriod();
 
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -297,6 +297,50 @@ export function Dashboard() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
   const isAdmin = user?.role === 'Admin';
+
+  // Load aggregated demand/supply data for grouped bar charts
+  useEffect(() => {
+    setAggLoading(true);
+    dashboardApi.getDemandSupplyAggregation()
+      .then(({ by_project, by_cost_center }) => {
+        setAggByProject(by_project);
+        setAggByCostCenter(by_cost_center);
+      })
+      .catch(() => {
+        setAggByProject([]);
+        setAggByCostCenter([]);
+      })
+      .finally(() => setAggLoading(false));
+  }, []); // Add dependencies if you want to reload on filter change
+
+  // Load demand and supply lines for the selected period
+  useEffect(() => {
+    async function fetchData() {
+      setLoading(true);
+      try {
+        // Use planningApi to fetch demand and supply lines for the selected period
+        const [demand, supply] = await Promise.all([
+          planningApi.getDemandLines(selectedPeriodId),
+          planningApi.getSupplyLines(selectedPeriodId),
+        ]);
+        setDemandLines(demand);
+        setSupplyLines(supply);
+      } catch (e) {
+        setDemandLines([]);
+        setSupplyLines([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+    if (selectedPeriodId) {
+      fetchData();
+    }
+  }, [selectedPeriodId]);
+
+  // Sync periodOptions with periods from context
+  useEffect(() => {
+    setPeriodOptions(periods);
+  }, [periods]);
 
   const handleKpiCardKeyDown = (e: React.KeyboardEvent, key: KpiDetailModalKey) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -368,128 +412,84 @@ export function Dashboard() {
       .sort((a, b) => b.supplyFte - a.supplyFte);
   }, [supplyLines]);
 
-  /* ── Load data ── */
-
-  useEffect(() => {
-    loadMiscData();
-  }, []);
-
-  // Load chart data for ALL roles whenever the period changes
-  useEffect(() => {
-    if (selectedPeriodId) {
-      loadChartData(selectedPeriodId);
-    }
-  }, [selectedPeriodId]);
-
-  // Load dashboard aggregation on mount
-  useEffect(() => {
-    setAggLoading(true);
-    dashboardApi.getDemandSupplyAggregation()
-      .then((resp) => {
-        setAggByCostCenter(resp.by_cost_center);
-        setAggByProject(resp.by_project);
-      })
-      .catch(() => {
-        setAggByCostCenter([]);
-        setAggByProject([]);
-      })
-      .finally(() => setAggLoading(false));
-  }, []);
-
-  // Fetch filter options on mount
-  useEffect(() => {
-    periodsApi.list().then(periods => {
-      const openPeriods = periods.filter(p => p.status === 'open');
-      setPeriodOptions(openPeriods);
-      setSelectedPeriodIds(openPeriods.map(p => p.id)); // default: all open
-    });
-    lookupsApi.listCostCenters().then(setCostCenterOptions);
-    lookupsApi.listProjects().then(setProjectOptions);
-  }, []);
-
-  const loadMiscData = async () => {
-    try {
-      setLoading(true);
-      const healthData = await apiClient.getHealth().catch(() => null);
-      setHealth(healthData);
-    } catch (error) {
-      console.error('Failed to load dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadChartData = async (periodId: string) => {
-    if (!periodId) return;
-    try {
-      setChartLoading(true);
-      const [demands, supplies] = await Promise.all([
-        planningApi.getDemandLines(periodId).catch(() => []),
-        planningApi.getSupplyLines(periodId).catch(() => []),
-      ]);
-      setDemandLines(demands || []);
-      setSupplyLines(supplies || []);
-    } catch (error) {
-      console.error('[Dashboard] Failed to load chart data:', error);
-    } finally {
-      setChartLoading(false);
-    }
-  };
-
-  const demandKeys = useMemo(() => {
-    return selectedPeriodIds.map(pid => {
-      const p = periodOptions.find(x => x.id === pid);
-      return p ? `demand_${monthNames[p.month - 1]} ${p.year}` : `demand_${pid}`;
-    });
-  }, [selectedPeriodIds, periodOptions]);
-  const supplyKeys = useMemo(() => {
-    return selectedPeriodIds.map(pid => {
-      const p = periodOptions.find(x => x.id === pid);
-      return p ? `supply_${monthNames[p.month - 1]} ${p.year}` : `supply_${pid}`;
-    });
-  }, [selectedPeriodIds, periodOptions]);
-
-  const filteredProjects = useMemo(() => {
-    return aggByProject.filter(row => {
-      const periodKey = `${row.year}-${row.month}`;
-      const selectedPeriodKeys = periodOptions
-        .filter(p => selectedPeriodIds.includes(p.id))
-        .map(p => `${p.year}-${p.month}`);
-      return (
-        (selectedPeriodIds.length === 0 || selectedPeriodKeys.includes(periodKey)) &&
-        (!selectedCostCenterId || projectOptions.find(p => p.id === row.project_id)?.cost_center_id === selectedCostCenterId) &&
-        (!selectedProjectId || row.project_id === selectedProjectId)
-      );
-    });
-  }, [aggByProject, selectedPeriodIds, selectedCostCenterId, selectedProjectId, projectOptions, periodOptions]);
-
-  // Build chart data: group by project, columns for each period's demand/supply
+  // Build chart data: group by period, columns for each project's demand/supply
   const chartData = useMemo(() => {
-    if (!filteredProjects.length) return [];
-    const periodLabels: Record<string, string> = {};
-    periodOptions.forEach(p => {
-      periodLabels[`${p.year}-${p.month}`] = `${monthNames[p.month - 1]} ${p.year}`;
+    if (!aggByProject.length) return [];
+    // Get all unique periods and projects
+    const periodMap = new Map<string, { year: number; month: number }>();
+    const projectMap = new Map<string, string>();
+    aggByProject.forEach(row => {
+      periodMap.set(`${row.year}-${row.month}`, { year: row.year, month: row.month });
+      projectMap.set(row.project_id, row.project_name || row.project_id);
     });
-    const grouped: Record<string, any> = {};
-    filteredProjects.forEach(row => {
-      const proj = projectOptions.find(p => p.id === row.project_id);
-      const label = proj ? proj.name : row.project_id;
-      if (!grouped[label]) grouped[label] = { label };
-      const periodKey = `${row.year}-${row.month}`;
-      const periodLabel = periodLabels[periodKey] || periodKey;
-      grouped[label][`demand_${periodLabel}`] = row.demand_fte;
-      grouped[label][`supply_${periodLabel}`] = row.supply_fte;
+    // Build a row for each period
+    const data: any[] = Array.from(periodMap.entries()).map(([key, { year, month }]) => {
+      const row: any = { label: `${monthNames[month - 1]} ${year}` };
+      projectMap.forEach((projectName, projectId) => {
+        // Find the matching agg row
+        const agg = aggByProject.find(r => r.year === year && r.month === month && r.project_id === projectId);
+        row[`${projectName}_demand`] = agg ? agg.demand_fte : 0;
+        row[`${projectName}_supply`] = agg ? agg.supply_fte : 0;
+      });
+      return row;
     });
-    return Object.values(grouped);
-  }, [filteredProjects, periodOptions, projectOptions]);
+    return data;
+  }, [aggByProject, monthNames]);
 
-  // Build legend map for chart keys
+  // Build keys and legend map for all projects
+  const projectNames = useMemo(() => {
+    const names = new Set<string>();
+    aggByProject.forEach(row => names.add(row.project_name || row.project_id));
+    return Array.from(names);
+  }, [aggByProject]);
+
+  const demandKeys = useMemo(() => projectNames.map(name => `${name}_demand`), [projectNames]);
+  const supplyKeys = useMemo(() => projectNames.map(name => `${name}_supply`), [projectNames]);
+
   const legendMap: Record<string, string> = {};
-  demandKeys.forEach((key) => {
-    legendMap[key] = `Demand (${key.replace('demand_', '')})`;
+  projectNames.forEach((name) => {
+    legendMap[`${name}_demand`] = `${name} Demand`;
+    legendMap[`${name}_supply`] = `${name} Supply`;
   });
-  supplyKeys.forEach((key) => {
-    legendMap[key] = `Supply (${key.replace('supply_', '')})`;
+
+  // Build chart data: group by period, columns for each department's demand/supply
+  const deptChartData = useMemo(() => {
+    if (!aggByCostCenter.length) return [];
+    // Get all unique periods and departments
+    const periodMap = new Map<string, { year: number; month: number }>();
+    const deptMap = new Map<string, string>();
+    aggByCostCenter.forEach(row => {
+      periodMap.set(`${row.year}-${row.month}`, { year: row.year, month: row.month });
+      deptMap.set(row.cost_center_id, row.cost_center_name || row.cost_center_id);
+    });
+    // Build a row for each period
+    const data: any[] = Array.from(periodMap.entries()).map(([key, { year, month }]) => {
+      const row: any = { label: `${monthNames[month - 1]} ${year}` };
+      deptMap.forEach((deptName, deptId) => {
+        // Find the matching agg row
+        const agg = aggByCostCenter.find(r => r.year === year && r.month === month && r.cost_center_id === deptId);
+        row[`${deptName}_demand`] = agg ? agg.demand_fte : 0;
+        row[`${deptName}_supply`] = agg ? agg.supply_fte : 0;
+      });
+      return row;
+    });
+    return data;
+  }, [aggByCostCenter, monthNames]);
+
+  // Build keys and legend map for all departments
+  const deptNames = useMemo(() => {
+    const names = new Set<string>();
+    aggByCostCenter.forEach(row => names.add(row.cost_center_name || row.cost_center_id));
+    return Array.from(names);
+  }, [aggByCostCenter]);
+
+  const deptDemandKeys = useMemo(() => deptNames.map(name => `${name}_demand`), [deptNames]);
+  const deptSupplyKeys = useMemo(() => deptNames.map(name => `${name}_supply`), [deptNames]);
+
+  const deptLegendMap: Record<string, string> = {};
+  deptNames.forEach((name) => {
+    deptLegendMap[`${name}_demand`] = `${name} Demand`;
+    deptLegendMap[`${name}_supply`] = `${name} Supply`;
   });
 
   /* ── Loading skeleton ── */
@@ -510,6 +510,17 @@ export function Dashboard() {
         <Skeleton className={styles.skeletonChart}>
           <SkeletonItem />
         </Skeleton>
+      </div>
+    );
+  }
+
+  if (!loading && !periodsLoading && periodOptions.length === 0) {
+    return (
+      <div className={styles.container}>
+        <div style={{ margin: '80px auto', textAlign: 'center', color: tokens.colorPaletteRedForeground1 }}>
+          <Title3>No periods available</Title3>
+          <p>There are no open periods configured in the system. Please contact your administrator.</p>
+        </div>
       </div>
     );
   }
@@ -997,6 +1008,30 @@ export function Dashboard() {
                 demandKeys={demandKeys}
                 supplyKeys={supplyKeys}
                 legendMap={legendMap}
+              />
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* ── Grouped Bar Chart: Departments ── */}
+      <div className={styles.section}>
+        <div className={styles.sectionTitle}>Demand & Supply by Department (Grouped Bar Chart)</div>
+        <Card className={styles.chartCard}>
+          <div className={styles.chartCardHeader}>
+            <div className={styles.chartCardHeaderRow}>
+              <Title3 style={{ margin: 0 }}>Grouped Bar Chart (Departments)</Title3>
+            </div>
+          </div>
+          <div className={styles.chartCardBody}>
+            {aggLoading ? (
+              <Skeleton style={{ height: 320 }}><SkeletonItem /></Skeleton>
+            ) : (
+              <GroupedBarChart
+                data={deptChartData}
+                demandKeys={deptDemandKeys}
+                supplyKeys={deptSupplyKeys}
+                legendMap={deptLegendMap}
               />
             )}
           </div>

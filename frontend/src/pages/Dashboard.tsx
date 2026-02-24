@@ -293,9 +293,11 @@ export function Dashboard() {
   const [periodOptions, setPeriodOptions] = useState<Period[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenter[]>([]);
   const [projectOptions, setProjectOptions] = useState<Project[]>([]);
+  const [departmentOptions, setDepartmentOptions] = useState<any[]>([]); // Add department options
   const [selectedPeriodIds, setSelectedPeriodIds] = useState<string[]>([]);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState<string | null>(null); // Add selected department
 
   // Department lookup map
   const [departmentMap, setDepartmentMap] = useState<Record<string, string>>({});
@@ -348,6 +350,27 @@ export function Dashboard() {
     setPeriodOptions(periods);
   }, [periods]);
 
+  // Load department options for filter
+  useEffect(() => {
+    adminApi.listDepartments().then((departments) => {
+      setDepartmentOptions(departments);
+    });
+  }, []);
+
+  // Load cost center options for filter
+  useEffect(() => {
+    adminApi.listCostCenters().then((costCenters) => {
+      setCostCenterOptions(costCenters);
+    });
+  }, []);
+
+  // Load project options for filter
+  useEffect(() => {
+    adminApi.listProjects().then((projects) => {
+      setProjectOptions(projects);
+    });
+  }, []);
+
   // Load department lookup map
   useEffect(() => {
     adminApi.listDepartments().then((departments) => {
@@ -374,6 +397,20 @@ export function Dashboard() {
       e.preventDefault();
       setKpiDetailModal(key);
     }
+  };
+
+  // Filter handlers
+  const handlePeriodChange = (periodId: string | null) => {
+    setSelectedPeriodIds(periodId ? [periodId] : []);
+  };
+  const handleCostCenterChange = (costCenterId: string | null) => {
+    setSelectedCostCenterId(costCenterId);
+  };
+  const handleDepartmentChange = (departmentId: string | null) => {
+    setSelectedDepartmentId(departmentId);
+  };
+  const handleProjectChange = (projectId: string | null) => {
+    setSelectedProjectId(projectId);
   };
 
   /* ── KPI computed values ── */
@@ -519,6 +556,65 @@ export function Dashboard() {
     deptLegendMap[`${name}_demand`] = `${name} Demand`;
     deptLegendMap[`${name}_supply`] = `${name} Supply`;
   });
+
+  // Filtered chart data for GroupedBarChart (Projects)
+  const filteredChartData = useMemo(() => {
+    let filtered = aggByProject;
+    if (selectedPeriodIds.length > 0) {
+      filtered = filtered.filter(row => selectedPeriodIds.includes(`${row.year}-${row.month}`));
+    }
+    if (selectedProjectId) {
+      filtered = filtered.filter(row => row.project_id === selectedProjectId);
+    }
+    // Build chart data as before
+    const periodMap = new Map<string, { year: number; month: number }>();
+    const projectMap = new Map<string, string>();
+    filtered.forEach(row => {
+      periodMap.set(`${row.year}-${row.month}`, { year: row.year, month: row.month });
+      projectMap.set(row.project_id, row.project_name || row.project_id);
+    });
+    const data: any[] = Array.from(periodMap.entries()).map(([key, { year, month }]) => {
+      const row: any = { label: `${monthNames[month - 1]} ${year}` };
+      projectMap.forEach((projectName, projectId) => {
+        const agg = filtered.find(r => r.year === year && r.month === month && r.project_id === projectId);
+        row[`${projectName}_demand`] = agg ? agg.demand_fte : 0;
+        row[`${projectName}_supply`] = agg ? agg.supply_fte : 0;
+      });
+      return row;
+    });
+    return data;
+  }, [aggByProject, selectedPeriodIds, selectedProjectId, monthNames]);
+
+  // Filtered chart data for GroupedBarChart (Departments)
+  const filteredDeptChartData = useMemo(() => {
+    let filtered = aggByCostCenter;
+    if (selectedPeriodIds.length > 0) {
+      filtered = filtered.filter(row => selectedPeriodIds.includes(`${row.year}-${row.month}`));
+    }
+    if (selectedCostCenterId) {
+      filtered = filtered.filter(row => row.cost_center_id === selectedCostCenterId);
+    }
+    if (selectedDepartmentId) {
+      filtered = filtered.filter(row => row.department_id === selectedDepartmentId);
+    }
+    // Build chart data as before
+    const periodMap = new Map<string, { year: number; month: number }>();
+    const deptMap = new Map<string, string>();
+    filtered.forEach(row => {
+      periodMap.set(`${row.year}-${row.month}`, { year: row.year, month: row.month });
+      deptMap.set(row.cost_center_id, row.cost_center_name || costCenterMap[row.cost_center_id] || row.cost_center_id);
+    });
+    const data: any[] = Array.from(periodMap.entries()).map(([key, { year, month }]) => {
+      const row: any = { label: `${monthNames[month - 1]} ${year}` };
+      deptMap.forEach((deptName, deptId) => {
+        const agg = filtered.find(r => r.year === year && r.month === month && r.cost_center_id === deptId);
+        row[`${deptName}_demand`] = agg ? agg.demand_fte : 0;
+        row[`${deptName}_supply`] = agg ? agg.supply_fte : 0;
+      });
+      return row;
+    });
+    return data;
+  }, [aggByCostCenter, selectedPeriodIds, selectedCostCenterId, selectedDepartmentId, monthNames, costCenterMap]);
 
   /* ── Loading skeleton ── */
 
@@ -969,6 +1065,66 @@ export function Dashboard() {
         </div>
       )}
 
+      {/* ── Filter Controls ── */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
+        {/* Period Filter */}
+        <label>
+          Period:
+          <select
+            value={selectedPeriodIds[0] || ''}
+            onChange={e => handlePeriodChange(e.target.value || null)}
+            style={{ marginLeft: 8 }}
+          >
+            <option value=''>All</option>
+            {periodOptions.map(p => (
+              <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>{monthNames[p.month - 1]} {p.year}</option>
+            ))}
+          </select>
+        </label>
+        {/* Cost Center Filter */}
+        <label>
+          Cost Center:
+          <select
+            value={selectedCostCenterId || ''}
+            onChange={e => handleCostCenterChange(e.target.value || null)}
+            style={{ marginLeft: 8 }}
+          >
+            <option value=''>All</option>
+            {costCenterOptions.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </label>
+        {/* Department Filter */}
+        <label>
+          Department:
+          <select
+            value={selectedDepartmentId || ''}
+            onChange={e => handleDepartmentChange(e.target.value || null)}
+            style={{ marginLeft: 8 }}
+          >
+            <option value=''>All</option>
+            {departmentOptions.map(d => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))}
+          </select>
+        </label>
+        {/* Project Filter */}
+        <label>
+          Project:
+          <select
+            value={selectedProjectId || ''}
+            onChange={e => handleProjectChange(e.target.value || null)}
+            style={{ marginLeft: 8 }}
+          >
+            <option value=''>All</option>
+            {projectOptions.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       {/* ── Grouped Bar Chart ── */}
       <div className={styles.section}>
         <div className={styles.sectionTitle}>Demand & Supply by Project (Filtered)</div>
@@ -983,7 +1139,7 @@ export function Dashboard() {
               <Skeleton style={{ height: 320 }}><SkeletonItem /></Skeleton>
             ) : (
               <GroupedBarChart
-                data={chartData}
+                data={filteredChartData}
                 demandKeys={demandKeys}
                 supplyKeys={supplyKeys}
                 legendMap={legendMap}
@@ -1007,7 +1163,7 @@ export function Dashboard() {
               <Skeleton style={{ height: 320 }}><SkeletonItem /></Skeleton>
             ) : (
               <GroupedBarChart
-                data={deptChartData}
+                data={filteredDeptChartData}
                 demandKeys={deptDemandKeys}
                 supplyKeys={deptSupplyKeys}
                 legendMap={deptLegendMap}

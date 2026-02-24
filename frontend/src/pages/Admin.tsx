@@ -385,9 +385,29 @@ export function Admin() {
                   <TableCell>{project.code}</TableCell>
                   <TableCell>{project.name}</TableCell>
                   <TableCell>
-                    <Badge color={project.is_active ? 'success' : 'danger'}>
-                      {project.is_active ? 'Active' : 'Inactive'}
-                    </Badge>
+                    {canManageMasterData ? (
+                      <select
+                        value={project.is_active ? 'active' : 'on_hold'}
+                        onChange={async (e) => {
+                          const newStatus = e.target.value === 'active';
+                          try {
+                            await adminApi.updateProject(project.id, { is_active: newStatus });
+                            setProjects((prev) => prev.map((p) => p.id === project.id ? { ...p, is_active: newStatus } : p));
+                            showSuccess('Project status updated');
+                          } catch (err) {
+                            showApiError(err);
+                          }
+                        }}
+                        style={{ minWidth: 90 }}
+                      >
+                        <option value="active">Active</option>
+                        <option value="on_hold">On Hold</option>
+                      </select>
+                    ) : (
+                      <Badge color={project.is_active ? 'success' : 'danger'}>
+                        {project.is_active ? 'Active' : 'On Hold'}
+                      </Badge>
+                    )}
                   </TableCell>
                   <TableCell>
                     {canManageMasterData && (
@@ -896,6 +916,48 @@ export function Admin() {
                     <span style={{ fontWeight: 600 }}>Skill profile</span><span>{(detailItem as Placeholder).skill_profile ?? '-'}</span>
                     <span style={{ fontWeight: 600 }}>Estimated cost</span><span>{(detailItem as Placeholder).estimated_cost != null ? (detailItem as Placeholder).estimated_cost : '-'}</span>
                     <span style={{ fontWeight: 600 }}>Active</span><span>{(detailItem as Placeholder).is_active ? 'Yes' : 'No'}</span>
+                  </div>
+                </div>
+              )}
+              {detailType === 'project' && detailItem && 'name' in detailItem && (
+                <div className={styles.dialogField}>
+                  <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: '120px 1fr' }}>
+                    <span style={{ fontWeight: 600 }}>Name</span><span>{detailItem.name}</span>
+                    <span style={{ fontWeight: 600 }}>Code</span><span>{detailItem.code}</span>
+                    <span style={{ fontWeight: 600 }}>Status</span>
+                    {canManageMasterData ? (
+                      <select
+                        value={detailItem.is_active ? 'active' : 'on_hold'}
+                        onChange={async (e) => {
+                          const newStatus = e.target.value === 'active';
+                          try {
+                            await adminApi.updateProject(detailItem.id, { is_active: newStatus });
+                            setProjects((prev) => prev.map((p) => p.id === detailItem.id ? { ...p, is_active: newStatus } : p));
+                            setDetailItem((prev: any) => prev ? { ...prev, is_active: newStatus } : prev);
+                            showSuccess('Project status updated');
+                          } catch (err) {
+                            showApiError(err);
+                          }
+                        }}
+                        style={{ minWidth: 90 }}
+                      >
+                        <option value="active">Active</option>
+                        <option value="on_hold">On Hold</option>
+                      </select>
+                    ) : (
+                      <span style={{
+                        display: 'inline-block',
+                        padding: '2px 12px',
+                        borderRadius: 8,
+                        background: detailItem.is_active ? '#E6F4EA' : '#FFF9E5',
+                        color: detailItem.is_active ? '#1A7F37' : '#B38600',
+                        fontWeight: 600,
+                        fontSize: 14,
+                        border: detailItem.is_active ? '1px solid #B7E4C7' : '1px solid #FFE066',
+                      }}>
+                        {detailItem.is_active ? 'Active' : 'On Hold'}
+                      </span>
+                    )}
                   </div>
                 </div>
               )}

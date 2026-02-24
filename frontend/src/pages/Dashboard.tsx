@@ -47,6 +47,7 @@ import { usePeriod } from '../contexts/PeriodContext';
 import { BreakdownChart, BreakdownRow } from '../components/BreakdownChart';
 import { periodsApi } from '../api/periods';
 import { lookupsApi } from '../api/lookups';
+import { adminApi } from '../api/admin';
 import type { Period } from '../types';
 import type { CostCenter, Project } from '../api/admin';
 import { GroupedBarChart } from '../components/GroupedBarChart';
@@ -296,6 +297,11 @@ export function Dashboard() {
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
+  // Department lookup map
+  const [departmentMap, setDepartmentMap] = useState<Record<string, string>>({});
+  // Cost center lookup map
+  const [costCenterMap, setCostCenterMap] = useState<Record<string, string>>({});
+
   const isAdmin = user?.role === 'Admin';
 
   // Load aggregated demand/supply data for grouped bar charts
@@ -342,6 +348,27 @@ export function Dashboard() {
     setPeriodOptions(periods);
   }, [periods]);
 
+  // Load department lookup map
+  useEffect(() => {
+    adminApi.listDepartments().then((departments) => {
+      const map: Record<string, string> = {};
+      departments.forEach((d) => {
+        map[d.id] = d.name;
+      });
+      setDepartmentMap(map);
+    });
+  }, []);
+  // Load cost center lookup map
+  useEffect(() => {
+    adminApi.listCostCenters().then((costCenters) => {
+      const map: Record<string, string> = {};
+      costCenters.forEach((c) => {
+        map[c.id] = c.name;
+      });
+      setCostCenterMap(map);
+    });
+  }, []);
+
   const handleKpiCardKeyDown = (e: React.KeyboardEvent, key: KpiDetailModalKey) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -374,13 +401,13 @@ export function Dashboard() {
   const deptBreakdown: BreakdownRow[] = useMemo(() => {
     const deptMap = new Map<string, { demand: number; supply: number }>();
     for (const d of demandLines || []) {
-      const name = d.department_name || 'Unassigned';
+      const name = d.department_name || departmentMap[d.department_id] || 'Unassigned';
       const cur = deptMap.get(name) || { demand: 0, supply: 0 };
       cur.demand += d.fte_percent || 0;
       deptMap.set(name, cur);
     }
     for (const s of supplyLines || []) {
-      const name = s.department_name || 'Unassigned';
+      const name = s.department_name || departmentMap[s.department_id] || 'Unassigned';
       const cur = deptMap.get(name) || { demand: 0, supply: 0 };
       cur.supply += s.fte_percent || 0;
       deptMap.set(name, cur);
@@ -388,7 +415,7 @@ export function Dashboard() {
     return Array.from(deptMap.entries())
       .map(([label, v]) => ({ label, demandFte: v.demand, supplyFte: v.supply }))
       .sort((a, b) => b.demandFte - a.demandFte);
-  }, [demandLines, supplyLines]);
+  }, [demandLines, supplyLines, departmentMap]);
 
   const projectBreakdown: BreakdownRow[] = useMemo(() => {
     const projMap = new Map<string, number>();
@@ -404,13 +431,13 @@ export function Dashboard() {
   const supplyByDept: BreakdownRow[] = useMemo(() => {
     const deptMap = new Map<string, number>();
     for (const s of supplyLines || []) {
-      const name = s.department_name || 'Unassigned';
+      const name = s.department_name || departmentMap[s.department_id] || 'Unassigned';
       deptMap.set(name, (deptMap.get(name) || 0) + (s.fte_percent || 0));
     }
     return Array.from(deptMap.entries())
       .map(([label, fte]) => ({ label, demandFte: 0, supplyFte: fte }))
       .sort((a, b) => b.supplyFte - a.supplyFte);
-  }, [supplyLines]);
+  }, [supplyLines, departmentMap]);
 
   // Build chart data: group by period, columns for each project's demand/supply
   const chartData = useMemo(() => {
@@ -460,7 +487,8 @@ export function Dashboard() {
     const deptMap = new Map<string, string>();
     aggByCostCenter.forEach(row => {
       periodMap.set(`${row.year}-${row.month}`, { year: row.year, month: row.month });
-      deptMap.set(row.cost_center_id, row.cost_center_name || row.cost_center_id);
+      // Use cost center name from row, or lookup from costCenterMap, or fallback to ID
+      deptMap.set(row.cost_center_id, row.cost_center_name || costCenterMap[row.cost_center_id] || row.cost_center_id);
     });
     // Build a row for each period
     const data: any[] = Array.from(periodMap.entries()).map(([key, { year, month }]) => {
@@ -474,14 +502,14 @@ export function Dashboard() {
       return row;
     });
     return data;
-  }, [aggByCostCenter, monthNames]);
+  }, [aggByCostCenter, monthNames, costCenterMap]);
 
   // Build keys and legend map for all departments
   const deptNames = useMemo(() => {
     const names = new Set<string>();
-    aggByCostCenter.forEach(row => names.add(row.cost_center_name || row.cost_center_id));
+    aggByCostCenter.forEach(row => names.add(row.cost_center_name || costCenterMap[row.cost_center_id] || row.cost_center_id));
     return Array.from(names);
-  }, [aggByCostCenter]);
+  }, [aggByCostCenter, costCenterMap]);
 
   const deptDemandKeys = useMemo(() => deptNames.map(name => `${name}_demand`), [deptNames]);
   const deptSupplyKeys = useMemo(() => deptNames.map(name => `${name}_supply`), [deptNames]);
@@ -694,7 +722,7 @@ export function Dashboard() {
                           <TableRow key={d.id}>
                             <TableCell>{d.project_name || 'Unknown'}</TableCell>
                             <TableCell>{d.resource_name || d.placeholder_name || '—'}</TableCell>
-                            <TableCell>{d.department_name || 'Unassigned'}</TableCell>
+                            <TableCell>{d.department_name || departmentMap[d.department_id] || 'Unassigned'}</TableCell>
                             <TableCell>{d.fte_percent ?? 0}%</TableCell>
                           </TableRow>
                         ))}
@@ -728,7 +756,7 @@ export function Dashboard() {
                         {(supplyLines || []).map((s: any) => (
                           <TableRow key={s.id}>
                             <TableCell>{s.resource_name || 'Unknown'}</TableCell>
-                            <TableCell>{s.department_name || 'Unassigned'}</TableCell>
+                            <TableCell>{s.department_name || departmentMap[s.department_id] || 'Unassigned'}</TableCell>
                             <TableCell>{s.project_name || '—'}</TableCell>
                             <TableCell>{s.fte_percent ?? 0}%</TableCell>
                           </TableRow>
@@ -957,7 +985,7 @@ export function Dashboard() {
               ) : (
                 <BreakdownChart
                   rows={aggByCostCenter.map(row => ({
-                    label: `${row.cost_center_name || row.cost_center_id} (${monthNames[row.month - 1]} ${row.year})`,
+                    label: `${row.cost_center_name || costCenterMap[row.cost_center_id] || row.cost_center_id} (${monthNames[row.month - 1]} ${row.year})`,
                     demandFte: row.demand_fte,
                     supplyFte: row.supply_fte,
                   }))}

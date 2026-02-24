@@ -87,32 +87,24 @@ export const GroupedBarChart: React.FC<GroupedBarChartProps> = ({ data, demandKe
         <YAxis />
         <Tooltip content={<CustomTooltip />} />
         <Legend />
-        {demandKeys.map((key) => {
-          const project = key.replace(/_demand$/, '');
-          return (
-            <Bar
-              key={key}
-              dataKey={key}
-              name={legendMap[key] || key}
-              fill={projectColorMap[project]}
-              radius={[4, 4, 0, 0]}
-              barSize={18}
-            />
-          );
-        })}
-        {supplyKeys.map((key) => {
-          const project = key.replace(/_supply$/, '');
-          return (
-            <Bar
-              key={key}
-              dataKey={key}
-              name={legendMap[key] || key}
-              fill={lighten(projectColorMap[project], 40)}
-              radius={[4, 4, 0, 0]}
-              barSize={18}
-            />
-          );
-        })}
+        {projectNames.map((project) => [
+          <Bar
+            key={`${project}_demand`}
+            dataKey={`${project}_demand`}
+            name={legendMap[`${project}_demand`] || `${project} Demand`}
+            fill={projectColorMap[project]}
+            radius={[4, 4, 0, 0]}
+            barSize={18}
+          />,
+          <Bar
+            key={`${project}_supply`}
+            dataKey={`${project}_supply`}
+            name={legendMap[`${project}_supply`] || `${project} Supply`}
+            fill={lighten(projectColorMap[project], 40)}
+            radius={[4, 4, 0, 0]}
+            barSize={18}
+          />
+        ])}
       </BarChart>
     </ResponsiveContainer>
   );

@@ -969,55 +969,6 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* ── New Aggregation Charts (all open periods) ── */}
-      <div className={styles.section}>
-        <div className={styles.sectionTitle}>All Open Periods: Demand & Supply by Cost Center</div>
-        <div className={styles.chartsGrid}>
-          <Card className={styles.chartCard}>
-            <div className={styles.chartCardHeader}>
-              <div className={styles.chartCardHeaderRow}>
-                <Title3 style={{ margin: 0 }}>Demand vs Supply by Cost Center (All Open Periods)</Title3>
-              </div>
-            </div>
-            <div className={styles.chartCardBody}>
-              {aggLoading ? (
-                <Skeleton style={{ height: 200 }}><SkeletonItem /></Skeleton>
-              ) : (
-                <BreakdownChart
-                  rows={aggByCostCenter.map(row => ({
-                    label: `${row.cost_center_name || costCenterMap[row.cost_center_id] || row.cost_center_id} (${monthNames[row.month - 1]} ${row.year})`,
-                    demandFte: row.demand_fte,
-                    supplyFte: row.supply_fte,
-                  }))}
-                  maxRows={12}
-                />
-              )}
-            </div>
-          </Card>
-          <Card className={styles.chartCard}>
-            <div className={styles.chartCardHeader}>
-              <div className={styles.chartCardHeaderRow}>
-                <Title3 style={{ margin: 0 }}>Demand vs Supply by Project (All Open Periods)</Title3>
-              </div>
-            </div>
-            <div className={styles.chartCardBody}>
-              {aggLoading ? (
-                <Skeleton style={{ height: 200 }}><SkeletonItem /></Skeleton>
-              ) : (
-                <BreakdownChart
-                  rows={aggByProject.map(row => ({
-                    label: `${row.project_name || row.project_id} (${monthNames[row.month - 1]} ${row.year})`,
-                    demandFte: row.demand_fte,
-                    supplyFte: row.supply_fte,
-                  }))}
-                  maxRows={12}
-                />
-              )}
-            </div>
-          </Card>
-        </div>
-      </div>
-
       {/* ── Grouped Bar Chart ── */}
       <div className={styles.section}>
         <div className={styles.sectionTitle}>Demand & Supply by Project (Filtered)</div>

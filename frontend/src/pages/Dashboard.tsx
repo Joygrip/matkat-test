@@ -30,6 +30,7 @@ import {
   TableHeaderCell,
   TableBody,
   TableCell,
+  mergeClasses,
 } from '@fluentui/react-components';
 import {
   BuildingRegular,
@@ -44,6 +45,11 @@ import { planningApi } from '../api/planning';
 import { dashboardApi, DemandSupplyByCostCenter, DemandSupplyByProject } from '../api/dashboard';
 import { usePeriod } from '../contexts/PeriodContext';
 import { BreakdownChart, BreakdownRow } from '../components/BreakdownChart';
+import { periodsApi } from '../api/periods';
+import { lookupsApi } from '../api/lookups';
+import type { Period } from '../types';
+import type { CostCenter, Project } from '../api/admin';
+import { GroupedBarChart } from '../components/GroupedBarChart';
 
 /* ─── Styles ────────────────────────────────────────────────────── */
 
@@ -282,6 +288,14 @@ export function Dashboard() {
   type KpiDetailModalKey = 'demand' | 'supply' | 'gap' | 'utilization' | null;
   const [kpiDetailModal, setKpiDetailModal] = useState<KpiDetailModalKey>(null);
 
+  // Filter state
+  const [periodOptions, setPeriodOptions] = useState<Period[]>([]);
+  const [costCenterOptions, setCostCenterOptions] = useState<CostCenter[]>([]);
+  const [projectOptions, setProjectOptions] = useState<Project[]>([]);
+  const [selectedPeriodIds, setSelectedPeriodIds] = useState<string[]>([]);
+  const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+
   const isAdmin = user?.role === 'Admin';
 
   const handleKpiCardKeyDown = (e: React.KeyboardEvent, key: KpiDetailModalKey) => {
@@ -382,6 +396,17 @@ export function Dashboard() {
       .finally(() => setAggLoading(false));
   }, []);
 
+  // Fetch filter options on mount
+  useEffect(() => {
+    periodsApi.list().then(periods => {
+      const openPeriods = periods.filter(p => p.status === 'open');
+      setPeriodOptions(openPeriods);
+      setSelectedPeriodIds(openPeriods.map(p => p.id)); // default: all open
+    });
+    lookupsApi.listCostCenters().then(setCostCenterOptions);
+    lookupsApi.listProjects().then(setProjectOptions);
+  }, []);
+
   const loadMiscData = async () => {
     try {
       setLoading(true);
@@ -410,6 +435,62 @@ export function Dashboard() {
       setChartLoading(false);
     }
   };
+
+  const demandKeys = useMemo(() => {
+    return selectedPeriodIds.map(pid => {
+      const p = periodOptions.find(x => x.id === pid);
+      return p ? `demand_${monthNames[p.month - 1]} ${p.year}` : `demand_${pid}`;
+    });
+  }, [selectedPeriodIds, periodOptions]);
+  const supplyKeys = useMemo(() => {
+    return selectedPeriodIds.map(pid => {
+      const p = periodOptions.find(x => x.id === pid);
+      return p ? `supply_${monthNames[p.month - 1]} ${p.year}` : `supply_${pid}`;
+    });
+  }, [selectedPeriodIds, periodOptions]);
+
+  const filteredProjects = useMemo(() => {
+    return aggByProject.filter(row => {
+      const periodKey = `${row.year}-${row.month}`;
+      const selectedPeriodKeys = periodOptions
+        .filter(p => selectedPeriodIds.includes(p.id))
+        .map(p => `${p.year}-${p.month}`);
+      return (
+        (selectedPeriodIds.length === 0 || selectedPeriodKeys.includes(periodKey)) &&
+        (!selectedCostCenterId || projectOptions.find(p => p.id === row.project_id)?.cost_center_id === selectedCostCenterId) &&
+        (!selectedProjectId || row.project_id === selectedProjectId)
+      );
+    });
+  }, [aggByProject, selectedPeriodIds, selectedCostCenterId, selectedProjectId, projectOptions, periodOptions]);
+
+  // Build chart data: group by project, columns for each period's demand/supply
+  const chartData = useMemo(() => {
+    if (!filteredProjects.length) return [];
+    const periodLabels: Record<string, string> = {};
+    periodOptions.forEach(p => {
+      periodLabels[`${p.year}-${p.month}`] = `${monthNames[p.month - 1]} ${p.year}`;
+    });
+    const grouped: Record<string, any> = {};
+    filteredProjects.forEach(row => {
+      const proj = projectOptions.find(p => p.id === row.project_id);
+      const label = proj ? proj.name : row.project_id;
+      if (!grouped[label]) grouped[label] = { label };
+      const periodKey = `${row.year}-${row.month}`;
+      const periodLabel = periodLabels[periodKey] || periodKey;
+      grouped[label][`demand_${periodLabel}`] = row.demand_fte;
+      grouped[label][`supply_${periodLabel}`] = row.supply_fte;
+    });
+    return Object.values(grouped);
+  }, [filteredProjects, periodOptions, projectOptions]);
+
+  // Build legend map for chart keys
+  const legendMap: Record<string, string> = {};
+  demandKeys.forEach((key) => {
+    legendMap[key] = `Demand (${key.replace('demand_', '')})`;
+  });
+  supplyKeys.forEach((key) => {
+    legendMap[key] = `Supply (${key.replace('supply_', '')})`;
+  });
 
   /* ── Loading skeleton ── */
 
@@ -475,7 +556,7 @@ export function Dashboard() {
             )}
           </Card>
           <Card
-            className={`${styles.kpiCard} ${styles.kpiCardClickable}`}
+            className={mergeClasses(styles.kpiCard, styles.kpiCardClickable)}
             role="button"
             tabIndex={0}
             onClick={() => setKpiDetailModal('demand')}
@@ -489,7 +570,7 @@ export function Dashboard() {
             </div>
           </Card>
           <Card
-            className={`${styles.kpiCard} ${styles.kpiCardClickable}`}
+            className={mergeClasses(styles.kpiCard, styles.kpiCardClickable)}
             role="button"
             tabIndex={0}
             onClick={() => setKpiDetailModal('supply')}
@@ -503,7 +584,7 @@ export function Dashboard() {
             </div>
           </Card>
           <Card
-            className={`${styles.kpiCard} ${styles.kpiCardClickable}`}
+            className={styles.kpiCard}
             style={{
               borderLeft: `4px solid ${gap < 0 ? tokens.colorPaletteRedBorderActive : gap > 0 ? tokens.colorPaletteGreenBorderActive : tokens.colorNeutralStroke2}`,
             }}
@@ -535,7 +616,7 @@ export function Dashboard() {
 
           {/* Utilization KPI */}
           <Card
-            className={`${styles.kpiCard} ${styles.kpiCardClickable}`}
+            className={mergeClasses(styles.kpiCard, styles.kpiCardClickable)}
             style={{
               borderLeft: `4px solid ${utilizationColor}`,
             }}
@@ -896,6 +977,30 @@ export function Dashboard() {
             </div>
           </Card>
         </div>
+      </div>
+
+      {/* ── Grouped Bar Chart ── */}
+      <div className={styles.section}>
+        <div className={styles.sectionTitle}>Demand & Supply by Project (Filtered)</div>
+        <Card className={styles.chartCard}>
+          <div className={styles.chartCardHeader}>
+            <div className={styles.chartCardHeaderRow}>
+              <Title3 style={{ margin: 0 }}>Grouped Bar Chart</Title3>
+            </div>
+          </div>
+          <div className={styles.chartCardBody}>
+            {aggLoading ? (
+              <Skeleton style={{ height: 320 }}><SkeletonItem /></Skeleton>
+            ) : (
+              <GroupedBarChart
+                data={chartData}
+                demandKeys={demandKeys}
+                supplyKeys={supplyKeys}
+                legendMap={legendMap}
+              />
+            )}
+          </div>
+        </Card>
       </div>
 
       {/* ── Admin-Only System Panels ── */}

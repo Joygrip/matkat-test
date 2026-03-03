@@ -76,25 +76,46 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
 
-  /* ── Chart filters bar ── */
-  filtersCard: {
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
-    borderRadius: tokens.borderRadiusLarge,
+  /* ── Chart filters toolbar ── */
+  filtersToolbar: {
+    position: 'relative',
+    zIndex: 1,
+  },
+  filtersToolbarCard: {
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusMedium,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground2,
+    boxShadow: tokens.shadow2,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
   },
-  filtersTitle: {
-    fontSize: tokens.fontSizeBase200,
+  filtersToolbarHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalM,
+  },
+  filtersToolbarTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground3,
     textTransform: 'uppercase' as const,
     letterSpacing: '0.5px',
-    marginBottom: tokens.spacingVerticalM,
+  },
+  filtersToolbarRows: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
   },
   filtersRow: {
     display: 'flex',
     flexWrap: 'wrap' as const,
-    gap: tokens.spacingHorizontalL,
+    gap: tokens.spacingHorizontalM,
     alignItems: 'flex-end',
   },
   filterGroup: {
@@ -549,50 +570,69 @@ export function Dashboard() {
         </p>
       </div>
 
-      {/* ── Chart filters (apply to both charts below) ── */}
-      <Card className={styles.filtersCard}>
-        <div className={styles.filtersTitle}>Chart filters</div>
-        <div className={styles.filtersRow}>
-          <div className={styles.filterGroup}>
-            <span className={styles.filterLabel}>Period</span>
-            <Select
-              value={selectedPeriodIds[0] || ''}
-              onChange={(_, data) => handlePeriodChange(data.value || null)}
+      {/* ── Chart filters toolbar (applies to both charts below) ── */}
+      <div className={styles.filtersToolbar}>
+        <Card className={styles.filtersToolbarCard}>
+          <div className={styles.filtersToolbarHeader}>
+            <div className={styles.filtersToolbarTitle}>
+              <span aria-hidden="true">Filters</span>
+            </div>
+            <Button
+              appearance="subtle"
+              size="small"
+              onClick={() => {
+                handlePeriodChange(null);
+                handleProjectChange(null);
+                handleCostCenterChange(null);
+              }}
             >
-              <option value="">All periods</option>
-              {periodOptions.map(p => (
-                <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>
-                  {monthNames[p.month - 1]} {p.year}
-                </option>
-              ))}
-            </Select>
+              Clear filters
+            </Button>
           </div>
-          <div className={styles.filterGroup}>
-            <span className={styles.filterLabel}>Project</span>
-            <Select
-              value={selectedProjectId || ''}
-              onChange={(_, data) => handleProjectChange(data.value || null)}
-            >
-              <option value="">All projects</option>
-              {projectOptions.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </Select>
+          <div className={styles.filtersToolbarRows}>
+            <div className={styles.filtersRow}>
+              <div className={styles.filterGroup}>
+                <span className={styles.filterLabel}>Period</span>
+                <Select
+                  value={selectedPeriodIds[0] || ''}
+                  onChange={(_, data) => handlePeriodChange(data.value || null)}
+                >
+                  <option value="">All periods</option>
+                  {periodOptions.map(p => (
+                    <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>
+                      {monthNames[p.month - 1]} {p.year}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className={styles.filterGroup}>
+                <span className={styles.filterLabel}>Project</span>
+                <Select
+                  value={selectedProjectId || ''}
+                  onChange={(_, data) => handleProjectChange(data.value || null)}
+                >
+                  <option value="">All projects</option>
+                  {projectOptions.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </Select>
+              </div>
+              <div className={styles.filterGroup}>
+                <span className={styles.filterLabel}>Cost Center</span>
+                <Select
+                  value={selectedCostCenterId || ''}
+                  onChange={(_, data) => handleCostCenterChange(data.value || null)}
+                >
+                  <option value="">All cost centers</option>
+                  {costCenterOptions.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </Select>
+              </div>
+            </div>
           </div>
-          <div className={styles.filterGroup}>
-            <span className={styles.filterLabel}>Cost Center</span>
-            <Select
-              value={selectedCostCenterId || ''}
-              onChange={(_, data) => handleCostCenterChange(data.value || null)}
-            >
-              <option value="">All cost centers</option>
-              {costCenterOptions.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </Select>
-          </div>
-        </div>
-      </Card>
+        </Card>
+      </div>
 
       {/* ── Grouped Bar Chart ── */}
       <div className={styles.section}>

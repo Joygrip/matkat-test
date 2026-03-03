@@ -486,7 +486,7 @@ export const Finance: React.FC = () => {
   const [publishDescription, setPublishDescription] = useState('');
 
   // ── Department stats state ──
-  const { selectedDept, setSelectedDept } = useState<string>('');
+  const [selectedDept, setSelectedDept] = useState<string>('');
   const year = currentPeriod?.year || new Date().getFullYear();
   const month = currentPeriod?.month || new Date().getMonth() + 1;
   const { data: ccStats, loading: ccStatsLoading, error: ccStatsError } = useCostCenterStats(year, month, selectedDept);

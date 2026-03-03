@@ -174,7 +174,7 @@ const useStyles = makeStyles({
     '0%, 100%': {
       opacity: 1,
     },
-    '50%': {
+    '&50%': {
       opacity: 0.7,
     },
   },

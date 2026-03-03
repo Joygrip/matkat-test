@@ -75,18 +75,17 @@ class FinanceService:
         self,
         year: int,
         month: int,
-        department_id: Optional[str] = None,
+        cost_center_id: Optional[str] = None,
     ) -> List[FinanceCostCenterStatsResponse]:
         from api.app.models.planning import DemandLine, SupplyLine
         from api.app.models.actuals import ActualLine
         from api.app.models.core import CostCenter, Resource
-        from sqlalchemy import func, and_
+        from sqlalchemy import func
 
-        # Join Resource to User to get department_id
         from api.app.models.core import User
         resource_filters = [Resource.tenant_id == self.current_user.tenant_id]
-        if department_id:
-            resource_filters.append(User.department_id == department_id)
+        if cost_center_id:
+            resource_filters.append(Resource.cost_center_id == cost_center_id)
 
         # Subqueries for demand, supply, actuals
         demand_subq = (
@@ -151,6 +150,8 @@ class FinanceService:
             .outerjoin(actuals_subq, CostCenter.id == actuals_subq.c.cost_center_id)
             .filter(CostCenter.tenant_id == self.current_user.tenant_id)
         )
+        if cost_center_id:
+            q = q.filter(CostCenter.id == cost_center_id)
         results = q.all()
         return [
             FinanceCostCenterStatsResponse(

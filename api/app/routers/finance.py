@@ -33,13 +33,14 @@ async def actuals_dashboard(
 async def actuals_vs_plan(
     year: int = Query(...),
     month: int = Query(...),
-    department_id: Optional[str] = Query(None),
+    cost_center_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.DIRECTOR)),
 ):
     """
-    Get demand, supply, and actuals per cost center for a given period and department.
+    Get demand, supply, and actuals per cost center for a given period.
+    Optionally filter to a single cost center.
     Accessible to: Finance, Director
     """
     service = FinanceService(db, current_user)
-    return service.get_cost_center_stats(year, month, department_id)
+    return service.get_cost_center_stats(year, month, cost_center_id)

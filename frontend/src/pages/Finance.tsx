@@ -66,6 +66,18 @@ import { useToast } from '../hooks/useToast';
 import { useAuth, useHasRole } from '../auth/AuthProvider';
 import { useCostCenterStats } from '../hooks/useCostCenterStats';
 import { BreakdownChart } from '../components/BreakdownChart';
+import type { CostCenterStats } from '../api/finance';
+
+// ─── Example data for Actuals vs Plan chart (when API returns empty) ─────────
+
+const EXAMPLE_COST_CENTER_STATS: CostCenterStats[] = [
+  { cost_center_id: 'ex-cc-1', cost_center_name: 'Software Development', demand_fte: 320, supply_fte: 300, actuals_fte: 285 },
+  { cost_center_id: 'ex-cc-2', cost_center_name: 'Quality Assurance', demand_fte: 175, supply_fte: 150, actuals_fte: 148 },
+  { cost_center_id: 'ex-cc-3', cost_center_name: 'Infrastructure', demand_fte: 100, supply_fte: 100, actuals_fte: 95 },
+  { cost_center_id: 'ex-cc-4', cost_center_name: 'DevOps', demand_fte: 80, supply_fte: 75, actuals_fte: 72 },
+  { cost_center_id: 'ex-cc-5', cost_center_name: 'Marketing', demand_fte: 50, supply_fte: 50, actuals_fte: 48 },
+  { cost_center_id: 'ex-cc-6', cost_center_name: 'Support', demand_fte: 75, supply_fte: 100, actuals_fte: 70 },
+];
 
 // ─── Actuals types ──────────────────────────────────────────────────────────
 
@@ -485,16 +497,16 @@ export const Finance: React.FC = () => {
   const [publishName, setPublishName] = useState('');
   const [publishDescription, setPublishDescription] = useState('');
 
-  // ── Department stats state ──
-  const [selectedDept, setSelectedDept] = useState<string>('');
+  // ── Cost center stats state (Actuals vs Plan chart) ──
+  const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
   const year = currentPeriod?.year || new Date().getFullYear();
   const month = currentPeriod?.month || new Date().getMonth() + 1;
-  const { data: ccStats, loading: ccStatsLoading, error: ccStatsError } = useCostCenterStats(year, month, selectedDept);
+  const { data: ccStats, loading: ccStatsLoading, error: ccStatsError } = useCostCenterStats(year, month, selectedCostCenterId || undefined);
 
-  // ── Department selector options
-  const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
+  // ── Cost center selector options
+  const [costCenters, setCostCenters] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
-    lookupsApi.listDepartments().then(setDepartments);
+    lookupsApi.listCostCenters().then(list => setCostCenters(list.map(cc => ({ id: cc.id, name: cc.name }))));
   }, []);
 
   // ── Initial load ──
@@ -889,40 +901,46 @@ export const Finance: React.FC = () => {
           </Card>
 
           {/* Actuals vs Demand/Supply by Cost Center */}
-          {canSeeStats && (
-            <Card className={styles.card}>
-              <CardHeader header={<Body1><strong>Actuals vs Demand/Supply by Cost Center</strong></Body1>} />
-              <div style={{ marginBottom: 16, display: 'flex', gap: 16 }}>
-                {/* Department selector (optional) */}
-                <Select value={selectedDept} onChange={e => setSelectedDept(e.target.value)}>
-                  <option value="">All Departments</option>
-                  {departments.map(d => (
-                    <option key={d.id} value={d.id}>{d.name}</option>
-                  ))}
-                </Select>
-                {/* Period selector can be reused if available */}
-              </div>
-              {ccStatsLoading ? (
-                <LoadingState message="Loading cost center stats..." />
-              ) : ccStatsError ? (
-                <MessageBar intent="error"><MessageBarBody>{ccStatsError}</MessageBarBody></MessageBar>
-              ) : ccStats && ccStats.length > 0 ? (
-                <div style={{ height: 320 }}>
-                  <BreakdownChart
-                    rows={ccStats.map(row => ({
-                      label: row.cost_center_name,
-                      demandFte: row.demand_fte,
-                      supplyFte: row.supply_fte,
-                      actualsFte: row.actuals_fte, // Not shown by default, but can be added
-                    }))}
-                    // Optionally, you can add a prop to show actuals as a third bar if you extend BreakdownChart
-                  />
+          {canSeeStats && (() => {
+            const chartRows = ccStats && ccStats.length > 0 ? ccStats : EXAMPLE_COST_CENTER_STATS;
+            const usedExampleData = !ccStats || ccStats.length === 0;
+            return (
+              <Card className={styles.card}>
+                <CardHeader header={<Body1><strong>Actuals vs Demand/Supply by Cost Center</strong></Body1>} />
+                <div style={{ marginBottom: 16, display: 'flex', gap: 16 }}>
+                  <Select value={selectedCostCenterId} onChange={e => setSelectedCostCenterId(e.target.value)}>
+                    <option value="">All Cost Centers</option>
+                    {costCenters.map(cc => (
+                      <option key={cc.id} value={cc.id}>{cc.name}</option>
+                    ))}
+                  </Select>
                 </div>
-              ) : (
-                <EmptyState title="No data" message="No cost center stats for this period." />
-              )}
-            </Card>
-          )}
+                {ccStatsLoading ? (
+                  <LoadingState message="Loading cost center stats..." />
+                ) : ccStatsError ? (
+                  <MessageBar intent="error"><MessageBarBody>{ccStatsError}</MessageBarBody></MessageBar>
+                ) : (
+                  <>
+                    {usedExampleData && (
+                      <MessageBar intent="info" style={{ marginBottom: tokens.spacingVerticalM }}>
+                        <MessageBarBody>Showing example data. Select a period with planning data to see real cost center stats.</MessageBarBody>
+                      </MessageBar>
+                    )}
+                    <div style={{ height: 320 }}>
+                      <BreakdownChart
+                        rows={chartRows.map(row => ({
+                          label: row.cost_center_name,
+                          demandFte: row.demand_fte,
+                          supplyFte: row.supply_fte,
+                          actualsFte: row.actuals_fte,
+                        }))}
+                      />
+                    </div>
+                  </>
+                )}
+              </Card>
+            );
+          })()}
         </>
       )}
 

@@ -33,6 +33,8 @@ import {
   Checkbox,
   Toolbar,
   ToolbarButton,
+  TabList,
+  Tab,
 } from '@fluentui/react-components';
 import { Add24Regular, Delete24Regular, CalendarRegular, Edit24Regular } from '@fluentui/react-icons';
 import { BreakdownChart, BreakdownRow } from '../components/BreakdownChart';
@@ -236,8 +238,8 @@ export const Demand: React.FC = () => {
   const [bulkEditForm, setBulkEditForm] = useState<Partial<CreateDemandLine>>({});
   const [bulkEditUseResource, setBulkEditUseResource] = useState<'resource' | 'placeholder' | ''>('');
 
-  // Bulk Add Dialog State
-  const [isBulkAddOpen, setIsBulkAddOpen] = useState(false);
+  // Add dialog mode: single line vs bulk add (both use isDialogOpen)
+  const [addMode, setAddMode] = useState<'single' | 'bulk'>('single');
   const [bulkAddProjects, setBulkAddProjects] = useState<string[]>([]);
   const [bulkAddResourceType, setBulkAddResourceType] = useState<'resource' | 'placeholder' | ''>('');
   const [bulkAddResourceId, setBulkAddResourceId] = useState<string>('');
@@ -283,12 +285,12 @@ export const Demand: React.FC = () => {
   }, [dialogDept, placeholders]);
   
   useEffect(() => {
-    if (isBulkAddOpen) {
+    if (isDialogOpen && addMode === 'bulk') {
       periodsApi.list().then((periods: Period[]) => {
         setOpenPeriods(periods.filter(p => p.status === 'open'));
       });
     }
-  }, [isBulkAddOpen]);
+  }, [isDialogOpen, addMode]);
   
   const loadInitialData = async () => {
     try {
@@ -512,15 +514,6 @@ export const Demand: React.FC = () => {
     return periods;
   }
 
-  const handleOpenBulkAdd = () => {
-    setBulkAddProjects([]);
-    setBulkAddResourceType('');
-    setBulkAddResourceId('');
-    setBulkAddPeriods([]);
-    setBulkAddFte(50);
-    setBulkAddPreview([]);
-    setIsBulkAddOpen(true);
-  };
 
   const handleBulkAddPreview = () => {
     // Preview lines
@@ -549,7 +542,8 @@ export const Demand: React.FC = () => {
       const actions = bulkAddPreview.map(line => ({ action: 'create', data: line }));
       await planningApi.bulkDemandLines({ actions, all_or_nothing: true });
       showSuccess('Bulk demand lines created');
-      setIsBulkAddOpen(false);
+      setIsDialogOpen(false);
+      setAddMode('single');
       loadDemands();
     } catch (err) {
       showApiError(err, 'Bulk add failed');
@@ -569,14 +563,17 @@ export const Demand: React.FC = () => {
         </div>
         <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
           {!isLocked && canEdit && (
-            <>
-              <Button appearance="primary" icon={<Add24Regular />} onClick={() => setIsDialogOpen(true)}>
-                Add Demand
-              </Button>
-              <Button appearance="subtle" icon={<Add24Regular />} onClick={handleOpenBulkAdd}>
-                Bulk Add
-              </Button>
-            </>
+            <Button
+              appearance="primary"
+              icon={<Add24Regular />}
+              onClick={() => {
+                setEditId(null);
+                setAddMode('single');
+                setIsDialogOpen(true);
+              }}
+            >
+              Add Demand
+            </Button>
           )}
         </div>
       </div>
@@ -652,107 +649,6 @@ export const Demand: React.FC = () => {
         </Dialog>
       )}
       
-      {/* Bulk Add Dialog */}
-      {canEdit && (
-        <Dialog open={isBulkAddOpen} onOpenChange={(_, d) => setIsBulkAddOpen(d.open)}>
-          <DialogSurface>
-            <DialogBody>
-              <DialogTitle>Bulk Add Demand Lines</DialogTitle>
-              <DialogContent>
-                <div className={styles.formField}>
-                  <label className={styles.formLabel}>Projects</label>
-                  <Dropdown
-                    multiselect
-                    selectedOptions={bulkAddProjects}
-                    onOptionSelect={(_, data) => setBulkAddProjects(data.selectedOptions as string[])}
-                    placeholder="Select projects..."
-                  >
-                    {projects.map(p => (
-                      <Option key={p.id} value={p.id}>{p.name}</Option>
-                    ))}
-                  </Dropdown>
-                </div>
-                <div className={styles.formField}>
-                  <label className={styles.formLabel}>Assignment Type</label>
-                  <Select value={bulkAddResourceType} onChange={(_, data) => setBulkAddResourceType(data.value)}>
-                    <option value="">Select...</option>
-                    <option value="resource">Named Resource</option>
-                    <option value="placeholder">Placeholder (TBD)</option>
-                  </Select>
-                </div>
-                {bulkAddResourceType === 'resource' && (
-                  <div className={styles.formField}>
-                    <label className={styles.formLabel}>Resource</label>
-                    <ResourcePicker resources={resources} value={bulkAddResourceId} onChange={setBulkAddResourceId} placeholder="Type name..." />
-                  </div>
-                )}
-                {bulkAddResourceType === 'placeholder' && (
-                  <div className={styles.formField}>
-                    <label className={styles.formLabel}>Placeholder</label>
-                    <PlaceholderPicker placeholders={placeholders} value={bulkAddResourceId} onChange={setBulkAddResourceId} placeholder="Type placeholder..." />
-                  </div>
-                )}
-                <div className={styles.formField}>
-                  <label className={styles.formLabel}>Periods</label>
-                  <Dropdown
-                    multiselect
-                    selectedOptions={bulkAddPeriods.map(p => p.id)}
-                    onOptionSelect={(_, data) => {
-                      setBulkAddPeriods(openPeriods.filter(p => data.selectedOptions.includes(p.id)));
-                    }}
-                    placeholder="Select open periods..."
-                  >
-                    {openPeriods.map(p => (
-                      <Option key={p.id} value={p.id}>
-                        {monthNames[p.month - 1]} {p.year}
-                      </Option>
-                    ))}
-                  </Dropdown>
-                </div>
-                <div className={styles.formField}>
-                  <label className={styles.formLabel}>FTE %</label>
-                  <Select value={String(bulkAddFte)} onChange={(_, data) => setBulkAddFte(parseInt(data.value))}>
-                    {[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100].map(val => (
-                      <option key={val} value={val}>{val}%</option>
-                    ))}
-                  </Select>
-                </div>
-                <Button appearance="secondary" onClick={handleBulkAddPreview} disabled={bulkAddProjects.length === 0 || bulkAddPeriods.length === 0}>Preview</Button>
-                {bulkAddPreview.length > 0 && (
-                  <div style={{ marginTop: 16 }}>
-                    <strong>Preview ({bulkAddPreview.length} lines):</strong>
-                    <Table className={styles.table}>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHeaderCell>Project</TableHeaderCell>
-                          <TableHeaderCell>Year</TableHeaderCell>
-                          <TableHeaderCell>Month</TableHeaderCell>
-                          <TableHeaderCell>FTE %</TableHeaderCell>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {bulkAddPreview.map((line, idx) => (
-                          <TableRow key={idx}>
-                            <TableCell>{projects.find(p => p.id === line.project_id)?.name || line.project_id}</TableCell>
-                            <TableCell>{line.year}</TableCell>
-                            <TableCell>{String(line.month).padStart(2, '0')}</TableCell>
-                            <TableCell>{line.fte_percent}%</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </DialogContent>
-              <DialogActions>
-                <Button onClick={() => setIsBulkAddOpen(false)}>Cancel</Button>
-                <Button appearance="primary" onClick={handleBulkAddSubmit} disabled={bulkAddPreview.length === 0}>Create All</Button>
-              </DialogActions>
-            </DialogBody>
-          </DialogSurface>
-        </Dialog>
-      )}
-      
       {/* Demand by Project chart */}
       {demands.length > 0 && (
         <Card className={styles.chartCard}>
@@ -794,7 +690,15 @@ export const Demand: React.FC = () => {
                     message="No demand lines found for the selected filters. Create one to get started."
                     action={
                       !isLocked && canEdit ? (
-                        <Button appearance="primary" icon={<Add24Regular />} onClick={() => setIsDialogOpen(true)}>
+                        <Button
+                          appearance="primary"
+                          icon={<Add24Regular />}
+                          onClick={() => {
+                            setEditId(null);
+                            setAddMode('single');
+                            setIsDialogOpen(true);
+                          }}
+                        >
                           Add Demand Line
                         </Button>
                       ) : undefined
@@ -867,65 +771,202 @@ export const Demand: React.FC = () => {
         </Table>
       </Card>
 
-      {/* Add Demand Dialog */}
+      {/* Add / Edit Demand Dialog with Single and Bulk modes */}
       {canEdit && (
-        <Dialog open={isDialogOpen} onOpenChange={(_, d) => setIsDialogOpen(d.open)}>
+        <Dialog
+          open={isDialogOpen}
+          onOpenChange={(_, data) => {
+            setIsDialogOpen(data.open);
+            if (!data.open) {
+              setEditId(null);
+              setAddMode('single');
+            }
+          }}
+        >
           <DialogSurface>
             <DialogBody>
-              <DialogTitle>{editId ? 'Edit Demand Line' : 'Add Demand Line'}</DialogTitle>
+              <DialogTitle>
+                {editId
+                  ? 'Edit Demand Line'
+                  : addMode === 'single'
+                    ? 'Add Demand Line'
+                    : 'Bulk Add Demand Lines'}
+              </DialogTitle>
               <DialogContent>
-                <div className={styles.formField}>
-                  <label className={styles.formLabel}>Project</label>
-                  <Select
-                    value={formData.project_id || ''}
-                    onChange={(_, data) => setFormData(f => ({ ...f, project_id: data.value }))}
-                  >
-                    <option value="">Select project...</option>
-                    {projects.map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </Select>
-                </div>
-                <div className={styles.formField}>
-                  <label className={styles.formLabel}>Assignment Type</label>
-                  <Select
-                    value={useResource ? 'resource' : 'placeholder'}
-                    onChange={(_, data) => setUseResource(data.value === 'resource')}
-                  >
-                    <option value="resource">Named Resource</option>
-                    <option value="placeholder">Placeholder (TBD)</option>
-                  </Select>
-                </div>
-                {useResource ? (
-                  <div className={styles.formField}>
-                    <label className={styles.formLabel}>Resource</label>
-                    <ResourcePicker resources={resources} value={formData.resource_id || ''} onChange={val => setFormData(f => ({ ...f, resource_id: val, placeholder_id: undefined }))} placeholder="Type name..." />
-                  </div>
-                ) : (
-                  <div className={styles.formField}>
-                    <label className={styles.formLabel}>Placeholder</label>
-                    <PlaceholderPicker placeholders={filteredPlaceholders} value={formData.placeholder_id || ''} onChange={val => setFormData(f => ({ ...f, placeholder_id: val, resource_id: undefined }))} placeholder="Type placeholder..." />
+                {!editId && (
+                  <div style={{ marginBottom: tokens.spacingVerticalM }}>
+                    <TabList
+                      selectedValue={addMode}
+                      onTabSelect={(_, data) => setAddMode(data.value as 'single' | 'bulk')}
+                    >
+                      <Tab value="single">Single line</Tab>
+                      <Tab value="bulk">Bulk add</Tab>
+                    </TabList>
                   </div>
                 )}
-                <div className={styles.formField}>
-                  <label className={styles.formLabel}>FTE %</label>
-                  <Select
-                    value={formData.fte_percent ? String(formData.fte_percent) : ''}
-                    onChange={(_, data) => setFormData(f => ({ ...f, fte_percent: data.value ? parseInt(data.value) : undefined }))
-                    }
-                  >
-                    <option value="">Select FTE %...</option>
-                    {[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100].map(val => (
-                      <option key={val} value={val}>{val}%</option>
-                    ))}
-                  </Select>
-                </div>
+
+                {(addMode === 'single' || editId) && (
+                  <>
+                    <div className={styles.formField}>
+                      <label className={styles.formLabel}>Project</label>
+                      <Select
+                        value={formData.project_id || ''}
+                        onChange={(_, data) => setFormData(f => ({ ...f, project_id: data.value }))}
+                      >
+                        <option value="">Select project...</option>
+                        {projects.map(p => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className={styles.formField}>
+                      <label className={styles.formLabel}>Assignment Type</label>
+                      <Select
+                        value={useResource ? 'resource' : 'placeholder'}
+                        onChange={(_, data) => setUseResource(data.value === 'resource')}
+                      >
+                        <option value="resource">Named Resource</option>
+                        <option value="placeholder">Placeholder (TBD)</option>
+                      </Select>
+                    </div>
+                    {useResource ? (
+                      <div className={styles.formField}>
+                        <label className={styles.formLabel}>Resource</label>
+                        <ResourcePicker resources={resources} value={formData.resource_id || ''} onChange={val => setFormData(f => ({ ...f, resource_id: val, placeholder_id: undefined }))} placeholder="Type name..." />
+                      </div>
+                    ) : (
+                      <div className={styles.formField}>
+                        <label className={styles.formLabel}>Placeholder</label>
+                        <PlaceholderPicker placeholders={filteredPlaceholders} value={formData.placeholder_id || ''} onChange={val => setFormData(f => ({ ...f, placeholder_id: val, resource_id: undefined }))} placeholder="Type placeholder..." />
+                      </div>
+                    )}
+                    <div className={styles.formField}>
+                      <label className={styles.formLabel}>FTE %</label>
+                      <Select
+                        value={formData.fte_percent ? String(formData.fte_percent) : ''}
+                        onChange={(_, data) => setFormData(f => ({ ...f, fte_percent: data.value ? parseInt(data.value) : undefined }))}
+                      >
+                        <option value="">Select FTE %...</option>
+                        {[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100].map(val => (
+                          <option key={val} value={val}>{val}%</option>
+                        ))}
+                      </Select>
+                    </div>
+                  </>
+                )}
+
+                {addMode === 'bulk' && !editId && (
+                  <>
+                    <div className={styles.formField}>
+                      <label className={styles.formLabel}>Projects</label>
+                      <Dropdown
+                        multiselect
+                        selectedOptions={bulkAddProjects}
+                        onOptionSelect={(_, data) => setBulkAddProjects(data.selectedOptions as string[])}
+                        placeholder="Select projects..."
+                      >
+                        {projects.map(p => (
+                          <Option key={p.id} value={p.id}>{p.name}</Option>
+                        ))}
+                      </Dropdown>
+                    </div>
+                    <div className={styles.formField}>
+                      <label className={styles.formLabel}>Assignment Type</label>
+                      <Select value={bulkAddResourceType} onChange={(_, data) => setBulkAddResourceType(data.value)}>
+                        <option value="">Select...</option>
+                        <option value="resource">Named Resource</option>
+                        <option value="placeholder">Placeholder (TBD)</option>
+                      </Select>
+                    </div>
+                    {bulkAddResourceType === 'resource' && (
+                      <div className={styles.formField}>
+                        <label className={styles.formLabel}>Resource</label>
+                        <ResourcePicker resources={resources} value={bulkAddResourceId} onChange={setBulkAddResourceId} placeholder="Type name..." />
+                      </div>
+                    )}
+                    {bulkAddResourceType === 'placeholder' && (
+                      <div className={styles.formField}>
+                        <label className={styles.formLabel}>Placeholder</label>
+                        <PlaceholderPicker placeholders={placeholders} value={bulkAddResourceId} onChange={setBulkAddResourceId} placeholder="Type placeholder..." />
+                      </div>
+                    )}
+                    <div className={styles.formField}>
+                      <label className={styles.formLabel}>Periods</label>
+                      <Dropdown
+                        multiselect
+                        selectedOptions={bulkAddPeriods.map(p => p.id)}
+                        onOptionSelect={(_, data) => {
+                          setBulkAddPeriods(openPeriods.filter(p => data.selectedOptions.includes(p.id)));
+                        }}
+                        placeholder="Select open periods..."
+                      >
+                        {openPeriods.map(p => (
+                          <Option key={p.id} value={p.id}>
+                            {monthNames[p.month - 1]} {p.year}
+                          </Option>
+                        ))}
+                      </Dropdown>
+                    </div>
+                    <div className={styles.formField}>
+                      <label className={styles.formLabel}>FTE %</label>
+                      <Select value={String(bulkAddFte)} onChange={(_, data) => setBulkAddFte(parseInt(data.value))}>
+                        {[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100].map(val => (
+                          <option key={val} value={val}>{val}%</option>
+                        ))}
+                      </Select>
+                    </div>
+                    <Button appearance="secondary" onClick={handleBulkAddPreview} disabled={bulkAddProjects.length === 0 || bulkAddPeriods.length === 0}>Preview</Button>
+                    {bulkAddPreview.length > 0 && (
+                      <div style={{ marginTop: 16 }}>
+                        <strong>Preview ({bulkAddPreview.length} lines):</strong>
+                        <Table className={styles.table}>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHeaderCell>Project</TableHeaderCell>
+                              <TableHeaderCell>Year</TableHeaderCell>
+                              <TableHeaderCell>Month</TableHeaderCell>
+                              <TableHeaderCell>FTE %</TableHeaderCell>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {bulkAddPreview.map((line, idx) => (
+                              <TableRow key={idx}>
+                                <TableCell>{projects.find(p => p.id === line.project_id)?.name || line.project_id}</TableCell>
+                                <TableCell>{line.year}</TableCell>
+                                <TableCell>{String(line.month).padStart(2, '0')}</TableCell>
+                                <TableCell>{line.fte_percent}%</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </>
+                )}
               </DialogContent>
               <DialogActions>
-                <Button onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-                <Button appearance="primary" onClick={editId ? handleSaveEdit : handleCreate}>
-                  {editId ? 'Save Changes' : 'Create'}
+                <Button
+                  onClick={() => {
+                    setIsDialogOpen(false);
+                    setEditId(null);
+                    setAddMode('single');
+                  }}
+                >
+                  Cancel
                 </Button>
+                {addMode === 'bulk' && !editId ? (
+                  <Button
+                    appearance="primary"
+                    onClick={handleBulkAddSubmit}
+                    disabled={bulkAddPreview.length === 0}
+                  >
+                    Create All
+                  </Button>
+                ) : editId ? (
+                  <Button appearance="primary" onClick={handleSaveEdit}>Save Changes</Button>
+                ) : (
+                  <Button appearance="primary" onClick={handleCreate}>Create</Button>
+                )}
               </DialogActions>
             </DialogBody>
           </DialogSurface>

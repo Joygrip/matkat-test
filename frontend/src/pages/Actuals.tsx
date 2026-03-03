@@ -4,7 +4,7 @@
  * Employee: Enter and sign actuals
  * RO: View and proxy sign for absent employees
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Title1,
   Body1,
@@ -18,6 +18,8 @@ import {
   TableBody,
   TableCell,
   Spinner,
+  Skeleton,
+  SkeletonItem,
   Badge,
   tokens,
   makeStyles,
@@ -63,23 +65,23 @@ const useStyles = makeStyles({
   header: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: tokens.spacingVerticalXXL,
-    paddingBottom: tokens.spacingVerticalL,
-    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+    alignItems: 'center',
+    marginBottom: tokens.spacingVerticalL,
+    paddingBottom: tokens.spacingVerticalS,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   headerContent: {
     flex: 1,
   },
   pageTitle: {
-    fontSize: tokens.fontSizeHero800,
+    fontSize: tokens.fontSizeHero700,
     fontWeight: tokens.fontWeightBold,
     color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalXS,
+    marginBottom: tokens.spacingVerticalXXS,
     lineHeight: '1.2',
   },
   pageSubtitle: {
-    fontSize: tokens.fontSizeBase400,
+    fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground3,
     fontWeight: tokens.fontWeightRegular,
   },
@@ -182,6 +184,13 @@ const useStyles = makeStyles({
       boxShadow: tokens.shadow8,
     },
   },
+  summaryCardClickable: {
+    cursor: 'pointer',
+    '&:hover': {
+      borderColor: tokens.colorBrandStroke1,
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+  },
   summaryValue: {
     fontSize: tokens.fontSizeHero700,
     fontWeight: tokens.fontWeightBold,
@@ -193,6 +202,124 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontWeight: tokens.fontWeightSemibold,
     marginBottom: tokens.spacingVerticalXS,
+  },
+  toolbar: {
+    position: 'sticky' as const,
+    top: 0,
+    zIndex: 10,
+    backgroundColor: tokens.colorNeutralBackground1,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
+    marginBottom: tokens.spacingVerticalL,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalL,
+    flexWrap: 'wrap' as const,
+  },
+  toolbarLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.5px',
+  },
+  scoreboardRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    marginBottom: tokens.spacingVerticalL,
+    flexWrap: 'wrap' as const,
+  },
+  scoreboardItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusMedium,
+    cursor: 'pointer',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    '&:hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
+  },
+  scoreboardItemActive: {
+    borderColor: tokens.colorBrandStroke1,
+    backgroundColor: tokens.colorNeutralBackground1Selected,
+  },
+  scoreboardValue: {
+    fontSize: tokens.fontSizeBase500,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  scoreboardLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.5px',
+  },
+  workQueueLayout: {
+    display: 'grid',
+    gridTemplateColumns: '35% 1fr',
+    gap: tokens.spacingHorizontalL,
+    minHeight: 400,
+  },
+  workQueueLeft: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
+    paddingRight: tokens.spacingHorizontalL,
+  },
+  workQueueSearch: {
+    minWidth: 0,
+  },
+  workQueueList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    overflowY: 'auto' as const,
+  },
+  workQueueRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusMedium,
+    cursor: 'pointer',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    '&:hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
+  },
+  workQueueRowSelected: {
+    borderColor: tokens.colorBrandStroke1,
+    backgroundColor: tokens.colorNeutralBackground1Selected,
+  },
+  sortableTable: {
+    width: '100%',
+    '& thead': {
+      backgroundColor: tokens.colorNeutralBackground2,
+      position: 'sticky' as const,
+      top: 0,
+      zIndex: 1,
+    },
+    '& th': {
+      fontWeight: tokens.fontWeightSemibold,
+      fontSize: tokens.fontSizeBase300,
+      color: tokens.colorNeutralForeground2,
+      padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
+      textTransform: 'uppercase',
+      letterSpacing: '0.5px',
+      borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+      cursor: 'pointer',
+      userSelect: 'none',
+      '&:hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
+    },
+    '& td': {
+      padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
+      borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+    },
+    '& tbody tr': {
+      transition: 'background-color 0.15s ease',
+      '&:hover': { backgroundColor: tokens.colorNeutralBackground1 },
+    },
   },
 });
 
@@ -239,6 +366,14 @@ export const Actuals: React.FC = () => {
   const [editPlannedFte, setEditPlannedFte] = useState<number | undefined>(undefined);
   const [editProjectId, setEditProjectId] = useState<string | undefined>(undefined);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+
+  const [planningLinesModal, setPlanningLinesModal] = useState<'demand' | 'supply' | null>(null);
+
+  // Toolbar and filter state (RO view)
+  const [selectedResourceFilter, setSelectedResourceFilter] = useState<string | null>(null);
+  const [selectedProjectFilter, setSelectedProjectFilter] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<'resource' | 'project' | 'period' | 'actual'>('resource');
+  const [sortAsc, setSortAsc] = useState(true);
   
   useEffect(() => {
     loadInitialData();
@@ -259,7 +394,7 @@ export const Actuals: React.FC = () => {
     if (selectedPeriodId) {
       loadActuals();
     }
-  }, [selectedPeriodId]);
+  }, [selectedPeriodId, myResourceId]);
   
   const loadInitialData = async () => {
     try {
@@ -288,12 +423,13 @@ export const Actuals: React.FC = () => {
       setActuals(data);
       setOverLimitIds([]);
       
-      // For employees, also load demand and supply lines for their resource
-      if (isEmployee && selectedPeriodId) {
+      // For employees, also load demand and supply lines for their resource (filter by myResourceId)
+      if (isEmployee && selectedPeriodId && myResourceId) {
         try {
+          const filters = { resourceId: myResourceId };
           const [demands, supplies] = await Promise.all([
-            planningApi.getDemandLines(selectedPeriodId).catch(() => []),
-            planningApi.getSupplyLines(selectedPeriodId).catch(() => []),
+            planningApi.getDemandLines(selectedPeriodId, filters).catch(() => []),
+            planningApi.getSupplyLines(selectedPeriodId, filters).catch(() => []),
           ]);
           setDemandLines(demands || []);
           setSupplyLines(supplies || []);
@@ -445,6 +581,43 @@ export const Actuals: React.FC = () => {
   
   const currentPeriod = ctxPeriod;
   const isLocked = currentPeriod?.status === 'locked';
+
+  const filteredActuals = useMemo(() => {
+    let out = actuals;
+    if (selectedResourceFilter) {
+      out = out.filter(a => a.resource_id === selectedResourceFilter);
+    }
+    if (selectedProjectFilter) {
+      out = out.filter(a => a.project_id === selectedProjectFilter);
+    }
+    return out;
+  }, [actuals, selectedResourceFilter, selectedProjectFilter]);
+
+  const sortedActuals = useMemo(() => {
+    const getRes = (id: string) => resources.find(r => r.id === id)?.display_name || 'Unknown';
+    const getProj = (id: string) => projects.find(p => p.id === id)?.name || 'Unknown';
+    return [...filteredActuals].sort((a, b) => {
+      const dir = sortAsc ? 1 : -1;
+      switch (sortBy) {
+        case 'resource':
+          return ((a.resource_name ?? getRes(a.resource_id)) || '').localeCompare((b.resource_name ?? getRes(b.resource_id)) || '') * dir;
+        case 'project':
+          return ((a.project_name ?? getProj(a.project_id)) || '').localeCompare((b.project_name ?? getProj(b.project_id)) || '') * dir;
+        case 'period':
+          return ((a.year * 12 + a.month) - (b.year * 12 + b.month)) * dir;
+        case 'actual':
+          return (a.actual_fte_percent - b.actual_fte_percent) * dir;
+        default:
+          return 0;
+      }
+    });
+  }, [filteredActuals, sortBy, sortAsc, resources, projects]);
+
+  const handleSort = (key: 'resource' | 'project' | 'period' | 'actual') => {
+    if (sortBy === key) setSortAsc(prev => !prev);
+    else { setSortBy(key); setSortAsc(true); }
+  };
+  const sortIndicator = (key: string) => (sortBy === key ? (sortAsc ? ' \u25B2' : ' \u25BC') : '');
   
   // Calculate total by resource
   const totalsByResource: Record<string, number> = {};
@@ -457,8 +630,19 @@ export const Actuals: React.FC = () => {
   
   if (loading) {
     return (
-      <div className={styles.loading}>
-        <Spinner size="large" label="Loading..." />
+      <div className={styles.container}>
+        <div className={styles.header}>
+          <div className={styles.headerContent}>
+            <Skeleton style={{ width: 200, height: 28, marginBottom: 4 }}><SkeletonItem /></Skeleton>
+            <Skeleton style={{ width: 280, height: 16 }}><SkeletonItem /></Skeleton>
+          </div>
+        </div>
+        <div className={styles.toolbar}>
+          <Skeleton style={{ width: 120, height: 24 }}><SkeletonItem /></Skeleton>
+          <Skeleton style={{ width: 100, height: 24 }}><SkeletonItem /></Skeleton>
+        </div>
+        <Skeleton style={{ height: 80, marginBottom: 16 }}><SkeletonItem /></Skeleton>
+        <Skeleton style={{ height: 300 }}><SkeletonItem /></Skeleton>
       </div>
     );
   }
@@ -596,6 +780,52 @@ export const Actuals: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Sticky toolbar */}
+      <div className={styles.toolbar}>
+        <span className={styles.toolbarLabel}>Period</span>
+        <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>
+          {currentPeriod ? `${monthNames[currentPeriod.month - 1]} ${currentPeriod.year}` : '—'}
+        </Body1>
+        {!isEmployee && (
+          <>
+            <span className={styles.toolbarLabel}>Resource</span>
+            <Select
+              value={selectedResourceFilter ?? ''}
+              onChange={(_, d) => setSelectedResourceFilter(d.value || null)}
+              style={{ minWidth: 160 }}
+            >
+              <option value="">All resources</option>
+              {resources.map(r => (
+                <option key={r.id} value={r.id}>{r.display_name}</option>
+              ))}
+            </Select>
+            <span className={styles.toolbarLabel}>Project</span>
+            <Select
+              value={selectedProjectFilter ?? ''}
+              onChange={(_, d) => setSelectedProjectFilter(d.value || null)}
+              style={{ minWidth: 160 }}
+            >
+              <option value="">All projects</option>
+              {projects.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </Select>
+            {(selectedResourceFilter || selectedProjectFilter) && (
+              <Button
+                appearance="subtle"
+                size="small"
+                onClick={() => {
+                  setSelectedResourceFilter(null);
+                  setSelectedProjectFilter(null);
+                }}
+              >
+                Clear filters
+              </Button>
+            )}
+          </>
+        )}
+      </div>
       
       {isLocked && (
         <MessageBar intent="warning" style={{ marginBottom: tokens.spacingVerticalM }}>
@@ -615,16 +845,28 @@ export const Actuals: React.FC = () => {
           <CardHeader header={<Title1>Planning Summary</Title1>} />
           <div className={styles.planningSummary}>
             <div className={styles.summaryGrid}>
-              <div className={styles.summaryCard}>
+              <div
+                className={`${styles.summaryCard} ${styles.summaryCardClickable}`}
+                onClick={() => demandLines.length > 0 && setPlanningLinesModal('demand')}
+                role={demandLines.length > 0 ? 'button' : undefined}
+                tabIndex={demandLines.length > 0 ? 0 : undefined}
+                onKeyDown={demandLines.length > 0 ? (e) => e.key === 'Enter' && setPlanningLinesModal('demand') : undefined}
+              >
                 <Body1 className={styles.summaryLabel}>Total Demand</Body1>
-                <Body1 className={styles.summaryValue} style={{ color: tokens.colorPaletteBlueForeground1 }}>
+                <Body1 className={styles.summaryValue} style={{ color: tokens.colorPaletteBlueForeground2 }}>
                   {demandLines.reduce((sum, d) => sum + (d.fte_percent || 0), 0)}%
                 </Body1>
                 <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
                   {demandLines.length} demand line{demandLines.length !== 1 ? 's' : ''} across {new Set(demandLines.map(d => d.project_id)).size} project{new Set(demandLines.map(d => d.project_id)).size !== 1 ? 's' : ''}
                 </Body1>
               </div>
-              <div className={styles.summaryCard}>
+              <div
+                className={`${styles.summaryCard} ${styles.summaryCardClickable}`}
+                onClick={() => supplyLines.length > 0 && setPlanningLinesModal('supply')}
+                role={supplyLines.length > 0 ? 'button' : undefined}
+                tabIndex={supplyLines.length > 0 ? 0 : undefined}
+                onKeyDown={supplyLines.length > 0 ? (e) => e.key === 'Enter' && setPlanningLinesModal('supply') : undefined}
+              >
                 <Body1 className={styles.summaryLabel}>Total Supply</Body1>
                 <Body1 className={styles.summaryValue} style={{ color: tokens.colorPaletteGreenForeground1 }}>
                   {supplyLines.reduce((sum, s) => sum + (s.fte_percent || 0), 0)}%
@@ -634,73 +876,52 @@ export const Actuals: React.FC = () => {
                 </Body1>
               </div>
             </div>
-            {demandLines.length > 0 && (
-              <div style={{ marginTop: tokens.spacingVerticalL }}>
-                <Body1 style={{ fontWeight: tokens.fontWeightSemibold, marginBottom: tokens.spacingVerticalS }}>
-                  Demand by Project:
-                </Body1>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS }}>
-                  {Array.from(new Set(demandLines.map(d => d.project_id))).map(projectId => {
-                    const projectDemands = demandLines.filter(d => d.project_id === projectId);
-                    const projectTotal = projectDemands.reduce((sum, d) => sum + (d.fte_percent || 0), 0);
-                    const projectName = projects.find(p => p.id === projectId)?.name || 'Unknown Project';
-                    return (
-                      <div key={projectId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Body1>{projectName}</Body1>
-                        <Badge appearance="outline">{projectTotal}%</Badge>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </div>
         </Card>
       )}
       
-      {/* Resource totals */}
+      {/* Resource totals scoreboard */}
       {Object.keys(totalsByResource).length > 0 && (
-        <Card className={styles.card}>
-          <CardHeader header={<Body1><strong>Resource Totals</strong></Body1>} />
-          <div style={{ padding: tokens.spacingVerticalM }}>
+        <div style={{ marginBottom: tokens.spacingVerticalL }}>
+          <div className={styles.toolbarLabel} style={{ marginBottom: tokens.spacingVerticalS }}>Resource Totals</div>
+          <div className={styles.scoreboardRow}>
             {Object.entries(totalsByResource).map(([resourceId, total]) => (
-              <div key={resourceId} className={styles.totalBar}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: tokens.spacingVerticalXS }}>
-                  <Body1>{getResourceName(resourceId)}</Body1>
-                  <Badge 
-                    appearance="filled" 
-                    color={total > 100 ? 'danger' : total === 100 ? 'success' : 'informative'}
-                  >
-                    {total}% / 100%
-                  </Badge>
-                </div>
-                <ProgressBar 
-                  value={Math.min(total, 100) / 100} 
-                  color={total > 100 ? 'error' : total === 100 ? 'success' : 'brand'}
-                />
+              <div
+                key={resourceId}
+                className={`${styles.scoreboardItem} ${selectedResourceFilter === resourceId ? styles.scoreboardItemActive : ''}`}
+                style={total > 100 ? { borderColor: tokens.colorPaletteRedBorder1 } : total === 100 ? { borderColor: tokens.colorPaletteGreenBorder1 } : undefined}
+                onClick={() => isRO && setSelectedResourceFilter(prev => prev === resourceId ? null : resourceId)}
+                role={isRO ? 'button' : undefined}
+                tabIndex={isRO ? 0 : undefined}
+                onKeyDown={isRO ? (e) => e.key === 'Enter' && setSelectedResourceFilter(prev => prev === resourceId ? null : resourceId) : undefined}
+              >
+                <span className={styles.scoreboardValue}>
+                  {total}% / 100%
+                </span>
+                <span className={styles.scoreboardLabel}>{getResourceName(resourceId)}</span>
               </div>
             ))}
           </div>
-        </Card>
+        </div>
       )}
       
       <Card className={styles.card}>
-        <CardHeader header={<Body1><strong>Actual Lines ({actuals.length})</strong></Body1>} />
+        <CardHeader header={<Body1><strong>Actual Lines ({sortedActuals.length})</strong></Body1>} />
         
-        <Table className={styles.table}>
+        <Table className={styles.sortableTable}>
           <TableHeader>
             <TableRow>
-              <TableHeaderCell>Resource</TableHeaderCell>
-              <TableHeaderCell>Project</TableHeaderCell>
-              <TableHeaderCell>Period</TableHeaderCell>
+              <TableHeaderCell onClick={() => handleSort('resource')}>Resource{sortIndicator('resource')}</TableHeaderCell>
+              <TableHeaderCell onClick={() => handleSort('project')}>Project{sortIndicator('project')}</TableHeaderCell>
+              <TableHeaderCell onClick={() => handleSort('period')}>Period{sortIndicator('period')}</TableHeaderCell>
               <TableHeaderCell>Planned</TableHeaderCell>
-              <TableHeaderCell>Actual</TableHeaderCell>
+              <TableHeaderCell onClick={() => handleSort('actual')}>Actual{sortIndicator('actual')}</TableHeaderCell>
               <TableHeaderCell>Status</TableHeaderCell>
               <TableHeaderCell>Actions</TableHeaderCell>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {actuals.length === 0 ? (
+            {sortedActuals.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} style={{ padding: tokens.spacingVerticalXXL }}>
                   <EmptyState
@@ -711,7 +932,7 @@ export const Actuals: React.FC = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              actuals.map(a => (
+              sortedActuals.map(a => (
                 <TableRow
                   key={a.id}
                   className={overLimitIds.includes(a.id) ? styles.overLimitRow : undefined}
@@ -863,6 +1084,60 @@ export const Actuals: React.FC = () => {
             <DialogActions>
               <Button onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
               <Button appearance="primary" onClick={handleEditSave}>Save</Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
+      {/* Planning Lines Modal (Demand / Supply) */}
+      <Dialog open={planningLinesModal !== null} onOpenChange={(_, data) => !data.open && setPlanningLinesModal(null)}>
+        <DialogSurface style={{ maxWidth: 560 }}>
+          <DialogBody>
+            <DialogTitle>
+              {planningLinesModal === 'demand' ? 'Demand Lines Assigned to You' : 'Supply Lines Assigned to You'}
+            </DialogTitle>
+            <DialogContent>
+              {planningLinesModal === 'demand' && (
+                <Table className={styles.sortableTable}>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHeaderCell>Project</TableHeaderCell>
+                      <TableHeaderCell>Resource / Placeholder</TableHeaderCell>
+                      <TableHeaderCell>FTE %</TableHeaderCell>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {demandLines.map((d) => (
+                      <TableRow key={d.id}>
+                        <TableCell>{d.project_name ?? getProjectName(d.project_id)}</TableCell>
+                        <TableCell>{d.resource_name ?? d.placeholder_name ?? '—'}</TableCell>
+                        <TableCell>{d.fte_percent}%</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+              {planningLinesModal === 'supply' && (
+                <Table className={styles.sortableTable}>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHeaderCell>Project</TableHeaderCell>
+                      <TableHeaderCell>FTE %</TableHeaderCell>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {supplyLines.map((s) => (
+                      <TableRow key={s.id}>
+                        <TableCell>{s.project_name ?? getProjectName(s.project_id ?? '') ?? '—'}</TableCell>
+                        <TableCell>{s.fte_percent}%</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setPlanningLinesModal(null)}>Close</Button>
             </DialogActions>
           </DialogBody>
         </DialogSurface>

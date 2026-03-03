@@ -65,6 +65,7 @@ export interface CreateSupplyLine {
 export interface PlanningFilters {
   periodId?: string;
   costCenterId?: string;
+  resourceId?: string;
 }
 
 export const planningApi = {
@@ -73,6 +74,7 @@ export const planningApi = {
     const params = new URLSearchParams();
     if (periodId) params.set('period_id', periodId);
     if (filters?.costCenterId) params.set('cost_center_id', filters.costCenterId);
+    if (filters?.resourceId) params.set('resource_id', filters.resourceId);
     const qs = params.toString();
     const url = `/demand-lines${qs ? `?${qs}` : ''}`;
     console.log('[planningApi] GET', url);
@@ -102,6 +104,7 @@ export const planningApi = {
     const params = new URLSearchParams();
     if (periodId) params.set('period_id', periodId);
     if (filters?.costCenterId) params.set('cost_center_id', filters.costCenterId);
+    if (filters?.resourceId) params.set('resource_id', filters.resourceId);
     const qs = params.toString();
     return apiClient.get<SupplyLine[]>(`/supply-lines${qs ? `?${qs}` : ''}`);
   },

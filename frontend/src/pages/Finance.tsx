@@ -5,7 +5,7 @@
  * Tabs: Dashboard (dept gaps), Actuals (employee actuals), Snapshots.
  * Accessible to: Admin, Finance, Director
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Title3,
   Body1,
@@ -14,12 +14,13 @@ import {
   CardHeader,
   Button,
   Spinner,
+  Skeleton,
+  SkeletonItem,
   Badge,
   tokens,
   makeStyles,
   Select,
   Dialog,
-  DialogTrigger,
   DialogSurface,
   DialogBody,
   DialogTitle,
@@ -41,20 +42,25 @@ import {
   AccordionItem,
   AccordionHeader,
   AccordionPanel,
+  Drawer,
+  DrawerBody,
+  DrawerHeader,
+  DrawerHeaderTitle,
 } from '@fluentui/react-components';
 import {
   ArrowDownload24Regular,
   DocumentBulletList24Regular,
   Warning24Regular,
   BuildingRegular,
-  PeopleRegular,
   MoneyRegular,
+  CalendarLtr24Regular,
 } from '@fluentui/react-icons';
 import {
   consolidationApi,
   ConsolidationDashboard,
   DashboardCostCenter,
   Snapshot,
+  SnapshotDetail,
 } from '../api/consolidation';
 import { usePeriod } from '../contexts/PeriodContext';
 import { apiClient } from '../api/client';
@@ -119,21 +125,21 @@ const useStyles = makeStyles({
   header: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: tokens.spacingVerticalXXL,
-    paddingBottom: tokens.spacingVerticalL,
-    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+    alignItems: 'center',
+    marginBottom: tokens.spacingVerticalL,
+    paddingBottom: tokens.spacingVerticalS,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   headerContent: { flex: 1 },
   pageTitle: {
-    fontSize: tokens.fontSizeHero800,
+    fontSize: tokens.fontSizeHero700,
     fontWeight: tokens.fontWeightBold,
     color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalXS,
+    marginBottom: tokens.spacingVerticalXXS,
     lineHeight: '1.2',
   },
   pageSubtitle: {
-    fontSize: tokens.fontSizeBase400,
+    fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground3,
     fontWeight: tokens.fontWeightRegular,
   },
@@ -202,6 +208,38 @@ const useStyles = makeStyles({
     letterSpacing: '0.5px',
     marginTop: tokens.spacingVerticalXS,
   },
+  scoreboardRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalL,
+    marginBottom: tokens.spacingVerticalL,
+    flexWrap: 'wrap' as const,
+  },
+  scoreboardItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusMedium,
+    cursor: 'pointer',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    '&:hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
+  },
+  scoreboardItemActive: {
+    borderColor: tokens.colorBrandStroke1,
+    backgroundColor: tokens.colorNeutralBackground1Selected,
+  },
+  scoreboardValue: {
+    fontSize: tokens.fontSizeBase500,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  scoreboardLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.5px',
+  },
   deptCard: {
     marginBottom: tokens.spacingVerticalM,
     borderRadius: tokens.borderRadiusLarge,
@@ -249,66 +287,79 @@ const useStyles = makeStyles({
     '&:last-child': { borderBottom: 'none' },
   },
 
-  /* ── Actuals tab ── */
-  filtersCard: {
-    marginBottom: tokens.spacingVerticalL,
-    padding: tokens.spacingHorizontalL,
-    borderRadius: tokens.borderRadiusLarge,
-    boxShadow: tokens.shadow2,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  filtersRow: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalM,
-    flexWrap: 'wrap' as const,
-    alignItems: 'flex-end',
-  },
-  filterField: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-    minWidth: '120px',
-  },
-  filterLabel: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground2,
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-  },
-  actualsSummaryRow: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-    gap: tokens.spacingHorizontalM,
-    marginBottom: tokens.spacingVerticalL,
-  },
-  actualsSummaryCard: {
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
-    borderRadius: tokens.borderRadiusLarge,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  /* ── Sticky toolbar ── */
+  toolbar: {
+    position: 'sticky' as const,
+    top: 0,
+    zIndex: 10,
     backgroundColor: tokens.colorNeutralBackground1,
-    boxShadow: tokens.shadow2,
-    textAlign: 'center' as const,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
+    marginBottom: tokens.spacingVerticalL,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalL,
+    flexWrap: 'wrap' as const,
   },
-  actualsSummaryValue: {
-    fontSize: tokens.fontSizeHero700,
-    fontWeight: tokens.fontWeightBold,
-    color: tokens.colorNeutralForeground1,
-    lineHeight: '1.2',
-  },
-  actualsSummaryLabel: {
+  toolbarLabel: {
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground3,
-    textTransform: 'uppercase',
+    textTransform: 'uppercase' as const,
     letterSpacing: '0.5px',
-    marginTop: tokens.spacingVerticalXXS,
   },
-  filtersCardLabel: {
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalS,
+  toolbarLastSnapshot: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    marginLeft: 'auto',
+  },
+
+  /* ── Cost Centers work queue ── */
+  workQueueLayout: {
+    display: 'grid',
+    gridTemplateColumns: '35% 1fr',
+    gap: tokens.spacingHorizontalL,
+    minHeight: 400,
+  },
+  workQueueLeft: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
+    paddingRight: tokens.spacingHorizontalL,
+  },
+  workQueueSearch: {
+    minWidth: 0,
+  },
+  workQueueList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    overflowY: 'auto' as const,
+  },
+  workQueueRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusMedium,
+    cursor: 'pointer',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    '&:hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
+  },
+  workQueueRowSelected: {
+    borderColor: tokens.colorBrandStroke1,
+    backgroundColor: tokens.colorNeutralBackground1Selected,
+  },
+  workQueueDetails: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+  },
+  workQueueDetailsHeader: {
+    paddingBottom: tokens.spacingVerticalS,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
 
   /* ── Shared ── */
@@ -467,11 +518,20 @@ export const Finance: React.FC = () => {
   const canSeeStats = useHasRole('Finance', 'Director');
 
   // ── Shared state ──
-  const { selectedPeriodId, selectedPeriod: currentPeriod, loading: periodsLoading } = usePeriod();
+  const { periods, selectedPeriodId, setSelectedPeriodId, selectedPeriod: currentPeriod, loading: periodsLoading } = usePeriod();
   const [activeTab, setActiveTab] = useState<string>('dashboard');
 
   // ── Dashboard tab state ──
   const [dashboard, setDashboard] = useState<ConsolidationDashboard | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [scoreboardFilter, setScoreboardFilter] = useState<'none' | 'orphans' | 'overalloc'>('none');
+
+  // ── Cost Centers work queue state ──
+  const [selectedQueueCostCenterId, setSelectedQueueCostCenterId] = useState<string | null>(null);
+  const [costCenterSearch, setCostCenterSearch] = useState('');
+  const [costCenterSort, setCostCenterSort] = useState<'gap' | 'name' | 'demand' | 'supply'>('gap');
+  const [costCenterSortDir, setCostCenterSortDir] = useState<'asc' | 'desc'>('desc');
+  const [costCenterDetailTab, setCostCenterDetailTab] = useState<'resources' | 'issues'>('resources');
 
   // ── Actuals tab state ──
   const [actualsData, setActualsData] = useState<FinanceActualRow[]>([]);
@@ -479,15 +539,25 @@ export const Finance: React.FC = () => {
   const [actualsError, setActualsError] = useState<string | null>(null);
   const [actualsProjectId, setActualsProjectId] = useState<string>('');
   const [actualsApprovalStatus, setActualsApprovalStatus] = useState<string>('');
+  const [actualsQueueCostCenterId, setActualsQueueCostCenterId] = useState<string | null>(null);
+  const [actualsScoreboardFilter, setActualsScoreboardFilter] = useState<'none' | 'pending' | 'approved'>('none');
+  const [actualsCcSearch, setActualsCcSearch] = useState('');
+  const [actualsCcSort, setActualsCcSort] = useState<'name' | 'fte' | 'pending'>('fte');
+  const [actualsCcSortDir, setActualsCcSortDir] = useState<'asc' | 'desc'>('desc');
   const [projects, setProjects] = useState<LookupProject[]>([]);
   const [sortKey, setSortKey] = useState<string>('');
   const [sortAsc, setSortAsc] = useState(true);
 
   // ── Snapshots tab state ──
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [viewedSnapshot, setViewedSnapshot] = useState<SnapshotDetail | null>(null);
 
   // ── Publish dialog state ──
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
+
+  // ── Period management drawer ──
+  const [isPeriodDrawerOpen, setIsPeriodDrawerOpen] = useState(false);
+  const canManagePeriods = user?.role === 'Finance' || user?.role === 'Admin';
   const [publishName, setPublishName] = useState('');
   const [publishDescription, setPublishDescription] = useState('');
 
@@ -495,13 +565,19 @@ export const Finance: React.FC = () => {
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
   const year = currentPeriod?.year || new Date().getFullYear();
   const month = currentPeriod?.month || new Date().getMonth() + 1;
-  const { data: ccStats, loading: ccStatsLoading, error: ccStatsError } = useCostCenterStats(year, month, selectedCostCenterId || undefined);
+  const chartCostCenterId = activeTab === 'actuals' ? (actualsQueueCostCenterId ?? undefined) : (selectedCostCenterId || undefined);
+  const { data: ccStats, loading: ccStatsLoading, error: ccStatsError } = useCostCenterStats(year, month, chartCostCenterId);
 
   // ── Cost center selector options
   const [costCenters, setCostCenters] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
     lookupsApi.listCostCenters().then(list => setCostCenters(list.map(cc => ({ id: cc.id, name: cc.name }))));
   }, []);
+
+  const latestSnapshot = useMemo(() =>
+    snapshots.length > 0 ? [...snapshots].sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())[0] : null,
+    [snapshots]
+  );
 
   // ── Initial load ──
   useEffect(() => {
@@ -528,11 +604,15 @@ export const Finance: React.FC = () => {
 
   const loadDashboard = async (periodId?: string) => {
     const pid = periodId || selectedPeriodId;
+    if (!pid) return;
+    setDashboardLoading(true);
     try {
       const data = await consolidationApi.getDashboard(pid);
       setDashboard(data);
     } catch (err: unknown) {
       showApiError(err as Error, 'Failed to load dashboard');
+    } finally {
+      setDashboardLoading(false);
     }
   };
 
@@ -593,20 +673,58 @@ export const Finance: React.FC = () => {
     if (sortKey !== key) return '';
     return sortAsc ? ' \u25B2' : ' \u25BC';
   }
-  const sortedActuals = [...actualsData].sort((a, b) => {
-    if (!sortKey) return 0;
-    const aVal = (a as Record<string, unknown>)[sortKey];
-    const bVal = (b as Record<string, unknown>)[sortKey];
-    if (aVal === bVal) return 0;
-    if (aVal == null) return 1;
-    if (bVal == null) return -1;
-    return ((aVal as string | number) > (bVal as string | number) ? 1 : -1) * (sortAsc ? 1 : -1);
-  });
-
   const totalActualsLines = actualsData.length;
   const totalActualsFte = actualsData.reduce((s, d) => s + d.fte_percent, 0);
   const pendingCount = actualsData.filter(d => (d.approval_status?.toUpperCase?.() ?? '') === 'PENDING').length;
   const approvedCount = actualsData.filter(d => (d.approval_status?.toUpperCase?.() ?? '') === 'APPROVED').length;
+
+  const actualsCcList = useMemo(() => {
+    const byCc = new Map<string, { cost_center_id: string; cost_center_name: string; totalFte: number; lineCount: number; pendingCount: number }>();
+    for (const row of actualsData) {
+      const id = row.cost_center_id;
+      const existing = byCc.get(id);
+      const pending = (row.approval_status?.toUpperCase?.() ?? '') === 'PENDING' ? 1 : 0;
+      if (existing) {
+        existing.totalFte += row.fte_percent;
+        existing.lineCount += 1;
+        existing.pendingCount += pending;
+      } else {
+        byCc.set(id, {
+          cost_center_id: id,
+          cost_center_name: row.cost_center_name,
+          totalFte: row.fte_percent,
+          lineCount: 1,
+          pendingCount: pending,
+        });
+      }
+    }
+    return Array.from(byCc.values());
+  }, [actualsData]);
+
+  const filteredActuals = useMemo(() => {
+    let out = actualsData;
+    if (actualsScoreboardFilter === 'pending') {
+      out = out.filter(d => (d.approval_status?.toUpperCase?.() ?? '') === 'PENDING');
+    } else if (actualsScoreboardFilter === 'approved') {
+      out = out.filter(d => (d.approval_status?.toUpperCase?.() ?? '') === 'APPROVED');
+    }
+    if (actualsQueueCostCenterId) {
+      out = out.filter(d => d.cost_center_id === actualsQueueCostCenterId);
+    }
+    return out;
+  }, [actualsData, actualsScoreboardFilter, actualsQueueCostCenterId]);
+
+  const sortedActuals = useMemo(() => {
+    return [...filteredActuals].sort((a, b) => {
+      if (!sortKey) return 0;
+      const aVal = (a as unknown as Record<string, unknown>)[sortKey];
+      const bVal = (b as unknown as Record<string, unknown>)[sortKey];
+      if (aVal === bVal) return 0;
+      if (aVal == null) return 1;
+      if (bVal == null) return -1;
+      return ((aVal as string | number) > (bVal as string | number) ? 1 : -1) * (sortAsc ? 1 : -1);
+    });
+  }, [filteredActuals, sortKey, sortAsc]);
 
   // ── Render ──
 
@@ -628,10 +746,23 @@ export const Finance: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
+          {canManagePeriods && (
+            <Button
+              appearance="secondary"
+              icon={<CalendarLtr24Regular />}
+              onClick={() => setIsPeriodDrawerOpen(true)}
+            >
+              Manage periods
+            </Button>
+          )}
+          <Button
+            appearance="primary"
+            icon={<ArrowDownload24Regular />}
+            onClick={() => setIsPublishDialogOpen(true)}
+          >
+            Publish Snapshot
+          </Button>
           <Dialog open={isPublishDialogOpen} onOpenChange={(_, data) => setIsPublishDialogOpen(data.open)}>
-            <DialogTrigger>
-              <Button appearance="primary" icon={<ArrowDownload24Regular />}>Publish Snapshot</Button>
-            </DialogTrigger>
             <DialogSurface>
               <DialogBody>
                 <DialogTitle>Publish Snapshot</DialogTitle>
@@ -639,6 +770,24 @@ export const Finance: React.FC = () => {
                   <MessageBar intent="info" style={{ marginBottom: tokens.spacingVerticalM }}>
                     <MessageBarBody>A snapshot is an immutable copy of planning data at this point in time.</MessageBarBody>
                   </MessageBar>
+                  {currentPeriod && (
+                    <div style={{ marginBottom: tokens.spacingVerticalM }}>
+                      <Body2 style={{ fontWeight: tokens.fontWeightSemibold }}>Period</Body2>
+                      <Body1>
+                        {currentPeriod.year}-{String(currentPeriod.month).padStart(2, '0')}
+                        {dashboard && ` · ${dashboard.summary.total_cost_centers} cost centers`}
+                      </Body1>
+                    </div>
+                  )}
+                  {dashboard && (dashboard.summary.orphans_count > 0 || dashboard.summary.over_allocations_count > 0) && (
+                    <MessageBar intent="warning" style={{ marginBottom: tokens.spacingVerticalM }}>
+                      <MessageBarBody>
+                        {dashboard.summary.orphans_count > 0 && `${dashboard.summary.orphans_count} orphan demand(s). `}
+                        {dashboard.summary.over_allocations_count > 0 && `${dashboard.summary.over_allocations_count} over-allocation(s). `}
+                        Consider resolving before publishing.
+                      </MessageBarBody>
+                    </MessageBar>
+                  )}
                   <div className={styles.formField}>
                     <label>Snapshot Name *</label>
                     <Input
@@ -648,7 +797,7 @@ export const Finance: React.FC = () => {
                     />
                   </div>
                   <div className={styles.formField}>
-                    <label>Description</label>
+                    <label>Description (optional notes)</label>
                     <Textarea
                       value={publishDescription}
                       onChange={(_, data) => setPublishDescription(data.value)}
@@ -666,88 +815,414 @@ export const Finance: React.FC = () => {
         </div>
       </div>
 
-      {/* Period Panel */}
-      <PeriodPanel />
+      {/* Period Management Drawer */}
+      {canManagePeriods && (
+        <Drawer
+          type="overlay"
+          position="end"
+          open={isPeriodDrawerOpen}
+          onOpenChange={(_, data) => setIsPeriodDrawerOpen(data.open)}
+        >
+          <DrawerHeader>
+            <DrawerHeaderTitle>Period Management</DrawerHeaderTitle>
+          </DrawerHeader>
+          <DrawerBody>
+            <PeriodPanel variant="embedded" />
+          </DrawerBody>
+        </Drawer>
+      )}
 
-      {/* Tabs */}
-      <TabList
-        selectedValue={activeTab}
-        onTabSelect={(_, data) => {
-          setActiveTab(data.value as string);
-          if (data.value === 'actuals') loadActuals();
-        }}
-        style={{ marginBottom: tokens.spacingVerticalL }}
-      >
-        <Tab value="dashboard" icon={<DocumentBulletList24Regular />}>Dashboard</Tab>
-        <Tab value="actuals" icon={<MoneyRegular />}>Actuals</Tab>
-        <Tab value="snapshots" icon={<ArrowDownload24Regular />}>Snapshots</Tab>
-      </TabList>
+      {/* Sticky toolbar */}
+      <div className={styles.toolbar}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+          <span className={styles.toolbarLabel}>Period</span>
+          <Select
+            value={periods.some(p => p.id === selectedPeriodId) ? selectedPeriodId : periods[0]?.id ?? ''}
+            onChange={(_, data) => setSelectedPeriodId(data.value)}
+            style={{ minWidth: 140 }}
+          >
+            {periods.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.year}-{String(p.month).padStart(2, '0')} ({p.status})
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+          <span className={styles.toolbarLabel}>Cost center</span>
+          <Select
+            value={activeTab === 'actuals' ? (actualsQueueCostCenterId ?? '') : selectedCostCenterId}
+            onChange={(_, data) => {
+              const val = data.value ?? '';
+              if (activeTab === 'actuals') {
+                setActualsQueueCostCenterId(val || null);
+              } else {
+                setSelectedCostCenterId(val);
+              }
+            }}
+            style={{ minWidth: 160 }}
+          >
+            <option value="">All cost centers</option>
+            {costCenters.map(cc => (
+              <option key={cc.id} value={cc.id}>{cc.name}</option>
+            ))}
+          </Select>
+        </div>
+        {activeTab === 'actuals' && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+              <span className={styles.toolbarLabel}>Project</span>
+              <Select
+                value={actualsProjectId}
+                onChange={(_, data) => setActualsProjectId(data.value ?? '')}
+                style={{ minWidth: 140 }}
+              >
+                <option value="">All projects</option>
+                {projects.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </Select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+              <span className={styles.toolbarLabel}>Approval</span>
+              <Select
+                value={actualsApprovalStatus}
+                onChange={(_, data) => setActualsApprovalStatus(data.value ?? '')}
+                style={{ minWidth: 120 }}
+              >
+                {approvalStatusOptions.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </Select>
+            </div>
+          </>
+        )}
+        <TabList
+          selectedValue={activeTab}
+          onTabSelect={(_, data) => {
+            setActiveTab(data.value as string);
+            if (data.value === 'actuals') {
+              setActualsQueueCostCenterId(selectedCostCenterId || null);
+              loadActuals();
+            }
+          }}
+        >
+          <Tab value="dashboard" icon={<DocumentBulletList24Regular />}>Overview</Tab>
+          <Tab value="costcenters" icon={<BuildingRegular />}>Cost Centers</Tab>
+          <Tab value="actuals" icon={<MoneyRegular />}>Actuals</Tab>
+          <Tab value="snapshots" icon={<ArrowDownload24Regular />}>Snapshots</Tab>
+        </TabList>
+        <span className={styles.toolbarLastSnapshot}>
+          {latestSnapshot ? `Last snapshot: ${new Date(latestSnapshot.published_at).toLocaleDateString()}` : 'No snapshots yet'}
+        </span>
+      </div>
 
-      {/* ═══════════════ Dashboard Tab ═══════════════ */}
-      {activeTab === 'dashboard' && dashboard && (
+      {/* ═══════════════ Cost Centers Tab (work queue + details) ═══════════════ */}
+      {activeTab === 'costcenters' && (
         <>
-          <div className={styles.sectionTitle}>Overview</div>
-          <div className={styles.summaryBar}>
-            <div className={styles.summaryItem}>
-              <div className={styles.summaryNumber}>{dashboard.summary.total_cost_centers}</div>
-              <div className={styles.summaryLabel}>Cost Centers</div>
-            </div>
-            <div className={styles.summaryItem}>
-              <div className={styles.summaryNumber}>{dashboard.summary.total_demand_fte}%</div>
-              <div className={styles.summaryLabel}>Total Demand</div>
-            </div>
-            <div className={styles.summaryItem}>
-              <div className={styles.summaryNumber}>{dashboard.summary.total_supply_fte}%</div>
-              <div className={styles.summaryLabel}>Total Supply</div>
-            </div>
-            <div className={styles.summaryItem} style={{
-              backgroundColor: dashboard.summary.total_gap_fte < 0
-                ? tokens.colorPaletteRedBackground2
-                : dashboard.summary.total_gap_fte > 0
-                ? tokens.colorPaletteGreenBackground2
-                : tokens.colorNeutralBackground1,
-            }}>
-              <div className={styles.summaryNumber}>
-                {dashboard.summary.total_gap_fte > 0 ? '+' : ''}{dashboard.summary.total_gap_fte}%
+          {dashboardLoading ? (
+            <div className={styles.workQueueLayout}>
+              <div className={styles.workQueueLeft}>
+                <Skeleton style={{ height: 32, marginBottom: 16 }}><SkeletonItem /></Skeleton>
+                <Skeleton style={{ height: 300 }}><SkeletonItem /></Skeleton>
               </div>
-              <div className={styles.summaryLabel}>Total Gap</div>
+              <div className={styles.workQueueDetails}>
+                <Skeleton style={{ height: 200 }}><SkeletonItem /></Skeleton>
+              </div>
             </div>
-            <div className={styles.summaryItem} style={{
-              backgroundColor: dashboard.summary.orphans_count > 0
-                ? tokens.colorPaletteDarkOrangeBackground2
-                : tokens.colorNeutralBackground1,
-            }}>
-              <div className={styles.summaryNumber}>{dashboard.summary.orphans_count}</div>
-              <div className={styles.summaryLabel}>Orphan Demands</div>
-            </div>
-            <div className={styles.summaryItem} style={{
-              backgroundColor: dashboard.summary.over_allocations_count > 0
-                ? tokens.colorPaletteRedBackground2
-                : tokens.colorNeutralBackground1,
-            }}>
-              <div className={styles.summaryNumber}>{dashboard.summary.over_allocations_count}</div>
-              <div className={styles.summaryLabel}>Over-allocations</div>
-            </div>
-          </div>
+          ) : dashboard && dashboard.cost_centers.length > 0 ? (
+            (() => {
+              const filtered = costCenterSearch.trim()
+                ? dashboard.cost_centers.filter(cc =>
+                    cc.cost_center_name.toLowerCase().includes(costCenterSearch.toLowerCase()))
+                : dashboard.cost_centers;
+              const sorted = [...filtered].sort((a, b) => {
+                const dir = costCenterSortDir === 'asc' ? 1 : -1;
+                switch (costCenterSort) {
+                  case 'name':
+                    return a.cost_center_name.localeCompare(b.cost_center_name) * dir;
+                  case 'demand':
+                    return (a.total_demand_fte - b.total_demand_fte) * dir;
+                  case 'supply':
+                    return (a.total_supply_fte - b.total_supply_fte) * dir;
+                  case 'gap':
+                  default:
+                    return (a.gap_fte - b.gap_fte) * dir;
+                }
+              });
+              const selectedCc = selectedQueueCostCenterId
+                ? dashboard.cost_centers.find(cc => (cc.cost_center_id || '__none__') === selectedQueueCostCenterId)
+                : null;
+              const overAllocsForCc = selectedCc
+                ? dashboard.over_allocations.filter(oa => (oa.cost_center_id || '__none__') === (selectedCc.cost_center_id || '__none__'))
+                : [];
 
-          <div className={styles.sectionTitle}>Resource overview</div>
-          {dashboard.cost_centers.length > 0 ? (
-            dashboard.cost_centers.map((cc, i) => (
-              <CostCenterCard key={cc.cost_center_id || i} cc={cc} />
-            ))
+              return (
+                <div className={styles.workQueueLayout}>
+                  <div className={styles.workQueueLeft}>
+                    <Input
+                      className={styles.workQueueSearch}
+                      placeholder="Search cost centers..."
+                      value={costCenterSearch}
+                      onChange={(_, d) => setCostCenterSearch(d.value)}
+                    />
+                    <div style={{ display: 'flex', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' }}>
+                      {(['gap', 'name', 'demand', 'supply'] as const).map(key => (
+                        <Button
+                          key={key}
+                          size="small"
+                          appearance={costCenterSort === key ? 'primary' : 'subtle'}
+                          onClick={() => {
+                            setCostCenterSort(key);
+                            setCostCenterSortDir(prev => (costCenterSort === key && prev === 'desc' ? 'asc' : 'desc'));
+                          }}
+                        >
+                          {key === 'gap' ? 'Gap' : key === 'name' ? 'Name' : key.charAt(0).toUpperCase() + key.slice(1)}
+                        </Button>
+                      ))}
+                    </div>
+                    <div className={styles.workQueueList}>
+                      {sorted.map(cc => (
+                        <div
+                          key={cc.cost_center_id || cc.cost_center_name}
+                          className={`${styles.workQueueRow} ${selectedQueueCostCenterId === (cc.cost_center_id || '__none__') ? styles.workQueueRowSelected : ''}`}
+                          onClick={() => setSelectedQueueCostCenterId(cc.cost_center_id || '__none__')}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={e => e.key === 'Enter' && setSelectedQueueCostCenterId(cc.cost_center_id || '__none__')}
+                        >
+                          <div>
+                            <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>{cc.cost_center_name}</Body1>
+                            <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                              D: {cc.total_demand_fte}% S: {cc.total_supply_fte}% G: {cc.gap_fte > 0 ? '+' : ''}{cc.gap_fte}%
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
+                            {cc.placeholders.length > 0 && (
+                              <Badge appearance="outline" color="warning" size="small">{cc.placeholders.length} orphan</Badge>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className={styles.workQueueDetails}>
+                    {selectedCc ? (
+                      <>
+                        <div className={styles.workQueueDetailsHeader}>
+                          <Title3>{selectedCc.cost_center_name}</Title3>
+                          <div style={{ display: 'flex', gap: tokens.spacingHorizontalL, marginTop: tokens.spacingVerticalXS }}>
+                            <Body2>Demand: {selectedCc.total_demand_fte}%</Body2>
+                            <Body2>Supply: {selectedCc.total_supply_fte}%</Body2>
+                            <GapBadge gap={selectedCc.gap_fte} />
+                          </div>
+                        </div>
+                        <TabList selectedValue={costCenterDetailTab} onTabSelect={(_, d) => setCostCenterDetailTab(d.value as 'resources' | 'issues')}>
+                          <Tab value="resources">Resources</Tab>
+                          <Tab value="issues">Issues</Tab>
+                        </TabList>
+                        {costCenterDetailTab === 'resources' && (
+                          <Table className={styles.table}>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHeaderCell>Resource</TableHeaderCell>
+                                <TableHeaderCell>Demand</TableHeaderCell>
+                                <TableHeaderCell>Supply</TableHeaderCell>
+                                <TableHeaderCell>Gap</TableHeaderCell>
+                                <TableHeaderCell>Status</TableHeaderCell>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {selectedCc.resources.map(r => (
+                                <TableRow key={r.resource_id}>
+                                  <TableCell>{r.resource_name}</TableCell>
+                                  <TableCell>{r.demand_fte}%</TableCell>
+                                  <TableCell>{r.supply_fte}%</TableCell>
+                                  <TableCell><GapBadge gap={r.gap_fte} /></TableCell>
+                                  <TableCell><GapStatusBadge status={r.status} /></TableCell>
+                                </TableRow>
+                              ))}
+                              {selectedCc.placeholders.map(ph => (
+                                <TableRow key={ph.placeholder_id}>
+                                  <TableCell>
+                                    <Badge appearance="outline" color="warning" size="small">TBD</Badge> {ph.placeholder_name}
+                                  </TableCell>
+                                  <TableCell>{ph.demand_fte}%</TableCell>
+                                  <TableCell>—</TableCell>
+                                  <TableCell>—</TableCell>
+                                  <TableCell>—</TableCell>
+                                </TableRow>
+                              ))}
+                              {selectedCc.resources.length === 0 && selectedCc.placeholders.length === 0 && (
+                                <TableRow>
+                                  <TableCell colSpan={5}>No resources or placeholders.</TableCell>
+                                </TableRow>
+                              )}
+                            </TableBody>
+                          </Table>
+                        )}
+                        {costCenterDetailTab === 'issues' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
+                            {selectedCc.placeholders.length > 0 && (
+                              <Card className={styles.card}>
+                                <CardHeader header={<Body1><strong>Orphan demands ({selectedCc.placeholders.length})</strong></Body1>} />
+                                <Table className={styles.table}>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHeaderCell>Placeholder</TableHeaderCell>
+                                      <TableHeaderCell>Project</TableHeaderCell>
+                                      <TableHeaderCell>Demand</TableHeaderCell>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {selectedCc.placeholders.map(ph => (
+                                      <TableRow key={ph.placeholder_id}>
+                                        <TableCell>{ph.placeholder_name}</TableCell>
+                                        <TableCell>{ph.project_name}</TableCell>
+                                        <TableCell>{ph.demand_fte}%</TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </Card>
+                            )}
+                            {overAllocsForCc.length > 0 && (
+                              <Card className={styles.card}>
+                                <CardHeader header={<Body1><strong>Over-allocations ({overAllocsForCc.length})</strong></Body1>} />
+                                <Table className={styles.table}>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHeaderCell>Resource</TableHeaderCell>
+                                      <TableHeaderCell>Total Demand</TableHeaderCell>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {overAllocsForCc.map((oa, i) => (
+                                      <TableRow key={i}>
+                                        <TableCell>{oa.resource_name}</TableCell>
+                                        <TableCell><Badge appearance="filled" color="danger">{oa.total_demand_fte}%</Badge></TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </Card>
+                            )}
+                            {selectedCc.placeholders.length === 0 && overAllocsForCc.length === 0 && (
+                              <Body1 style={{ color: tokens.colorNeutralForeground3 }}>No issues for this cost center.</Body1>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div style={{ padding: tokens.spacingVerticalXXL, textAlign: 'center', color: tokens.colorNeutralForeground3 }}>
+                        <Body1>Select a cost center from the list.</Body1>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()
           ) : (
             <Card className={styles.card}>
               <div style={{ padding: tokens.spacingVerticalXL, textAlign: 'center' }}>
-                <Body1>No planning data for this period.</Body1>
+                <Body1>No planning data for this period. Select a different period or add demand/supply.</Body1>
               </div>
             </Card>
           )}
+        </>
+      )}
 
-          {dashboard.over_allocations.length > 0 && (
-            <Card className={styles.card}>
+      {/* ═══════════════ Dashboard Tab ═══════════════ */}
+      {activeTab === 'dashboard' && dashboardLoading && (
+        <>
+          <div className={styles.sectionTitle}>Overview</div>
+          <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, marginBottom: tokens.spacingVerticalL }}>
+            {[1, 2, 3, 4, 5].map(i => (
+              <Skeleton key={i} style={{ height: 64, flex: 1 }}><SkeletonItem /></Skeleton>
+            ))}
+          </div>
+          <Skeleton style={{ height: 200, marginBottom: tokens.spacingVerticalL }}><SkeletonItem /></Skeleton>
+        </>
+      )}
+      {activeTab === 'dashboard' && !dashboardLoading && !dashboard && (
+        <Card className={styles.card}>
+          <div style={{ padding: tokens.spacingVerticalXL, textAlign: 'center' }}>
+            <Body1>Failed to load dashboard. Select a period and try again.</Body1>
+          </div>
+        </Card>
+      )}
+      {activeTab === 'dashboard' && !dashboardLoading && dashboard && (
+        <>
+          <div className={styles.sectionTitle}>Overview</div>
+          <div className={styles.scoreboardRow}>
+            <div
+              className={`${styles.scoreboardItem}`}
+              onClick={() => setScoreboardFilter('none')}
+              role="button"
+              tabIndex={0}
+              onKeyDown={e => e.key === 'Enter' && setScoreboardFilter('none')}
+            >
+              <span className={styles.scoreboardValue}>{dashboard.summary.total_demand_fte}%</span>
+              <span className={styles.scoreboardLabel}>Demand</span>
+            </div>
+            <div
+              className={`${styles.scoreboardItem}`}
+              onClick={() => setScoreboardFilter('none')}
+              role="button"
+              tabIndex={0}
+              onKeyDown={e => e.key === 'Enter' && setScoreboardFilter('none')}
+            >
+              <span className={styles.scoreboardValue}>{dashboard.summary.total_supply_fte}%</span>
+              <span className={styles.scoreboardLabel}>Supply</span>
+            </div>
+            <div
+              className={`${styles.scoreboardItem} ${scoreboardFilter === 'none' ? '' : ''}`}
+              style={{
+                backgroundColor: dashboard.summary.total_gap_fte < 0
+                  ? tokens.colorPaletteRedBackground2
+                  : dashboard.summary.total_gap_fte > 0
+                  ? tokens.colorPaletteGreenBackground2
+                  : undefined,
+              }}
+              onClick={() => setScoreboardFilter('none')}
+              role="button"
+              tabIndex={0}
+              onKeyDown={e => e.key === 'Enter' && setScoreboardFilter('none')}
+            >
+              <span className={styles.scoreboardValue}>
+                {dashboard.summary.total_gap_fte > 0 ? '+' : ''}{dashboard.summary.total_gap_fte}%
+              </span>
+              <span className={styles.scoreboardLabel}>Gap</span>
+            </div>
+            <div
+              className={`${styles.scoreboardItem} ${scoreboardFilter === 'orphans' ? styles.scoreboardItemActive : ''}`}
+              style={dashboard.summary.orphans_count > 0 ? { borderColor: tokens.colorPaletteDarkOrangeBorder1 } : undefined}
+              onClick={() => setScoreboardFilter(scoreboardFilter === 'orphans' ? 'none' : 'orphans')}
+              role="button"
+              tabIndex={0}
+              onKeyDown={e => e.key === 'Enter' && setScoreboardFilter(scoreboardFilter === 'orphans' ? 'none' : 'orphans')}
+            >
+              <span className={styles.scoreboardValue}>{dashboard.summary.orphans_count}</span>
+              <span className={styles.scoreboardLabel}>Orphan Demands</span>
+            </div>
+            <div
+              className={`${styles.scoreboardItem} ${scoreboardFilter === 'overalloc' ? styles.scoreboardItemActive : ''}`}
+              style={dashboard.summary.over_allocations_count > 0 ? { borderColor: tokens.colorPaletteRedBorder1 } : undefined}
+              onClick={() => setScoreboardFilter(scoreboardFilter === 'overalloc' ? 'none' : 'overalloc')}
+              role="button"
+              tabIndex={0}
+              onKeyDown={e => e.key === 'Enter' && setScoreboardFilter(scoreboardFilter === 'overalloc' ? 'none' : 'overalloc')}
+            >
+              <span className={styles.scoreboardValue}>{dashboard.summary.over_allocations_count}</span>
+              <span className={styles.scoreboardLabel}>Over-allocations</span>
+            </div>
+          </div>
+
+          {scoreboardFilter === 'overalloc' && dashboard.over_allocations.length > 0 && (
+            <Card className={styles.card} style={{ marginBottom: tokens.spacingVerticalL }}>
               <CardHeader
                 header={<Body1><strong>Over-allocations (&gt;100%)</strong></Body1>}
-                action={<Warning24Regular color={tokens.colorPaletteRedForeground1} />}
+                action={<Warning24Regular style={{ color: tokens.colorPaletteRedForeground1 }} />}
               />
               <Table className={styles.sortableTable}>
                 <TableHeader>
@@ -771,204 +1246,369 @@ export const Finance: React.FC = () => {
               </Table>
             </Card>
           )}
+
+          <div className={styles.sectionTitle}>Resource overview</div>
+          {dashboard.cost_centers.length > 0 ? (
+            (scoreboardFilter === 'orphans'
+              ? dashboard.cost_centers.filter(cc => cc.placeholders.length > 0)
+              : dashboard.cost_centers
+            ).map((cc, i) => (
+              <CostCenterCard key={cc.cost_center_id || i} cc={cc} />
+            ))
+          ) : (
+            <Card className={styles.card}>
+              <div style={{ padding: tokens.spacingVerticalXL, textAlign: 'center' }}>
+                <Body1>No planning data for this period.</Body1>
+              </div>
+            </Card>
+          )}
         </>
       )}
 
       {/* ═══════════════ Actuals Tab ═══════════════ */}
       {activeTab === 'actuals' && (
         <>
-          {/* Summary cards */}
-          <div className={styles.sectionTitle}>Summary</div>
-          <div className={styles.actualsSummaryRow}>
-            <div className={styles.actualsSummaryCard}>
-              <div className={styles.actualsSummaryValue}>{totalActualsLines}</div>
-              <div className={styles.actualsSummaryLabel}>Total Lines</div>
-            </div>
-            <div className={styles.actualsSummaryCard}>
-              <div className={styles.actualsSummaryValue}>{totalActualsFte}%</div>
-              <div className={styles.actualsSummaryLabel}>Total FTE</div>
-            </div>
-            <div className={styles.actualsSummaryCard} style={{ borderColor: tokens.colorPaletteYellowBorder1, backgroundColor: tokens.colorPaletteYellowBackground1 }}>
-              <div className={styles.actualsSummaryValue} style={{ color: tokens.colorPaletteYellowForeground1 }}>{pendingCount}</div>
-              <div className={styles.actualsSummaryLabel}>Pending Approval</div>
-            </div>
-            <div className={styles.actualsSummaryCard} style={{ borderColor: tokens.colorPaletteGreenBorder1, backgroundColor: tokens.colorPaletteGreenBackground1 }}>
-              <div className={styles.actualsSummaryValue} style={{ color: tokens.colorPaletteGreenForeground1 }}>{approvedCount}</div>
-              <div className={styles.actualsSummaryLabel}>Approved</div>
-            </div>
-          </div>
-
-          {/* Filters */}
-          <Card className={styles.filtersCard}>
-            <div className={styles.filtersCardLabel}>Filter by</div>
-            <div className={styles.filtersRow}>
-              <div className={styles.filterField}>
-                <span className={styles.filterLabel}>Project</span>
-                <Select value={actualsProjectId} onChange={(_, d) => setActualsProjectId(d.value)}>
-                  <option value="">All Projects</option>
-                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </Select>
-              </div>
-              <div className={styles.filterField}>
-                <span className={styles.filterLabel}>Approval</span>
-                <Select value={actualsApprovalStatus} onChange={(_, d) => setActualsApprovalStatus(d.value)}>
-                  {approvalStatusOptions.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </Select>
-              </div>
-            </div>
-          </Card>
-
           {actualsError && (
             <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
               <MessageBarBody>{actualsError}</MessageBarBody>
             </MessageBar>
           )}
 
-          {/* Data table */}
-          <Card className={styles.card}>
-            <CardHeader header={<Body1><strong>Employee actuals</strong></Body1>} />
-            {actualsLoading ? (
-              <LoadingState message="Loading actuals..." />
-            ) : sortedActuals.length === 0 ? (
-              <EmptyState
-                icon={<MoneyRegular style={{ fontSize: 48 }} />}
-                title="No actuals data"
-                message="No actuals found for this period. Adjust the filters or select a different period."
-              />
-            ) : (
-              <Table className={styles.sortableTable}>
-                <TableHeader>
-                  <TableRow>
-                    <TableHeaderCell onClick={() => handleSort('employee_name')}>
-                      Employee{sortIndicator('employee_name')}
-                    </TableHeaderCell>
-                    <TableHeaderCell onClick={() => handleSort('project_name')}>
-                      Project{sortIndicator('project_name')}
-                    </TableHeaderCell>
-                    <TableHeaderCell onClick={() => handleSort('cost_center_name')}>
-                      Cost Center{sortIndicator('cost_center_name')}
-                    </TableHeaderCell>
-                    <TableHeaderCell onClick={() => handleSort('year')}>
-                      Period{sortIndicator('year')}
-                    </TableHeaderCell>
-                    <TableHeaderCell onClick={() => handleSort('fte_percent')}>
-                      FTE %{sortIndicator('fte_percent')}
-                    </TableHeaderCell>
-                    <TableHeaderCell onClick={() => handleSort('approval_status')}>
-                      Approval{sortIndicator('approval_status')}
-                    </TableHeaderCell>
-                    <TableHeaderCell onClick={() => handleSort('current_approval_step')}>
-                      Current Step{sortIndicator('current_approval_step')}
-                    </TableHeaderCell>
-                    <TableHeaderCell onClick={() => handleSort('current_approver_name')}>
-                      Approver{sortIndicator('current_approver_name')}
-                    </TableHeaderCell>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sortedActuals.map(row => (
-                    <TableRow key={row.actual_id}>
-                      <TableCell>
+          {/* KPI Scoreboard */}
+          <div className={styles.sectionTitle}>Summary</div>
+          <div className={styles.scoreboardRow}>
+            <div className={styles.scoreboardItem}>
+              <span className={styles.scoreboardValue}>{totalActualsLines}</span>
+              <span className={styles.scoreboardLabel}>Total Lines</span>
+            </div>
+            <div className={styles.scoreboardItem}>
+              <span className={styles.scoreboardValue}>{totalActualsFte}%</span>
+              <span className={styles.scoreboardLabel}>Total FTE</span>
+            </div>
+            <div
+              className={`${styles.scoreboardItem} ${actualsScoreboardFilter === 'pending' ? styles.scoreboardItemActive : ''}`}
+              style={pendingCount > 0 ? { borderColor: tokens.colorPaletteYellowBorder1 } : undefined}
+              onClick={() => setActualsScoreboardFilter(actualsScoreboardFilter === 'pending' ? 'none' : 'pending')}
+              role="button"
+              tabIndex={0}
+              onKeyDown={e => e.key === 'Enter' && setActualsScoreboardFilter(actualsScoreboardFilter === 'pending' ? 'none' : 'pending')}
+            >
+              <span className={styles.scoreboardValue}>{pendingCount}</span>
+              <span className={styles.scoreboardLabel}>Pending</span>
+            </div>
+            <div
+              className={`${styles.scoreboardItem} ${actualsScoreboardFilter === 'approved' ? styles.scoreboardItemActive : ''}`}
+              style={approvedCount > 0 ? { borderColor: tokens.colorPaletteGreenBorder1 } : undefined}
+              onClick={() => setActualsScoreboardFilter(actualsScoreboardFilter === 'approved' ? 'none' : 'approved')}
+              role="button"
+              tabIndex={0}
+              onKeyDown={e => e.key === 'Enter' && setActualsScoreboardFilter(actualsScoreboardFilter === 'approved' ? 'none' : 'approved')}
+            >
+              <span className={styles.scoreboardValue}>{approvedCount}</span>
+              <span className={styles.scoreboardLabel}>Approved</span>
+            </div>
+          </div>
+
+          {/* Work queue layout */}
+          {actualsLoading ? (
+            <div className={styles.workQueueLayout}>
+              <div className={styles.workQueueLeft}>
+                <Skeleton style={{ height: 32, marginBottom: 16 }}><SkeletonItem /></Skeleton>
+                <Skeleton style={{ height: 300 }}><SkeletonItem /></Skeleton>
+              </div>
+              <div className={styles.workQueueDetails}>
+                <Skeleton style={{ height: 200 }}><SkeletonItem /></Skeleton>
+              </div>
+            </div>
+          ) : (
+            <div className={styles.workQueueLayout}>
+              <div className={styles.workQueueLeft}>
+                <Input
+                  className={styles.workQueueSearch}
+                  placeholder="Search cost centers..."
+                  value={actualsCcSearch}
+                  onChange={(_, d) => setActualsCcSearch(d.value)}
+                />
+                <div style={{ display: 'flex', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' }}>
+                  {(['fte', 'name', 'pending'] as const).map(key => (
+                    <Button
+                      key={key}
+                      size="small"
+                      appearance={actualsCcSort === key ? 'primary' : 'subtle'}
+                      onClick={() => {
+                        setActualsCcSort(key);
+                        setActualsCcSortDir(prev => (actualsCcSort === key && prev === 'desc' ? 'asc' : 'desc'));
+                      }}
+                    >
+                      {key === 'fte' ? 'FTE' : key === 'name' ? 'Name' : 'Pending'}
+                    </Button>
+                  ))}
+                </div>
+                <div className={styles.workQueueList}>
+                  <div
+                    className={`${styles.workQueueRow} ${actualsQueueCostCenterId === null ? styles.workQueueRowSelected : ''}`}
+                    onClick={() => setActualsQueueCostCenterId(null)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={e => e.key === 'Enter' && setActualsQueueCostCenterId(null)}
+                  >
+                    <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>All cost centers</Body1>
+                    <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                      {totalActualsFte}% FTE · {totalActualsLines} lines
+                    </div>
+                  </div>
+                  {(() => {
+                    const filtered = actualsCcSearch.trim()
+                      ? actualsCcList.filter(cc =>
+                          cc.cost_center_name.toLowerCase().includes(actualsCcSearch.toLowerCase()))
+                      : actualsCcList;
+                    const sorted = [...filtered].sort((a, b) => {
+                      const dir = actualsCcSortDir === 'asc' ? 1 : -1;
+                      switch (actualsCcSort) {
+                        case 'name':
+                          return a.cost_center_name.localeCompare(b.cost_center_name) * dir;
+                        case 'fte':
+                          return (a.totalFte - b.totalFte) * dir;
+                        case 'pending':
+                          return (a.pendingCount - b.pendingCount) * dir;
+                        default:
+                          return 0;
+                      }
+                    });
+                    return sorted.map(cc => (
+                      <div
+                        key={cc.cost_center_id}
+                        className={`${styles.workQueueRow} ${actualsQueueCostCenterId === cc.cost_center_id ? styles.workQueueRowSelected : ''}`}
+                        onClick={() => setActualsQueueCostCenterId(cc.cost_center_id)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={e => e.key === 'Enter' && setActualsQueueCostCenterId(cc.cost_center_id)}
+                      >
                         <div>
-                          <strong>{row.employee_name}</strong>
+                          <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>{cc.cost_center_name}</Body1>
                           <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-                            {row.employee_email}
+                            {cc.totalFte}% FTE · {cc.lineCount} lines
                           </div>
                         </div>
-                      </TableCell>
-                      <TableCell>{row.project_name}</TableCell>
-                      <TableCell>{row.cost_center_name}</TableCell>
-                      <TableCell>{row.year}-{String(row.month).padStart(2, '0')}</TableCell>
-                      <TableCell>
-                        <Badge appearance="filled" color="informative">{row.fte_percent}%</Badge>
-                      </TableCell>
-                      <TableCell><ApprovalBadge status={row.approval_status} /></TableCell>
-                      <TableCell>{row.current_approval_step || '-'}</TableCell>
-                      <TableCell>{row.current_approver_name || '-'}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </Card>
-
-          {/* Actuals vs Demand/Supply by Cost Center */}
-          {canSeeStats && (() => {
-            const chartRows = ccStats && ccStats.length > 0 ? ccStats : EXAMPLE_COST_CENTER_STATS;
-            const usedExampleData = !ccStats || ccStats.length === 0;
-            return (
-              <Card className={styles.card}>
-                <CardHeader header={<Body1><strong>Actuals vs Demand/Supply by Cost Center</strong></Body1>} />
-                <div style={{ marginBottom: 16, display: 'flex', gap: 16 }}>
-                  <Select value={selectedCostCenterId} onChange={e => setSelectedCostCenterId(e.target.value)}>
-                    <option value="">All Cost Centers</option>
-                    {costCenters.map(cc => (
-                      <option key={cc.id} value={cc.id}>{cc.name}</option>
-                    ))}
-                  </Select>
+                        {cc.pendingCount > 0 && (
+                          <Badge appearance="outline" color="warning" size="small">{cc.pendingCount} pending</Badge>
+                        )}
+                      </div>
+                    ));
+                  })()}
                 </div>
-                {ccStatsLoading ? (
-                  <LoadingState message="Loading cost center stats..." />
-                ) : ccStatsError ? (
-                  <MessageBar intent="error"><MessageBarBody>{ccStatsError}</MessageBarBody></MessageBar>
-                ) : (
-                  <>
-                    {usedExampleData && (
-                      <MessageBar intent="info" style={{ marginBottom: tokens.spacingVerticalM }}>
-                        <MessageBarBody>Showing example data. Select a period with planning data to see real cost center stats.</MessageBarBody>
-                      </MessageBar>
-                    )}
-                    <div style={{ height: 320 }}>
-                      <BreakdownChart
-                        rows={chartRows.map(row => ({
-                          label: row.cost_center_name,
-                          demandFte: row.demand_fte,
-                          supplyFte: row.supply_fte,
-                          actualsFte: row.actuals_fte,
-                        }))}
-                      />
-                    </div>
-                  </>
+                {actualsCcList.length === 0 && !actualsLoading && (
+                  <Body1 style={{ color: tokens.colorNeutralForeground3, padding: tokens.spacingVerticalM }}>
+                    No actuals for this period.
+                  </Body1>
                 )}
-              </Card>
-            );
-          })()}
+              </div>
+              <div className={styles.workQueueDetails}>
+                <Card className={styles.card}>
+                  <CardHeader header={<Body1><strong>Employee actuals</strong></Body1>} />
+                  {sortedActuals.length === 0 ? (
+                    <EmptyState
+                      icon={<MoneyRegular style={{ fontSize: 48 }} />}
+                      title="No actuals data"
+                      message="No actuals found for this period. Adjust the filters or select a different period."
+                    />
+                  ) : (
+                    <Table className={styles.sortableTable}>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHeaderCell onClick={() => handleSort('employee_name')}>
+                            Employee{sortIndicator('employee_name')}
+                          </TableHeaderCell>
+                          <TableHeaderCell onClick={() => handleSort('project_name')}>
+                            Project{sortIndicator('project_name')}
+                          </TableHeaderCell>
+                          <TableHeaderCell onClick={() => handleSort('cost_center_name')}>
+                            Cost Center{sortIndicator('cost_center_name')}
+                          </TableHeaderCell>
+                          <TableHeaderCell onClick={() => handleSort('year')}>
+                            Period{sortIndicator('year')}
+                          </TableHeaderCell>
+                          <TableHeaderCell onClick={() => handleSort('fte_percent')}>
+                            FTE %{sortIndicator('fte_percent')}
+                          </TableHeaderCell>
+                          <TableHeaderCell onClick={() => handleSort('approval_status')}>
+                            Approval{sortIndicator('approval_status')}
+                          </TableHeaderCell>
+                          <TableHeaderCell onClick={() => handleSort('current_approval_step')}>
+                            Current Step{sortIndicator('current_approval_step')}
+                          </TableHeaderCell>
+                          <TableHeaderCell onClick={() => handleSort('current_approver_name')}>
+                            Approver{sortIndicator('current_approver_name')}
+                          </TableHeaderCell>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sortedActuals.map(row => (
+                          <TableRow key={row.actual_id}>
+                            <TableCell>
+                              <div>
+                                <strong>{row.employee_name}</strong>
+                                <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                  {row.employee_email}
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>{row.project_name}</TableCell>
+                            <TableCell>{row.cost_center_name}</TableCell>
+                            <TableCell>{row.year}-{String(row.month).padStart(2, '0')}</TableCell>
+                            <TableCell>
+                              <Badge appearance="filled" color="informative">{row.fte_percent}%</Badge>
+                            </TableCell>
+                            <TableCell><ApprovalBadge status={row.approval_status} /></TableCell>
+                            <TableCell>{row.current_approval_step || '-'}</TableCell>
+                            <TableCell>{row.current_approver_name || '-'}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </Card>
+
+                {canSeeStats && (() => {
+                  const chartRows = ccStats && ccStats.length > 0 ? ccStats : EXAMPLE_COST_CENTER_STATS;
+                  const usedExampleData = !ccStats || ccStats.length === 0;
+                  return (
+                    <Card className={styles.card}>
+                      <CardHeader header={<Body1><strong>Actuals vs Demand/Supply by Cost Center</strong></Body1>} />
+                      {ccStatsLoading ? (
+                        <LoadingState message="Loading cost center stats..." />
+                      ) : ccStatsError ? (
+                        <MessageBar intent="error"><MessageBarBody>{ccStatsError}</MessageBarBody></MessageBar>
+                      ) : (
+                        <>
+                          {usedExampleData && (
+                            <MessageBar intent="info" style={{ marginBottom: tokens.spacingVerticalM }}>
+                              <MessageBarBody>Showing example data. Select a period with planning data to see real cost center stats.</MessageBarBody>
+                            </MessageBar>
+                          )}
+                          <div style={{ height: 320 }}>
+                            <BreakdownChart
+                              rows={chartRows.map(row => ({
+                                label: row.cost_center_name,
+                                demandFte: row.demand_fte,
+                                supplyFte: row.supply_fte,
+                                actualsFte: row.actuals_fte,
+                              }))}
+                            />
+                          </div>
+                        </>
+                      )}
+                    </Card>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
         </>
       )}
 
       {/* ═══════════════ Snapshots Tab ═══════════════ */}
       {activeTab === 'snapshots' && (
-        <Card className={styles.card}>
-          <CardHeader header={<Body1><strong>Published Snapshots</strong></Body1>} />
-          {snapshots.length > 0 ? (
-            <Table className={styles.table}>
-              <TableHeader>
-                <TableRow>
-                  <TableHeaderCell>Name</TableHeaderCell>
-                  <TableHeaderCell>Description</TableHeaderCell>
-                  <TableHeaderCell>Lines</TableHeaderCell>
-                  <TableHeaderCell>Published At</TableHeaderCell>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {snapshots.map(snapshot => (
-                  <TableRow key={snapshot.id}>
-                    <TableCell><strong>{snapshot.name}</strong></TableCell>
-                    <TableCell>{snapshot.description || '-'}</TableCell>
-                    <TableCell>{snapshot.lines_count}</TableCell>
-                    <TableCell>{new Date(snapshot.published_at).toLocaleString()}</TableCell>
+        <>
+          <Card className={styles.card}>
+            <CardHeader header={<Body1><strong>Published Snapshots</strong></Body1>} />
+            {snapshots.length > 0 ? (
+              <Table className={styles.table}>
+                <TableHeader>
+                  <TableRow>
+                    <TableHeaderCell>Name</TableHeaderCell>
+                    <TableHeaderCell>Description</TableHeaderCell>
+                    <TableHeaderCell>Lines</TableHeaderCell>
+                    <TableHeaderCell>Published At</TableHeaderCell>
+                    <TableHeaderCell>Published By</TableHeaderCell>
+                    <TableHeaderCell>Actions</TableHeaderCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <div style={{ padding: tokens.spacingVerticalL, textAlign: 'center' }}>
-              <Body1>No snapshots published for this period yet.</Body1>
-            </div>
-          )}
-        </Card>
+                </TableHeader>
+                <TableBody>
+                  {snapshots.map(snapshot => (
+                    <TableRow key={snapshot.id}>
+                      <TableCell><strong>{snapshot.name}</strong></TableCell>
+                      <TableCell>{snapshot.description || '-'}</TableCell>
+                      <TableCell>{snapshot.lines_count}</TableCell>
+                      <TableCell>{new Date(snapshot.published_at).toLocaleString()}</TableCell>
+                      <TableCell>{snapshot.published_by}</TableCell>
+                      <TableCell>
+                        <Button
+                          size="small"
+                          appearance="subtle"
+                          onClick={async () => {
+                            try {
+                              const detail = await consolidationApi.getSnapshot(snapshot.id);
+                              setViewedSnapshot(detail);
+                            } catch (err) {
+                              showApiError(err as Error, 'Failed to load snapshot');
+                            }
+                          }}
+                        >
+                          View
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div style={{ padding: tokens.spacingVerticalL, textAlign: 'center' }}>
+                <Body1>No snapshots published for this period yet.</Body1>
+              </div>
+            )}
+          </Card>
+
+          {/* View Snapshot Dialog */}
+          <Dialog open={!!viewedSnapshot} onOpenChange={(_, d) => !d.open && setViewedSnapshot(null)}>
+            <DialogSurface style={{ maxWidth: 720 }}>
+              <DialogBody>
+                <DialogTitle>{viewedSnapshot?.name ?? 'Snapshot'}</DialogTitle>
+                <DialogContent>
+                  {viewedSnapshot && (
+                    <>
+                      <Body2 style={{ marginBottom: tokens.spacingVerticalM, color: tokens.colorNeutralForeground3 }}>
+                        {viewedSnapshot.description || 'No description'} · {viewedSnapshot.lines_count} lines · {new Date(viewedSnapshot.published_at).toLocaleString()}
+                      </Body2>
+                      <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+                        <Table className={styles.table}>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHeaderCell>Type</TableHeaderCell>
+                              <TableHeaderCell>Project</TableHeaderCell>
+                              <TableHeaderCell>Resource</TableHeaderCell>
+                              <TableHeaderCell>Period</TableHeaderCell>
+                              <TableHeaderCell>FTE %</TableHeaderCell>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {viewedSnapshot.lines.slice(0, 100).map((line, i) => (
+                              <TableRow key={i}>
+                                <TableCell>{line.line_type}</TableCell>
+                                <TableCell>{line.project_name || '-'}</TableCell>
+                                <TableCell>{line.resource_name || line.placeholder_name || '-'}</TableCell>
+                                <TableCell>{line.year}-{String(line.month).padStart(2, '0')}</TableCell>
+                                <TableCell>{line.fte_percent ?? '-'}%</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                        {viewedSnapshot.lines.length > 100 && (
+                          <Body2 style={{ marginTop: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
+                            Showing first 100 of {viewedSnapshot.lines.length} lines.
+                          </Body2>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </DialogContent>
+                <DialogActions>
+                  <Button onClick={() => setViewedSnapshot(null)}>Close</Button>
+                </DialogActions>
+              </DialogBody>
+            </DialogSurface>
+          </Dialog>
+        </>
       )}
     </div>
   );

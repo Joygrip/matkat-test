@@ -158,6 +158,10 @@ The Supply Planning page mirrors the updated Demand UX, focused on resource avai
 - **Grouped, collapsible table**: Supply lines are grouped by **Cost center**, each group showing **Total FTE** and line count. Groups can be expanded/collapsed, and key columns (Resource, Project, Period, FTE%) are sortable.
 - **Drawer-based editing**: Adding and editing supply lines (including bulk add) now uses a right-hand drawer with **Single line** and **Bulk add** tabs, so you can work on lines without losing the main table context.
 
+## Finance page
+
+The Finance page has been redesigned with a compact header, sticky toolbar, period management drawer, KPI scoreboard, and cost center work queue. See [docs/FINANCE_PAGE.md](FINANCE_PAGE.md) for layout, period management, publish snapshot flow, and cost center work queue usage.
+
 ### "Cannot reach API" or HTTP 0 (NETWORK_ERROR)
 
 If the app shows "Cannot reach the API" or requests fail with a network error when adding actuals or calling the API:

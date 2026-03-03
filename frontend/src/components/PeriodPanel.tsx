@@ -67,7 +67,12 @@ const monthNames = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-export function PeriodPanel() {
+interface PeriodPanelProps {
+  /** When 'embedded', renders without Card wrapper (for use inside Drawer) */
+  variant?: 'card' | 'embedded';
+}
+
+export function PeriodPanel({ variant = 'card' }: PeriodPanelProps) {
   const styles = useStyles();
   const { showSuccess, showApiError } = useToast();
   const { user } = useAuth();
@@ -101,18 +106,30 @@ export function PeriodPanel() {
     }
   };
   
-  const handleLock = async (period: Period) => {
-    setActionLoading(period.id);
+  const [lockConfirmOpen, setLockConfirmOpen] = useState(false);
+  const [periodToLock, setPeriodToLock] = useState<Period | null>(null);
+
+  const handleLockClick = (period: Period) => {
+    setPeriodToLock(period);
+    setLockConfirmOpen(true);
+  };
+
+  const handleLockConfirm = async () => {
+    if (!periodToLock) return;
+    setLockConfirmOpen(false);
+    setActionLoading(periodToLock.id);
     try {
-      await periodsApi.lock(period.id);
-      showSuccess('Period Locked', `${monthNames[period.month - 1]} ${period.year} has been locked.`);
+      await periodsApi.lock(periodToLock.id);
+      showSuccess('Period Locked', `${monthNames[periodToLock.month - 1]} ${periodToLock.year} has been locked.`);
       loadPeriods();
     } catch (error) {
       showApiError(error as Error, 'Failed to lock period');
     } finally {
       setActionLoading(null);
+      setPeriodToLock(null);
     }
   };
+
   
   const handleUnlockClick = (period: Period) => {
     setSelectedPeriod(period);
@@ -156,12 +173,12 @@ export function PeriodPanel() {
   if (loading) {
     return <Spinner label="Loading periods..." />;
   }
-  
-  return (
+
+  const content = (
     <>
-      <Card className={styles.card}>
         <div className={styles.header}>
-          <Title3>Period Management</Title3>
+          {variant === 'card' && <Title3>Period Management</Title3>}
+          {variant === 'embedded' && <span />}
           {isFinanceOrAdmin && (
             <Button
               appearance="primary"
@@ -213,7 +230,7 @@ export function PeriodPanel() {
                           <Button
                             appearance="subtle"
                             icon={<LockClosedRegular />}
-                            onClick={() => handleLock(period)}
+                            onClick={() => handleLockClick(period)}
                             disabled={actionLoading === period.id}
                           >
                             Lock
@@ -236,8 +253,36 @@ export function PeriodPanel() {
             </TableBody>
           </Table>
         )}
-      </Card>
       
+      {/* Lock Confirmation Dialog */}
+      <Dialog open={lockConfirmOpen} onOpenChange={(_, data) => {
+        setLockConfirmOpen(data.open);
+        if (!data.open) setPeriodToLock(null);
+      }}>
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Lock Period</DialogTitle>
+            <DialogContent>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalM }}>
+                Locking{' '}
+                <strong>
+                  {periodToLock && `${monthNames[periodToLock.month - 1]} ${periodToLock.year}`}
+                </strong>
+                {' '}will prevent further edits to planning data for this period. Continue?
+              </Body1>
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="secondary" onClick={() => setLockConfirmOpen(false)}>
+                Cancel
+              </Button>
+              <Button appearance="primary" onClick={handleLockConfirm}>
+                Lock Period
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
       {/* Unlock Dialog */}
       <Dialog open={unlockDialogOpen} onOpenChange={(_, data) => setUnlockDialogOpen(data.open)}>
         <DialogSurface>
@@ -319,4 +364,9 @@ export function PeriodPanel() {
       </Dialog>
     </>
   );
+
+  if (variant === 'embedded') {
+    return content;
+  }
+  return <Card className={styles.card}>{content}</Card>;
 }

@@ -350,46 +350,46 @@ export function Dashboard() {
     setPeriodOptions(periods);
   }, [periods]);
 
-  // Load department options for filter
+  // Load department options for filter (use lookupsApi for all roles)
   useEffect(() => {
-    adminApi.listDepartments().then((departments) => {
-      setDepartmentOptions(departments);
-    });
+    lookupsApi.listDepartments?.()
+      .then((departments) => setDepartmentOptions(departments))
+      .catch(() => setDepartmentOptions([]));
   }, []);
 
-  // Load cost center options for filter
+  // Load cost center options for filter (use lookupsApi for all roles)
   useEffect(() => {
-    adminApi.listCostCenters().then((costCenters) => {
-      setCostCenterOptions(costCenters);
-    });
+    lookupsApi.listCostCenters?.()
+      .then((costCenters) => setCostCenterOptions(costCenters))
+      .catch(() => setCostCenterOptions([]));
   }, []);
 
-  // Load project options for filter
+  // Load project options for filter (use lookupsApi for all roles)
   useEffect(() => {
-    adminApi.listProjects().then((projects) => {
-      setProjectOptions(projects);
-    });
+    lookupsApi.listProjects?.()
+      .then((projects) => setProjectOptions(projects))
+      .catch(() => setProjectOptions([]));
   }, []);
 
-  // Load department lookup map
+  // Load department lookup map (fallback to empty on error)
   useEffect(() => {
-    adminApi.listDepartments().then((departments) => {
-      const map: Record<string, string> = {};
-      departments.forEach((d) => {
-        map[d.id] = d.name;
-      });
-      setDepartmentMap(map);
-    });
+    lookupsApi.listDepartments?.()
+      .then((departments) => {
+        const map: Record<string, string> = {};
+        departments.forEach((d) => { map[d.id] = d.name; });
+        setDepartmentMap(map);
+      })
+      .catch(() => setDepartmentMap({}));
   }, []);
-  // Load cost center lookup map
+  // Load cost center lookup map (fallback to empty on error)
   useEffect(() => {
-    adminApi.listCostCenters().then((costCenters) => {
-      const map: Record<string, string> = {};
-      costCenters.forEach((c) => {
-        map[c.id] = c.name;
-      });
-      setCostCenterMap(map);
-    });
+    lookupsApi.listCostCenters?.()
+      .then((costCenters) => {
+        const map: Record<string, string> = {};
+        costCenters.forEach((c) => { map[c.id] = c.name; });
+        setCostCenterMap(map);
+      })
+      .catch(() => setCostCenterMap({}));
   }, []);
 
   const handleKpiCardKeyDown = (e: React.KeyboardEvent, key: KpiDetailModalKey) => {

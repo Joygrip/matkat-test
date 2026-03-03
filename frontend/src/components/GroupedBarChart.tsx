@@ -1,7 +1,35 @@
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
-import { tokens } from '@fluentui/react-components';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { makeStyles } from '@fluentui/react-components';
 import React from 'react';
 import { schemeCategory10, interpolateRainbow } from 'd3-scale-chromatic';
+
+const useStyles = makeStyles({
+  wrapper: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  legend: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+    gap: '8px 16px',
+    paddingTop: '8px',
+    borderTop: '1px solid var(--colorNeutralStroke2)',
+  },
+  legendItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '12px',
+    color: 'var(--colorNeutralForeground2)',
+  },
+  legendSwatch: {
+    width: '12px',
+    height: '12px',
+    borderRadius: '3px',
+    flexShrink: 0,
+  },
+});
 
 export interface GroupedBarChartDatum {
   label: string;
@@ -60,6 +88,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export const GroupedBarChart: React.FC<GroupedBarChartProps> = ({ data, demandKeys, supplyKeys, legendMap, colorMap }) => {
+  const styles = useStyles();
   // Dynamic color palette using d3-scale-chromatic
   const projectNames = Array.from(new Set([
     ...demandKeys.map(k => k.replace(/_demand$/, '')),
@@ -79,33 +108,48 @@ export const GroupedBarChart: React.FC<GroupedBarChartProps> = ({ data, demandKe
     });
   }
 
+  // Build legend items: demand then supply for each project
+  const legendItems = projectNames.flatMap((project) => [
+    { key: `${project}_demand`, label: legendMap[`${project}_demand`] || `${project} Demand`, color: projectColorMap[project] },
+    { key: `${project}_supply`, label: legendMap[`${project}_supply`] || `${project} Supply`, color: lighten(projectColorMap[project], 40) },
+  ]);
+
   return (
-    <ResponsiveContainer width="100%" height={360}>
-      <BarChart data={data} margin={{ top: 16, right: 32, left: 8, bottom: 24 }}>
-        <CartesianGrid strokeDasharray="3 3" />
-        <XAxis dataKey="label" angle={-20} textAnchor="end" height={60} />
-        <YAxis />
-        <Tooltip content={<CustomTooltip />} />
-        <Legend />
-        {projectNames.map((project) => [
-          <Bar
-            key={`${project}_demand`}
-            dataKey={`${project}_demand`}
-            name={legendMap[`${project}_demand`] || `${project} Demand`}
-            fill={projectColorMap[project]}
-            radius={[4, 4, 0, 0]}
-            barSize={18}
-          />,
-          <Bar
-            key={`${project}_supply`}
-            dataKey={`${project}_supply`}
-            name={legendMap[`${project}_supply`] || `${project} Supply`}
-            fill={lighten(projectColorMap[project], 40)}
-            radius={[4, 4, 0, 0]}
-            barSize={18}
-          />
-        ])}
-      </BarChart>
-    </ResponsiveContainer>
+    <div className={styles.wrapper}>
+      <ResponsiveContainer width="100%" height={360}>
+        <BarChart data={data} margin={{ top: 16, right: 32, left: 8, bottom: 24 }}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey="label" angle={-20} textAnchor="end" height={60} />
+          <YAxis />
+          <Tooltip content={<CustomTooltip />} />
+          {projectNames.map((project) => [
+            <Bar
+              key={`${project}_demand`}
+              dataKey={`${project}_demand`}
+              name={legendMap[`${project}_demand`] || `${project} Demand`}
+              fill={projectColorMap[project]}
+              radius={[4, 4, 0, 0]}
+              barSize={18}
+            />,
+            <Bar
+              key={`${project}_supply`}
+              dataKey={`${project}_supply`}
+              name={legendMap[`${project}_supply`] || `${project} Supply`}
+              fill={lighten(projectColorMap[project], 40)}
+              radius={[4, 4, 0, 0]}
+              barSize={18}
+            />,
+          ])}
+        </BarChart>
+      </ResponsiveContainer>
+      <div className={styles.legend}>
+        {legendItems.map((item) => (
+          <div key={item.key} className={styles.legendItem}>
+            <span className={styles.legendSwatch} style={{ backgroundColor: item.color }} />
+            <span>{item.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 };

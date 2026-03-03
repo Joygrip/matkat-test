@@ -57,14 +57,11 @@ async def list_projects(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """
-    List all active projects.
+    List all projects for the tenant (active and inactive).
     Accessible to all roles (read-only).
     """
     return db.query(Project).filter(
-        and_(
-            Project.tenant_id == current_user.tenant_id,
-            Project.is_active == True,
-        )
+        Project.tenant_id == current_user.tenant_id
     ).order_by(Project.name).all()
 
 

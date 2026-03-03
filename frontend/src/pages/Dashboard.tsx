@@ -48,22 +48,6 @@ const useStyles = makeStyles({
     maxWidth: '1400px',
     margin: '0 auto',
   },
-  pageHeader: {
-    marginBottom: tokens.spacingVerticalXS,
-  },
-  pageTitle: {
-    fontSize: tokens.fontSizeHero800,
-    fontWeight: tokens.fontWeightBold,
-    color: tokens.colorNeutralForeground1,
-    margin: 0,
-    lineHeight: '1.2',
-  },
-  pageSubtitle: {
-    fontSize: tokens.fontSizeBase400,
-    color: tokens.colorNeutralForeground3,
-    marginTop: tokens.spacingVerticalXXS,
-  },
-
   /* ── Section separators ── */
   section: {
     display: 'flex',
@@ -337,7 +321,7 @@ export function Dashboard() {
   // Filter state
   const [periodOptions, setPeriodOptions] = useState<Period[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenter[]>([]);
-  const [projectOptions, setProjectOptions] = useState<Project[]>([]);
+  const [lookupsProjects, setLookupsProjects] = useState<Project[]>([]);
   const [selectedPeriodIds, setSelectedPeriodIds] = useState<string[]>([]);
   const [periodPreset, setPeriodPreset] = useState<'all' | 'last3' | 'last6' | 'custom'>('all');
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
@@ -376,12 +360,33 @@ export function Dashboard() {
       .catch(() => setCostCenterOptions([]));
   }, []);
 
-  // Load project options for filter (use lookupsApi for all roles)
+  // Load projects from lookups (all active projects)
   useEffect(() => {
     lookupsApi.listProjects?.()
-      .then((projects) => setProjectOptions(projects))
-      .catch(() => setProjectOptions([]));
+      .then((projects) => setLookupsProjects(projects))
+      .catch(() => setLookupsProjects([]));
   }, []);
+
+  // Merge lookups projects with projects from aggregation (ensures all projects with demand/supply data are in the dropdown)
+  const projectOptions = useMemo(() => {
+    const map = new Map(lookupsProjects.map((p) => [p.id, p]));
+    aggByProject.forEach((row) => {
+      if (row.project_id && !map.has(row.project_id)) {
+        map.set(row.project_id, {
+          id: row.project_id,
+          name: row.project_name || row.project_id,
+          code: '',
+          tenant_id: '',
+          cost_center_id: null,
+          pm_user_id: null,
+          is_active: true,
+          created_at: '',
+          updated_at: '',
+        } as Project);
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [lookupsProjects, aggByProject]);
 
   // Load cost center lookup map (fallback to empty on error)
   useEffect(() => {
@@ -721,26 +726,18 @@ export function Dashboard() {
               </div>
               <div className={styles.filterGroup}>
                 <span className={styles.filterLabel}>Project</span>
-                <Combobox
-                  value={
-                    selectedProjectId
-                      ? (projectOptions.find(p => p.id === selectedProjectId)?.name ?? '')
-                      : ''
-                  }
-                  onOptionSelect={(_, data) => {
-                    const v = data.optionValue;
-                    handleProjectChange(v ? String(v) : null);
-                  }}
+                <Select
+                  value={selectedProjectId ?? ''}
+                  onChange={(_, data) => handleProjectChange(data.value ? String(data.value) : null)}
+                  style={{ minWidth: 180 }}
                 >
-                  <Option key="__all-projects" value="" text="All projects">
-                    All projects
-                  </Option>
+                  <option value="">All projects</option>
                   {projectOptions.map(p => (
-                    <Option key={p.id} value={p.id} text={p.name}>
+                    <option key={p.id} value={p.id}>
                       {p.name}
-                    </Option>
+                    </option>
                   ))}
-                </Combobox>
+                </Select>
               </div>
               <div className={styles.filterGroup}>
                 <span className={styles.filterLabel}>Cost Center</span>

@@ -59,16 +59,17 @@ def main():
                 subject_type="actuals",
                 subject_id=actual.id,
                 status=ApprovalStatus.APPROVED,
+                created_by=users[0].object_id if users else "system",
             )
             db.add(approval)
             db.flush()
             step = ApprovalStep(
-                approval_instance_id=approval.id,
+                instance_id=approval.id,
                 step_order=1,
-                step_name="RO Approval",
+                step_name="RO",
                 status=StepStatus.APPROVED,
                 approver_id=resource.user_id,
-                completed_at=datetime.utcnow()
+                actioned_at=datetime.utcnow(),
             )
             db.add(step)
             print(f"Added signed actual for {resource.display_name} on {project.name}")

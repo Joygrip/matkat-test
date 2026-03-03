@@ -108,53 +108,69 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
     db.add_all(placeholders)
     db.flush()
     
-    # Create periods
+    # Create periods: Dec 2025, Jan 2026 (locked); Feb 2026 - Dec 2026 (open)
     periods = [
         Period(tenant_id=tenant_id, year=2025, month=12, status=PeriodStatus.LOCKED),
         Period(tenant_id=tenant_id, year=2026, month=1, status=PeriodStatus.LOCKED),
-        Period(tenant_id=tenant_id, year=2026, month=2, status=PeriodStatus.OPEN),
-        Period(tenant_id=tenant_id, year=2026, month=3, status=PeriodStatus.OPEN),
-        Period(tenant_id=tenant_id, year=2026, month=4, status=PeriodStatus.OPEN),
-        Period(tenant_id=tenant_id, year=2026, month=5, status=PeriodStatus.OPEN),
+    ]
+    periods += [
+        Period(tenant_id=tenant_id, year=2026, month=m, status=PeriodStatus.OPEN)
+        for m in range(2, 13)
     ]
     db.add_all(periods)
     db.flush()
-    
-    current_period = periods[2]  # February 2026
-    
-    # Create demand lines
-    demand_lines = [
-        DemandLine(tenant_id=tenant_id, period_id=current_period.id, project_id=projects[0].id, resource_id=resources[0].id, year=2026, month=2, fte_percent=50, created_by="system"),
-        DemandLine(tenant_id=tenant_id, period_id=current_period.id, project_id=projects[0].id, resource_id=resources[1].id, year=2026, month=2, fte_percent=75, created_by="system"),
-        DemandLine(tenant_id=tenant_id, period_id=current_period.id, project_id=projects[1].id, resource_id=resources[0].id, year=2026, month=2, fte_percent=25, created_by="system"),
-        DemandLine(tenant_id=tenant_id, period_id=current_period.id, project_id=projects[1].id, resource_id=resources[3].id, year=2026, month=2, fte_percent=50, created_by="system"),
-        DemandLine(tenant_id=tenant_id, period_id=current_period.id, project_id=projects[2].id, resource_id=resources[1].id, year=2026, month=2, fte_percent=25, created_by="system"),
-        DemandLine(tenant_id=tenant_id, period_id=periods[3].id, project_id=projects[0].id, resource_id=resources[0].id, year=2026, month=3, fte_percent=50, created_by="system"),
-        DemandLine(tenant_id=tenant_id, period_id=periods[3].id, project_id=projects[0].id, placeholder_id=placeholders[0].id, year=2026, month=3, fte_percent=100, created_by="system"),
-        DemandLine(tenant_id=tenant_id, period_id=periods[3].id, project_id=projects[1].id, resource_id=resources[3].id, year=2026, month=3, fte_percent=75, created_by="system"),
-        DemandLine(tenant_id=tenant_id, period_id=periods[4].id, project_id=projects[0].id, resource_id=resources[0].id, year=2026, month=4, fte_percent=50, created_by="system"),
-        DemandLine(tenant_id=tenant_id, period_id=periods[4].id, project_id=projects[0].id, placeholder_id=placeholders[1].id, year=2026, month=4, fte_percent=50, created_by="system"),
+    period_by_key = {(p.year, p.month): p for p in periods}
+
+    # Demand lines: each (project, resource/placeholder) unique per month.
+    # (project_idx, resource_idx or -1, placeholder_idx or -1, fte)
+    demand_templates = [
+        (0, 0, -1, 50), (0, 1, -1, 75), (1, 0, -1, 25), (1, 3, -1, 50), (2, 1, -1, 25),
+        (0, -1, 0, 100), (1, 4, -1, 75), (0, 2, -1, 50), (3, 2, -1, 50), (4, 4, -1, 100),
+        (2, 0, -1, 50), (3, 5, -1, 75),
     ]
+
+    # All (year, month) pairs: Dec 2025, Jan 2026, Feb 2026 - Dec 2026
+    period_months = [(2025, 12)] + [(2026, m) for m in range(1, 13)]
+
+    demand_lines = []
+    for year, month in period_months:
+        p = period_by_key[(year, month)]
+        for proj_idx, res_idx, ph_idx, fte_val in demand_templates:
+            line = DemandLine(
+                tenant_id=tenant_id, period_id=p.id, project_id=projects[proj_idx].id,
+                year=year, month=month, fte_percent=fte_val, created_by="system",
+            )
+            if ph_idx >= 0:
+                line.placeholder_id = placeholders[ph_idx].id
+            else:
+                line.resource_id = resources[res_idx].id
+            demand_lines.append(line)
     db.add_all(demand_lines)
     db.flush()
-    
-    # Create supply lines
-    supply_lines = [
-        SupplyLine(tenant_id=tenant_id, period_id=current_period.id, resource_id=resources[0].id, year=2026, month=2, fte_percent=100, created_by="system"),
-        SupplyLine(tenant_id=tenant_id, period_id=current_period.id, resource_id=resources[1].id, year=2026, month=2, fte_percent=75, created_by="system"),
-        SupplyLine(tenant_id=tenant_id, period_id=current_period.id, resource_id=resources[2].id, year=2026, month=2, fte_percent=50, created_by="system"),
-        SupplyLine(tenant_id=tenant_id, period_id=current_period.id, resource_id=resources[3].id, year=2026, month=2, fte_percent=100, created_by="system"),
-        SupplyLine(tenant_id=tenant_id, period_id=current_period.id, resource_id=resources[4].id, year=2026, month=2, fte_percent=100, created_by="system"),
-        SupplyLine(tenant_id=tenant_id, period_id=current_period.id, resource_id=resources[5].id, year=2026, month=2, fte_percent=100, created_by="system"),
-        SupplyLine(tenant_id=tenant_id, period_id=current_period.id, resource_id=resources[6].id, year=2026, month=2, fte_percent=75, created_by="system"),
-        SupplyLine(tenant_id=tenant_id, period_id=periods[3].id, resource_id=resources[0].id, year=2026, month=3, fte_percent=100, created_by="system"),
-        SupplyLine(tenant_id=tenant_id, period_id=periods[3].id, resource_id=resources[3].id, year=2026, month=3, fte_percent=100, created_by="system"),
+
+    # Supply lines with project_id so Dashboard "by project" chart shows supply.
+    # (resource_idx, project_idx, fte_percent) - allocates each resource's supply to projects
+    supply_templates = [
+        (0, 0, 100), (1, 0, 100), (2, 0, 50), (2, 1, 50), (3, 1, 100), (4, 2, 100),
+        (5, 0, 100), (6, 2, 100),
     ]
+    supply_lines = []
+    for year, month in period_months:
+        p = period_by_key[(year, month)]
+        fte_base = 100 if month % 3 != 0 else 75
+        for res_idx, proj_idx, fte_pct in supply_templates:
+            fte_val = (fte_base * fte_pct) // 100
+            fte_val = max(5, min(100, (fte_val // 5) * 5))
+            supply_lines.append(SupplyLine(
+                tenant_id=tenant_id, period_id=p.id, resource_id=resources[res_idx].id,
+                project_id=projects[proj_idx].id, year=year, month=month,
+                fte_percent=fte_val, created_by="system",
+            ))
     db.add_all(supply_lines)
     db.flush()
     
-    # Create actuals for January 2026
-    jan_period = periods[1]
+    # Create actuals for January 2026 (locked period)
+    jan_period = period_by_key[(2026, 1)]
     actual_lines = [
         ActualLine(tenant_id=tenant_id, period_id=jan_period.id, resource_id=resources[0].id, project_id=projects[0].id, year=2026, month=1, planned_fte_percent=50, actual_fte_percent=50, created_by="system"),
         ActualLine(tenant_id=tenant_id, period_id=jan_period.id, resource_id=resources[0].id, project_id=projects[1].id, year=2026, month=1, planned_fte_percent=25, actual_fte_percent=25, created_by="system"),
@@ -229,6 +245,84 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
         status=StepStatus.PENDING,
     )
     db.add(step2_director)
-    
+    db.flush()
+
+    # Create actuals for February 2026 (open period) - for Finance Actuals chart
+    feb_period = period_by_key[(2026, 2)]
+    feb_actuals = [
+        ActualLine(tenant_id=tenant_id, period_id=feb_period.id, resource_id=resources[0].id, project_id=projects[0].id, year=2026, month=2, planned_fte_percent=50, actual_fte_percent=50, created_by="system"),
+        ActualLine(tenant_id=tenant_id, period_id=feb_period.id, resource_id=resources[0].id, project_id=projects[1].id, year=2026, month=2, planned_fte_percent=25, actual_fte_percent=25, created_by="system"),
+        ActualLine(tenant_id=tenant_id, period_id=feb_period.id, resource_id=resources[1].id, project_id=projects[0].id, year=2026, month=2, planned_fte_percent=75, actual_fte_percent=75, created_by="system"),
+        ActualLine(tenant_id=tenant_id, period_id=feb_period.id, resource_id=resources[3].id, project_id=projects[1].id, year=2026, month=2, planned_fte_percent=50, actual_fte_percent=50, created_by="system"),
+    ]
+    db.add_all(feb_actuals)
+    db.flush()
+
+    # Sign Feb actuals and create approvals
+    feb_actuals[0].employee_signed_at = datetime.utcnow()
+    feb_actuals[0].employee_signed_by = users[9].object_id
+    feb_actuals[0].is_proxy_signed = False
+
+    feb_approval1 = ApprovalInstance(
+        tenant_id=tenant_id,
+        subject_type="actuals",
+        subject_id=feb_actuals[0].id,
+        status=ApprovalStatus.PENDING,
+        created_by=users[9].object_id,
+    )
+    db.add(feb_approval1)
+    db.flush()
+
+    feb_step1_ro = ApprovalStep(
+        instance_id=feb_approval1.id,
+        step_order=1,
+        step_name="RO",
+        approver_id=users[4].id,
+        status=StepStatus.PENDING,
+    )
+    db.add(feb_step1_ro)
+
+    feb_step1_director = ApprovalStep(
+        instance_id=feb_approval1.id,
+        step_order=2,
+        step_name="Director",
+        approver_id=users[7].id,
+        status=StepStatus.PENDING,
+    )
+    db.add(feb_step1_director)
+    db.flush()
+
+    feb_actuals[2].employee_signed_at = datetime.utcnow()
+    feb_actuals[2].employee_signed_by = users[10].object_id
+    feb_actuals[2].is_proxy_signed = False
+
+    feb_approval2 = ApprovalInstance(
+        tenant_id=tenant_id,
+        subject_type="actuals",
+        subject_id=feb_actuals[2].id,
+        status=ApprovalStatus.PENDING,
+        created_by=users[10].object_id,
+    )
+    db.add(feb_approval2)
+    db.flush()
+
+    feb_step2_ro = ApprovalStep(
+        instance_id=feb_approval2.id,
+        step_order=1,
+        step_name="RO",
+        approver_id=users[5].id,
+        status=StepStatus.PENDING,
+    )
+    db.add(feb_step2_ro)
+
+    feb_step2_director = ApprovalStep(
+        instance_id=feb_approval2.id,
+        step_order=2,
+        step_name="Director",
+        approver_id=users[7].id,
+        status=StepStatus.PENDING,
+    )
+    db.add(feb_step2_director)
+
     db.commit()
-    print("✓ Example data created successfully")
+    print("Example data created successfully")

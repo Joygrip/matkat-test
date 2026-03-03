@@ -152,6 +152,75 @@ async def seed_database(
     return MessageResponse(message=msg)
 
 
+def reset_and_seed_tenant(db: Session, tenant_id: str) -> str:
+    """
+    Delete all tenant data and re-seed with full example data (periods 2026-01 to 2026-12,
+    demand, supply, actuals). Use for existing DBs that have minimal dev seed.
+    """
+    from api.app.models.actuals import ActualLine
+    from api.app.models.approvals import ApprovalInstance, ApprovalStep
+    from api.app.models.planning import DemandLine, SupplyLine
+    from api.app.models.consolidation import PublishSnapshotLine, PublishSnapshot, OopLine
+    from api.app.models.notifications import NotificationLog
+    from api.app.models.audit import AuditLog
+    from api.app.example_data import create_example_data
+    from sqlalchemy import delete, update
+
+    # Delete in FK-safe order
+    db.execute(delete(PublishSnapshotLine).where(
+        PublishSnapshotLine.snapshot_id.in_(
+            db.query(PublishSnapshot.id).filter(PublishSnapshot.tenant_id == tenant_id)
+        )
+    ))
+    db.execute(delete(PublishSnapshot).where(PublishSnapshot.tenant_id == tenant_id))
+    db.execute(delete(OopLine).where(OopLine.tenant_id == tenant_id))
+
+    instance_ids = db.query(ApprovalInstance.id).filter(
+        ApprovalInstance.tenant_id == tenant_id
+    ).scalar_subquery()
+    db.execute(delete(ApprovalStep).where(ApprovalStep.instance_id.in_(instance_ids)))
+    db.execute(delete(ApprovalInstance).where(ApprovalInstance.tenant_id == tenant_id))
+    db.execute(delete(ActualLine).where(ActualLine.tenant_id == tenant_id))
+    db.execute(delete(DemandLine).where(DemandLine.tenant_id == tenant_id))
+    db.execute(delete(SupplyLine).where(SupplyLine.tenant_id == tenant_id))
+    db.execute(delete(NotificationLog).where(NotificationLog.tenant_id == tenant_id))
+    db.execute(delete(AuditLog).where(AuditLog.tenant_id == tenant_id))
+    db.execute(delete(Period).where(Period.tenant_id == tenant_id))
+    db.execute(delete(Resource).where(Resource.tenant_id == tenant_id))
+    db.execute(delete(Project).where(Project.tenant_id == tenant_id))
+    db.execute(delete(Placeholder).where(Placeholder.tenant_id == tenant_id))
+
+    # Break circular refs: User <-> CostCenter
+    db.execute(update(User).where(User.tenant_id == tenant_id).values(
+        cost_center_id=None, manager_object_id=None
+    ))
+    db.execute(update(CostCenter).where(CostCenter.tenant_id == tenant_id).values(
+        ro_user_id=None, director_user_id=None
+    ))
+    db.execute(delete(CostCenter).where(CostCenter.tenant_id == tenant_id))
+    db.execute(delete(User).where(User.tenant_id == tenant_id))
+    db.commit()
+
+    # Re-seed with full example data
+    create_example_data(db, tenant_id)
+    return f"Reset and re-seeded tenant {tenant_id} with full example data"
+
+
+@router.post("/seed-reset", response_model=MessageResponse, dependencies=[Depends(require_dev_mode)])
+async def seed_reset(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Wipe tenant data and re-seed with full example data (periods 2026-01 to 2026-12,
+    demand, supply, actuals). Use when you have minimal dev seed and need full data.
+    Only available when DEV_AUTH_BYPASS=true.
+    """
+    tenant_id = current_user.tenant_id
+    msg = reset_and_seed_tenant(db, tenant_id)
+    return MessageResponse(message=msg)
+
+
 @router.get("/config", dependencies=[Depends(require_dev_mode)])
 async def get_dev_config():
     """Get current dev configuration."""

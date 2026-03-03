@@ -65,13 +65,28 @@ After starting both services:
 2. **Frontend**: http://localhost:5173 should load the app
 3. **API Docs**: http://localhost:8000/docs should show Swagger UI
 
+## Dev seed and example data
+
+On first startup (with `DEV_AUTH_BYPASS=true`), the backend auto-seeds **full example data**:
+
+- **Periods**: Dec 2025, Jan 2026 (locked); Feb 2026 - Dec 2026 (open)
+- **Demand and supply lines** for all months
+- **Actuals** for January 2026 (locked) and February 2026 (open), including signed actuals, so the Finance Actuals chart shows data for the default period (Feb 2026)
+
+If you have an existing database with minimal data (e.g. from an older dev seed with only 2 periods and no planning data):
+
+- Call **POST /dev/seed-reset** (e.g. from http://localhost:8000/docs) to wipe tenant data and re-seed with full example data.
+- Or delete `api/dev.db` and restart the backend for a clean slate.
+
+The legacy **POST /dev/seed** still exists for compatibility but creates minimal data; prefer the auto-seed or seed-reset for full data.
+
 ## Testing actuals in dev
 
 To enter and test actuals locally:
 
-1. Ensure the backend has run at least once (startup auto-seeds example data when `DEV_AUTH_BYPASS=true`), or call **POST /dev/seed** (e.g. from API docs) to create example data.
+1. Ensure the backend has run at least once (startup auto-seeds full example data when `DEV_AUTH_BYPASS=true`), or call **POST /dev/seed-reset** if you need to re-seed.
 2. Open the app and use **Dev Login**: choose role **Employee** and pick a resource that has a linked user (e.g. Dev User or Alice Developer), or choose **Admin** to add actuals for any employee.
-3. In the app, select an **open period** in the period dropdown (e.g. Feb 2026). Locked periods do not allow new actuals.
+3. In the app, select an **open period** in the period dropdown (e.g. Jan 2026 or Feb 2026). Locked periods do not allow new actuals.
 4. Go to **Actuals**, click **Add Actual**, select resource (if Admin), project, and FTE %, then **Create**.
 
 ## Troubleshooting

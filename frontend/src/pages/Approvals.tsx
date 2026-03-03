@@ -57,21 +57,6 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
   },
-  headerContent: {
-    flex: 1,
-  },
-  pageTitle: {
-    fontSize: tokens.fontSizeHero800,
-    fontWeight: tokens.fontWeightBold,
-    color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalXS,
-    lineHeight: '1.2',
-  },
-  pageSubtitle: {
-    fontSize: tokens.fontSizeBase400,
-    color: tokens.colorNeutralForeground3,
-    fontWeight: tokens.fontWeightRegular,
-  },
   card: {
     marginBottom: tokens.spacingVerticalL,
     borderRadius: tokens.borderRadiusLarge,

@@ -72,7 +72,6 @@ import { useToast } from '../hooks/useToast';
 import { useAuth, useHasRole } from '../auth/AuthProvider';
 import { useEmployeeStats } from '../hooks/useEmployeeStats';
 import { DemandVsActualsBarChart } from '../components/DemandVsActualsBarChart';
-
 // ─── Actuals types ──────────────────────────────────────────────────────────
 
 interface FinanceActualRow {
@@ -118,20 +117,6 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalS,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  headerContent: { flex: 1 },
-  pageTitle: {
-    fontSize: tokens.fontSizeHero700,
-    fontWeight: tokens.fontWeightBold,
-    color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalXXS,
-    lineHeight: '1.2',
-  },
-  pageSubtitle: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground3,
-    fontWeight: tokens.fontWeightRegular,
-  },
-
   /* ── Consolidation dashboard ── */
   card: {
     marginBottom: tokens.spacingVerticalL,
@@ -215,7 +200,10 @@ const useStyles = makeStyles({
     '&:hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
   scoreboardItemActive: {
-    borderColor: tokens.colorBrandStroke1,
+    borderTopColor: tokens.colorBrandStroke1,
+    borderRightColor: tokens.colorBrandStroke1,
+    borderBottomColor: tokens.colorBrandStroke1,
+    borderLeftColor: tokens.colorBrandStroke1,
     backgroundColor: tokens.colorNeutralBackground1Selected,
   },
   scoreboardValue: {
@@ -337,7 +325,10 @@ const useStyles = makeStyles({
     '&:hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
   workQueueRowSelected: {
-    borderColor: tokens.colorBrandStroke1,
+    borderTopColor: tokens.colorBrandStroke1,
+    borderRightColor: tokens.colorBrandStroke1,
+    borderBottomColor: tokens.colorBrandStroke1,
+    borderLeftColor: tokens.colorBrandStroke1,
     backgroundColor: tokens.colorNeutralBackground1Selected,
   },
   workQueueDetails: {
@@ -503,7 +494,7 @@ export const Finance: React.FC = () => {
   const styles = useStyles();
   const { showSuccess, showError, showApiError } = useToast();
   const { user } = useAuth();
-  const canSeeStats = useHasRole('Finance', 'Director');
+  const canSeeStats = useHasRole('Finance', 'Director', 'Admin');
 
   // ── Shared state ──
   const { periods, selectedPeriodId, setSelectedPeriodId, selectedPeriod: currentPeriod, loading: periodsLoading } = usePeriod();
@@ -549,16 +540,21 @@ export const Finance: React.FC = () => {
   const [publishName, setPublishName] = useState('');
   const [publishDescription, setPublishDescription] = useState('');
 
-  // ── Cost center stats state (Dashboard tab) ──
+  // ── Cost center stats state (Actuals vs Plan chart) ──
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
-  const year = currentPeriod?.year || new Date().getFullYear();
-  const month = currentPeriod?.month || new Date().getMonth() + 1;
-  // ── Employee stats for Actuals tab chart (Demand vs Actuals by employee) ──
-  const { data: employeeStats, loading: employeeStatsLoading, error: employeeStatsError } = useEmployeeStats(
+  const firstOpenPeriod = periods.find((p) => p.status === 'open');
+  const chartPeriod = currentPeriod ?? firstOpenPeriod ?? periods[0];
+  // Use period from actuals data when available (guarantees match with displayed table)
+  const periodFromActuals = actualsData.length > 0 ? { year: actualsData[0].year, month: actualsData[0].month } : null;
+  const year = periodFromActuals?.year ?? chartPeriod?.year ?? 0;
+  const month = periodFromActuals?.month ?? chartPeriod?.month ?? 0;
+  const chartCostCenterId = activeTab === 'actuals' ? (actualsQueueCostCenterId ?? undefined) : (selectedCostCenterId || undefined);
+  const { data: empStats, loading: empStatsLoading, error: empStatsError } = useEmployeeStats(
     year,
     month,
-    actualsQueueCostCenterId ?? undefined,
-    actualsProjectId || undefined
+    chartCostCenterId ?? undefined,
+    actualsProjectId || undefined,
+    !!(chartPeriod || periodFromActuals)
   );
 
   // ── Cost center selector options
@@ -591,7 +587,7 @@ export const Finance: React.FC = () => {
     if (selectedPeriodId) {
       loadActuals(selectedPeriodId);
     }
-  }, [actualsProjectId, actualsApprovalStatus, actualsQueueCostCenterId]);
+  }, [actualsProjectId, actualsApprovalStatus]);
 
   // ── Data loaders ──
 
@@ -629,7 +625,6 @@ export const Finance: React.FC = () => {
       params.append('year', String(currentPeriod.year));
       params.append('month', String(currentPeriod.month));
       if (actualsProjectId) params.append('project_id', actualsProjectId);
-      if (actualsQueueCostCenterId) params.append('cost_center_id', actualsQueueCostCenterId);
       if (actualsApprovalStatus) params.append('approval_status', actualsApprovalStatus.toLowerCase());
       const result = await apiClient.get<FinanceActualRow[]>(
         `/finance/actuals-dashboard?${params.toString()}`
@@ -734,7 +729,7 @@ export const Finance: React.FC = () => {
     <div className={styles.container}>
       {/* Header */}
       <div className={styles.header}>
-        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center', marginLeft: 'auto' }}>
+        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
           {canManagePeriods && (
             <Button
               appearance="secondary"
@@ -1458,33 +1453,34 @@ export const Finance: React.FC = () => {
                   )}
                 </Card>
 
-                {canSeeStats && (
-                  <Card className={styles.card}>
-                    <CardHeader header={<Body1><strong>Demand vs Actuals by Employee</strong></Body1>} />
-                    {employeeStatsLoading ? (
-                      <LoadingState message="Loading employee stats..." />
-                    ) : employeeStatsError ? (
-                      <MessageBar intent="error"><MessageBarBody>{employeeStatsError}</MessageBarBody></MessageBar>
-                    ) : employeeStats && employeeStats.length > 0 ? (
-                      <DemandVsActualsBarChart
-                        data={employeeStats.map(row => ({
-                          label: row.employee_name,
-                          demand: row.demand_fte,
-                          actuals: row.actuals_fte,
-                        }))}
-                      />
-                    ) : (
-                      <div style={{ padding: tokens.spacingVerticalL, textAlign: 'center' }}>
-                        <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
-                          No employees with demand or actuals for the selected filters.
-                        </Body1>
-                      </div>
-                    )}
-                  </Card>
-                )}
               </div>
             </div>
           )}
+
+          {/* Full-width chart section below work queue - always visible */}
+          {canSeeStats && activeTab === 'actuals' && (() => {
+            const chartReady = !!(chartPeriod || periodFromActuals) && !periodsLoading;
+            return (
+              <Card className={styles.card} style={{ marginTop: tokens.spacingVerticalL, minHeight: 360 }}>
+                <CardHeader header={<Body1><strong>Actuals vs Demand by Employee</strong></Body1>} />
+                {!chartReady ? (
+                  <LoadingState message="Loading period..." />
+                ) : empStatsLoading ? (
+                  <LoadingState message="Loading employee stats..." />
+                ) : empStatsError ? (
+                  <MessageBar intent="error"><MessageBarBody>{empStatsError}</MessageBarBody></MessageBar>
+                ) : empStats && empStats.length > 0 ? (
+                  <div style={{ width: '100%', minHeight: 320 }}>
+                    <DemandVsActualsBarChart data={empStats} height={320} />
+                  </div>
+                ) : (
+                  <MessageBar intent="info" style={{ marginTop: tokens.spacingVerticalM }}>
+                    <MessageBarBody>No employee demand or actuals for this period. Select a period with planning and actuals data.</MessageBarBody>
+                  </MessageBar>
+                )}
+              </Card>
+            );
+          })()}
         </>
       )}
 

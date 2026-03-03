@@ -166,14 +166,13 @@ async def startup_event():
     print(f"Starting Resource Allocation API in {settings.env} mode")
     if settings.dev_auth_bypass:
         print("WARNING: DEV_AUTH_BYPASS is enabled. Do not use in production!")
-        # --- Robust dev seeding logic ---
+        # --- Dev seeding: full example data (periods 2026-01 to 2026-12, demand, supply, actuals) ---
         from api.app.db.engine import SessionLocal
-        from api.app.routers.dev import seed_database_for_tenant
-        # Use a default dev tenant id (as in tests or frontend dev login)
+        from api.app.example_data import create_example_data
         dev_tenant_id = "dev-tenant-001"
         with SessionLocal() as db:
-            msg = seed_database_for_tenant(db, dev_tenant_id)
-            print(f"[DEV SEED] {msg}")
+            create_example_data(db, dev_tenant_id)
+            print("[DEV SEED] Example data ready (skipped if already seeded)")
 
 
 @app.on_event("shutdown")

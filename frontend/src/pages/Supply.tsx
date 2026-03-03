@@ -70,21 +70,6 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalS,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  headerContent: {
-    flex: 1,
-  },
-  pageTitle: {
-    fontSize: tokens.fontSizeHero700,
-    fontWeight: tokens.fontWeightBold,
-    color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalXXS,
-    lineHeight: '1.2',
-  },
-  pageSubtitle: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground3,
-    fontWeight: tokens.fontWeightRegular,
-  },
   filters: {
     display: 'flex',
     gap: tokens.spacingHorizontalM,
@@ -248,20 +233,8 @@ export const Supply: React.FC = () => {
   const { showSuccess, showApiError, showError } = useToast();
   const { user } = useAuth();
   
-  const { periods, selectedPeriodId, setSelectedPeriodId, selectedPeriod: currentPeriod } = usePeriod();
-  const visiblePeriods = useMemo(() => {
-    if (user?.role === 'Finance' || user?.role === 'Admin') return periods;
-    return periods.filter((p) => p.status === 'open');
-  }, [periods, user?.role]);
-
-  useEffect(() => {
-    if (visiblePeriods.length === 0) return;
-    const isSelectedVisible = visiblePeriods.some((p) => p.id === selectedPeriodId);
-    if (!isSelectedVisible) {
-      setSelectedPeriodId(visiblePeriods[0].id);
-    }
-  }, [visiblePeriods, selectedPeriodId, setSelectedPeriodId]);
-
+  const { selectedPeriodId, selectedPeriod: currentPeriod } = usePeriod();
+  
   const [supplies, setSupplies] = useState<SupplyLine[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -619,7 +592,7 @@ export const Supply: React.FC = () => {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center', marginLeft: 'auto' }}>
+        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
           {!isLocked && canEdit && (
             <Button
               appearance="primary"
@@ -640,17 +613,11 @@ export const Supply: React.FC = () => {
       <div className={styles.filters}>
         <div className={styles.filterGroup}>
           <span className={styles.filterLabel}>Period</span>
-          <Select
-            value={visiblePeriods.some((p) => p.id === selectedPeriodId) ? selectedPeriodId : visiblePeriods[0]?.id ?? ''}
-            onChange={(_, data) => setSelectedPeriodId(data.value)}
-            style={{ minWidth: 140 }}
-          >
-            {visiblePeriods.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.year}-{String(p.month).padStart(2, '0')} ({p.status})
-              </option>
-            ))}
-          </Select>
+          <Body1>
+            {currentPeriod
+              ? `${monthNames[currentPeriod.month - 1]} ${currentPeriod.year}`
+              : 'No period selected'}
+          </Body1>
         </div>
         <div className={styles.filterGroup}>
           <span className={styles.filterLabel}>Project</span>

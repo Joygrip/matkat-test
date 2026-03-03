@@ -616,6 +616,26 @@ export function Dashboard() {
     return data;
   }, [aggByCostCenter, selectedPeriodIds, selectedCostCenterId, selectedDepartmentId, monthNames, costCenterMap]);
 
+  // Build cost center breakdown for Demand vs Supply
+  const costCenterBreakdown: BreakdownRow[] = useMemo(() => {
+    const ccMap = new Map<string, { demand: number; supply: number }>();
+    for (const d of demandLines || []) {
+      const name = d.cost_center_name || costCenterMap[d.cost_center_id] || 'Unassigned';
+      const cur = ccMap.get(name) || { demand: 0, supply: 0 };
+      cur.demand += d.fte_percent || 0;
+      ccMap.set(name, cur);
+    }
+    for (const s of supplyLines || []) {
+      const name = s.cost_center_name || costCenterMap[s.cost_center_id] || 'Unassigned';
+      const cur = ccMap.get(name) || { demand: 0, supply: 0 };
+      cur.supply += s.fte_percent || 0;
+      ccMap.set(name, cur);
+    }
+    return Array.from(ccMap.entries())
+      .map(([label, v]) => ({ label, demandFte: v.demand, supplyFte: v.supply }))
+      .sort((a, b) => b.demandFte - a.demandFte);
+  }, [demandLines, supplyLines, costCenterMap]);
+
   /* ── Loading skeleton ── */
 
   if (loading || periodsLoading) {
@@ -659,9 +679,7 @@ export function Dashboard() {
     <div className={styles.container}>
       {/* ── Page header ── */}
       <div className={styles.pageHeader}>
-        <h1 className={styles.pageTitle}>Welcome, {user?.display_name}</h1>
         <p className={styles.pageSubtitle}>
-          {user?.role} &middot; {user?.tenant_id}
         </p>
       </div>
 
@@ -948,11 +966,11 @@ export function Dashboard() {
         <div className={styles.section}>
           <div className={styles.sectionTitle}>Resource Overview</div>
           <div className={styles.chartsGrid}>
-            {/* Department breakdown */}
+            {/* Cost Center breakdown (was Department) */}
             <Card className={styles.chartCard}>
               <div className={styles.chartCardHeader}>
                 <div className={styles.chartCardHeaderRow}>
-                  <Title3 style={{ margin: 0 }}>Demand vs Supply by Department</Title3>
+                  <Title3 style={{ margin: 0 }}>Demand vs Supply by Cost Center</Title3>
                   <Button
                     appearance="subtle"
                     icon={<FullScreenMaximizeRegular />}
@@ -968,16 +986,16 @@ export function Dashboard() {
                     <SkeletonItem />
                   </Skeleton>
                 ) : (
-                  <BreakdownChart rows={deptBreakdown} maxRows={10} />
+                  <BreakdownChart rows={costCenterBreakdown} maxRows={10} />
                 )}
               </div>
             </Card>
             <Dialog open={chartModalOpen === 'dept'} onOpenChange={(_, data) => setChartModalOpen(data.open ? 'dept' : null)}>
               <DialogSurface className={styles.chartModalSurface}>
                 <DialogBody>
-                  <DialogTitle>Demand vs Supply by Department</DialogTitle>
+                  <DialogTitle>Demand vs Supply by Cost Center</DialogTitle>
                   <DialogContent className={styles.chartModalBody}>
-                    {!chartLoading && <BreakdownChart rows={deptBreakdown} />}
+                    {!chartLoading && <BreakdownChart rows={costCenterBreakdown} />}
                   </DialogContent>
                   <DialogActions>
                     <Button appearance="secondary" onClick={() => setChartModalOpen(null)}>Close</Button>
@@ -1127,11 +1145,10 @@ export function Dashboard() {
 
       {/* ── Grouped Bar Chart ── */}
       <div className={styles.section}>
-        <div className={styles.sectionTitle}>Demand & Supply by Project (Filtered)</div>
         <Card className={styles.chartCard}>
           <div className={styles.chartCardHeader}>
             <div className={styles.chartCardHeaderRow}>
-              <Title3 style={{ margin: 0 }}>Grouped Bar Chart</Title3>
+              <Title3 style={{ margin: 0 }}>Demand & Supply by Project</Title3>
             </div>
           </div>
           <div className={styles.chartCardBody}>
@@ -1151,11 +1168,10 @@ export function Dashboard() {
 
       {/* ── Grouped Bar Chart: Departments ── */}
       <div className={styles.section}>
-        <div className={styles.sectionTitle}>Demand & Supply by Department (Grouped Bar Chart)</div>
         <Card className={styles.chartCard}>
           <div className={styles.chartCardHeader}>
             <div className={styles.chartCardHeaderRow}>
-              <Title3 style={{ margin: 0 }}>Grouped Bar Chart (Departments)</Title3>
+              <Title3 style={{ margin: 0 }}>Demand & Supply by Cost Center</Title3>
             </div>
           </div>
           <div className={styles.chartCardBody}>

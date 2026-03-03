@@ -19,6 +19,8 @@ import {
   SkeletonItem,
   Button,
   Select,
+  Combobox,
+  Option,
 } from '@fluentui/react-components';
 import {
   BuildingRegular,
@@ -78,7 +80,8 @@ const useStyles = makeStyles({
 
   /* ── Chart filters toolbar ── */
   filtersToolbar: {
-    position: 'relative',
+    position: 'sticky',
+    top: tokens.spacingVerticalM,
     zIndex: 1,
   },
   filtersToolbarCard: {
@@ -111,6 +114,18 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalS,
+  },
+  periodPresetRow: {
+    display: 'flex',
+    flexWrap: 'wrap' as const,
+    gap: tokens.spacingHorizontalXS,
+    marginBottom: tokens.spacingVerticalXXS,
+  },
+  filtersChipsRow: {
+    display: 'flex',
+    flexWrap: 'wrap' as const,
+    gap: tokens.spacingHorizontalXS,
+    marginTop: tokens.spacingVerticalXXS,
   },
   filtersRow: {
     display: 'flex',
@@ -324,8 +339,10 @@ export function Dashboard() {
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenter[]>([]);
   const [projectOptions, setProjectOptions] = useState<Project[]>([]);
   const [selectedPeriodIds, setSelectedPeriodIds] = useState<string[]>([]);
+  const [periodPreset, setPeriodPreset] = useState<'all' | 'last3' | 'last6' | 'custom'>('all');
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   // Cost center lookup map
   const [costCenterMap, setCostCenterMap] = useState<Record<string, string>>({});
@@ -377,16 +394,51 @@ export function Dashboard() {
       .catch(() => setCostCenterMap({}));
   }, []);
 
+  const sortedPeriods = useMemo(() => {
+    return [...periodOptions].sort((a, b) => {
+      if (a.year === b.year) {
+        return a.month - b.month;
+      }
+      return a.year - b.year;
+    });
+  }, [periodOptions]);
+
+  const applyLastNPeriods = (n: number) => {
+    if (!sortedPeriods.length) {
+      setSelectedPeriodIds([]);
+      return;
+    }
+    const slice = sortedPeriods.slice(-n);
+    setSelectedPeriodIds(slice.map(p => `${p.year}-${p.month}`));
+  };
+
   // Filter handlers
   const handlePeriodChange = (periodId: string | null) => {
-    setSelectedPeriodIds(periodId ? [periodId] : []);
+    if (periodId) {
+      setSelectedPeriodIds([periodId]);
+      setPeriodPreset('custom');
+    } else {
+      setSelectedPeriodIds([]);
+      setPeriodPreset('all');
+    }
   };
   const handleCostCenterChange = (costCenterId: string | null) => {
     setSelectedCostCenterId(costCenterId);
+    setIsUpdating(true);
   };
   const handleProjectChange = (projectId: string | null) => {
     setSelectedProjectId(projectId);
+    setIsUpdating(true);
   };
+
+  // Mark updates as complete after filters have been applied to data
+  useEffect(() => {
+    if (!isUpdating) return;
+    const timeout = window.setTimeout(() => {
+      setIsUpdating(false);
+    }, 150);
+    return () => window.clearTimeout(timeout);
+  }, [isUpdating, selectedPeriodIds, selectedProjectId, selectedCostCenterId, aggByProject, aggByCostCenter]);
 
   // Build chart data: group by period, columns for each project's demand/supply
   const chartData = useMemo(() => {
@@ -468,6 +520,30 @@ export function Dashboard() {
     deptLegendMap[`${name}_demand`] = `${name} Demand`;
     deptLegendMap[`${name}_supply`] = `${name} Supply`;
   });
+
+  // Active filter labels for chips
+  const activePeriodLabel = useMemo(() => {
+    if (!selectedPeriodIds.length) return null;
+    const id = selectedPeriodIds[0];
+    const match = periodOptions.find(p => `${p.year}-${p.month}` === id);
+    if (!match) return id;
+    return `${monthNames[match.month - 1]} ${match.year}`;
+  }, [selectedPeriodIds, periodOptions]);
+
+  const activeProjectLabel = useMemo(() => {
+    if (!selectedProjectId) return null;
+    const match = projectOptions.find(p => p.id === selectedProjectId);
+    return match?.name || selectedProjectId;
+  }, [selectedProjectId, projectOptions]);
+
+  const activeCostCenterLabel = useMemo(() => {
+    if (!selectedCostCenterId) return null;
+    const match = costCenterOptions.find(c => c.id === selectedCostCenterId);
+    return match?.name || selectedCostCenterId;
+  }, [selectedCostCenterId, costCenterOptions]);
+
+  const hasActiveFilters =
+    !!activePeriodLabel || !!activeProjectLabel || !!activeCostCenterLabel;
 
   // Filtered chart data for GroupedBarChart (Projects)
   const filteredChartData = useMemo(() => {
@@ -577,6 +653,11 @@ export function Dashboard() {
             <div className={styles.filtersToolbarTitle}>
               <span aria-hidden="true">Filters</span>
             </div>
+            {isUpdating && !aggLoading && (
+              <Body1 as="span" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                Updating&hellip;
+              </Body1>
+            )}
             <Button
               appearance="subtle"
               size="small"
@@ -593,45 +674,139 @@ export function Dashboard() {
             <div className={styles.filtersRow}>
               <div className={styles.filterGroup}>
                 <span className={styles.filterLabel}>Period</span>
-                <Select
-                  value={selectedPeriodIds[0] || ''}
-                  onChange={(_, data) => handlePeriodChange(data.value || null)}
-                >
-                  <option value="">All periods</option>
-                  {periodOptions.map(p => (
-                    <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>
-                      {monthNames[p.month - 1]} {p.year}
-                    </option>
-                  ))}
-                </Select>
+                <div className={styles.periodPresetRow}>
+                  <Button
+                    size="small"
+                    appearance={periodPreset === 'all' ? 'primary' : 'secondary'}
+                    onClick={() => {
+                      setPeriodPreset('all');
+                      setSelectedPeriodIds([]);
+                    }}
+                  >
+                    All
+                  </Button>
+                  <Button
+                    size="small"
+                    appearance={periodPreset === 'last3' ? 'primary' : 'secondary'}
+                    onClick={() => {
+                      setPeriodPreset('last3');
+                      applyLastNPeriods(3);
+                    }}
+                  >
+                    Last 3
+                  </Button>
+                  <Button
+                    size="small"
+                    appearance={periodPreset === 'last6' ? 'primary' : 'secondary'}
+                    onClick={() => {
+                      setPeriodPreset('last6');
+                      applyLastNPeriods(6);
+                    }}
+                  >
+                    Last 6
+                  </Button>
+                  <Button
+                    size="small"
+                    appearance={periodPreset === 'custom' ? 'primary' : 'secondary'}
+                    onClick={() => setPeriodPreset('custom')}
+                  >
+                    Custom
+                  </Button>
+                </div>
+                {periodPreset === 'custom' && (
+                  <Select
+                    value={selectedPeriodIds[0] || ''}
+                    onChange={(_, data) => handlePeriodChange(data.value || null)}
+                  >
+                    <option value="">All periods</option>
+                    {periodOptions.map(p => (
+                      <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>
+                        {monthNames[p.month - 1]} {p.year}
+                      </option>
+                    ))}
+                  </Select>
+                )}
               </div>
               <div className={styles.filterGroup}>
                 <span className={styles.filterLabel}>Project</span>
-                <Select
-                  value={selectedProjectId || ''}
-                  onChange={(_, data) => handleProjectChange(data.value || null)}
+                <Combobox
+                  value={
+                    selectedProjectId
+                      ? (projectOptions.find(p => p.id === selectedProjectId)?.name ?? '')
+                      : ''
+                  }
+                  onOptionSelect={(_, data) => {
+                    const v = data.optionValue;
+                    handleProjectChange(v ? String(v) : null);
+                  }}
                 >
-                  <option value="">All projects</option>
+                  <Option key="__all-projects" value="" text="All projects">
+                    All projects
+                  </Option>
                   {projectOptions.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
+                    <Option key={p.id} value={p.id} text={p.name}>
+                      {p.name}
+                    </Option>
                   ))}
-                </Select>
+                </Combobox>
               </div>
               <div className={styles.filterGroup}>
                 <span className={styles.filterLabel}>Cost Center</span>
-                <Select
-                  value={selectedCostCenterId || ''}
-                  onChange={(_, data) => handleCostCenterChange(data.value || null)}
+                <Combobox
+                  value={
+                    selectedCostCenterId
+                      ? (costCenterOptions.find(c => c.id === selectedCostCenterId)?.name ?? '')
+                      : ''
+                  }
+                  onOptionSelect={(_, data) => {
+                    const v = data.optionValue;
+                    handleCostCenterChange(v ? String(v) : null);
+                  }}
                 >
-                  <option value="">All cost centers</option>
+                  <Option key="__all-cost-centers" value="" text="All cost centers">
+                    All cost centers
+                  </Option>
                   {costCenterOptions.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                    <Option key={c.id} value={c.id} text={c.name}>
+                      {c.name}
+                    </Option>
                   ))}
-                </Select>
+                </Combobox>
               </div>
             </div>
           </div>
         </Card>
+        {hasActiveFilters && (
+          <div className={styles.filtersChipsRow}>
+            {activePeriodLabel && (
+              <Button
+                appearance="outline"
+                size="small"
+                onClick={() => handlePeriodChange(null)}
+              >
+                {`Period: ${activePeriodLabel} ✕`}
+              </Button>
+            )}
+            {activeProjectLabel && (
+              <Button
+                appearance="outline"
+                size="small"
+                onClick={() => handleProjectChange(null)}
+              >
+                {`Project: ${activeProjectLabel} ✕`}
+              </Button>
+            )}
+            {activeCostCenterLabel && (
+              <Button
+                appearance="outline"
+                size="small"
+                onClick={() => handleCostCenterChange(null)}
+              >
+                {`Cost center: ${activeCostCenterLabel} ✕`}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Grouped Bar Chart ── */}

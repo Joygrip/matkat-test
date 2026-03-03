@@ -128,6 +128,26 @@ $env:PYTHONPATH = (Get-Location).Path
 python api/script_add_initials_column.py
 ```
 
+## Dashboard filters toolbar
+
+The Dashboard page shows two grouped bar charts (Demand & Supply by project and by cost center) with a compact filter toolbar above them:
+
+- **Filters available**: Period, Project, and Cost center.
+- **Period presets**: buttons for **All**, **Last 3**, **Last 6**, and **Custom**. Presets control which months are included; **Custom** lets you pick a specific month from a dropdown.
+- **Searchable inputs**: Project and Cost center filters use searchable comboboxes to make it easier to find entries in long lists.
+- **Active filter chips**: when any filter is active, small pill buttons appear under the toolbar (for example, `Period: Feb 2026 ✕`). Clicking a pill clears that specific filter; **Clear filters** in the toolbar header resets all filters to their defaults.
+- **Updating indicator**: a subtle “Updating…” label appears briefly in the toolbar while the charts recompute after filter changes.
+
+## Demand Planning page
+
+The Demand Planning page has been redesigned to focus on cost centers and provide a cleaner, more "enterprise" UX:
+
+- **Compact filters**: At the top of the page, a compact bar shows the current **Period** plus filters for **Project** and **Resource**. Filters apply instantly to the demand table.
+- **Active filter chips**: When Project or Resource filters are applied, small pill buttons appear under the toolbar (for example, `Project: Alpha`). Clicking a pill clears that filter; a **Clear all** button resets all demand filters.
+- **KPI summary cards**: Below the filters, three small cards show **Total FTE%**, **Distinct resources/placeholders**, and **Distinct projects** for the currently filtered demand lines.
+- **Grouped, collapsible table**: Demand lines are grouped by **Cost center**, with each group showing **Total FTE** and line count. Groups can be expanded/collapsed for easier scanning, and key columns (Project, Resource, Period, FTE%) support click-to-sort.
+- **Drawer-based editing**: Adding and editing demand lines (including bulk add) now happens in a right-hand drawer with tabs for **Single line** and **Bulk add**, so you can keep the main table context visible while editing.
+
 ### "Cannot reach API" or HTTP 0 (NETWORK_ERROR)
 
 If the app shows "Cannot reach the API" or requests fail with a network error when adding actuals or calling the API:

@@ -70,20 +70,8 @@ import { EmptyState } from '../components/EmptyState';
 import { LoadingState } from '../components/LoadingState';
 import { useToast } from '../hooks/useToast';
 import { useAuth, useHasRole } from '../auth/AuthProvider';
-import { useCostCenterStats } from '../hooks/useCostCenterStats';
-import { BreakdownChart } from '../components/BreakdownChart';
-import type { CostCenterStats } from '../api/finance';
-
-// ─── Example data for Actuals vs Plan chart (when API returns empty) ─────────
-
-const EXAMPLE_COST_CENTER_STATS: CostCenterStats[] = [
-  { cost_center_id: 'ex-cc-1', cost_center_name: 'Software Development', demand_fte: 320, supply_fte: 300, actuals_fte: 285 },
-  { cost_center_id: 'ex-cc-2', cost_center_name: 'Quality Assurance', demand_fte: 175, supply_fte: 150, actuals_fte: 148 },
-  { cost_center_id: 'ex-cc-3', cost_center_name: 'Infrastructure', demand_fte: 100, supply_fte: 100, actuals_fte: 95 },
-  { cost_center_id: 'ex-cc-4', cost_center_name: 'DevOps', demand_fte: 80, supply_fte: 75, actuals_fte: 72 },
-  { cost_center_id: 'ex-cc-5', cost_center_name: 'Marketing', demand_fte: 50, supply_fte: 50, actuals_fte: 48 },
-  { cost_center_id: 'ex-cc-6', cost_center_name: 'Support', demand_fte: 75, supply_fte: 100, actuals_fte: 70 },
-];
+import { useEmployeeStats } from '../hooks/useEmployeeStats';
+import { DemandVsActualsBarChart } from '../components/DemandVsActualsBarChart';
 
 // ─── Actuals types ──────────────────────────────────────────────────────────
 
@@ -561,12 +549,17 @@ export const Finance: React.FC = () => {
   const [publishName, setPublishName] = useState('');
   const [publishDescription, setPublishDescription] = useState('');
 
-  // ── Cost center stats state (Actuals vs Plan chart) ──
+  // ── Cost center stats state (Dashboard tab) ──
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
   const year = currentPeriod?.year || new Date().getFullYear();
   const month = currentPeriod?.month || new Date().getMonth() + 1;
-  const chartCostCenterId = activeTab === 'actuals' ? (actualsQueueCostCenterId ?? undefined) : (selectedCostCenterId || undefined);
-  const { data: ccStats, loading: ccStatsLoading, error: ccStatsError } = useCostCenterStats(year, month, chartCostCenterId);
+  // ── Employee stats for Actuals tab chart (Demand vs Actuals by employee) ──
+  const { data: employeeStats, loading: employeeStatsLoading, error: employeeStatsError } = useEmployeeStats(
+    year,
+    month,
+    actualsQueueCostCenterId ?? undefined,
+    actualsProjectId || undefined
+  );
 
   // ── Cost center selector options
   const [costCenters, setCostCenters] = useState<{ id: string; name: string }[]>([]);
@@ -598,7 +591,7 @@ export const Finance: React.FC = () => {
     if (selectedPeriodId) {
       loadActuals(selectedPeriodId);
     }
-  }, [actualsProjectId, actualsApprovalStatus]);
+  }, [actualsProjectId, actualsApprovalStatus, actualsQueueCostCenterId]);
 
   // ── Data loaders ──
 
@@ -636,6 +629,7 @@ export const Finance: React.FC = () => {
       params.append('year', String(currentPeriod.year));
       params.append('month', String(currentPeriod.month));
       if (actualsProjectId) params.append('project_id', actualsProjectId);
+      if (actualsQueueCostCenterId) params.append('cost_center_id', actualsQueueCostCenterId);
       if (actualsApprovalStatus) params.append('approval_status', actualsApprovalStatus.toLowerCase());
       const result = await apiClient.get<FinanceActualRow[]>(
         `/finance/actuals-dashboard?${params.toString()}`
@@ -1464,38 +1458,30 @@ export const Finance: React.FC = () => {
                   )}
                 </Card>
 
-                {canSeeStats && (() => {
-                  const chartRows = ccStats && ccStats.length > 0 ? ccStats : EXAMPLE_COST_CENTER_STATS;
-                  const usedExampleData = !ccStats || ccStats.length === 0;
-                  return (
-                    <Card className={styles.card}>
-                      <CardHeader header={<Body1><strong>Actuals vs Demand/Supply by Cost Center</strong></Body1>} />
-                      {ccStatsLoading ? (
-                        <LoadingState message="Loading cost center stats..." />
-                      ) : ccStatsError ? (
-                        <MessageBar intent="error"><MessageBarBody>{ccStatsError}</MessageBarBody></MessageBar>
-                      ) : (
-                        <>
-                          {usedExampleData && (
-                            <MessageBar intent="info" style={{ marginBottom: tokens.spacingVerticalM }}>
-                              <MessageBarBody>Showing example data. Select a period with planning data to see real cost center stats.</MessageBarBody>
-                            </MessageBar>
-                          )}
-                          <div style={{ height: 320 }}>
-                            <BreakdownChart
-                              rows={chartRows.map(row => ({
-                                label: row.cost_center_name,
-                                demandFte: row.demand_fte,
-                                supplyFte: row.supply_fte,
-                                actualsFte: row.actuals_fte,
-                              }))}
-                            />
-                          </div>
-                        </>
-                      )}
-                    </Card>
-                  );
-                })()}
+                {canSeeStats && (
+                  <Card className={styles.card}>
+                    <CardHeader header={<Body1><strong>Demand vs Actuals by Employee</strong></Body1>} />
+                    {employeeStatsLoading ? (
+                      <LoadingState message="Loading employee stats..." />
+                    ) : employeeStatsError ? (
+                      <MessageBar intent="error"><MessageBarBody>{employeeStatsError}</MessageBarBody></MessageBar>
+                    ) : employeeStats && employeeStats.length > 0 ? (
+                      <DemandVsActualsBarChart
+                        data={employeeStats.map(row => ({
+                          label: row.employee_name,
+                          demand: row.demand_fte,
+                          actuals: row.actuals_fte,
+                        }))}
+                      />
+                    ) : (
+                      <div style={{ padding: tokens.spacingVerticalL, textAlign: 'center' }}>
+                        <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
+                          No employees with demand or actuals for the selected filters.
+                        </Body1>
+                      </div>
+                    )}
+                  </Card>
+                )}
               </div>
             </div>
           )}

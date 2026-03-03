@@ -22,3 +22,10 @@ class FinanceCostCenterStatsResponse(BaseModel):
     demand_fte: float
     supply_fte: float
     actuals_fte: float
+
+
+class FinanceEmployeeStatsResponse(BaseModel):
+    resource_id: str
+    employee_name: str
+    demand_fte: float
+    actuals_fte: float

@@ -5,7 +5,7 @@ from api.app.auth.dependencies import CurrentUser
 from api.app.models.actuals import ActualLine
 from api.app.models.core import User, Project, Resource, CostCenter
 from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalStatus, StepStatus
-from api.app.schemas.finance import FinanceActualsDashboardResponse, FinanceCostCenterStatsResponse
+from api.app.schemas.finance import FinanceActualsDashboardResponse, FinanceCostCenterStatsResponse, FinanceEmployeeStatsResponse
 
 class FinanceService:
     def __init__(self, db: Session, current_user: CurrentUser):
@@ -162,4 +162,98 @@ class FinanceService:
                 actuals_fte=float(row.actuals_fte or 0),
             )
             for row in results
+        ]
+
+    def get_employee_stats(
+        self,
+        year: int,
+        month: int,
+        cost_center_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+    ) -> List[FinanceEmployeeStatsResponse]:
+        """Get demand and actuals FTE per employee (resource), optionally filtered by cost center and project."""
+        from api.app.models.planning import DemandLine
+        from api.app.models.actuals import ActualLine
+        from api.app.models.core import Resource
+        from sqlalchemy import func, or_
+
+        resource_filters = [
+            Resource.tenant_id == self.current_user.tenant_id,
+            Resource.is_active == True,
+        ]
+        if cost_center_id:
+            resource_filters.append(Resource.cost_center_id == cost_center_id)
+
+        # Demand subquery: sum by resource_id (exclude placeholders)
+        demand_filters = [
+            DemandLine.tenant_id == self.current_user.tenant_id,
+            DemandLine.year == year,
+            DemandLine.month == month,
+            DemandLine.resource_id.isnot(None),
+        ]
+        if project_id:
+            demand_filters.append(DemandLine.project_id == project_id)
+
+        demand_subq = (
+            self.db.query(
+                DemandLine.resource_id.label("resource_id"),
+                func.sum(DemandLine.fte_percent).label("demand_fte"),
+            )
+            .join(Resource, DemandLine.resource_id == Resource.id)
+            .filter(*demand_filters, *resource_filters)
+            .group_by(DemandLine.resource_id)
+            .subquery()
+        )
+
+        # Actuals subquery: sum by resource_id
+        actuals_filters = [
+            ActualLine.tenant_id == self.current_user.tenant_id,
+            ActualLine.year == year,
+            ActualLine.month == month,
+        ]
+        if project_id:
+            actuals_filters.append(ActualLine.project_id == project_id)
+
+        actuals_subq = (
+            self.db.query(
+                ActualLine.resource_id.label("resource_id"),
+                func.sum(ActualLine.actual_fte_percent).label("actuals_fte"),
+            )
+            .join(Resource, ActualLine.resource_id == Resource.id)
+            .filter(*actuals_filters, *resource_filters)
+            .group_by(ActualLine.resource_id)
+            .subquery()
+        )
+
+        # Join Resource with both subqueries; include resources that have demand OR actuals
+        q = (
+            self.db.query(
+                Resource.id.label("resource_id"),
+                Resource.display_name.label("employee_name"),
+                func.coalesce(demand_subq.c.demand_fte, 0).label("demand_fte"),
+                func.coalesce(actuals_subq.c.actuals_fte, 0).label("actuals_fte"),
+            )
+            .select_from(Resource)
+            .outerjoin(demand_subq, Resource.id == demand_subq.c.resource_id)
+            .outerjoin(actuals_subq, Resource.id == actuals_subq.c.resource_id)
+            .filter(
+                Resource.tenant_id == self.current_user.tenant_id,
+                or_(
+                    demand_subq.c.resource_id.isnot(None),
+                    actuals_subq.c.resource_id.isnot(None),
+                ),
+            )
+        )
+        if cost_center_id:
+            q = q.filter(Resource.cost_center_id == cost_center_id)
+
+        rows = q.all()
+        return [
+            FinanceEmployeeStatsResponse(
+                resource_id=str(row.resource_id),
+                employee_name=row.employee_name or "Unknown",
+                demand_fte=float(row.demand_fte or 0),
+                actuals_fte=float(row.actuals_fte or 0),
+            )
+            for row in rows
         ]

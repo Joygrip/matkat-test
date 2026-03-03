@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from api.app.db.engine import get_db
 from api.app.auth.dependencies import require_roles, CurrentUser
 from api.app.models.core import UserRole
-from api.app.schemas.finance import FinanceActualsDashboardResponse, FinanceCostCenterStatsResponse
+from api.app.schemas.finance import FinanceActualsDashboardResponse, FinanceCostCenterStatsResponse, FinanceEmployeeStatsResponse
 from api.app.services.finance import FinanceService
 
 router = APIRouter(tags=["Finance"])
@@ -44,3 +44,21 @@ async def actuals_vs_plan(
     """
     service = FinanceService(db, current_user)
     return service.get_cost_center_stats(year, month, cost_center_id)
+
+
+@router.get("/actuals-vs-plan-by-employee", response_model=List[FinanceEmployeeStatsResponse])
+async def actuals_vs_plan_by_employee(
+    year: int = Query(...),
+    month: int = Query(...),
+    cost_center_id: Optional[str] = Query(None),
+    project_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.DIRECTOR)),
+):
+    """
+    Get demand and actuals FTE per employee for a given period.
+    Filterable by cost center and project.
+    Accessible to: Finance, Director
+    """
+    service = FinanceService(db, current_user)
+    return service.get_employee_stats(year, month, cost_center_id, project_id)

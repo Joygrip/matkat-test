@@ -248,8 +248,20 @@ export const Supply: React.FC = () => {
   const { showSuccess, showApiError, showError } = useToast();
   const { user } = useAuth();
   
-  const { selectedPeriodId, selectedPeriod: currentPeriod } = usePeriod();
-  
+  const { periods, selectedPeriodId, setSelectedPeriodId, selectedPeriod: currentPeriod } = usePeriod();
+  const visiblePeriods = useMemo(() => {
+    if (user?.role === 'Finance' || user?.role === 'Admin') return periods;
+    return periods.filter((p) => p.status === 'open');
+  }, [periods, user?.role]);
+
+  useEffect(() => {
+    if (visiblePeriods.length === 0) return;
+    const isSelectedVisible = visiblePeriods.some((p) => p.id === selectedPeriodId);
+    if (!isSelectedVisible) {
+      setSelectedPeriodId(visiblePeriods[0].id);
+    }
+  }, [visiblePeriods, selectedPeriodId, setSelectedPeriodId]);
+
   const [supplies, setSupplies] = useState<SupplyLine[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -607,12 +619,7 @@ export const Supply: React.FC = () => {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <div className={styles.headerContent}>
-          <h1 className={styles.pageTitle}>Supply Planning</h1>
-          <p className={styles.pageSubtitle}>Manage resource availability by cost center</p>
-        </div>
-        
-        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center', marginLeft: 'auto' }}>
           {!isLocked && canEdit && (
             <Button
               appearance="primary"
@@ -633,11 +640,17 @@ export const Supply: React.FC = () => {
       <div className={styles.filters}>
         <div className={styles.filterGroup}>
           <span className={styles.filterLabel}>Period</span>
-          <Body1>
-            {currentPeriod
-              ? `${monthNames[currentPeriod.month - 1]} ${currentPeriod.year}`
-              : 'No period selected'}
-          </Body1>
+          <Select
+            value={visiblePeriods.some((p) => p.id === selectedPeriodId) ? selectedPeriodId : visiblePeriods[0]?.id ?? ''}
+            onChange={(_, data) => setSelectedPeriodId(data.value)}
+            style={{ minWidth: 140 }}
+          >
+            {visiblePeriods.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.year}-{String(p.month).padStart(2, '0')} ({p.status})
+              </option>
+            ))}
+          </Select>
         </div>
         <div className={styles.filterGroup}>
           <span className={styles.filterLabel}>Project</span>

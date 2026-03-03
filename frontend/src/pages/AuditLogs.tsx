@@ -169,10 +169,6 @@ export const AuditLogs: React.FC = () => {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <div>
-          <h1 className={styles.pageTitle}>Audit logs</h1>
-          <p className={styles.pageSubtitle}>All actions (lock/unlock, create, update, delete, sign, approve) for this tenant</p>
-        </div>
         <Button
           appearance="secondary"
           icon={<ArrowClockwise24Regular />}

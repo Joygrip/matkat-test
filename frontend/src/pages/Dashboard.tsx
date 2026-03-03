@@ -638,14 +638,6 @@ export function Dashboard() {
 
   return (
     <div className={styles.container}>
-      {/* ── Page header ── */}
-      <div className={styles.pageHeader}>
-        <h1 className={styles.pageTitle}>Dashboard</h1>
-        <p className={styles.pageSubtitle}>
-          Demand and supply by period, project, and cost center
-        </p>
-      </div>
-
       {/* ── Chart filters toolbar (applies to both charts below) ── */}
       <div className={styles.filtersToolbar}>
         <Card className={styles.filtersToolbarCard}>

@@ -740,12 +740,7 @@ export const Finance: React.FC = () => {
     <div className={styles.container}>
       {/* Header */}
       <div className={styles.header}>
-        <div className={styles.headerContent}>
-          <h1 className={styles.pageTitle}>Finance</h1>
-          <p className={styles.pageSubtitle}>Cost center gaps, employee actuals, and snapshot management</p>
-        </div>
-
-        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center', marginLeft: 'auto' }}>
           {canManagePeriods && (
             <Button
               appearance="secondary"

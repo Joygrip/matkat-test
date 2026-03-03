@@ -319,10 +319,6 @@ export const Approvals: React.FC = () => {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <div className={styles.headerContent}>
-          <h1 className={styles.pageTitle}>Approvals</h1>
-          <p className={styles.pageSubtitle}>Review and action pending approvals</p>
-        </div>
         <Button
           icon={<ArrowClockwise24Regular />}
           appearance="subtle"

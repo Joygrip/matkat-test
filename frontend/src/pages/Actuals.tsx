@@ -323,14 +323,27 @@ const useStyles = makeStyles({
   },
 });
 
-const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-
 export const Actuals: React.FC = () => {
   const styles = useStyles();
   const { showSuccess, showError, showApiError } = useToast();
   const { user } = useAuth();
   
-  const { selectedPeriodId, selectedPeriod: ctxPeriod } = usePeriod();
+  const { periods, selectedPeriodId, setSelectedPeriodId, selectedPeriod: ctxPeriod } = usePeriod();
+  const isEmployee = user?.role === 'Employee';
+  const isRO = user?.role === 'RO';
+  const visiblePeriods = useMemo(() => {
+    if (user?.role === 'Finance' || user?.role === 'Admin') return periods;
+    return periods.filter((p) => p.status === 'open');
+  }, [periods, user?.role]);
+
+  useEffect(() => {
+    if (isEmployee) return;
+    if (visiblePeriods.length === 0) return;
+    const isSelectedVisible = visiblePeriods.some((p) => p.id === selectedPeriodId);
+    if (!isSelectedVisible) {
+      setSelectedPeriodId(visiblePeriods[0].id);
+    }
+  }, [visiblePeriods, selectedPeriodId, setSelectedPeriodId, isEmployee]);
 
   const [actuals, setActuals] = useState<ActualLine[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -340,9 +353,6 @@ export const Actuals: React.FC = () => {
   const [overLimitIds, setOverLimitIds] = useState<string[]>([]);
   const [demandLines, setDemandLines] = useState<DemandLine[]>([]);
   const [supplyLines, setSupplyLines] = useState<SupplyLine[]>([]);
-  
-  const isEmployee = user?.role === 'Employee';
-  const isRO = user?.role === 'RO';
   
   // Form state
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -391,10 +401,36 @@ export const Actuals: React.FC = () => {
   }, [isEmployee]);
   
   useEffect(() => {
-    if (selectedPeriodId) {
+    if (isEmployee) {
+      loadActuals();
+    } else if (selectedPeriodId) {
       loadActuals();
     }
-  }, [selectedPeriodId, myResourceId]);
+  }, [selectedPeriodId, myResourceId, isEmployee]);
+
+  useEffect(() => {
+    if (isEmployee && selectedPeriodId && myResourceId) {
+      const loadPlanning = async () => {
+        try {
+          const filters = { resourceId: myResourceId };
+          const [demands, supplies] = await Promise.all([
+            planningApi.getDemandLines(selectedPeriodId, filters).catch(() => []),
+            planningApi.getSupplyLines(selectedPeriodId, filters).catch(() => []),
+          ]);
+          setDemandLines(demands || []);
+          setSupplyLines(supplies || []);
+        } catch (err) {
+          console.error('Failed to load demand/supply lines:', err);
+          setDemandLines([]);
+          setSupplyLines([]);
+        }
+      };
+      loadPlanning();
+    } else {
+      setDemandLines([]);
+      setSupplyLines([]);
+    }
+  }, [isEmployee, selectedPeriodId, myResourceId]);
   
   const loadInitialData = async () => {
     try {
@@ -415,41 +451,23 @@ export const Actuals: React.FC = () => {
   
   const loadActuals = async () => {
     try {
-      // Employee role uses /actuals/my to see their own lines (filtered by year/month if period selected)
-      // Other roles (RO, Finance, Admin) use /actuals?year=X&month=Y to see all lines
-      const data = isEmployee 
-        ? await actualsApi.getMyActuals(ctxPeriod?.year, ctxPeriod?.month)
+      // Employee: all actuals (no period filter). RO/Finance/Admin: filter by selected period
+      const data = isEmployee
+        ? await actualsApi.getMyActuals()
         : await actualsApi.getActualLines(undefined, ctxPeriod?.year, ctxPeriod?.month);
       setActuals(data);
       setOverLimitIds([]);
-      
-      // For employees, also load demand and supply lines for their resource (filter by myResourceId)
-      if (isEmployee && selectedPeriodId && myResourceId) {
-        try {
-          const filters = { resourceId: myResourceId };
-          const [demands, supplies] = await Promise.all([
-            planningApi.getDemandLines(selectedPeriodId, filters).catch(() => []),
-            planningApi.getSupplyLines(selectedPeriodId, filters).catch(() => []),
-          ]);
-          setDemandLines(demands || []);
-          setSupplyLines(supplies || []);
-        } catch (err) {
-          console.error('Failed to load demand/supply lines:', err);
-          setDemandLines([]);
-          setSupplyLines([]);
-        }
-      }
     } catch (err: unknown) {
       showApiError(err as Error, 'Failed to load actuals');
     }
   };
   
   const handleCreate = async () => {
-    if (!selectedPeriodId || !ctxPeriod) {
-      showError('No period selected', 'Please select a period first.');
+    const period = formData.period_id ? periods.find((p) => p.id === formData.period_id) : null;
+    if (!period || period.status === 'locked') {
+      showError('Invalid period', 'Please select an open period.');
       return;
     }
-    // For employees, use their own resource
     const resourceId = isEmployee && myResourceId ? myResourceId : formData.resource_id;
     if (!resourceId) {
       showError('Missing resource', 'Please select a resource.');
@@ -461,13 +479,12 @@ export const Actuals: React.FC = () => {
     }
     try {
       await actualsApi.createActualLine({
-        period_id: selectedPeriodId,
+        period_id: formData.period_id,
         resource_id: resourceId,
         project_id: formData.project_id,
-        year: ctxPeriod.year,
-        month: ctxPeriod.month,
+        year: period.year,
+        month: period.month,
         actual_fte_percent: formData.actual_fte_percent,
-        // planned_fte_percent is omitted - backend will calculate it automatically
       });
       showSuccess('Actual line created');
       setIsDialogOpen(false);
@@ -475,7 +492,7 @@ export const Actuals: React.FC = () => {
       
       // Reset form
       setFormData({
-        period_id: selectedPeriodId,
+        period_id: formData.period_id,
         resource_id: '',
         project_id: '',
         actual_fte_percent: 50,
@@ -539,8 +556,8 @@ export const Actuals: React.FC = () => {
   const reloadActuals = async () => {
     try {
       setLoading(true);
-      const data = isEmployee 
-        ? await actualsApi.getMyActuals(ctxPeriod?.year, ctxPeriod?.month)
+      const data = isEmployee
+        ? await actualsApi.getMyActuals()
         : await actualsApi.getActualLines(undefined, ctxPeriod?.year, ctxPeriod?.month);
       setActuals(data);
       setOverLimitIds([]);
@@ -579,8 +596,9 @@ export const Actuals: React.FC = () => {
   const getProjectName = (id: string) => projects.find(p => p.id === id)?.name || 'Unknown';
   const getResourceName = (id: string) => resources.find(r => r.id === id)?.display_name || 'Unknown';
   
-  const currentPeriod = ctxPeriod;
-  const isLocked = currentPeriod?.status === 'locked';
+  const addDialogPeriod = formData.period_id ? periods.find((p) => p.id === formData.period_id) : null;
+  const isAddPeriodLocked = addDialogPeriod?.status === 'locked';
+  const isPeriodLocked = (periodId: string) => periods.find((p) => p.id === periodId)?.status === 'locked';
 
   const filteredActuals = useMemo(() => {
     let out = actuals;
@@ -619,24 +637,12 @@ export const Actuals: React.FC = () => {
   };
   const sortIndicator = (key: string) => (sortBy === key ? (sortAsc ? ' \u25B2' : ' \u25BC') : '');
   
-  // Calculate total by resource
-  const totalsByResource: Record<string, number> = {};
-  actuals.forEach(a => {
-    if (!totalsByResource[a.resource_id]) {
-      totalsByResource[a.resource_id] = 0;
-    }
-    totalsByResource[a.resource_id] += a.actual_fte_percent;
-  });
-  
   if (loading) {
     return (
       <div className={styles.container}>
-        <div className={styles.header}>
-          <div className={styles.headerContent}>
-            <Skeleton style={{ width: 200, height: 28, marginBottom: 4 }}><SkeletonItem /></Skeleton>
-            <Skeleton style={{ width: 280, height: 16 }}><SkeletonItem /></Skeleton>
-          </div>
-        </div>
+      <div className={styles.header}>
+        <Skeleton style={{ width: 120, height: 24 }}><SkeletonItem /></Skeleton>
+      </div>
         <div className={styles.toolbar}>
           <Skeleton style={{ width: 120, height: 24 }}><SkeletonItem /></Skeleton>
           <Skeleton style={{ width: 100, height: 24 }}><SkeletonItem /></Skeleton>
@@ -650,27 +656,21 @@ export const Actuals: React.FC = () => {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <div className={styles.headerContent}>
-          <h1 className={styles.pageTitle}>Actuals Entry</h1>
-          <p className={styles.pageSubtitle}>Record actual time spent on projects</p>
-        </div>
-        
-        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center', flexWrap: 'wrap' }}>
-          {isLocked && (
-            <MessageBar intent="warning" style={{ flex: '1 1 100%' }}>
-              <MessageBarBody>
-                This period is locked. Select an open period in the dropdown above, or ask Finance to unlock this period.
-              </MessageBarBody>
-            </MessageBar>
-          )}
-          {!isLocked && (
+        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center', flexWrap: 'wrap', flex: 1 }}>
+          {
             <Dialog 
               open={isDialogOpen} 
               onOpenChange={(_, data) => {
                 setIsDialogOpen(data.open);
-                // Auto-set resource for employees when dialog opens
-                if (data.open && isEmployee && myResourceId) {
-                  setFormData(prev => ({ ...prev, resource_id: myResourceId }));
+                if (data.open) {
+                  const defaultPeriodId = selectedPeriodId && visiblePeriods.some((p) => p.id === selectedPeriodId)
+                    ? selectedPeriodId
+                    : visiblePeriods[0]?.id ?? '';
+                  setFormData(prev => ({
+                    ...prev,
+                    resource_id: isEmployee && myResourceId ? myResourceId : prev.resource_id,
+                    period_id: defaultPeriodId,
+                  }));
                 }
               }}
             >
@@ -683,14 +683,26 @@ export const Actuals: React.FC = () => {
                 <DialogBody>
                   <DialogTitle>Add Actual Line</DialogTitle>
                   <DialogContent>
-                    {currentPeriod && (
-                      <div className={styles.formField} style={{ marginBottom: tokens.spacingVerticalM }}>
-                        <label>Period</label>
-                        <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
-                          {monthNames[currentPeriod.month - 1]} {currentPeriod.year} ({currentPeriod.status})
-                        </Body1>
-                      </div>
-                    )}
+                    <div className={styles.formField} style={{ marginBottom: tokens.spacingVerticalM }}>
+                      <label>Period</label>
+                      <Select
+                        value={formData.period_id}
+                        onChange={(_, data) => setFormData({ ...formData, period_id: data.value })}
+                        style={{ minWidth: 160 }}
+                      >
+                        <option value="">Select period...</option>
+                        {visiblePeriods.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.year}-{String(p.month).padStart(2, '0')} ({p.status})
+                          </option>
+                        ))}
+                      </Select>
+                      {addDialogPeriod && addDialogPeriod.status === 'locked' && (
+                        <MessageBar intent="warning" style={{ marginTop: tokens.spacingVerticalS }}>
+                          <MessageBarBody>This period is locked. Select an open period to add actuals.</MessageBarBody>
+                        </MessageBar>
+                      )}
+                    </div>
                     
                     <div className={styles.formField}>
                       <label>Resource</label>
@@ -768,7 +780,9 @@ export const Actuals: React.FC = () => {
                       disabled={
                         (isEmployee && !myResourceId) ||
                         (!isEmployee && !formData.resource_id) ||
-                        !formData.project_id
+                        !formData.project_id ||
+                        !formData.period_id ||
+                        isAddPeriodLocked
                       }
                     >
                       Create
@@ -777,16 +791,30 @@ export const Actuals: React.FC = () => {
                 </DialogBody>
               </DialogSurface>
             </Dialog>
-          )}
+          }
         </div>
       </div>
 
       {/* Sticky toolbar */}
       <div className={styles.toolbar}>
-        <span className={styles.toolbarLabel}>Period</span>
-        <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>
-          {currentPeriod ? `${monthNames[currentPeriod.month - 1]} ${currentPeriod.year}` : '—'}
-        </Body1>
+        {!isEmployee ? (
+          <>
+            <span className={styles.toolbarLabel}>Period</span>
+            <Select
+              value={visiblePeriods.some((p) => p.id === selectedPeriodId) ? selectedPeriodId : visiblePeriods[0]?.id ?? ''}
+              onChange={(_, data) => setSelectedPeriodId(data.value)}
+              style={{ minWidth: 140 }}
+            >
+              {visiblePeriods.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.year}-{String(p.month).padStart(2, '0')} ({p.status})
+                </option>
+              ))}
+            </Select>
+          </>
+        ) : (
+          <span className={styles.toolbarLabel}>All periods</span>
+        )}
         {!isEmployee && (
           <>
             <span className={styles.toolbarLabel}>Resource</span>
@@ -827,12 +855,6 @@ export const Actuals: React.FC = () => {
         )}
       </div>
       
-      {isLocked && (
-        <MessageBar intent="warning" style={{ marginBottom: tokens.spacingVerticalM }}>
-          <MessageBarBody>Period is locked. Editing is disabled.</MessageBarBody>
-        </MessageBar>
-      )}
-      
       {error && (
         <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
           <MessageBarBody>{error}</MessageBarBody>
@@ -840,9 +862,26 @@ export const Actuals: React.FC = () => {
       )}
       
       {/* Demand and Supply Summary for Employees */}
-      {isEmployee && selectedPeriodId && (demandLines.length > 0 || supplyLines.length > 0) && (
+      {isEmployee && myResourceId && (
         <Card className={styles.card} style={{ marginBottom: tokens.spacingVerticalL }}>
-          <CardHeader header={<Title1>Planning Summary</Title1>} />
+          <CardHeader
+            header={
+              <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM, flexWrap: 'wrap' }}>
+                <Title1>Planning Summary</Title1>
+                <Select
+                  value={visiblePeriods.some((p) => p.id === selectedPeriodId) ? selectedPeriodId : visiblePeriods[0]?.id ?? ''}
+                  onChange={(_, data) => setSelectedPeriodId(data.value)}
+                  style={{ minWidth: 140 }}
+                >
+                  {visiblePeriods.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.year}-{String(p.month).padStart(2, '0')} ({p.status})
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            }
+          />
           <div className={styles.planningSummary}>
             <div className={styles.summaryGrid}>
               <div
@@ -880,31 +919,6 @@ export const Actuals: React.FC = () => {
         </Card>
       )}
       
-      {/* Resource totals scoreboard */}
-      {Object.keys(totalsByResource).length > 0 && (
-        <div style={{ marginBottom: tokens.spacingVerticalL }}>
-          <div className={styles.toolbarLabel} style={{ marginBottom: tokens.spacingVerticalS }}>Resource Totals</div>
-          <div className={styles.scoreboardRow}>
-            {Object.entries(totalsByResource).map(([resourceId, total]) => (
-              <div
-                key={resourceId}
-                className={`${styles.scoreboardItem} ${selectedResourceFilter === resourceId ? styles.scoreboardItemActive : ''}`}
-                style={total > 100 ? { borderColor: tokens.colorPaletteRedBorder1 } : total === 100 ? { borderColor: tokens.colorPaletteGreenBorder1 } : undefined}
-                onClick={() => isRO && setSelectedResourceFilter(prev => prev === resourceId ? null : resourceId)}
-                role={isRO ? 'button' : undefined}
-                tabIndex={isRO ? 0 : undefined}
-                onKeyDown={isRO ? (e) => e.key === 'Enter' && setSelectedResourceFilter(prev => prev === resourceId ? null : resourceId) : undefined}
-              >
-                <span className={styles.scoreboardValue}>
-                  {total}% / 100%
-                </span>
-                <span className={styles.scoreboardLabel}>{getResourceName(resourceId)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      
       <Card className={styles.card}>
         <CardHeader header={<Body1><strong>Actual Lines ({sortedActuals.length})</strong></Body1>} />
         
@@ -927,7 +941,7 @@ export const Actuals: React.FC = () => {
                   <EmptyState
                     icon={<ClipboardTaskRegular style={{ fontSize: 48 }} />}
                     title="No actuals"
-                    message="No actual lines found for this period. Create one to start logging time."
+                    message="No actual lines found. Create one to start logging time."
                   />
                 </TableCell>
               </TableRow>
@@ -959,7 +973,7 @@ export const Actuals: React.FC = () => {
                   </TableCell>
                   <TableCell>
                     <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
-                      {!a.employee_signed_at && !isLocked && isEmployee && (
+                      {!a.employee_signed_at && !isPeriodLocked(a.period_id) && isEmployee && (
                         <Button
                           icon={<ClipboardTaskRegular />}
                           appearance="subtle"
@@ -985,7 +999,7 @@ export const Actuals: React.FC = () => {
                           onClick={() => openSignDialog(a, true)}
                         />
                       )}
-                      {!a.employee_signed_at && !isLocked && (
+                      {!a.employee_signed_at && !isPeriodLocked(a.period_id) && (
                         <Button
                           icon={<Delete24Regular />}
                           appearance="subtle"

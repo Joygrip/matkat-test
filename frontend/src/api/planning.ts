@@ -87,8 +87,8 @@ export const planningApi = {
     return apiClient.post<DemandLine>('/demand-lines', data);
   },
   
-  async updateDemandLine(id: string, data: Partial<CreateDemandLine>): Promise<DemandLine> {
-    return apiClient.put<DemandLine>(`/demand-lines/${id}`, data);
+  async updateDemandLine(id: string, data: { fte_percent: number }): Promise<DemandLine> {
+    return apiClient.patch<DemandLine>(`/demand-lines/${id}`, data);
   },
   
   async deleteDemandLine(id: string): Promise<void> {

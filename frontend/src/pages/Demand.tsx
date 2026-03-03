@@ -31,6 +31,12 @@ import {
   DrawerBody,
   DrawerHeader,
   DrawerHeaderTitle,
+  Dialog,
+  DialogSurface,
+  DialogBody,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@fluentui/react-components';
 import { Add24Regular, Delete24Regular, CalendarRegular, Edit24Regular, ChevronRight20Regular, ChevronDown20Regular } from '@fluentui/react-icons';
 import { planningApi, DemandLine, CreateDemandLine } from '../api/planning';
@@ -241,7 +247,19 @@ export const Demand: React.FC = () => {
   const { showSuccess, showApiError, showError } = useToast();
   const { user } = useAuth();
   
-  const { selectedPeriodId, selectedPeriod: currentPeriod } = usePeriod();
+  const { periods, selectedPeriodId, setSelectedPeriodId, selectedPeriod: currentPeriod } = usePeriod();
+  const visiblePeriods = useMemo(() => {
+    if (user?.role === 'Finance' || user?.role === 'Admin') return periods;
+    return periods.filter((p) => p.status === 'open');
+  }, [periods, user?.role]);
+
+  useEffect(() => {
+    if (visiblePeriods.length === 0) return;
+    const isSelectedVisible = visiblePeriods.some((p) => p.id === selectedPeriodId);
+    if (!isSelectedVisible) {
+      setSelectedPeriodId(visiblePeriods[0].id);
+    }
+  }, [visiblePeriods, selectedPeriodId, setSelectedPeriodId]);
   
   const [demands, setDemands] = useState<DemandLine[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -513,38 +531,9 @@ export const Demand: React.FC = () => {
       showError('Read-only', 'Only PMs can edit demand lines.');
       return;
     }
-    if (!formData.project_id) {
-      showError('Missing project', 'Please select a project.');
-      return;
-    }
-    if (!selectedPeriodId || !currentPeriod) {
-      showError('Missing period', 'Please select a period.');
-      return;
-    }
-    if (useResource && !formData.resource_id) {
-      showError('Missing resource', 'Please select a resource.');
-      return;
-    }
-    if (!useResource && !formData.placeholder_id) {
-      showError('Missing placeholder', 'Please select a placeholder.');
-      return;
-    }
     try {
-      const data: any = {
-        id: editId,
-        project_id: formData.project_id,
-        fte_percent: formData.fte_percent,
-        year: currentPeriod.year,
-        month: currentPeriod.month,
-      };
-      if (useResource) {
-        data.resource_id = formData.resource_id;
-        data.placeholder_id = undefined;
-      } else {
-        data.placeholder_id = formData.placeholder_id;
-        data.resource_id = undefined;
-      }
-      await planningApi.updateDemandLine(editId, data);
+      // Backend only supports updating FTE per demand line
+      await planningApi.updateDemandLine(editId, { fte_percent: formData.fte_percent });
       showSuccess('Demand line updated');
       setIsDialogOpen(false);
       setEditId(null);
@@ -690,15 +679,22 @@ export const Demand: React.FC = () => {
   if (loading) {
     return <LoadingState message="Loading demand planning data..." />;
   }
+
+  if (visiblePeriods.length === 0) {
+    return (
+      <div className={styles.container}>
+        <EmptyState
+          title="No open periods"
+          message="There are no open periods available for demand planning. Contact Finance to open a period."
+        />
+      </div>
+    );
+  }
   
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <div className={styles.headerContent}>
-          <h1 className={styles.pageTitle}>Demand Planning</h1>
-          <p className={styles.pageSubtitle}>Manage project resource demand by cost center</p>
-        </div>
-        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center', marginLeft: 'auto' }}>
           {!isLocked && canEdit && (
             <Button
               appearance="primary"
@@ -719,11 +715,17 @@ export const Demand: React.FC = () => {
       <div className={styles.filters}>
         <div className={styles.filterGroup}>
           <span className={styles.filterLabel}>Period</span>
-          <Body1>
-            {currentPeriod
-              ? `${monthNames[currentPeriod.month - 1]} ${currentPeriod.year}`
-              : 'No period selected'}
-          </Body1>
+          <Select
+            value={visiblePeriods.some((p) => p.id === selectedPeriodId) ? selectedPeriodId : visiblePeriods[0]?.id ?? ''}
+            onChange={(_, data) => setSelectedPeriodId(data.value)}
+            style={{ minWidth: 140 }}
+          >
+            {visiblePeriods.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.year}-{String(p.month).padStart(2, '0')} ({p.status})
+              </option>
+            ))}
+          </Select>
         </div>
         <div className={styles.filterGroup}>
           <span className={styles.filterLabel}>Project</span>
@@ -1076,6 +1078,7 @@ export const Demand: React.FC = () => {
                   <Select
                     value={formData.project_id || ''}
                     onChange={(_, data) => setFormData(f => ({ ...f, project_id: data.value }))}
+                    disabled={!!editId}
                   >
                     <option value="">Select project...</option>
                     {projects.map(p => (
@@ -1088,6 +1091,7 @@ export const Demand: React.FC = () => {
                   <Select
                     value={useResource ? 'resource' : 'placeholder'}
                     onChange={(_, data) => setUseResource(data.value === 'resource')}
+                    disabled={!!editId}
                   >
                     <option value="resource">Named Resource</option>
                     <option value="placeholder">Placeholder (TBD)</option>

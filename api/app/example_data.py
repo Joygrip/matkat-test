@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from api.app.models.core import (
-    User, Department, CostCenter, Project, Resource, ResourceType, Period, Placeholder,
+    User, CostCenter, Project, Resource, ResourceType, Period, Placeholder,
     UserRole, PeriodStatus,
 )
 from api.app.models.planning import DemandLine, SupplyLine
@@ -14,34 +14,25 @@ from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalSta
 def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
     """
     Create example data for development.
-    Only creates data if database is empty (no departments exist).
+    Only creates data if database is empty (no cost centers exist).
     """
-    # Check if data already exists
-    existing_dept = db.query(Department).filter(Department.tenant_id == tenant_id).first()
-    if existing_dept:
+    existing_cc = db.query(CostCenter).filter(CostCenter.tenant_id == tenant_id).first()
+    if existing_cc:
         return  # Data already exists, skip
-    
+
     print("Creating example data for development...")
-    
-    # Create departments
-    dept_engineering = Department(tenant_id=tenant_id, code="ENG", name="Engineering")
-    dept_operations = Department(tenant_id=tenant_id, code="OPS", name="Operations")
-    dept_sales = Department(tenant_id=tenant_id, code="SALES", name="Sales & Marketing")
-    dept_support = Department(tenant_id=tenant_id, code="SUPPORT", name="Customer Support")
-    db.add_all([dept_engineering, dept_operations, dept_sales, dept_support])
-    db.flush()
-    
-    # Create cost centers
-    cc_software = CostCenter(tenant_id=tenant_id, department_id=dept_engineering.id, code="CC-SW", name="Software Development")
-    cc_qa = CostCenter(tenant_id=tenant_id, department_id=dept_engineering.id, code="CC-QA", name="Quality Assurance")
-    cc_infra = CostCenter(tenant_id=tenant_id, department_id=dept_operations.id, code="CC-INFRA", name="Infrastructure")
-    cc_devops = CostCenter(tenant_id=tenant_id, department_id=dept_operations.id, code="CC-DEVOPS", name="DevOps")
-    cc_marketing = CostCenter(tenant_id=tenant_id, department_id=dept_sales.id, code="CC-MKT", name="Marketing")
-    cc_support = CostCenter(tenant_id=tenant_id, department_id=dept_support.id, code="CC-SUPPORT", name="Support Team")
+
+    # Create cost centers (no department)
+    cc_software = CostCenter(tenant_id=tenant_id, code="CC-SW", name="Software Development")
+    cc_qa = CostCenter(tenant_id=tenant_id, code="CC-QA", name="Quality Assurance")
+    cc_infra = CostCenter(tenant_id=tenant_id, code="CC-INFRA", name="Infrastructure")
+    cc_devops = CostCenter(tenant_id=tenant_id, code="CC-DEVOPS", name="DevOps")
+    cc_marketing = CostCenter(tenant_id=tenant_id, code="CC-MKT", name="Marketing")
+    cc_support = CostCenter(tenant_id=tenant_id, code="CC-SUPPORT", name="Support Team")
     db.add_all([cc_software, cc_qa, cc_infra, cc_devops, cc_marketing, cc_support])
     db.flush()
-    
-    # Create users with all roles
+
+    # Create users with all roles (Directors get cost_center_id for display)
     users = [
         User(tenant_id=tenant_id, object_id="admin-001", email="admin@example.com", display_name="Admin User", role=UserRole.ADMIN),
         User(tenant_id=tenant_id, object_id="finance-001", email="finance@example.com", display_name="Finance Manager", role=UserRole.FINANCE),
@@ -50,8 +41,8 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
         User(tenant_id=tenant_id, object_id="ro-001", email="ro1@example.com", display_name="RO Software", role=UserRole.RO, cost_center_id=cc_software.id),
         User(tenant_id=tenant_id, object_id="ro-002", email="ro2@example.com", display_name="RO QA", role=UserRole.RO, cost_center_id=cc_qa.id),
         User(tenant_id=tenant_id, object_id="ro-003", email="ro3@example.com", display_name="RO Infrastructure", role=UserRole.RO, cost_center_id=cc_infra.id),
-        User(tenant_id=tenant_id, object_id="director-001", email="director1@example.com", display_name="Engineering Director", role=UserRole.DIRECTOR, department_id=dept_engineering.id),
-        User(tenant_id=tenant_id, object_id="director-002", email="director2@example.com", display_name="Operations Director", role=UserRole.DIRECTOR, department_id=dept_operations.id),
+        User(tenant_id=tenant_id, object_id="director-001", email="director1@example.com", display_name="Engineering Director", role=UserRole.DIRECTOR, cost_center_id=cc_software.id),
+        User(tenant_id=tenant_id, object_id="director-002", email="director2@example.com", display_name="Operations Director", role=UserRole.DIRECTOR, cost_center_id=cc_infra.id),
         User(tenant_id=tenant_id, object_id="emp-001", email="emp1@example.com", display_name="Alice Developer", role=UserRole.EMPLOYEE, cost_center_id=cc_software.id),
         User(tenant_id=tenant_id, object_id="emp-002", email="emp2@example.com", display_name="Bob Tester", role=UserRole.EMPLOYEE, cost_center_id=cc_qa.id),
         User(tenant_id=tenant_id, object_id="emp-003", email="emp3@example.com", display_name="Charlie DevOps", role=UserRole.EMPLOYEE, cost_center_id=cc_devops.id),
@@ -59,7 +50,7 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
         User(tenant_id=tenant_id, object_id="emp-005", email="emp5@example.com", display_name="Eve Support", role=UserRole.EMPLOYEE, cost_center_id=cc_support.id),
         User(tenant_id=tenant_id, object_id="dev-user-001", email="dev@example.com", display_name="Dev User", role=UserRole.EMPLOYEE, cost_center_id=cc_software.id),
     ]
-    
+
     # Set manager relationships
     users[9].manager_object_id = users[4].object_id   # Alice -> RO Software
     users[10].manager_object_id = users[5].object_id   # Bob -> RO QA
@@ -69,14 +60,18 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
     users[4].manager_object_id = users[7].object_id    # RO Software -> Engineering Director
     users[5].manager_object_id = users[7].object_id    # RO QA -> Engineering Director
     users[6].manager_object_id = users[8].object_id    # RO Infrastructure -> Operations Director
-    
+
     db.add_all(users)
     db.flush()
-    
-    # Update cost center ROs
+
+    # Update cost center ROs and directors
     cc_software.ro_user_id = users[4].id
+    cc_software.director_user_id = users[7].id
     cc_qa.ro_user_id = users[5].id
+    cc_qa.director_user_id = users[7].id
     cc_infra.ro_user_id = users[6].id
+    cc_infra.director_user_id = users[8].id
+    cc_devops.director_user_id = users[8].id
     
     # Create projects
     projects = [

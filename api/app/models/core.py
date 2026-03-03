@@ -49,14 +49,12 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(SQLEnum(UserRole), nullable=False, default=UserRole.EMPLOYEE)
     manager_object_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    department_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("departments.id"), nullable=True)
     cost_center_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("cost_centers.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    department: Mapped[Optional["Department"]] = relationship(back_populates="users")
     cost_center: Mapped[Optional["CostCenter"]] = relationship(
         back_populates="users",
         foreign_keys=[cost_center_id],
@@ -67,49 +65,30 @@ class User(Base):
     )
 
 
-class Department(Base):
-    """Department entity."""
-    __tablename__ = "departments"
-    
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    code: Mapped[str] = mapped_column(String(50), nullable=False)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    users: Mapped[list["User"]] = relationship(back_populates="department")
-    cost_centers: Mapped[list["CostCenter"]] = relationship(back_populates="department")
-    
-    __table_args__ = (
-        Index("ix_departments_tenant_code", "tenant_id", "code", unique=True),
-    )
-
-
 class CostCenter(Base):
-    """Cost Center entity."""
+    """Cost Center entity (single org unit; no department)."""
     __tablename__ = "cost_centers"
     
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    department_id: Mapped[str] = mapped_column(String(36), ForeignKey("departments.id"), nullable=False)
     code: Mapped[str] = mapped_column(String(50), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     ro_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    director_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    department: Mapped["Department"] = relationship(back_populates="cost_centers")
     users: Mapped[list["User"]] = relationship(
         back_populates="cost_center",
         foreign_keys="[User.cost_center_id]",
     )
     ro_user: Mapped[Optional["User"]] = relationship(
         foreign_keys=[ro_user_id],
+    )
+    director: Mapped[Optional["User"]] = relationship(
+        foreign_keys=[director_user_id],
     )
     resources: Mapped[list["Resource"]] = relationship(back_populates="cost_center")
     placeholders: Mapped[list["Placeholder"]] = relationship(
@@ -213,7 +192,6 @@ class Placeholder(Base):
     
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    department_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("departments.id"), nullable=True)
     cost_center_id: Mapped[str] = mapped_column(String(36), ForeignKey("cost_centers.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -224,7 +202,6 @@ class Placeholder(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    department: Mapped[Optional["Department"]] = relationship("Department")
     cost_center: Mapped["CostCenter"] = relationship(
         "CostCenter",
         back_populates="placeholders",

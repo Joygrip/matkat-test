@@ -37,8 +37,8 @@ def test_audit_logs_are_tenant_scoped(client, admin_headers, db):
         user_id="user-1",
         user_email="user@test.com",
         action="create",
-        entity_type="Department",
-        entity_id="dept-1",
+        entity_type="CostCenter",
+        entity_id="cc-1",
         created_at=datetime.now(timezone.utc),
     )
     log_other = AuditLog(
@@ -46,8 +46,8 @@ def test_audit_logs_are_tenant_scoped(client, admin_headers, db):
         user_id="user-2",
         user_email="other@test.com",
         action="create",
-        entity_type="Department",
-        entity_id="dept-2",
+        entity_type="CostCenter",
+        entity_id="cc-2",
         created_at=datetime.now(timezone.utc),
     )
     db.add_all([log_own, log_other])
@@ -57,9 +57,8 @@ def test_audit_logs_are_tenant_scoped(client, admin_headers, db):
     assert resp.status_code == 200
     data = resp.json()
 
-    # Should only see own tenant's log
     assert len(data) == 1
-    assert data[0]["entity_id"] == "dept-1"
+    assert data[0]["entity_id"] == "cc-1"
 
 
 def test_audit_logs_pagination(client, admin_headers, db):
@@ -94,20 +93,18 @@ def test_audit_logs_pagination(client, admin_headers, db):
 
 
 def test_audit_trail_created_on_admin_crud(client, admin_headers, db):
-    """Creating a department via API produces an audit log entry."""
-    # Create department (triggers audit log)
+    """Creating a cost center via API produces an audit log entry."""
     resp = client.post(
-        "/admin/departments",
-        json={"name": "Audited Dept", "code": "AD"},
+        "/admin/cost-centers",
+        json={"name": "Audited CC", "code": "ACC"},
         headers=admin_headers,
     )
     assert resp.status_code == 200
 
-    # Check audit logs contain the create action
     logs_resp = client.get("/audit-logs/", headers=admin_headers)
     data = logs_resp.json()
     assert len(data) >= 1
-    create_log = next((l for l in data if l["entity_type"] == "Department" and l["action"] == "create"), None)
+    create_log = next((l for l in data if l["entity_type"] == "CostCenter" and l["action"] == "create"), None)
     assert create_log is not None
     assert create_log["user_email"] == "admin@test.com"
 

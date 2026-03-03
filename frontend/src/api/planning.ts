@@ -19,8 +19,6 @@ export interface DemandLine {
   project_name?: string;
   resource_name?: string;
   placeholder_name?: string;
-  department_id?: string;
-  department_name?: string;
   cost_center_id?: string;
   cost_center_name?: string;
 }
@@ -39,8 +37,6 @@ export interface SupplyLine {
   // Enriched fields
   resource_name?: string;
   project_name?: string;
-  department_id?: string;
-  department_name?: string;
   cost_center_id?: string;
   cost_center_name?: string;
 }
@@ -68,7 +64,6 @@ export interface CreateSupplyLine {
 
 export interface PlanningFilters {
   periodId?: string;
-  departmentId?: string;
   costCenterId?: string;
 }
 
@@ -77,7 +72,6 @@ export const planningApi = {
   async getDemandLines(periodId?: string, filters?: Omit<PlanningFilters, 'periodId'>): Promise<DemandLine[]> {
     const params = new URLSearchParams();
     if (periodId) params.set('period_id', periodId);
-    if (filters?.departmentId) params.set('department_id', filters.departmentId);
     if (filters?.costCenterId) params.set('cost_center_id', filters.costCenterId);
     const qs = params.toString();
     const url = `/demand-lines${qs ? `?${qs}` : ''}`;
@@ -107,7 +101,6 @@ export const planningApi = {
   async getSupplyLines(periodId?: string, filters?: Omit<PlanningFilters, 'periodId'>): Promise<SupplyLine[]> {
     const params = new URLSearchParams();
     if (periodId) params.set('period_id', periodId);
-    if (filters?.departmentId) params.set('department_id', filters.departmentId);
     if (filters?.costCenterId) params.set('cost_center_id', filters.costCenterId);
     const qs = params.toString();
     return apiClient.get<SupplyLine[]>(`/supply-lines${qs ? `?${qs}` : ''}`);

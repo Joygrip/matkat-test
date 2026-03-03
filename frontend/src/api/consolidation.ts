@@ -3,7 +3,7 @@
  */
 import { apiClient } from './client';
 
-// Department-grouped dashboard types
+// Cost-center dashboard types
 export interface DashboardResource {
   resource_id: string;
   resource_name: string;
@@ -24,29 +24,23 @@ export interface DashboardPlaceholder {
 export interface DashboardCostCenter {
   cost_center_id: string | null;
   cost_center_name: string;
-  resources: DashboardResource[];
-  placeholders: DashboardPlaceholder[];
-}
-
-export interface DashboardDepartment {
-  department_id: string | null;
-  department_name: string;
   total_demand_fte: number;
   total_supply_fte: number;
   gap_fte: number;
-  cost_centers: DashboardCostCenter[];
+  resources: DashboardResource[];
+  placeholders: DashboardPlaceholder[];
 }
 
 export interface OverAllocation {
   resource_id: string;
   resource_name: string;
-  department_id?: string;
-  department_name?: string;
+  cost_center_id?: string;
+  cost_center_name?: string;
   total_demand_fte: number;
 }
 
 export interface DashboardSummary {
-  total_departments: number;
+  total_cost_centers: number;
   total_demand_fte: number;
   total_supply_fte: number;
   total_gap_fte: number;
@@ -58,7 +52,7 @@ export interface ConsolidationDashboard {
   period_id: string;
   period: string;
   summary: DashboardSummary;
-  departments: DashboardDepartment[];
+  cost_centers: DashboardCostCenter[];
   over_allocations: OverAllocation[];
 }
 

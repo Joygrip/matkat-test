@@ -7,10 +7,9 @@ from typing import Optional
 from api.app.db.engine import get_db
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
 from api.app.models.core import (
-    UserRole, Department, CostCenter, Project, Resource, Placeholder, Holiday, Settings
+    UserRole, CostCenter, Project, Resource, Placeholder, Holiday, Settings
 )
 from api.app.schemas.admin import (
-    DepartmentCreate, DepartmentUpdate, DepartmentResponse,
     CostCenterCreate, CostCenterUpdate, CostCenterResponse,
     ProjectCreate, ProjectUpdate, ProjectResponse,
     ResourceCreate, ResourceUpdate, ResourceResponse,
@@ -30,94 +29,6 @@ PLANNING_READ_ROLES = (UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.R
 WRITE_ROLES = (UserRole.ADMIN,)
 # Allowed roles for master data write access (Admin + Finance)
 MASTER_DATA_WRITE_ROLES = (UserRole.ADMIN, UserRole.FINANCE)
-
-
-# ============== DEPARTMENTS ==============
-
-@router.get("/departments", response_model=list[DepartmentResponse])
-async def list_departments(
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(*READ_ROLES)),
-):
-    """List all departments."""
-    return db.query(Department).filter(
-        Department.tenant_id == current_user.tenant_id
-    ).all()
-
-
-@router.get("/departments/{department_id}", response_model=DepartmentResponse)
-async def get_department(
-    department_id: str,
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(*READ_ROLES)),
-):
-    """Get a department by ID."""
-    dept = db.query(Department).filter(
-        and_(Department.id == department_id, Department.tenant_id == current_user.tenant_id)
-    ).first()
-    if not dept:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Department not found"})
-    return dept
-
-
-@router.post("/departments", response_model=DepartmentResponse)
-async def create_department(
-    data: DepartmentCreate,
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(*MASTER_DATA_WRITE_ROLES)),
-):
-    """Create a new department. (Admin, Finance)"""
-    dept = Department(tenant_id=current_user.tenant_id, **data.model_dump())
-    db.add(dept)
-    db.commit()
-    db.refresh(dept)
-    log_audit(db, current_user, "create", "Department", dept.id, new_values=data.model_dump())
-    return dept
-
-
-@router.patch("/departments/{department_id}", response_model=DepartmentResponse)
-async def update_department(
-    department_id: str,
-    data: DepartmentUpdate,
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(*MASTER_DATA_WRITE_ROLES)),
-):
-    """Update a department. (Admin, Finance)"""
-    dept = db.query(Department).filter(
-        and_(Department.id == department_id, Department.tenant_id == current_user.tenant_id)
-    ).first()
-    if not dept:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Department not found"})
-    
-    update_data = data.model_dump(exclude_unset=True)
-    old_values = {k: getattr(dept, k) for k in update_data}
-    
-    for key, value in update_data.items():
-        setattr(dept, key, value)
-    
-    db.commit()
-    db.refresh(dept)
-    log_audit(db, current_user, "update", "Department", dept.id, old_values=old_values, new_values=update_data)
-    return dept
-
-
-@router.delete("/departments/{department_id}")
-async def delete_department(
-    department_id: str,
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(*MASTER_DATA_WRITE_ROLES)),
-):
-    """Soft delete a department (set is_active=False). (Admin, Finance)"""
-    dept = db.query(Department).filter(
-        and_(Department.id == department_id, Department.tenant_id == current_user.tenant_id)
-    ).first()
-    if not dept:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Department not found"})
-    
-    dept.is_active = False
-    db.commit()
-    log_audit(db, current_user, "delete", "Department", dept.id)
-    return {"message": "Department deleted"}
 
 
 # ============== COST CENTERS ==============
@@ -403,12 +314,11 @@ async def delete_resource(
 # ============== PLACEHOLDERS ==============
 
 def _enrich_placeholder(placeholder: Placeholder) -> dict:
-    """Enrich a placeholder ORM object with department/cost-center names."""
+    """Enrich a placeholder ORM object with cost-center name."""
     data = {
         "id": placeholder.id,
         "tenant_id": placeholder.tenant_id,
         "name": placeholder.name,
-        "department_id": placeholder.department_id,
         "cost_center_id": placeholder.cost_center_id,
         "description": placeholder.description,
         "skill_profile": placeholder.skill_profile,
@@ -416,7 +326,6 @@ def _enrich_placeholder(placeholder: Placeholder) -> dict:
         "is_active": placeholder.is_active,
         "created_at": placeholder.created_at,
         "updated_at": placeholder.updated_at,
-        "department_name": placeholder.department.name if placeholder.department else None,
         "cost_center_name": placeholder.cost_center.name if placeholder.cost_center else None,
     }
     return data

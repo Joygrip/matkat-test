@@ -28,17 +28,9 @@ def test_full_monthly_cycle(client, admin_headers, finance_headers, pm_headers, 
     employee_user_id = employee_user.id
 
     # ── 1. Admin creates master data ──
-    dept_resp = client.post(
-        "/admin/departments",
-        json={"code": "ENG", "name": "Engineering"},
-        headers=admin_headers,
-    )
-    assert dept_resp.status_code == 200
-    dept_id = dept_resp.json()["id"]
-
     cc_resp = client.post(
         "/admin/cost-centers",
-        json={"department_id": dept_id, "code": "ENG-01", "name": "Backend Team"},
+        json={"code": "ENG-01", "name": "Backend Team"},
         headers=admin_headers,
     )
     assert cc_resp.status_code == 200
@@ -113,7 +105,7 @@ def test_full_monthly_cycle(client, admin_headers, finance_headers, pm_headers, 
     )
     assert dash_resp.status_code == 200
     dashboard = dash_resp.json()
-    assert dashboard["summary"]["total_departments"] >= 1
+    assert dashboard["summary"]["total_cost_centers"] >= 1
 
     # ── 6. Employee creates actuals ──
     actual_resp = client.post(
@@ -142,13 +134,12 @@ def test_full_monthly_cycle(client, admin_headers, finance_headers, pm_headers, 
     audit_resp = client.get("/audit-logs/", headers=admin_headers)
     assert audit_resp.status_code == 200
     logs = audit_resp.json()
-    # Should have at minimum: dept create, cc create, project create, resource create,
+    # Should have at minimum: cc create, project create, resource create,
     # actual create, actual sign
     assert len(logs) >= 4
 
-    # Verify specific audit entries exist
     actions = [(l["entity_type"], l["action"]) for l in logs]
-    assert ("Department", "create") in actions
+    assert ("CostCenter", "create") in actions
     assert ("ActualLine", "create") in actions
 
     # ── 9. Finance publishes consolidation snapshot ──
@@ -201,10 +192,9 @@ def test_over_allocation_across_projects(client, admin_headers, finance_headers,
     db.refresh(employee_user)
 
     # Setup master data
-    dept = client.post("/admin/departments", json={"code": "OA", "name": "Over-Alloc"}, headers=admin_headers)
     cc = client.post(
         "/admin/cost-centers",
-        json={"department_id": dept.json()["id"], "code": "OA-01", "name": "OA CC"},
+        json={"code": "OA-01", "name": "OA CC"},
         headers=admin_headers,
     )
     res = client.post(
@@ -290,19 +280,9 @@ def test_finance_can_manage_full_lifecycle(client, admin_headers, finance_header
     Finance role can create master data, create planning lines, and publish snapshots.
     This verifies the P4 Finance access expansion end-to-end.
     """
-    # Finance creates department
-    dept = client.post(
-        "/admin/departments",
-        json={"code": "FIN-INT", "name": "Finance Integration"},
-        headers=finance_headers,
-    )
-    assert dept.status_code == 200
-    dept_id = dept.json()["id"]
-
-    # Finance creates cost center
     cc = client.post(
         "/admin/cost-centers",
-        json={"department_id": dept_id, "code": "FIN-CC", "name": "Finance CC"},
+        json={"code": "FIN-CC", "name": "Finance CC"},
         headers=finance_headers,
     )
     assert cc.status_code == 200

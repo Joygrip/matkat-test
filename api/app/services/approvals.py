@@ -48,19 +48,7 @@ class ApprovalsService:
         
         if resource.cost_center:
             ro_user_id = resource.cost_center.ro_user_id
-            # Get Director from department (simplified lookup)
-            # TODO: In production, use Azure Graph API manager chain for accurate Director resolution
-            if resource.cost_center.department:
-                # Find Director user in this department (simplified)
-                director = self.db.query(User).filter(
-                    and_(
-                        User.tenant_id == self.current_user.tenant_id,
-                        User.department_id == resource.cost_center.department_id,
-                        User.role == "Director",
-                    )
-                ).first()
-                if director:
-                    director_user_id = director.id
+            director_user_id = resource.cost_center.director_user_id
         
         # Create approval instance
         instance = ApprovalInstance(

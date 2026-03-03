@@ -1,7 +1,6 @@
 """SQLAlchemy models."""
 from api.app.models.core import (
     User,
-    Department,
     CostCenter,
     Project,
     Resource,
@@ -37,7 +36,6 @@ from api.app.models.notifications import (
 
 __all__ = [
     "User",
-    "Department",
     "CostCenter",
     "Project",
     "Resource",

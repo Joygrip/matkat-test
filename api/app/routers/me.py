@@ -21,7 +21,6 @@ def get_permissions_for_role(role: UserRole) -> list[str]:
             "read:*",
             "write:*",
             "manage:users",
-            "manage:departments",
             "manage:cost_centers",
             "manage:projects",
             "manage:resources",
@@ -36,7 +35,6 @@ def get_permissions_for_role(role: UserRole) -> list[str]:
             "publish:consolidation",
             "read:approvals",
             # Master data management (same as Admin for these entities):
-            "manage:departments",
             "manage:cost_centers",
             "manage:projects",
             "manage:resources",
@@ -65,7 +63,7 @@ def get_permissions_for_role(role: UserRole) -> list[str]:
             "proxy_sign:actuals",
         ],
         UserRole.DIRECTOR: [
-            "read:department",
+            "read:cost_center",
             "approve:actuals",
             "read:consolidation",
         ],

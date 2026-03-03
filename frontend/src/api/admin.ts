@@ -4,23 +4,13 @@
 import { apiClient } from './client';
 
 // Types
-export interface Department {
-  id: string;
-  tenant_id: string;
-  code: string;
-  name: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface CostCenter {
   id: string;
   tenant_id: string;
-  department_id: string;
   code: string;
   name: string;
   ro_user_id: string | null;
+  director_user_id: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -63,9 +53,7 @@ export interface Placeholder {
   id: string;
   tenant_id: string;
   name: string;
-  department_id: string | null;
-  cost_center_id: string | null;
-  department_name: string | null;
+  cost_center_id: string;
   cost_center_name: string | null;
   description: string | null;
   skill_profile: string | null;
@@ -96,18 +84,9 @@ export interface Setting {
 
 // API methods
 export const adminApi = {
-  // Departments
-  listDepartments: () => apiClient.get<Department[]>('/admin/departments'),
-  createDepartment: (data: { code: string; name: string }) =>
-    apiClient.post<Department>('/admin/departments', data),
-  updateDepartment: (id: string, data: Partial<Department>) =>
-    apiClient.patch<Department>(`/admin/departments/${id}`, data),
-  deleteDepartment: (id: string) =>
-    apiClient.delete<{ message: string }>(`/admin/departments/${id}`),
-
   // Cost Centers
   listCostCenters: () => apiClient.get<CostCenter[]>('/admin/cost-centers'),
-  createCostCenter: (data: { department_id: string; code: string; name: string; ro_user_id?: string }) =>
+  createCostCenter: (data: { code: string; name: string; ro_user_id?: string; director_user_id?: string }) =>
     apiClient.post<CostCenter>('/admin/cost-centers', data),
   updateCostCenter: (id: string, data: Partial<CostCenter>) =>
     apiClient.patch<CostCenter>(`/admin/cost-centers/${id}`, data),

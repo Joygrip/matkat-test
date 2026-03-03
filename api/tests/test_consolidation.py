@@ -42,27 +42,22 @@ def test_dashboard_with_empty_period(client, db):
     data = response.json()
     
     assert data["period_id"] == "period-1"
-    assert data["departments"] == []
+    assert data["cost_centers"] == []
     assert data["over_allocations"] == []
-    assert data["summary"]["total_departments"] == 0
+    assert data["summary"]["total_cost_centers"] == 0
     assert data["summary"]["total_demand_fte"] == 0
     assert data["summary"]["total_supply_fte"] == 0
 
 
 def test_dashboard_shows_gaps(client, db):
     """Test that dashboard calculates demand/supply gaps."""
-    from api.app.models.core import Period, Resource, CostCenter, Department, Project
+    from api.app.models.core import Period, Resource, CostCenter, Project
     from api.app.models.planning import DemandLine, SupplyLine
-    
+
     tenant_id = "test-tenant"
-    
-    # Create department and cost center
-    dept = Department(id="dept-1", tenant_id=tenant_id, name="Test Dept", code="TD")
-    db.add(dept)
-    
+
     cc = CostCenter(
-        id="cc-1", tenant_id=tenant_id, name="Test CC", code="TCC", 
-        department_id="dept-1"
+        id="cc-1", tenant_id=tenant_id, name="Test CC", code="TCC",
     )
     db.add(cc)
     
@@ -102,12 +97,9 @@ def test_dashboard_shows_gaps(client, db):
     assert response.status_code == 200
     data = response.json()
     
-    # New department-grouped structure
-    assert len(data["departments"]) >= 1
-    dept = data["departments"][0]
-    assert dept["department_name"] == "Test Dept"
-    assert len(dept["cost_centers"]) >= 1
-    cc_data = dept["cost_centers"][0]
+    assert len(data["cost_centers"]) >= 1
+    cc_data = data["cost_centers"][0]
+    assert cc_data["cost_center_name"] == "Test CC"
     assert len(cc_data["resources"]) >= 1
     res = cc_data["resources"][0]
     assert res["resource_id"] == "res-1"
@@ -146,18 +138,13 @@ def test_publish_snapshot(client, db):
 
 def test_publish_snapshot_includes_planning_data(client, db):
     """Test that published snapshot includes demand and supply lines."""
-    from api.app.models.core import Period, Resource, CostCenter, Department, Project
+    from api.app.models.core import Period, Resource, CostCenter, Project
     from api.app.models.planning import DemandLine, SupplyLine
-    
+
     tenant_id = "test-tenant"
-    
-    # Create department and cost center
-    dept = Department(id="dept-2", tenant_id=tenant_id, name="Test Dept 2", code="TD2")
-    db.add(dept)
-    
+
     cc = CostCenter(
-        id="cc-2", tenant_id=tenant_id, name="Test CC 2", code="TCC2", 
-        department_id="dept-2"
+        id="cc-2", tenant_id=tenant_id, name="Test CC 2", code="TCC2",
     )
     db.add(cc)
     
@@ -218,18 +205,13 @@ def test_publish_snapshot_includes_planning_data(client, db):
 
 def test_snapshots_are_immutable(client, db):
     """Test that snapshot data doesn't change after publishing."""
-    from api.app.models.core import Period, Resource, CostCenter, Department, Project
+    from api.app.models.core import Period, Resource, CostCenter, Project
     from api.app.models.planning import DemandLine
-    
+
     tenant_id = "test-tenant"
-    
-    # Create department and cost center
-    dept = Department(id="dept-3", tenant_id=tenant_id, name="Test Dept 3", code="TD3")
-    db.add(dept)
-    
+
     cc = CostCenter(
-        id="cc-3", tenant_id=tenant_id, name="Test CC 3", code="TCC3", 
-        department_id="dept-3"
+        id="cc-3", tenant_id=tenant_id, name="Test CC 3", code="TCC3",
     )
     db.add(cc)
     

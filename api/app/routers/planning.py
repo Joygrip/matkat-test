@@ -22,20 +22,15 @@ router = APIRouter(tags=["Planning"])
 
 
 def _enrich_demand(line) -> DemandLineResponse:
-    """Build an enriched DemandLineResponse with department/CC context."""
-    dept_id = dept_name = cc_id = cc_name = None
+    """Build an enriched DemandLineResponse with cost center context."""
+    cc_id = cc_name = None
     if line.resource and line.resource.cost_center:
         cc = line.resource.cost_center
         cc_id = cc.id
         cc_name = cc.name
-        if cc.department:
-            dept_id = cc.department.id
-            dept_name = cc.department.name
-    elif line.placeholder:
-        dept_id = line.placeholder.department_id
-        dept_name = line.placeholder.department.name if line.placeholder.department else None
+    elif line.placeholder and line.placeholder.cost_center:
         cc_id = line.placeholder.cost_center_id
-        cc_name = line.placeholder.cost_center.name if line.placeholder.cost_center else None
+        cc_name = line.placeholder.cost_center.name
 
     return DemandLineResponse(
         id=line.id,
@@ -53,23 +48,18 @@ def _enrich_demand(line) -> DemandLineResponse:
         project_name=line.project.name if line.project else None,
         resource_name=line.resource.display_name if line.resource else None,
         placeholder_name=line.placeholder.name if line.placeholder else None,
-        department_id=dept_id,
-        department_name=dept_name,
         cost_center_id=cc_id,
         cost_center_name=cc_name,
     )
 
 
 def _enrich_supply(line) -> SupplyLineResponse:
-    """Build an enriched SupplyLineResponse with department/CC context."""
-    dept_id = dept_name = cc_id = cc_name = None
+    """Build an enriched SupplyLineResponse with cost center context."""
+    cc_id = cc_name = None
     if line.resource and line.resource.cost_center:
         cc = line.resource.cost_center
         cc_id = cc.id
         cc_name = cc.name
-        if cc.department:
-            dept_id = cc.department.id
-            dept_name = cc.department.name
 
     return SupplyLineResponse(
         id=line.id,
@@ -85,8 +75,6 @@ def _enrich_supply(line) -> SupplyLineResponse:
         updated_at=line.updated_at,
         resource_name=line.resource.display_name if line.resource else None,
         project_name=line.project.name if line.project else None,
-        department_id=dept_id,
-        department_name=dept_name,
         cost_center_id=cc_id,
         cost_center_name=cc_name,
     )
@@ -100,7 +88,6 @@ async def list_demand_lines(
     month: Optional[int] = Query(None, ge=1, le=12, description="Filter by month"),
     project_id: Optional[str] = Query(None, description="Filter by project_id"),
     resource_id: Optional[str] = Query(None, description="Filter by resource_id"),
-    department_id: Optional[str] = Query(None, description="Filter by department_id"),
     cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
@@ -109,18 +96,13 @@ async def list_demand_lines(
     )),
 ):
     """
-    List demand lines. Filtered by tenant, period, project, resource, department, cost center.
+    List demand lines. Filtered by tenant, period, project, resource, cost center.
     Accessible to: Admin, Finance, PM, RO, Director, Employee (read-only for dashboard).
     """
     service = DemandService(db, current_user)
     lines = service.get_all(year, month, project_id, resource_id, period_id=period_id)
     
-    # Enrich with department/CC context
     result = [_enrich_demand(line) for line in lines]
-    
-    # Post-filter by department / cost center (applied after enrichment)
-    if department_id:
-        result = [r for r in result if r.department_id == department_id]
     if cost_center_id:
         result = [r for r in result if r.cost_center_id == cost_center_id]
     
@@ -274,7 +256,6 @@ async def list_supply_lines(
     year: Optional[int] = Query(None, description="Filter by year"),
     month: Optional[int] = Query(None, ge=1, le=12, description="Filter by month"),
     resource_id: Optional[str] = Query(None, description="Filter by resource_id"),
-    department_id: Optional[str] = Query(None, description="Filter by department_id"),
     cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
@@ -283,18 +264,13 @@ async def list_supply_lines(
     )),
 ):
     """
-    List supply lines. Filtered by tenant, period, resource, department, cost center.
+    List supply lines. Filtered by tenant, period, resource, cost center.
     Accessible to: Admin, Finance, PM, RO, Director, Employee (read-only for dashboard).
     """
     service = SupplyService(db, current_user)
     lines = service.get_all(year, month, None, resource_id, period_id=period_id)
     
-    # Enrich with department/CC context
     result = [_enrich_supply(line) for line in lines]
-    
-    # Post-filter by department / cost center
-    if department_id:
-        result = [r for r in result if r.department_id == department_id]
     if cost_center_id:
         result = [r for r in result if r.cost_center_id == cost_center_id]
     

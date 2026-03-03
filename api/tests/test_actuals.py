@@ -25,18 +25,9 @@ def setup_actuals_data(client, admin_headers, finance_headers, db):
     db.refresh(employee_user)
     employee_user_id = employee_user.id
 
-    # Create department
-    dept_resp = client.post(
-        "/admin/departments",
-        json={"code": "ACT-TEST", "name": "Actuals Test Dept"},
-        headers=admin_headers,
-    )
-    dept_id = dept_resp.json()["id"]
-    
-    # Create cost center
     cc_resp = client.post(
         "/admin/cost-centers",
-        json={"department_id": dept_id, "code": "CC-ACT", "name": "Actuals Test CC"},
+        json={"code": "CC-ACT", "name": "Actuals Test CC"},
         headers=admin_headers,
     )
     cc_id = cc_resp.json()["id"]

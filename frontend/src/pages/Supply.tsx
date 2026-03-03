@@ -4,7 +4,7 @@
  * RO/Finance: Create and edit supply lines (resource availability)
  * Admin/PM: Read-only view
  * 
- * Features: Department/CC filters, grouped table
+ * Features: Cost center filters, grouped table
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -43,7 +43,7 @@ import { Add24Regular, Delete24Regular, PeopleRegular, Edit24Regular } from '@fl
 import { BreakdownChart, BreakdownRow } from '../components/BreakdownChart';
 import { planningApi, SupplyLine, CreateSupplyLine } from '../api/planning';
 import { usePeriod } from '../contexts/PeriodContext';
-import { lookupsApi, Resource, Department, Project } from '../api/lookups';
+import { lookupsApi, Resource, CostCenter, Project } from '../api/lookups';
 import { useToast } from '../hooks/useToast';
 import { formatApiError } from '../utils/errors';
 import { useAuth } from '../auth/AuthProvider';
@@ -182,25 +182,25 @@ const useStyles = makeStyles({
 });
 
 interface GroupedSupplies {
-  departmentId: string | undefined;
-  departmentName: string;
+  costCenterId: string | undefined;
+  costCenterName: string;
   supplies: SupplyLine[];
 }
 
-function groupSuppliesByDept(supplies: SupplyLine[]): GroupedSupplies[] {
-  const deptMap = new Map<string, GroupedSupplies>();
+function groupSuppliesByCostCenter(supplies: SupplyLine[]): GroupedSupplies[] {
+  const ccMap = new Map<string, GroupedSupplies>();
 
   for (const s of supplies) {
-    const deptKey = s.department_id || '__none__';
-    const deptName = s.department_name || 'Unassigned';
-    if (!deptMap.has(deptKey)) {
-      deptMap.set(deptKey, { departmentId: s.department_id, departmentName: deptName, supplies: [] });
+    const ccKey = s.cost_center_id || '__none__';
+    const ccName = s.cost_center_name || 'Unassigned';
+    if (!ccMap.has(ccKey)) {
+      ccMap.set(ccKey, { costCenterId: s.cost_center_id, costCenterName: ccName, supplies: [] });
     }
-    deptMap.get(deptKey)!.supplies.push(s);
+    ccMap.get(ccKey)!.supplies.push(s);
   }
 
-  const result = Array.from(deptMap.values());
-  result.sort((a, b) => a.departmentName.localeCompare(b.departmentName));
+  const result = Array.from(ccMap.values());
+  result.sort((a, b) => a.costCenterName.localeCompare(b.costCenterName));
   return result;
 }
 
@@ -214,8 +214,8 @@ export const Supply: React.FC = () => {
   const [supplies, setSupplies] = useState<SupplyLine[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [selectedDept, setSelectedDept] = useState<string>('');
+  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
+  const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -246,17 +246,16 @@ export const Supply: React.FC = () => {
   const isLocked = currentPeriod?.status === 'locked';
   const canEdit = user?.role === 'Finance' || user?.role === 'RO';
 
-  const groupedSupplies = useMemo(() => groupSuppliesByDept(supplies), [supplies]);
+  const groupedSupplies = useMemo(() => groupSuppliesByCostCenter(supplies), [supplies]);
   const totalColumns = canEdit ? 8 : 7;
 
-  // Breakdown chart data: supply grouped by department
-  const deptBreakdown: BreakdownRow[] = useMemo(() => {
-    const deptMap = new Map<string, number>();
+  const ccBreakdown: BreakdownRow[] = useMemo(() => {
+    const ccMap = new Map<string, number>();
     for (const s of supplies) {
-      const name = s.department_name || 'Unassigned';
-      deptMap.set(name, (deptMap.get(name) || 0) + (s.fte_percent || 0));
+      const name = s.cost_center_name || 'Unassigned';
+      ccMap.set(name, (ccMap.get(name) || 0) + (s.fte_percent || 0));
     }
-    return Array.from(deptMap.entries())
+    return Array.from(ccMap.entries())
       .map(([label, fte]) => ({ label, demandFte: 0, supplyFte: fte }))
       .sort((a, b) => b.supplyFte - a.supplyFte);
   }, [supplies]);
@@ -267,9 +266,9 @@ export const Supply: React.FC = () => {
   
   useEffect(() => {
     if (selectedPeriodId) {
-      loadSupplies(selectedPeriodId, selectedDept);
+      loadSupplies(selectedPeriodId, selectedCostCenterId || undefined);
     }
-  }, [selectedPeriodId, selectedDept]);
+  }, [selectedPeriodId, selectedCostCenterId]);
   
   useEffect(() => {
     if (isDialogOpen && addMode === 'bulk') {
@@ -282,15 +281,15 @@ export const Supply: React.FC = () => {
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const [resourcesData, projectsData, deptsData] = await Promise.all([
+      const [resourcesData, projectsData, costCentersData] = await Promise.all([
         lookupsApi.listResources(),
         lookupsApi.listProjects(),
-        lookupsApi.listDepartments(),
+        lookupsApi.listCostCenters(),
       ]);
       
       setResources(resourcesData);
       setProjects(projectsData);
-      setDepartments(deptsData);
+      setCostCenters(costCentersData);
     } catch (err: unknown) {
       setError(formatApiError(err, 'Failed to load data'));
     } finally {
@@ -298,12 +297,12 @@ export const Supply: React.FC = () => {
     }
   };
   
-  const loadSupplies = async (periodId?: string, deptId?: string) => {
+  const loadSupplies = async (periodId?: string, costCenterId?: string) => {
     const pid = periodId || selectedPeriodId;
     if (!pid) return;
     try {
       const data = await planningApi.getSupplyLines(pid, {
-        departmentId: deptId ?? (selectedDept || undefined),
+        costCenterId: costCenterId ?? (selectedCostCenterId || undefined),
       });
       setSupplies(data);
     } catch (err: unknown) {
@@ -477,7 +476,7 @@ export const Supply: React.FC = () => {
       <div className={styles.header}>
         <div className={styles.headerContent}>
           <h1 className={styles.pageTitle}>Supply Planning</h1>
-          <p className={styles.pageSubtitle}>Manage resource availability by department</p>
+          <p className={styles.pageSubtitle}>Manage resource availability by cost center</p>
         </div>
         
         <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
@@ -500,14 +499,14 @@ export const Supply: React.FC = () => {
       {/* Filters bar */}
       <div className={styles.filters}>
         <div className={styles.filterGroup}>
-          <span className={styles.filterLabel}>Department</span>
+          <span className={styles.filterLabel}>Cost Center</span>
           <Select
-            value={selectedDept}
-            onChange={(_, data) => setSelectedDept(data.value)}
+            value={selectedCostCenterId}
+            onChange={(_, data) => setSelectedCostCenterId(data.value || '')}
           >
-            <option value="">All departments</option>
-            {departments.map(d => (
-              <option key={d.id} value={d.id}>{d.name}</option>
+            <option value="">All cost centers</option>
+            {costCenters.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </Select>
         </div>
@@ -788,14 +787,14 @@ export const Supply: React.FC = () => {
         </Dialog>
       )}
       
-      {/* Supply by Department chart */}
+      {/* Supply by Cost Center chart */}
       {supplies.length > 0 && (
         <Card className={styles.chartCard}>
           <div className={styles.chartCardHeader}>
-            <Title3 style={{ margin: 0 }}>Supply by Department</Title3>
+            <Title3 style={{ margin: 0 }}>Supply by Cost Center</Title3>
           </div>
           <div className={styles.chartCardBody}>
-            <BreakdownChart rows={deptBreakdown} supplyOnly />
+            <BreakdownChart rows={ccBreakdown} supplyOnly />
           </div>
         </Card>
       )}
@@ -811,7 +810,7 @@ export const Supply: React.FC = () => {
                   <Checkbox checked={allSelected} onChange={toggleSelectAll} />
                 </TableHeaderCell>
               )}
-              <TableHeaderCell>Department</TableHeaderCell>
+              <TableHeaderCell>Cost Center</TableHeaderCell>
               <TableHeaderCell>Resource</TableHeaderCell>
               <TableHeaderCell>Project</TableHeaderCell>
               <TableHeaderCell>Period</TableHeaderCell>
@@ -847,24 +846,24 @@ export const Supply: React.FC = () => {
               </TableRow>
             ) : (
               <>
-                {groupedSupplies.map(dept => (
-                  <React.Fragment key={dept.departmentId || '__none__'}>
+                {groupedSupplies.map(cc => (
+                  <React.Fragment key={cc.costCenterId || '__none__'}>
                     <TableRow className={styles.groupHeader}>
                       <TableCell colSpan={totalColumns}>
-                        {dept.departmentName}
+                        {cc.costCenterName}
                         <Badge appearance="outline" style={{ marginLeft: 8 }}>
-                          {dept.supplies.length} lines
+                          {cc.supplies.length} lines
                         </Badge>
                       </TableCell>
                     </TableRow>
-                    {dept.supplies.map(s => (
+                    {cc.supplies.map(s => (
                       <TableRow key={s.id}>
                         {canEdit && (
                           <TableCell>
                             <Checkbox checked={selectedIds.includes(s.id)} onChange={() => toggleSelect(s.id)} />
                           </TableCell>
                         )}
-                        <TableCell>{s.department_name || '-'}</TableCell>
+                        <TableCell>{s.cost_center_name || '-'}</TableCell>
                         <TableCell>{s.resource_name || 'Unknown'}</TableCell>
                         <TableCell>{s.project_name || '—'}</TableCell>
                         <TableCell>{s.year}-{String(s.month).padStart(2, '0')}</TableCell>

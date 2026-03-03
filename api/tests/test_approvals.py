@@ -29,20 +29,10 @@ def test_approval_not_found(client):
 
 def test_full_approval_workflow(client, db):
     """Test complete approval workflow: sign → RO approve → Director approve."""
-    from api.app.models.core import User, Department, CostCenter, Resource, Period, Project
-    
+    from api.app.models.core import User, CostCenter, Resource, Period, Project
+
     tenant_id = "test-tenant"
-    
-    # Create department
-    dept = Department(
-        id="dept-1",
-        tenant_id=tenant_id,
-        name="Test Dept",
-        code="TD",
-    )
-    db.add(dept)
-    
-    # Create RO user
+
     ro_user = User(
         id="ro-user-1",
         tenant_id=tenant_id,
@@ -50,11 +40,9 @@ def test_full_approval_workflow(client, db):
         email="ro@test.com",
         display_name="RO User",
         role="RO",
-        department_id="dept-1",
     )
     db.add(ro_user)
-    
-    # Create Director user (different from RO)
+
     director_user = User(
         id="director-user-1",
         tenant_id=tenant_id,
@@ -62,18 +50,16 @@ def test_full_approval_workflow(client, db):
         email="director@test.com",
         display_name="Director User",
         role="Director",
-        department_id="dept-1",
     )
     db.add(director_user)
-    
-    # Create cost center with RO
+
     cost_center = CostCenter(
         id="cc-1",
         tenant_id=tenant_id,
         name="Test CC",
         code="TCC",
-        department_id="dept-1",
         ro_user_id="ro-user-1",
+        director_user_id="director-user-1",
     )
     db.add(cost_center)
     
@@ -175,43 +161,30 @@ def test_full_approval_workflow(client, db):
 
 def test_skip_director_when_ro_equals_director(client, db):
     """Test that Director step is skipped when RO is also the Director."""
-    from api.app.models.core import User, Department, CostCenter, Resource, Period, Project
-    
+    from api.app.models.core import User, CostCenter, Resource, Period, Project
+
     tenant_id = "test-tenant"
-    
-    # Create department
-    dept = Department(
-        id="dept-2",
-        tenant_id=tenant_id,
-        name="Test Dept 2",
-        code="TD2",
-    )
-    db.add(dept)
-    
-    # Create user who is both RO and Director
+
     ro_director_user = User(
         id="ro-director-user",
         tenant_id=tenant_id,
         object_id="ro-director-oid",
         email="ro-director@test.com",
         display_name="RO Director User",
-        role="Director",  # Has Director role
-        department_id="dept-2",
+        role="Director",
     )
     db.add(ro_director_user)
-    
-    # Create cost center where RO = Director
+
     cost_center = CostCenter(
         id="cc-2",
         tenant_id=tenant_id,
         name="Test CC 2",
         code="TCC2",
-        department_id="dept-2",
         ro_user_id="ro-director-user",
+        director_user_id="ro-director-user",
     )
     db.add(cost_center)
 
-    # Create employee user (needed for ownership check)
     employee_user = User(
         id="employee-user-2",
         tenant_id=tenant_id,
@@ -219,7 +192,6 @@ def test_skip_director_when_ro_equals_director(client, db):
         email="employee@test.com",
         display_name="Employee User 2",
         role="Employee",
-        department_id="dept-2",
     )
     db.add(employee_user)
 
@@ -305,20 +277,11 @@ def test_skip_director_when_ro_equals_director(client, db):
 
 def test_rejection_sets_instance_rejected(client, db):
     """Test that rejection sets the instance status to rejected."""
-    from api.app.models.core import User, Department
+    from api.app.models.core import User
     from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalStatus, StepStatus
-    
+
     tenant_id = "test-tenant"
-    
-    # Create department and RO user
-    dept = Department(
-        id="dept-3",
-        tenant_id=tenant_id,
-        name="Test Dept 3",
-        code="TD3",
-    )
-    db.add(dept)
-    
+
     ro_user = User(
         id="ro-user-3",
         tenant_id=tenant_id,
@@ -326,7 +289,6 @@ def test_rejection_sets_instance_rejected(client, db):
         email="ro3@test.com",
         display_name="RO User 3",
         role="RO",
-        department_id="dept-3",
     )
     db.add(ro_user)
     

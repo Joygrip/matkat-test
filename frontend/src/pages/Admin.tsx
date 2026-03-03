@@ -36,7 +36,6 @@ import {
   AddRegular,
   EditRegular,
   DeleteRegular,
-  BuildingRegular,
   OrganizationRegular,
   FolderRegular,
   PersonRegular,
@@ -44,7 +43,7 @@ import {
   CalendarRegular,
   SettingsRegular,
 } from '@fluentui/react-icons';
-import { adminApi, Department, CostCenter, Project, Resource, Placeholder, Holiday, Setting } from '../api/admin';
+import { adminApi, CostCenter, Project, Resource, Placeholder, Holiday, Setting } from '../api/admin';
 import { useToast } from '../hooks/useToast';
 import { useAuth } from '../auth/AuthProvider';
 import { config } from '../config';
@@ -80,21 +79,18 @@ const useStyles = makeStyles({
   },
 });
 
-type TabValue = 'departments' | 'cost-centers' | 'projects' | 'resources' | 'placeholders' | 'holidays' | 'settings';
+type TabValue = 'cost-centers' | 'projects' | 'resources' | 'placeholders' | 'holidays' | 'settings';
 
 export function Admin() {
   const styles = useStyles();
   const { showSuccess, showApiError } = useToast();
   const { user } = useAuth();
-  const [selectedTab, setSelectedTab] = useState<TabValue>('departments');
+  const [selectedTab, setSelectedTab] = useState<TabValue>('cost-centers');
   const [loading, setLoading] = useState(true);
   
-  // Finance and Admin can manage master data; Finance cannot manage Settings
   const canManageMasterData = user?.role === 'Admin' || user?.role === 'Finance';
   const canManageSettings = user?.role === 'Admin';
   
-  // Data states
-  const [departments, setDepartments] = useState<Department[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
@@ -117,16 +113,8 @@ export function Admin() {
     setLoading(true);
     try {
       switch (selectedTab) {
-        case 'departments':
-          setDepartments(await adminApi.listDepartments());
-          break;
         case 'cost-centers':
-          const [ccData, deptData] = await Promise.all([
-            adminApi.listCostCenters(),
-            adminApi.listDepartments(),
-          ]);
-          setCostCenters(ccData);
-          setDepartments(deptData);
+          setCostCenters(await adminApi.listCostCenters());
           break;
         case 'projects':
           setProjects(await adminApi.listProjects());
@@ -178,18 +166,11 @@ export function Admin() {
   const handleSave = async () => {
     try {
       switch (selectedTab) {
-        case 'departments':
-          if (editItem) {
-            await adminApi.updateDepartment((editItem as Department).id, formData as Partial<Department>);
-          } else {
-            await adminApi.createDepartment(formData as { code: string; name: string });
-          }
-          break;
         case 'cost-centers':
           if (editItem) {
             await adminApi.updateCostCenter((editItem as CostCenter).id, formData as Partial<CostCenter>);
           } else {
-            await adminApi.createCostCenter(formData as { department_id: string; code: string; name: string });
+            await adminApi.createCostCenter(formData as { code: string; name: string; ro_user_id?: string; director_user_id?: string });
           }
           break;
         case 'projects':
@@ -258,9 +239,6 @@ export function Admin() {
     
     try {
       switch (selectedTab) {
-        case 'departments':
-          await adminApi.deleteDepartment((item as Department).id);
-          break;
         case 'cost-centers':
           await adminApi.deleteCostCenter((item as CostCenter).id);
           break;
@@ -296,41 +274,6 @@ export function Admin() {
     if (loading) return <Spinner label="Loading..." />;
     
     switch (selectedTab) {
-      case 'departments':
-        return (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell>Code</TableHeaderCell>
-                <TableHeaderCell>Name</TableHeaderCell>
-                <TableHeaderCell>Status</TableHeaderCell>
-                <TableHeaderCell>Actions</TableHeaderCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {departments.map((dept) => (
-                <TableRow key={dept.id}>
-                  <TableCell>{dept.code}</TableCell>
-                  <TableCell>{dept.name}</TableCell>
-                  <TableCell>
-                    <Badge color={dept.is_active ? 'success' : 'danger'}>
-                      {dept.is_active ? 'Active' : 'Inactive'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {canManageMasterData && (
-                      <>
-                        <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(dept)} />
-                        <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(dept)} />
-                      </>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        );
-      
       case 'cost-centers':
         return (
           <Table>
@@ -338,7 +281,6 @@ export function Admin() {
               <TableRow>
                 <TableHeaderCell>Code</TableHeaderCell>
                 <TableHeaderCell>Name</TableHeaderCell>
-                <TableHeaderCell>Department</TableHeaderCell>
                 <TableHeaderCell>Status</TableHeaderCell>
                 <TableHeaderCell>Actions</TableHeaderCell>
               </TableRow>
@@ -348,7 +290,6 @@ export function Admin() {
                 <TableRow key={cc.id}>
                   <TableCell>{cc.code}</TableCell>
                   <TableCell>{cc.name}</TableCell>
-                  <TableCell>{departments.find(d => d.id === cc.department_id)?.name || '-'}</TableCell>
                   <TableCell>
                     <Badge color={cc.is_active ? 'success' : 'danger'}>
                       {cc.is_active ? 'Active' : 'Inactive'}
@@ -570,42 +511,9 @@ export function Admin() {
   
   const renderDialogForm = () => {
     switch (selectedTab) {
-      case 'departments':
-        return (
-          <>
-            <div className={styles.dialogField}>
-              <Label required>Code</Label>
-              <Input
-                value={String(formData.code || '')}
-                onChange={(_, d) => setFormData({ ...formData, code: d.value })}
-              />
-            </div>
-            <div className={styles.dialogField}>
-              <Label required>Name</Label>
-              <Input
-                value={String(formData.name || '')}
-                onChange={(_, d) => setFormData({ ...formData, name: d.value })}
-              />
-            </div>
-          </>
-        );
-      
       case 'cost-centers':
         return (
           <>
-            <div className={styles.dialogField}>
-              <Label required>Department</Label>
-              <select
-                value={String(formData.department_id || '')}
-                onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
-                style={{ padding: '8px', borderRadius: '4px' }}
-              >
-                <option value="">Select Department</option>
-                {departments.map((dept) => (
-                  <option key={dept.id} value={dept.id}>{dept.name}</option>
-                ))}
-              </select>
-            </div>
             <div className={styles.dialogField}>
               <Label required>Code</Label>
               <Input
@@ -808,7 +716,6 @@ export function Admin() {
   };
   
   const tabLabels: Record<TabValue, string> = {
-    'departments': 'Departments',
     'cost-centers': 'Cost Centers',
     'projects': 'Projects',
     'resources': 'Resources',
@@ -821,7 +728,6 @@ export function Admin() {
     <div className={styles.container}>
       <Card className={styles.card}>
         <TabList selectedValue={selectedTab} onTabSelect={handleTabSelect}>
-          <Tab value="departments" icon={<BuildingRegular />}>Departments</Tab>
           <Tab value="cost-centers" icon={<OrganizationRegular />}>Cost Centers</Tab>
           <Tab value="projects" icon={<FolderRegular />}>Projects</Tab>
           <Tab value="resources" icon={<PersonRegular />}>Resources</Tab>
@@ -911,7 +817,6 @@ export function Admin() {
                   <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: '120px 1fr' }}>
                     <span style={{ fontWeight: 600 }}>Name</span><span>{(detailItem as Placeholder).name}</span>
                     <span style={{ fontWeight: 600 }}>Cost Center</span><span>{(detailItem as Placeholder).cost_center_name ?? '-'}</span>
-                    <span style={{ fontWeight: 600 }}>Department</span><span>{(detailItem as Placeholder).department_name ?? '-'}</span>
                     <span style={{ fontWeight: 600 }}>Description</span><span>{(detailItem as Placeholder).description ?? '-'}</span>
                     <span style={{ fontWeight: 600 }}>Skill profile</span><span>{(detailItem as Placeholder).skill_profile ?? '-'}</span>
                     <span style={{ fontWeight: 600 }}>Estimated cost</span><span>{(detailItem as Placeholder).estimated_cost != null ? (detailItem as Placeholder).estimated_cost : '-'}</span>

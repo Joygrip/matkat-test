@@ -4,7 +4,7 @@
  * PM/Finance: Create and edit demand lines (project + resource/placeholder + FTE)
  * Admin: Read-only view
  * 
- * Features: Department/CC filters, grouped table, placeholder-by-department dialog
+ * Features: Cost center filters, grouped table, placeholder picker
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -40,7 +40,7 @@ import { Add24Regular, Delete24Regular, CalendarRegular, Edit24Regular } from '@
 import { BreakdownChart, BreakdownRow } from '../components/BreakdownChart';
 import { planningApi, DemandLine, CreateDemandLine } from '../api/planning';
 import { usePeriod } from '../contexts/PeriodContext';
-import { lookupsApi, Project, Resource, Placeholder, Department } from '../api/lookups';
+import { lookupsApi, Project, Resource, Placeholder, CostCenter } from '../api/lookups';
 import { useToast } from '../hooks/useToast';
 import { formatApiError } from '../utils/errors';
 import { useAuth } from '../auth/AuthProvider';
@@ -180,25 +180,25 @@ const useStyles = makeStyles({
 });
 
 interface GroupedDemands {
-  departmentId: string | undefined;
-  departmentName: string;
+  costCenterId: string | undefined;
+  costCenterName: string;
   demands: DemandLine[];
 }
 
-function groupDemandsByDept(demands: DemandLine[]): GroupedDemands[] {
-  const deptMap = new Map<string, GroupedDemands>();
+function groupDemandsByCostCenter(demands: DemandLine[]): GroupedDemands[] {
+  const ccMap = new Map<string, GroupedDemands>();
 
   for (const d of demands) {
-    const deptKey = d.department_id || '__none__';
-    const deptName = d.department_name || 'Unassigned';
-    if (!deptMap.has(deptKey)) {
-      deptMap.set(deptKey, { departmentId: d.department_id, departmentName: deptName, demands: [] });
+    const ccKey = d.cost_center_id || '__none__';
+    const ccName = d.cost_center_name || 'Unassigned';
+    if (!ccMap.has(ccKey)) {
+      ccMap.set(ccKey, { costCenterId: d.cost_center_id, costCenterName: ccName, demands: [] });
     }
-    deptMap.get(deptKey)!.demands.push(d);
+    ccMap.get(ccKey)!.demands.push(d);
   }
 
-  const result = Array.from(deptMap.values());
-  result.sort((a, b) => a.departmentName.localeCompare(b.departmentName));
+  const result = Array.from(ccMap.values());
+  result.sort((a, b) => a.costCenterName.localeCompare(b.costCenterName));
   return result;
 }
 
@@ -213,8 +213,8 @@ export const Demand: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
   const [placeholders, setPlaceholders] = useState<Placeholder[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [selectedDept, setSelectedDept] = useState<string>('');
+  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
+  const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -225,10 +225,10 @@ export const Demand: React.FC = () => {
     project_id: '',
     fte_percent: 50,
   });
-  const [editId, setEditId] = useState<string | null>(null); // Track editing line
+  const [editId, setEditId] = useState<string | null>(null);
   const [useResource, setUseResource] = useState(true);
-  const [dialogDept, setDialogDept] = useState<string>('');
   const [filteredPlaceholders, setFilteredPlaceholders] = useState<Placeholder[]>([]);
+  const [dialogCostCenterId, setDialogCostCenterId] = useState<string>('');
   
   // Selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -250,7 +250,7 @@ export const Demand: React.FC = () => {
 
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-  const groupedDemands = useMemo(() => groupDemandsByDept(demands), [demands]);
+  const groupedDemands = useMemo(() => groupDemandsByCostCenter(demands), [demands]);
   const totalColumns = (user?.role === 'Finance' || user?.role === 'PM') ? 7 : 6;
 
   // Breakdown chart data: demand grouped by project
@@ -271,18 +271,17 @@ export const Demand: React.FC = () => {
   
   useEffect(() => {
     if (selectedPeriodId) {
-      loadDemands(selectedPeriodId, selectedDept);
+      loadDemands(selectedPeriodId, selectedCostCenterId || undefined);
     }
-  }, [selectedPeriodId, selectedDept]);
+  }, [selectedPeriodId, selectedCostCenterId]);
 
-  // When dialog dept changes, filter placeholders
   useEffect(() => {
-    if (dialogDept) {
-      lookupsApi.listPlaceholders(dialogDept).then(setFilteredPlaceholders);
+    if (dialogCostCenterId) {
+      lookupsApi.listPlaceholders(dialogCostCenterId).then(setFilteredPlaceholders);
     } else {
       setFilteredPlaceholders(placeholders);
     }
-  }, [dialogDept, placeholders]);
+  }, [dialogCostCenterId, placeholders]);
   
   useEffect(() => {
     if (isDialogOpen && addMode === 'bulk') {
@@ -295,17 +294,17 @@ export const Demand: React.FC = () => {
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const [projectsData, resourcesData, placeholdersData, deptsData] = await Promise.all([
+      const [projectsData, resourcesData, placeholdersData, costCentersData] = await Promise.all([
         lookupsApi.listProjects(),
         lookupsApi.listResources(),
         lookupsApi.listPlaceholders(),
-        lookupsApi.listDepartments(),
+        lookupsApi.listCostCenters(),
       ]);
       
       setProjects(projectsData);
       setResources(resourcesData);
       setPlaceholders(placeholdersData);
-      setDepartments(deptsData);
+      setCostCenters(costCentersData);
     } catch (err: unknown) {
       setError(formatApiError(err, 'Failed to load data'));
     } finally {
@@ -313,12 +312,12 @@ export const Demand: React.FC = () => {
     }
   };
   
-  const loadDemands = async (periodId?: string, deptId?: string) => {
+  const loadDemands = async (periodId?: string, costCenterId?: string) => {
     const pid = periodId || selectedPeriodId;
     if (!pid) return;
     try {
       const data = await planningApi.getDemandLines(pid, {
-        departmentId: deptId ?? (selectedDept || undefined),
+        costCenterId: costCenterId ?? (selectedCostCenterId || undefined),
       });
       setDemands(data);
     } catch (err: unknown) {
@@ -365,7 +364,7 @@ export const Demand: React.FC = () => {
       setIsDialogOpen(false);
       loadDemands();
       setFormData({ period_id: selectedPeriodId, project_id: '', fte_percent: 50 });
-      setDialogDept('');
+      setDialogCostCenterId('');
     } catch (err: any) {
       showApiError(err, 'Failed to create demand line');
     }
@@ -383,7 +382,7 @@ export const Demand: React.FC = () => {
       month: d.month,
     });
     setUseResource(!!d.resource_id);
-    setDialogDept(d.department_id || '');
+    setDialogCostCenterId(d.cost_center_id || '');
     setIsDialogOpen(true);
   };
 
@@ -430,7 +429,7 @@ export const Demand: React.FC = () => {
       setEditId(null);
       loadDemands();
       setFormData({ period_id: selectedPeriodId, project_id: '', fte_percent: 50 });
-      setDialogDept('');
+      setDialogCostCenterId('');
     } catch (err: any) {
       showApiError(err, 'Failed to update demand line');
     }
@@ -559,7 +558,7 @@ export const Demand: React.FC = () => {
       <div className={styles.header}>
         <div className={styles.headerContent}>
           <h1 className={styles.pageTitle}>Demand Planning</h1>
-          <p className={styles.pageSubtitle}>Manage project resource demand by department</p>
+          <p className={styles.pageSubtitle}>Manage project resource demand by cost center</p>
         </div>
         <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
           {!isLocked && canEdit && (
@@ -581,14 +580,14 @@ export const Demand: React.FC = () => {
       {/* Filters bar */}
       <div className={styles.filters}>
         <div className={styles.filterGroup}>
-          <span className={styles.filterLabel}>Department</span>
+          <span className={styles.filterLabel}>Cost Center</span>
           <Select
-            value={selectedDept}
-            onChange={(_, data) => setSelectedDept(data.value)}
+            value={selectedCostCenterId}
+            onChange={(_, data) => setSelectedCostCenterId(data.value || '')}
           >
-            <option value="">All departments</option>
-            {departments.map(d => (
-              <option key={d.id} value={d.id}>{d.name}</option>
+            <option value="">All cost centers</option>
+            {costCenters.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </Select>
         </div>
@@ -672,7 +671,7 @@ export const Demand: React.FC = () => {
                   <Checkbox checked={allSelected} onChange={toggleSelectAll} />
                 </TableHeaderCell>
               )}
-              <TableHeaderCell>Department</TableHeaderCell>
+              <TableHeaderCell>Cost Center</TableHeaderCell>
               <TableHeaderCell>Project</TableHeaderCell>
               <TableHeaderCell>Resource</TableHeaderCell>
               <TableHeaderCell>Period</TableHeaderCell>
@@ -707,25 +706,24 @@ export const Demand: React.FC = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              groupedDemands.map(dept => (
-                <React.Fragment key={dept.departmentId || '__none__'}>
-                  {/* Department group header */}
+              groupedDemands.map(cc => (
+                <React.Fragment key={cc.costCenterId || '__none__'}>
                   <TableRow className={styles.groupHeader}>
                     <TableCell colSpan={totalColumns}>
-                      {dept.departmentName}
+                      {cc.costCenterName}
                       <Badge appearance="outline" style={{ marginLeft: 8 }}>
-                        {dept.demands.length} lines
+                        {cc.demands.length} lines
                       </Badge>
                     </TableCell>
                   </TableRow>
-                  {dept.demands.map(d => (
+                  {cc.demands.map(d => (
                     <TableRow key={d.id}>
                       {canEdit && (
                         <TableCell>
                           <Checkbox checked={selectedIds.includes(d.id)} onChange={() => toggleSelect(d.id)} />
                         </TableCell>
                       )}
-                      <TableCell>{d.department_name || '-'}</TableCell>
+                      <TableCell>{d.cost_center_name || '-'}</TableCell>
                       <TableCell>{d.project_name || 'Unknown'}</TableCell>
                       <TableCell>
                         {d.resource_name ? (

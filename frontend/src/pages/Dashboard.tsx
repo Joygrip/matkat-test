@@ -302,11 +302,9 @@ export function Dashboard() {
   const [periodOptions, setPeriodOptions] = useState<Period[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenter[]>([]);
   const [projectOptions, setProjectOptions] = useState<Project[]>([]);
-  const [departmentOptions, setDepartmentOptions] = useState<any[]>([]);
   const [selectedPeriodIds, setSelectedPeriodIds] = useState<string[]>([]);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [selectedDepartmentId, setSelectedDepartmentId] = useState<string | null>(null);
 
   // Cost center lookup map
   const [costCenterMap, setCostCenterMap] = useState<Record<string, string>>({});
@@ -332,13 +330,6 @@ export function Dashboard() {
   useEffect(() => {
     setPeriodOptions(periods);
   }, [periods]);
-
-  // Load department options for filter (use lookupsApi for all roles)
-  useEffect(() => {
-    lookupsApi.listDepartments?.()
-      .then((departments) => setDepartmentOptions(departments))
-      .catch(() => setDepartmentOptions([]));
-  }, []);
 
   // Load cost center options for filter (use lookupsApi for all roles)
   useEffect(() => {
@@ -371,9 +362,6 @@ export function Dashboard() {
   };
   const handleCostCenterChange = (costCenterId: string | null) => {
     setSelectedCostCenterId(costCenterId);
-  };
-  const handleDepartmentChange = (departmentId: string | null) => {
-    setSelectedDepartmentId(departmentId);
   };
   const handleProjectChange = (projectId: string | null) => {
     setSelectedProjectId(projectId);
@@ -497,9 +485,6 @@ export function Dashboard() {
     if (selectedCostCenterId) {
       filtered = filtered.filter(row => row.cost_center_id === selectedCostCenterId);
     }
-    if (selectedDepartmentId) {
-      filtered = filtered.filter(row => row.department_id === selectedDepartmentId);
-    }
     // Build chart data as before
     const periodMap = new Map<string, { year: number; month: number }>();
     const deptMap = new Map<string, string>();
@@ -517,7 +502,7 @@ export function Dashboard() {
       return row;
     });
     return data;
-  }, [aggByCostCenter, selectedPeriodIds, selectedCostCenterId, selectedDepartmentId, monthNames, costCenterMap]);
+  }, [aggByCostCenter, selectedPeriodIds, selectedCostCenterId, monthNames, costCenterMap]);
 
   /* ── Loading skeleton ── */
 
@@ -606,18 +591,6 @@ export function Dashboard() {
               ))}
             </Select>
           </div>
-          <div className={styles.filterGroup}>
-            <span className={styles.filterLabel}>Department</span>
-            <Select
-              value={selectedDepartmentId || ''}
-              onChange={(_, data) => handleDepartmentChange(data.value || null)}
-            >
-              <option value="">All departments</option>
-              {departmentOptions.map(d => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </Select>
-          </div>
         </div>
       </Card>
 
@@ -644,7 +617,7 @@ export function Dashboard() {
         </Card>
       </div>
 
-      {/* ── Grouped Bar Chart: Departments ── */}
+      {/* ── Grouped Bar Chart: Cost Centers ── */}
       <div className={styles.section}>
         <Card className={styles.chartCard}>
           <div className={styles.chartCardHeader}>

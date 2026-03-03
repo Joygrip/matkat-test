@@ -53,7 +53,7 @@ import {
 import {
   consolidationApi,
   ConsolidationDashboard,
-  DashboardDepartment,
+  DashboardCostCenter,
   Snapshot,
 } from '../api/consolidation';
 import { usePeriod } from '../contexts/PeriodContext';
@@ -385,33 +385,33 @@ function ApprovalBadge({ status }: { status: string }) {
   }
 }
 
-function DepartmentCard({ dept }: { dept: DashboardDepartment }) {
+function CostCenterCard({ cc }: { cc: DashboardCostCenter }) {
   const styles = useStyles();
-  const totalResources = dept.cost_centers.reduce((s, cc) => s + cc.resources.length, 0);
-  const totalPlaceholders = dept.cost_centers.reduce((s, cc) => s + cc.placeholders.length, 0);
+  const totalResources = cc.resources.length;
+  const totalPlaceholders = cc.placeholders.length;
 
   return (
     <Card className={styles.deptCard}>
       <Accordion collapsible>
-        <AccordionItem value="dept">
+        <AccordionItem value="cc">
           <AccordionHeader>
             <div className={styles.deptHeader}>
               <div className={styles.deptName}>
                 <BuildingRegular style={{ fontSize: 20, color: tokens.colorBrandForeground1 }} />
-                <Title3>{dept.department_name}</Title3>
+                <Title3>{cc.cost_center_name}</Title3>
               </div>
               <div className={styles.deptStats}>
                 <div className={styles.deptStat}>
                   <Body2 style={{ fontWeight: tokens.fontWeightSemibold }}>Demand</Body2>
-                  <Body1>{dept.total_demand_fte}%</Body1>
+                  <Body1>{cc.total_demand_fte}%</Body1>
                 </div>
                 <div className={styles.deptStat}>
                   <Body2 style={{ fontWeight: tokens.fontWeightSemibold }}>Supply</Body2>
-                  <Body1>{dept.total_supply_fte}%</Body1>
+                  <Body1>{cc.total_supply_fte}%</Body1>
                 </div>
                 <div className={styles.deptStat}>
                   <Body2 style={{ fontWeight: tokens.fontWeightSemibold }}>Gap</Body2>
-                  <GapBadge gap={dept.gap_fte} />
+                  <GapBadge gap={cc.gap_fte} />
                 </div>
                 <Badge appearance="outline" size="small">
                   {totalResources} resource{totalResources !== 1 ? 's' : ''}
@@ -421,42 +421,36 @@ function DepartmentCard({ dept }: { dept: DashboardDepartment }) {
             </div>
           </AccordionHeader>
           <AccordionPanel>
-            {dept.cost_centers.map((cc, idx) => (
-              <div key={cc.cost_center_id || idx} className={styles.ccSection}>
-                <div className={styles.ccName}>
-                  <PeopleRegular style={{ fontSize: 16, marginRight: 4 }} />
-                  {cc.cost_center_name}
+            <div className={styles.ccSection}>
+              {cc.resources.map(r => (
+                <div key={r.resource_id} className={styles.resourceRow}>
+                  <Body1>{r.resource_name}</Body1>
+                  <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
+                    <Body2>Demand: {r.demand_fte}%</Body2>
+                    <Body2>Supply: {r.supply_fte}%</Body2>
+                    <GapBadge gap={r.gap_fte} />
+                    <GapStatusBadge status={r.status} />
+                  </div>
                 </div>
-                {cc.resources.map(r => (
-                  <div key={r.resource_id} className={styles.resourceRow}>
-                    <Body1>{r.resource_name}</Body1>
-                    <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
-                      <Body2>Demand: {r.demand_fte}%</Body2>
-                      <Body2>Supply: {r.supply_fte}%</Body2>
-                      <GapBadge gap={r.gap_fte} />
-                      <GapStatusBadge status={r.status} />
-                    </div>
+              ))}
+              {cc.placeholders.map(ph => (
+                <div key={ph.placeholder_id} className={styles.placeholderRow}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+                    <Badge appearance="outline" color="warning" size="small">TBH</Badge>
+                    <Body1>{ph.placeholder_name}</Body1>
                   </div>
-                ))}
-                {cc.placeholders.map(ph => (
-                  <div key={ph.placeholder_id} className={styles.placeholderRow}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
-                      <Badge appearance="outline" color="warning" size="small">TBH</Badge>
-                      <Body1>{ph.placeholder_name}</Body1>
-                    </div>
-                    <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
-                      <Body2>Demand: {ph.demand_fte}%</Body2>
-                      <Body2 style={{ color: tokens.colorNeutralForeground3 }}>{ph.project_name}</Body2>
-                    </div>
+                  <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
+                    <Body2>Demand: {ph.demand_fte}%</Body2>
+                    <Body2 style={{ color: tokens.colorNeutralForeground3 }}>{ph.project_name}</Body2>
                   </div>
-                ))}
-                {cc.resources.length === 0 && cc.placeholders.length === 0 && (
-                  <div style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
-                    <Body2>No resources or placeholders in this cost center.</Body2>
-                  </div>
-                )}
-              </div>
-            ))}
+                </div>
+              ))}
+              {cc.resources.length === 0 && cc.placeholders.length === 0 && (
+                <div style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
+                  <Body2>No resources or placeholders in this cost center.</Body2>
+                </div>
+              )}
+            </div>
           </AccordionPanel>
         </AccordionItem>
       </Accordion>
@@ -630,7 +624,7 @@ export const Finance: React.FC = () => {
       <div className={styles.header}>
         <div className={styles.headerContent}>
           <h1 className={styles.pageTitle}>Finance</h1>
-          <p className={styles.pageSubtitle}>Department gaps, employee actuals, and snapshot management</p>
+          <p className={styles.pageSubtitle}>Cost center gaps, employee actuals, and snapshot management</p>
         </div>
 
         <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
@@ -695,8 +689,8 @@ export const Finance: React.FC = () => {
           <div className={styles.sectionTitle}>Overview</div>
           <div className={styles.summaryBar}>
             <div className={styles.summaryItem}>
-              <div className={styles.summaryNumber}>{dashboard.summary.total_departments}</div>
-              <div className={styles.summaryLabel}>Departments</div>
+              <div className={styles.summaryNumber}>{dashboard.summary.total_cost_centers}</div>
+              <div className={styles.summaryLabel}>Cost Centers</div>
             </div>
             <div className={styles.summaryItem}>
               <div className={styles.summaryNumber}>{dashboard.summary.total_demand_fte}%</div>
@@ -737,9 +731,9 @@ export const Finance: React.FC = () => {
           </div>
 
           <div className={styles.sectionTitle}>Resource overview</div>
-          {dashboard.departments.length > 0 ? (
-            dashboard.departments.map((dept, i) => (
-              <DepartmentCard key={dept.department_id || i} dept={dept} />
+          {dashboard.cost_centers.length > 0 ? (
+            dashboard.cost_centers.map((cc, i) => (
+              <CostCenterCard key={cc.cost_center_id || i} cc={cc} />
             ))
           ) : (
             <Card className={styles.card}>
@@ -759,7 +753,7 @@ export const Finance: React.FC = () => {
                 <TableHeader>
                   <TableRow>
                     <TableHeaderCell>Resource</TableHeaderCell>
-                    <TableHeaderCell>Department</TableHeaderCell>
+                    <TableHeaderCell>Cost Center</TableHeaderCell>
                     <TableHeaderCell>Total Demand</TableHeaderCell>
                   </TableRow>
                 </TableHeader>
@@ -767,7 +761,7 @@ export const Finance: React.FC = () => {
                   {dashboard.over_allocations.map((oa, i) => (
                     <TableRow key={i}>
                       <TableCell>{oa.resource_name}</TableCell>
-                      <TableCell>{oa.department_name || '-'}</TableCell>
+                      <TableCell>{oa.cost_center_name || '-'}</TableCell>
                       <TableCell>
                         <Badge appearance="filled" color="danger">{oa.total_demand_fte}%</Badge>
                       </TableCell>

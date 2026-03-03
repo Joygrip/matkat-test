@@ -4,39 +4,12 @@ from typing import Optional
 from pydantic import BaseModel
 
 
-# Department schemas
-class DepartmentBase(BaseModel):
-    code: str
-    name: str
-
-
-class DepartmentCreate(DepartmentBase):
-    pass
-
-
-class DepartmentUpdate(BaseModel):
-    code: Optional[str] = None
-    name: Optional[str] = None
-    is_active: Optional[bool] = None
-
-
-class DepartmentResponse(DepartmentBase):
-    id: str
-    tenant_id: str
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-    
-    class Config:
-        from_attributes = True
-
-
 # Cost Center schemas
 class CostCenterBase(BaseModel):
-    department_id: str
     code: str
     name: str
     ro_user_id: Optional[str] = None
+    director_user_id: Optional[str] = None
 
 
 class CostCenterCreate(CostCenterBase):
@@ -44,10 +17,10 @@ class CostCenterCreate(CostCenterBase):
 
 
 class CostCenterUpdate(BaseModel):
-    department_id: Optional[str] = None
     code: Optional[str] = None
     name: Optional[str] = None
     ro_user_id: Optional[str] = None
+    director_user_id: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -143,7 +116,6 @@ class ResourceResponse(ResourceBase):
 # Placeholder schemas - one placeholder per cost center; cost_center_id required
 class PlaceholderBase(BaseModel):
     name: str
-    department_id: Optional[str] = None
     cost_center_id: str  # Required; one placeholder per cost center
     description: Optional[str] = None
     skill_profile: Optional[str] = None
@@ -171,9 +143,7 @@ class PlaceholderUpdate(BaseModel):
 class PlaceholderResponse(PlaceholderBase):
     id: str
     tenant_id: str
-    department_id: Optional[str] = None
     cost_center_id: str
-    department_name: Optional[str] = None
     cost_center_name: Optional[str] = None
     is_active: bool
     created_at: datetime

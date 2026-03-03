@@ -3,15 +3,15 @@
 
 # ============== ROLE GUARDS ==============
 
-def test_admin_can_create_department(client, admin_headers, db):
-    """Admin can create a department."""
+def test_admin_can_create_cost_center(client, admin_headers, db):
+    """Admin can create a cost center."""
     response = client.post(
-        "/admin/departments",
-        json={"code": "IT", "name": "Information Technology"},
+        "/admin/cost-centers",
+        json={"code": "CC-IT", "name": "Information Technology"},
         headers=admin_headers,
     )
     assert response.status_code == 200
-    assert response.json()["code"] == "IT"
+    assert response.json()["code"] == "CC-IT"
 
 
 def test_finance_can_create_project(client, finance_headers, db):
@@ -70,39 +70,33 @@ def test_pm_cannot_create_project(client, pm_headers, db):
     assert response.status_code == 403
 
 
-def test_finance_can_read_departments(client, admin_headers, finance_headers, db):
-    """Finance can read departments."""
-    # Create as admin
+def test_finance_can_read_cost_centers(client, admin_headers, finance_headers, db):
+    """Finance can read cost centers."""
     client.post(
-        "/admin/departments",
-        json={"code": "HR", "name": "Human Resources"},
+        "/admin/cost-centers",
+        json={"code": "CC-HR", "name": "Human Resources"},
         headers=admin_headers,
     )
-    
-    # Read as finance
-    response = client.get("/admin/departments", headers=finance_headers)
+    response = client.get("/admin/cost-centers", headers=finance_headers)
     assert response.status_code == 200
     assert len(response.json()) >= 1
 
 
-def test_employee_cannot_read_departments(client, employee_headers, db):
-    """Employee cannot access admin endpoints."""
-    response = client.get("/admin/departments", headers=employee_headers)
+def test_employee_cannot_read_cost_centers(client, employee_headers, db):
+    """Employee cannot access admin cost centers endpoint."""
+    response = client.get("/admin/cost-centers", headers=employee_headers)
     assert response.status_code == 403
 
 
 # ============== TENANT ISOLATION ==============
 
-def test_departments_are_tenant_isolated(client, admin_headers, db):
-    """Departments are isolated by tenant."""
-    # Create in tenant 1
+def test_cost_centers_are_tenant_isolated(client, admin_headers, db):
+    """Cost centers are isolated by tenant."""
     client.post(
-        "/admin/departments",
-        json={"code": "SALES", "name": "Sales"},
+        "/admin/cost-centers",
+        json={"code": "CC-SALES", "name": "Sales"},
         headers=admin_headers,
     )
-    
-    # Query from different tenant
     other_tenant_headers = {
         "X-Dev-Role": "Admin",
         "X-Dev-Tenant": "other-tenant-999",
@@ -110,48 +104,37 @@ def test_departments_are_tenant_isolated(client, admin_headers, db):
         "X-Dev-Email": "admin@other.com",
         "X-Dev-Name": "Other Admin",
     }
-    response = client.get("/admin/departments", headers=other_tenant_headers)
+    response = client.get("/admin/cost-centers", headers=other_tenant_headers)
     assert response.status_code == 200
-    
-    # Should not see tenant 1's department
-    codes = [d["code"] for d in response.json()]
-    assert "SALES" not in codes
+    codes = [c["code"] for c in response.json()]
+    assert "CC-SALES" not in codes
 
 
 # ============== CRUD OPERATIONS ==============
 
-def test_crud_department(client, admin_headers, db):
-    """Test full CRUD cycle for departments."""
-    # Create
+def test_crud_cost_center(client, admin_headers, db):
+    """Test full CRUD cycle for cost centers."""
     create_resp = client.post(
-        "/admin/departments",
-        json={"code": "ENG", "name": "Engineering"},
+        "/admin/cost-centers",
+        json={"code": "CC-ENG", "name": "Engineering"},
         headers=admin_headers,
     )
     assert create_resp.status_code == 200
-    dept_id = create_resp.json()["id"]
-    
-    # Read
-    get_resp = client.get(f"/admin/departments/{dept_id}", headers=admin_headers)
+    cc_id = create_resp.json()["id"]
+    get_resp = client.get(f"/admin/cost-centers/{cc_id}", headers=admin_headers)
     assert get_resp.status_code == 200
     assert get_resp.json()["name"] == "Engineering"
-    
-    # Update
     update_resp = client.patch(
-        f"/admin/departments/{dept_id}",
+        f"/admin/cost-centers/{cc_id}",
         json={"name": "Software Engineering"},
         headers=admin_headers,
     )
     assert update_resp.status_code == 200
     assert update_resp.json()["name"] == "Software Engineering"
-    
-    # Delete (soft)
-    delete_resp = client.delete(f"/admin/departments/{dept_id}", headers=admin_headers)
+    delete_resp = client.delete(f"/admin/cost-centers/{cc_id}", headers=admin_headers)
     assert delete_resp.status_code == 200
-    
-    # Verify soft deleted
-    get_deleted = client.get(f"/admin/departments/{dept_id}", headers=admin_headers)
-    assert get_deleted.json()["is_active"] == False
+    get_deleted = client.get(f"/admin/cost-centers/{cc_id}", headers=admin_headers)
+    assert get_deleted.json()["is_active"] is False
 
 
 def test_crud_project(client, admin_headers, db):
@@ -184,17 +167,9 @@ def test_crud_project(client, admin_headers, db):
 
 def test_crud_resource(client, admin_headers, db):
     """Test CRUD for resources."""
-    # Create a department and cost center first
-    dept_resp = client.post(
-        "/admin/departments",
-        json={"code": "DEV", "name": "Development"},
-        headers=admin_headers,
-    )
-    dept_id = dept_resp.json()["id"]
-    
     cc_resp = client.post(
         "/admin/cost-centers",
-        json={"department_id": dept_id, "code": "CC-DEV", "name": "Dev Team"},
+        json={"code": "CC-DEV", "name": "Dev Team"},
         headers=admin_headers,
     )
     cc_id = cc_resp.json()["id"]
@@ -217,17 +192,9 @@ def test_crud_resource(client, admin_headers, db):
 
 def test_oop_resource_flag(client, admin_headers, db):
     """Test OoP (Out of Pool) resource flag."""
-    # Create department and cost center
-    dept_resp = client.post(
-        "/admin/departments",
-        json={"code": "OPS", "name": "Operations"},
-        headers=admin_headers,
-    )
-    dept_id = dept_resp.json()["id"]
-    
     cc_resp = client.post(
         "/admin/cost-centers",
-        json={"department_id": dept_id, "code": "CC-OPS", "name": "Ops Team"},
+        json={"code": "CC-OPS", "name": "Ops Team"},
         headers=admin_headers,
     )
     cc_id = cc_resp.json()["id"]
@@ -249,16 +216,9 @@ def test_oop_resource_flag(client, admin_headers, db):
 
 def test_crud_placeholder(client, admin_headers, db):
     """Test placeholders: one per cost center; create cost center auto-creates placeholder; update placeholder."""
-    # Create department and cost center (cost center create auto-creates a placeholder)
-    dept_resp = client.post(
-        "/admin/departments",
-        json={"code": "PH-DEPT", "name": "Placeholder Dept"},
-        headers=admin_headers,
-    )
-    dept_id = dept_resp.json()["id"]
     cc_resp = client.post(
         "/admin/cost-centers",
-        json={"department_id": dept_id, "code": "CC-PH", "name": "Placeholder CC"},
+        json={"code": "CC-PH", "name": "Placeholder CC"},
         headers=admin_headers,
     )
     assert cc_resp.status_code == 200
@@ -319,52 +279,41 @@ def test_crud_settings(client, admin_headers, db):
     assert get_resp.status_code == 200
 
 
-def test_finance_can_create_department(client, finance_headers, db):
-    """Finance can create departments (write access)."""
+def test_finance_can_create_cost_center(client, finance_headers, db):
+    """Finance can create cost centers (write access)."""
     response = client.post(
-        "/admin/departments",
-        json={"code": "FIN", "name": "Finance"},
+        "/admin/cost-centers",
+        json={"code": "CC-FIN", "name": "Finance"},
         headers=finance_headers,
     )
     assert response.status_code == 200
-    assert response.json()["code"] == "FIN"
+    assert response.json()["code"] == "CC-FIN"
 
 
-def test_finance_can_update_and_delete_department(client, finance_headers, db):
-    """Finance can update and delete departments."""
-    # Create
+def test_finance_can_update_and_delete_cost_center(client, finance_headers, db):
+    """Finance can update and delete cost centers."""
     create_resp = client.post(
-        "/admin/departments",
-        json={"code": "FIN2", "name": "Finance2"},
+        "/admin/cost-centers",
+        json={"code": "CC-FIN2", "name": "Finance2"},
         headers=finance_headers,
     )
-    dept_id = create_resp.json()["id"]
-    # Update
+    cc_id = create_resp.json()["id"]
     update_resp = client.patch(
-        f"/admin/departments/{dept_id}",
+        f"/admin/cost-centers/{cc_id}",
         json={"name": "Finance Updated"},
         headers=finance_headers,
     )
     assert update_resp.status_code == 200
     assert update_resp.json()["name"] == "Finance Updated"
-    # Delete
-    delete_resp = client.delete(f"/admin/departments/{dept_id}", headers=finance_headers)
+    delete_resp = client.delete(f"/admin/cost-centers/{cc_id}", headers=finance_headers)
     assert delete_resp.status_code == 200
 
 
 def test_finance_can_crud_cost_center(client, finance_headers, db):
     """Finance can create, update, delete cost centers."""
-    # Create department first
-    dept_resp = client.post(
-        "/admin/departments",
-        json={"code": "FCCD", "name": "CC Dept"},
-        headers=finance_headers,
-    )
-    dept_id = dept_resp.json()["id"]
-    # Create cost center
     cc_resp = client.post(
         "/admin/cost-centers",
-        json={"department_id": dept_id, "code": "FCC", "name": "Finance CC"},
+        json={"code": "FCC", "name": "Finance CC"},
         headers=finance_headers,
     )
     cc_id = cc_resp.json()["id"]
@@ -383,16 +332,9 @@ def test_finance_can_crud_cost_center(client, finance_headers, db):
 
 def test_finance_can_crud_resource(client, finance_headers, db):
     """Finance can create, update, delete resources."""
-    # Create department and cost center
-    dept_resp = client.post(
-        "/admin/departments",
-        json={"code": "FRES", "name": "Res Dept"},
-        headers=finance_headers,
-    )
-    dept_id = dept_resp.json()["id"]
     cc_resp = client.post(
         "/admin/cost-centers",
-        json={"department_id": dept_id, "code": "FRESCC", "name": "Res CC"},
+        json={"code": "FRESCC", "name": "Res CC"},
         headers=finance_headers,
     )
     cc_id = cc_resp.json()["id"]
@@ -418,18 +360,15 @@ def test_finance_can_crud_resource(client, finance_headers, db):
 
 def test_finance_can_crud_placeholder(client, finance_headers, admin_headers, db):
     """Finance can create, update, delete placeholders."""
-    # Create a department first
-    dept_resp = client.post(
-        "/admin/departments",
-        json={"code": "FIN-PH", "name": "Finance PH Dept"},
+    cc_resp = client.post(
+        "/admin/cost-centers",
+        json={"code": "CC-FIN-PH", "name": "Finance PH CC"},
         headers=admin_headers,
     )
-    dept_id = dept_resp.json()["id"]
-
-    # Create
+    cc_id = cc_resp.json()["id"]
     create_resp = client.post(
         "/admin/placeholders",
-        json={"name": "Finance Placeholder", "skill_profile": "Skill", "department_id": dept_id},
+        json={"cost_center_id": cc_id, "name": "Finance Placeholder", "skill_profile": "Skill"},
         headers=finance_headers,
     )
     ph_id = create_resp.json()["id"]
@@ -461,31 +400,31 @@ def test_finance_can_crud_holiday(client, finance_headers, db):
     assert delete_resp.status_code == 200
 
 
-def test_pm_cannot_create_department(client, pm_headers, db):
-    """PM cannot create departments (still forbidden)."""
+def test_pm_cannot_create_cost_center(client, pm_headers, db):
+    """PM cannot create cost centers (forbidden)."""
     response = client.post(
-        "/admin/departments",
-        json={"code": "PMD", "name": "PM Dept"},
+        "/admin/cost-centers",
+        json={"code": "CC-PMD", "name": "PM CC"},
         headers=pm_headers,
     )
     assert response.status_code == 403
 
 
-def test_ro_cannot_create_department(client, ro_headers, db):
-    """RO cannot create departments (still forbidden)."""
+def test_ro_cannot_create_cost_center(client, ro_headers, db):
+    """RO cannot create cost centers (forbidden)."""
     response = client.post(
-        "/admin/departments",
-        json={"code": "ROD", "name": "RO Dept"},
+        "/admin/cost-centers",
+        json={"code": "CC-ROD", "name": "RO CC"},
         headers=ro_headers,
     )
     assert response.status_code == 403
 
 
-def test_employee_cannot_create_department(client, employee_headers, db):
-    """Employee cannot create departments (still forbidden)."""
+def test_employee_cannot_create_cost_center(client, employee_headers, db):
+    """Employee cannot create cost centers (forbidden)."""
     response = client.post(
-        "/admin/departments",
-        json={"code": "EMPD", "name": "Emp Dept"},
+        "/admin/cost-centers",
+        json={"code": "CC-EMPD", "name": "Emp CC"},
         headers=employee_headers,
     )
     assert response.status_code == 403

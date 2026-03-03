@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from api.app.config import get_settings
 from api.app.db.engine import get_db
 from api.app.models.core import (
-    User, Department, CostCenter, Project, Resource, ResourceType, Period, Placeholder,
+    User, CostCenter, Project, Resource, ResourceType, Period, Placeholder,
     UserRole, PeriodStatus,
 )
 from api.app.schemas.common import MessageResponse
@@ -30,94 +30,36 @@ def seed_database_for_tenant(db: Session, tenant_id: str) -> str:
     Seed database with sample data for development for a given tenant_id.
     Returns a message indicating result.
     """
-    from api.app.models.core import Department, CostCenter, User, Project, Resource, Placeholder, Period, UserRole, PeriodStatus
-    # Check if already seeded
-    existing_dept = db.query(Department).filter(Department.tenant_id == tenant_id).first()
-    if existing_dept:
+    from api.app.models.core import CostCenter, User, Project, Resource, Placeholder, Period, UserRole, PeriodStatus
+    existing_cc = db.query(CostCenter).filter(CostCenter.tenant_id == tenant_id).first()
+    if existing_cc:
         return f"Database already seeded for tenant {tenant_id}"
-    # Create departments
-    dept_engineering = Department(
-        tenant_id=tenant_id,
-        code="ENG",
-        name="Engineering",
-    )
-    dept_operations = Department(
-        tenant_id=tenant_id,
-        code="OPS",
-        name="Operations",
-    )
-    db.add_all([dept_engineering, dept_operations])
-    db.flush()
-    # Create cost centers
     cc_software = CostCenter(
         tenant_id=tenant_id,
-        department_id=dept_engineering.id,
         code="CC-SW",
         name="Software Development",
     )
     cc_infra = CostCenter(
         tenant_id=tenant_id,
-        department_id=dept_operations.id,
         code="CC-INFRA",
         name="Infrastructure",
     )
     db.add_all([cc_software, cc_infra])
     db.flush()
-    # Create users with different roles
     users = [
-        User(
-            tenant_id=tenant_id,
-            object_id="admin-001",
-            email="admin@example.com",
-            display_name="Admin User",
-            role=UserRole.ADMIN,
-        ),
-        User(
-            tenant_id=tenant_id,
-            object_id="finance-001",
-            email="finance@example.com",
-            display_name="Finance User",
-            role=UserRole.FINANCE,
-        ),
-        User(
-            tenant_id=tenant_id,
-            object_id="pm-001",
-            email="pm@example.com",
-            display_name="Project Manager",
-            role=UserRole.PM,
-        ),
-        User(
-            tenant_id=tenant_id,
-            object_id="ro-001",
-            email="ro@example.com",
-            display_name="Resource Owner",
-            role=UserRole.RO,
-            cost_center_id=cc_software.id,
-        ),
-        User(
-            tenant_id=tenant_id,
-            object_id="director-001",
-            email="director@example.com",
-            display_name="Director",
-            role=UserRole.DIRECTOR,
-            department_id=dept_engineering.id,
-        ),
-        User(
-            tenant_id=tenant_id,
-            object_id="employee-001",
-            email="employee@example.com",
-            display_name="Employee User",
-            role=UserRole.EMPLOYEE,
-            cost_center_id=cc_software.id,
-        ),
+        User(tenant_id=tenant_id, object_id="admin-001", email="admin@example.com", display_name="Admin User", role=UserRole.ADMIN),
+        User(tenant_id=tenant_id, object_id="finance-001", email="finance@example.com", display_name="Finance User", role=UserRole.FINANCE),
+        User(tenant_id=tenant_id, object_id="pm-001", email="pm@example.com", display_name="Project Manager", role=UserRole.PM),
+        User(tenant_id=tenant_id, object_id="ro-001", email="ro@example.com", display_name="Resource Owner", role=UserRole.RO, cost_center_id=cc_software.id),
+        User(tenant_id=tenant_id, object_id="director-001", email="director@example.com", display_name="Director", role=UserRole.DIRECTOR, cost_center_id=cc_software.id),
+        User(tenant_id=tenant_id, object_id="employee-001", email="employee@example.com", display_name="Employee User", role=UserRole.EMPLOYEE, cost_center_id=cc_software.id),
     ]
-    # Set manager relationships
-    users[5].manager_object_id = users[3].object_id  # Employee reports to RO
-    users[3].manager_object_id = users[4].object_id  # RO reports to Director
+    users[5].manager_object_id = users[3].object_id
+    users[3].manager_object_id = users[4].object_id
     db.add_all(users)
     db.flush()
-    # Update cost center RO
     cc_software.ro_user_id = users[3].id
+    cc_software.director_user_id = users[4].id
     # Create projects
     projects = [
         Project(

@@ -16,7 +16,6 @@ export interface SeedRunResponse {
   tenants_created: number;
   scale: string;
   entities_created: {
-    departments: number;
     cost_centers: number;
     users: number;
     resources: number;
@@ -40,7 +39,6 @@ export interface SeedStatusResponse {
     scale: string;
     created_at: string;
     counts: {
-      departments: number;
       cost_centers: number;
       users: number;
       resources: number;
@@ -60,7 +58,6 @@ export interface SeedWipeResponse {
   message: string;
   tenants_wiped: number;
   entities_deleted: {
-    departments: number;
     cost_centers: number;
     users: number;
     resources: number;

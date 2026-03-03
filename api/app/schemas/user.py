@@ -11,7 +11,6 @@ class UserBase(BaseModel):
     email: str
     display_name: str
     role: UserRole
-    department_id: Optional[str] = None
     cost_center_id: Optional[str] = None
     
 
@@ -25,7 +24,6 @@ class UserUpdate(BaseModel):
     """Properties for updating a user."""
     display_name: Optional[str] = None
     role: Optional[UserRole] = None
-    department_id: Optional[str] = None
     cost_center_id: Optional[str] = None
     manager_object_id: Optional[str] = None
     is_active: Optional[bool] = None

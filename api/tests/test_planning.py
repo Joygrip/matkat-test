@@ -9,31 +9,20 @@ from dateutil.relativedelta import relativedelta
 @pytest.fixture
 def setup_planning_data(client, admin_headers, finance_headers, db):
     """Set up test data for planning tests."""
-    # Create department
-    dept_resp = client.post(
-        "/admin/departments",
-        json={"code": "TEST", "name": "Test Department"},
-        headers=admin_headers,
-    )
-    dept_id = dept_resp.json()["id"]
-    
-    # Create cost center
     cc_resp = client.post(
         "/admin/cost-centers",
-        json={"department_id": dept_id, "code": "CC-TEST", "name": "Test Cost Center"},
+        json={"code": "CC-TEST", "name": "Test Cost Center"},
         headers=admin_headers,
     )
     cc_id = cc_resp.json()["id"]
-    
-    # Create project
+
     project_resp = client.post(
         "/admin/projects",
         json={"code": "PRJ-TEST", "name": "Test Project"},
         headers=admin_headers,
     )
     project_id = project_resp.json()["id"]
-    
-    # Create resource
+
     resource_resp = client.post(
         "/admin/resources",
         json={
@@ -44,11 +33,10 @@ def setup_planning_data(client, admin_headers, finance_headers, db):
         headers=admin_headers,
     )
     resource_id = resource_resp.json()["id"]
-    
-    # Create placeholder (with department)
+
     placeholder_resp = client.post(
         "/admin/placeholders",
-        json={"name": "Test Placeholder", "department_id": dept_id, "cost_center_id": cc_id},
+        json={"name": "Test Placeholder", "cost_center_id": cc_id},
         headers=admin_headers,
     )
     placeholder_id = placeholder_resp.json()["id"]

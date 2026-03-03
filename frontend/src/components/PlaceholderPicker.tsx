@@ -56,8 +56,7 @@ export function PlaceholderPicker({
     if (!q) return placeholders.slice(0, 50);
     return placeholders.filter(p =>
       p.name.toLowerCase().includes(q) ||
-      (p.cost_center_name != null && p.cost_center_name.toLowerCase().includes(q)) ||
-      (p.department_name != null && p.department_name.toLowerCase().includes(q))
+      (p.cost_center_name != null && p.cost_center_name.toLowerCase().includes(q))
     ).slice(0, 50);
   }, [placeholders, query]);
 
@@ -100,7 +99,7 @@ export function PlaceholderPicker({
                 className={styles.option}
                 onMouseDown={(e) => { e.preventDefault(); onChange(p.id); setQuery(''); setOpen(false); }}
               >
-                {p.name}{p.department_name ? ` (${p.department_name})` : ''}{p.cost_center_name ? ` – ${p.cost_center_name}` : ''}
+                {p.name}{p.cost_center_name ? ` – ${p.cost_center_name}` : ''}
               </li>
             ))
           )}

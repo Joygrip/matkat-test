@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 
-from api.app.models.core import Period, Project, Resource, Placeholder, Department, CostCenter
+from api.app.models.core import Period, Project, Resource, Placeholder, CostCenter
 from api.app.models.planning import DemandLine, SupplyLine
 from api.app.models.actuals import ActualLine
 from api.app.models.consolidation import OopLine, PublishSnapshot, PublishSnapshotLine
@@ -36,38 +36,23 @@ class ConsolidationService:
         ).all()
         return {p.id: p for p in placeholders}
 
-    def _resolve_dept_cc(self, resource: Optional["Resource"] = None,
-                         placeholder: Optional["Placeholder"] = None):
-        """Return (dept_id, dept_name, cc_id, cc_name) from resource or placeholder."""
+    def _resolve_cc(self, resource: Optional["Resource"] = None,
+                    placeholder: Optional["Placeholder"] = None):
+        """Return (cc_id, cc_name) from resource or placeholder."""
         if resource and resource.cost_center:
-            cc = resource.cost_center
-            dept = cc.department if cc else None
-            return (
-                dept.id if dept else None,
-                dept.name if dept else "Unassigned",
-                cc.id,
-                cc.name,
-            )
-        if placeholder:
-            dept = placeholder.department
-            cc = placeholder.cost_center
-            return (
-                dept.id if dept else None,
-                dept.name if dept else "Unassigned",
-                cc.id if cc else None,
-                cc.name if cc else "Unassigned",
-            )
-        return (None, "Unassigned", None, "Unassigned")
+            return (resource.cost_center.id, resource.cost_center.name)
+        if placeholder and placeholder.cost_center:
+            return (placeholder.cost_center_id, placeholder.cost_center.name)
+        return (None, "Unassigned")
 
     # ------------------------------------------------------------------ dashboard
     def get_dashboard(self, period_id: str) -> Dict[str, Any]:
         """
-        Get consolidation dashboard data for a period, grouped by department.
+        Get consolidation dashboard data for a period, grouped by cost center.
 
-        Returns a department-grouped hierarchy with per-resource/placeholder
-        breakdowns plus flat over-allocations for quick scanning.
+        Returns a cost-center list with per-resource/placeholder breakdowns
+        plus flat over-allocations for quick scanning.
         """
-        # Verify period exists
         period = self.db.query(Period).filter(
             and_(
                 Period.id == period_id,
@@ -81,7 +66,6 @@ class ConsolidationService:
         resource_map = self._load_resource_map()
         placeholder_map = self._load_placeholder_map()
 
-        # --- gather demand totals by resource ---
         demand_by_resource: Dict[str, int] = defaultdict(int)
         resource_demands = self.db.query(DemandLine).filter(
             and_(
@@ -90,11 +74,9 @@ class ConsolidationService:
                 DemandLine.resource_id.isnot(None),
             )
         ).all()
-
         for d in resource_demands:
             demand_by_resource[d.resource_id] += d.fte_percent
 
-        # --- gather supply totals by resource ---
         supply_by_resource: Dict[str, int] = defaultdict(int)
         supplies = self.db.query(SupplyLine).filter(
             and_(
@@ -102,11 +84,9 @@ class ConsolidationService:
                 SupplyLine.period_id == period_id,
             )
         ).all()
-
         for s in supplies:
             supply_by_resource[s.resource_id] = s.fte_percent
 
-        # --- gather placeholder demands ---
         placeholder_demands = self.db.query(DemandLine).filter(
             and_(
                 DemandLine.tenant_id == self.current_user.tenant_id,
@@ -115,49 +95,36 @@ class ConsolidationService:
             )
         ).all()
 
-        # ---- build department -> cost-center -> resource/placeholder tree -----
-        # Structure: dept_key -> { info, cc_key -> { info, resources[], placeholders[] } }
-        dept_tree: Dict[str, Dict[str, Any]] = {}
+        # Build cost_center_id -> { info, resources[], placeholders[] }
+        cc_tree: Dict[str, Dict[str, Any]] = {}
 
-        def _ensure_dept(dept_id, dept_name):
-            key = dept_id or "__none__"
-            if key not in dept_tree:
-                dept_tree[key] = {
-                    "department_id": dept_id,
-                    "department_name": dept_name or "Unassigned",
+        def _ensure_cc(cc_id, cc_name):
+            key = cc_id or "__none__"
+            if key not in cc_tree:
+                cc_tree[key] = {
+                    "cost_center_id": cc_id,
+                    "cost_center_name": cc_name or "Unassigned",
                     "total_demand_fte": 0,
                     "total_supply_fte": 0,
                     "gap_fte": 0,
-                    "cost_centers": {},
-                }
-            return dept_tree[key]
-
-        def _ensure_cc(dept_node, cc_id, cc_name):
-            key = cc_id or "__none__"
-            if key not in dept_node["cost_centers"]:
-                dept_node["cost_centers"][key] = {
-                    "cost_center_id": cc_id,
-                    "cost_center_name": cc_name or "Unassigned",
                     "resources": [],
                     "placeholders": [],
                 }
-            return dept_node["cost_centers"][key]
+            return cc_tree[key]
 
-        # -- Add resource rows --
-        all_resource_ids = set(demand_by_resource.keys()) | set(supply_by_resource.keys())
         over_allocations = []
+        all_resource_ids = set(demand_by_resource.keys()) | set(supply_by_resource.keys())
 
         for res_id in all_resource_ids:
             resource = resource_map.get(res_id)
-            dept_id, dept_name, cc_id, cc_name = self._resolve_dept_cc(resource=resource)
+            cc_id, cc_name = self._resolve_cc(resource=resource)
             demand = demand_by_resource.get(res_id, 0)
             supply = supply_by_resource.get(res_id, 0)
             gap = supply - demand
 
-            dept_node = _ensure_dept(dept_id, dept_name)
-            cc_node = _ensure_cc(dept_node, cc_id, cc_name)
-            dept_node["total_demand_fte"] += demand
-            dept_node["total_supply_fte"] += supply
+            cc_node = _ensure_cc(cc_id, cc_name)
+            cc_node["total_demand_fte"] += demand
+            cc_node["total_supply_fte"] += supply
 
             status = "balanced"
             if gap < 0:
@@ -178,12 +145,11 @@ class ConsolidationService:
                 over_allocations.append({
                     "resource_id": res_id,
                     "resource_name": resource.display_name if resource else "Unknown",
-                    "department_id": dept_id,
-                    "department_name": dept_name,
+                    "cost_center_id": cc_id,
+                    "cost_center_name": cc_name,
                     "total_demand_fte": demand,
                 })
 
-        # -- Add placeholder rows --
         orphans_count = 0
         for od in placeholder_demands:
             ph = placeholder_map.get(od.placeholder_id)
@@ -191,10 +157,9 @@ class ConsolidationService:
                 and_(Project.id == od.project_id, Project.tenant_id == self.current_user.tenant_id)
             ).first()
 
-            dept_id, dept_name, cc_id, cc_name = self._resolve_dept_cc(placeholder=ph)
-            dept_node = _ensure_dept(dept_id, dept_name)
-            cc_node = _ensure_cc(dept_node, cc_id, cc_name)
-            dept_node["total_demand_fte"] += od.fte_percent
+            cc_id, cc_name = self._resolve_cc(placeholder=ph)
+            cc_node = _ensure_cc(cc_id, cc_name)
+            cc_node["total_demand_fte"] += od.fte_percent
 
             cc_node["placeholders"].append({
                 "placeholder_id": od.placeholder_id,
@@ -205,34 +170,29 @@ class ConsolidationService:
             })
             orphans_count += 1
 
-        # -- Compute gap per department and flatten cost_centers dict -> list --
-        departments_list = []
+        cost_centers_list = []
         total_demand = 0
         total_supply = 0
-        for dept_node in dept_tree.values():
-            dept_node["gap_fte"] = dept_node["total_supply_fte"] - dept_node["total_demand_fte"]
-            dept_node["cost_centers"] = sorted(
-                dept_node["cost_centers"].values(),
-                key=lambda c: c["cost_center_name"],
-            )
-            total_demand += dept_node["total_demand_fte"]
-            total_supply += dept_node["total_supply_fte"]
-            departments_list.append(dept_node)
+        for cc_node in cc_tree.values():
+            cc_node["gap_fte"] = cc_node["total_supply_fte"] - cc_node["total_demand_fte"]
+            total_demand += cc_node["total_demand_fte"]
+            total_supply += cc_node["total_supply_fte"]
+            cost_centers_list.append(cc_node)
 
-        departments_list.sort(key=lambda d: d["department_name"])
+        cost_centers_list.sort(key=lambda c: c["cost_center_name"] or "")
 
         return {
             "period_id": period_id,
             "period": f"{period.year}-{period.month:02d}",
             "summary": {
-                "total_departments": len(departments_list),
+                "total_cost_centers": len(cost_centers_list),
                 "total_demand_fte": total_demand,
                 "total_supply_fte": total_supply,
                 "total_gap_fte": total_supply - total_demand,
                 "orphans_count": orphans_count,
                 "over_allocations_count": len(over_allocations),
             },
-            "departments": departments_list,
+            "cost_centers": cost_centers_list,
             "over_allocations": over_allocations,
         }
     

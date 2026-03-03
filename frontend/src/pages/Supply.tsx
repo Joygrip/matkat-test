@@ -9,7 +9,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Body1,
-  Title3,
   Card,
   CardHeader,
   Button,
@@ -25,22 +24,24 @@ import {
   Input,
   Select,
   Dialog,
-  DialogTrigger,
   DialogSurface,
   DialogBody,
   DialogTitle,
   DialogContent,
   DialogActions,
-  MessageBar,
-  MessageBarBody,
   Checkbox,
   Toolbar,
   ToolbarButton,
   TabList,
   Tab,
+  Dropdown,
+  Option,
+  Drawer,
+  DrawerBody,
+  DrawerHeader,
+  DrawerHeaderTitle,
 } from '@fluentui/react-components';
-import { Add24Regular, Delete24Regular, PeopleRegular, Edit24Regular } from '@fluentui/react-icons';
-import { BreakdownChart, BreakdownRow } from '../components/BreakdownChart';
+import { Add24Regular, Delete24Regular, PeopleRegular, Edit24Regular, ChevronRight20Regular, ChevronDown20Regular } from '@fluentui/react-icons';
 import { planningApi, SupplyLine, CreateSupplyLine } from '../api/planning';
 import { usePeriod } from '../contexts/PeriodContext';
 import { lookupsApi, Resource, CostCenter, Project } from '../api/lookups';
@@ -53,7 +54,6 @@ import { LoadingState } from '../components/LoadingState';
 import { ResourcePicker } from '../components/ResourcePicker';
 import { periodsApi } from '../api/periods';
 import { Period } from '../types';
-import { Dropdown, Option } from '@fluentui/react-components';
 
 const useStyles = makeStyles({
   container: {
@@ -65,23 +65,23 @@ const useStyles = makeStyles({
   header: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: tokens.spacingVerticalXXL,
-    paddingBottom: tokens.spacingVerticalL,
-    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+    alignItems: 'center',
+    marginBottom: tokens.spacingVerticalL,
+    paddingBottom: tokens.spacingVerticalS,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   headerContent: {
     flex: 1,
   },
   pageTitle: {
-    fontSize: tokens.fontSizeHero800,
+    fontSize: tokens.fontSizeHero700,
     fontWeight: tokens.fontWeightBold,
     color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalXS,
+    marginBottom: tokens.spacingVerticalXXS,
     lineHeight: '1.2',
   },
   pageSubtitle: {
-    fontSize: tokens.fontSizeBase400,
+    fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground3,
     fontWeight: tokens.fontWeightRegular,
   },
@@ -90,6 +90,45 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalM,
     alignItems: 'center',
     marginBottom: tokens.spacingVerticalL,
+    flexWrap: 'wrap' as const,
+  },
+  kpiRow: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gap: tokens.spacingHorizontalM,
+    marginBottom: tokens.spacingVerticalL,
+  },
+  kpiCard: {
+    padding: tokens.spacingHorizontalL,
+    borderRadius: tokens.borderRadiusLarge,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground2,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+  },
+  kpiLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  kpiValue: {
+    fontSize: tokens.fontSizeHero600,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  filtersChipsRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: tokens.spacingVerticalL,
+    gap: tokens.spacingHorizontalM,
+    flexWrap: 'wrap' as const,
+  },
+  filtersChipsList: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalXS,
     flexWrap: 'wrap' as const,
   },
   filterLabel: {
@@ -216,6 +255,8 @@ export const Supply: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -242,23 +283,98 @@ export const Supply: React.FC = () => {
   const [openPeriods, setOpenPeriods] = useState<Period[]>([]);
   const [addMode, setAddMode] = useState<'single' | 'bulk'>('single');
 
+  type SortColumn = 'resource' | 'project' | 'period' | 'fte';
+  const [sortBy, setSortBy] = useState<SortColumn>('resource');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const isLocked = currentPeriod?.status === 'locked';
   const canEdit = user?.role === 'Finance' || user?.role === 'RO';
 
-  const groupedSupplies = useMemo(() => groupSuppliesByCostCenter(supplies), [supplies]);
+  const filteredSupplies = useMemo(() => {
+    return supplies.filter(s => {
+      if (selectedProjectId && s.project_id !== selectedProjectId) {
+        return false;
+      }
+      if (selectedResourceId && s.resource_id !== selectedResourceId) {
+        return false;
+      }
+      return true;
+    });
+  }, [supplies, selectedProjectId, selectedResourceId]);
+
+  const groupedSupplies = useMemo(() => groupSuppliesByCostCenter(filteredSupplies), [filteredSupplies]);
   const totalColumns = canEdit ? 8 : 7;
 
-  const ccBreakdown: BreakdownRow[] = useMemo(() => {
-    const ccMap = new Map<string, number>();
-    for (const s of supplies) {
-      const name = s.cost_center_name || 'Unassigned';
-      ccMap.set(name, (ccMap.get(name) || 0) + (s.fte_percent || 0));
+  const activeProjectLabel = useMemo(() => {
+    if (!selectedProjectId) return null;
+    const project = projects.find(p => p.id === selectedProjectId);
+    return project ? `Project: ${project.name}` : 'Project filter';
+  }, [projects, selectedProjectId]);
+
+  const activeResourceLabel = useMemo(() => {
+    if (!selectedResourceId) return null;
+    const resource = resources.find(r => r.id === selectedResourceId);
+    return resource ? `Resource: ${resource.display_name}` : 'Resource filter';
+  }, [resources, selectedResourceId]);
+
+  const hasActiveFilters = !!(activeProjectLabel || activeResourceLabel);
+
+  const totalFtePercent = useMemo(() => {
+    return filteredSupplies.reduce((sum, s) => sum + (s.fte_percent ?? 0), 0);
+  }, [filteredSupplies]);
+
+  const distinctResourcesCount = useMemo(() => {
+    const ids = new Set<string>();
+    for (const s of filteredSupplies) {
+      if (s.resource_id) ids.add(s.resource_id);
     }
-    return Array.from(ccMap.entries())
-      .map(([label, fte]) => ({ label, demandFte: 0, supplyFte: fte }))
-      .sort((a, b) => b.supplyFte - a.supplyFte);
-  }, [supplies]);
+    return ids.size;
+  }, [filteredSupplies]);
+
+  const distinctProjectsCount = useMemo(() => {
+    const ids = new Set<string>();
+    for (const s of filteredSupplies) {
+      if (s.project_id) ids.add(s.project_id);
+    }
+    return ids.size;
+  }, [filteredSupplies]);
+
+  const sortedGroupedSupplies = useMemo(() => {
+    const direction = sortDir === 'asc' ? 1 : -1;
+    const compare = (a: SupplyLine, b: SupplyLine) => {
+      switch (sortBy) {
+        case 'resource': {
+          const aName = a.resource_name || '';
+          const bName = b.resource_name || '';
+          return aName.localeCompare(bName) * direction;
+        }
+        case 'project': {
+          const aName = a.project_name || '';
+          const bName = b.project_name || '';
+          return aName.localeCompare(bName) * direction;
+        }
+        case 'period': {
+          const aKey = (a.year ?? 0) * 100 + (a.month ?? 0);
+          const bKey = (b.year ?? 0) * 100 + (b.month ?? 0);
+          return (aKey - bKey) * direction;
+        }
+        case 'fte': {
+          const aFte = a.fte_percent ?? 0;
+          const bFte = b.fte_percent ?? 0;
+          return (aFte - bFte) * direction;
+        }
+        default:
+          return 0;
+      }
+    };
+
+    return groupedSupplies.map(group => ({
+      ...group,
+      supplies: [...group.supplies].sort(compare),
+    }));
+  }, [groupedSupplies, sortBy, sortDir]);
   
   useEffect(() => {
     loadInitialData();
@@ -399,9 +515,9 @@ export const Supply: React.FC = () => {
     }
   };
   
-  const allSelected = supplies.length > 0 && selectedIds.length === supplies.length;
+  const allSelected = filteredSupplies.length > 0 && selectedIds.length === filteredSupplies.length;
   const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? [] : supplies.map(s => s.id));
+    setSelectedIds(allSelected ? [] : filteredSupplies.map(s => s.id));
   };
   const toggleSelect = (id: string) => {
     setSelectedIds(selectedIds.includes(id) ? selectedIds.filter(x => x !== id) : [...selectedIds, id]);
@@ -466,6 +582,23 @@ export const Supply: React.FC = () => {
       showApiError(err, 'Bulk add failed');
     }
   };
+
+  const handleSort = (column: SortColumn) => {
+    setSortDir(prev => (sortBy === column && prev === 'asc' ? 'desc' : 'asc'));
+    setSortBy(column);
+  };
+
+  const toggleGroupCollapsed = (groupKey: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) {
+        next.delete(groupKey);
+      } else {
+        next.add(groupKey);
+      }
+      return next;
+    });
+  };
   
   if (loading) {
     return <LoadingState message="Loading supply planning data..." />;
@@ -496,19 +629,94 @@ export const Supply: React.FC = () => {
         </div>
       </div>
 
-      {/* Filters bar */}
+      {/* Filters bar - RO-focused: period summary + project/resource filters. Cost center remains an API filter but is hidden from the main UI for now. */}
       <div className={styles.filters}>
         <div className={styles.filterGroup}>
-          <span className={styles.filterLabel}>Cost Center</span>
+          <span className={styles.filterLabel}>Period</span>
+          <Body1>
+            {currentPeriod
+              ? `${monthNames[currentPeriod.month - 1]} ${currentPeriod.year}`
+              : 'No period selected'}
+          </Body1>
+        </div>
+        <div className={styles.filterGroup}>
+          <span className={styles.filterLabel}>Project</span>
           <Select
-            value={selectedCostCenterId}
-            onChange={(_, data) => setSelectedCostCenterId(data.value || '')}
+            value={selectedProjectId || ''}
+            onChange={(_, data) => setSelectedProjectId(data.value || null)}
           >
-            <option value="">All cost centers</option>
-            {costCenters.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
+            <option value="">All projects</option>
+            {projects.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
             ))}
           </Select>
+        </div>
+        <div className={styles.filterGroup}>
+          <span className={styles.filterLabel}>Resource</span>
+          <Select
+            value={selectedResourceId || ''}
+            onChange={(_, data) => setSelectedResourceId(data.value || null)}
+          >
+            <option value="">All resources</option>
+            {resources.map(r => (
+              <option key={r.id} value={r.id}>
+                {r.display_name}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
+      {hasActiveFilters && (
+        <div className={styles.filtersChipsRow}>
+          <div className={styles.filtersChipsList}>
+            {activeProjectLabel && (
+              <Button
+                size="small"
+                appearance="outline"
+                onClick={() => setSelectedProjectId(null)}
+              >
+                {activeProjectLabel}
+              </Button>
+            )}
+            {activeResourceLabel && (
+              <Button
+                size="small"
+                appearance="outline"
+                onClick={() => setSelectedResourceId(null)}
+              >
+                {activeResourceLabel}
+              </Button>
+            )}
+          </div>
+          <Button
+            size="small"
+            appearance="subtle"
+            onClick={() => {
+              setSelectedProjectId(null);
+              setSelectedResourceId(null);
+            }}
+          >
+            Clear all
+          </Button>
+        </div>
+      )}
+
+      {/* KPI summary based on current filters */}
+      <div className={styles.kpiRow}>
+        <div className={styles.kpiCard}>
+          <span className={styles.kpiLabel}>Total FTE%</span>
+          <span className={styles.kpiValue}>{totalFtePercent}</span>
+        </div>
+        <div className={styles.kpiCard}>
+          <span className={styles.kpiLabel}>Distinct resources</span>
+          <span className={styles.kpiValue}>{distinctResourcesCount}</span>
+        </div>
+        <div className={styles.kpiCard}>
+          <span className={styles.kpiLabel}>Distinct projects</span>
+          <span className={styles.kpiValue}>{distinctProjectsCount}</span>
         </div>
       </div>
       
@@ -553,7 +761,9 @@ export const Supply: React.FC = () => {
       
       {/* Add / Edit Supply Dialog with Single and Bulk modes */}
       {canEdit && (
-        <Dialog
+        <Drawer
+          type="overlay"
+          position="end"
           open={isDialogOpen}
           onOpenChange={(_, data) => {
             setIsDialogOpen(data.open);
@@ -563,244 +773,231 @@ export const Supply: React.FC = () => {
             }
           }}
         >
-          <DialogSurface>
-            <DialogBody>
-              <DialogTitle>
-                {editId
-                  ? 'Edit Supply Line'
-                  : addMode === 'single'
-                  ? 'Add Supply Line'
-                  : 'Bulk Add Supply Lines'}
-              </DialogTitle>
-              <DialogContent>
-                {!editId && (
-                  <div style={{ marginBottom: tokens.spacingVerticalM }}>
-                    <TabList
-                      selectedValue={addMode}
-                      onTabSelect={(_, data) => setAddMode(data.value as 'single' | 'bulk')}
-                    >
-                      <Tab value="single">Single line</Tab>
-                      <Tab value="bulk">Bulk add</Tab>
-                    </TabList>
+          <DrawerHeader>
+            <DrawerHeaderTitle>
+              {editId
+                ? 'Edit Supply Line'
+                : addMode === 'single'
+                ? 'Add Supply Line'
+                : 'Bulk Add Supply Lines'}
+            </DrawerHeaderTitle>
+          </DrawerHeader>
+          <DrawerBody>
+            {!editId && (
+              <div style={{ marginBottom: tokens.spacingVerticalM }}>
+                <TabList
+                  selectedValue={addMode}
+                  onTabSelect={(_, data) => setAddMode(data.value as 'single' | 'bulk')}
+                >
+                  <Tab value="single">Single line</Tab>
+                  <Tab value="bulk">Bulk add</Tab>
+                </TabList>
+              </div>
+            )}
+
+            {(addMode === 'single' || editId) && (
+              <>
+                {currentPeriod && (
+                  <div className={styles.formField}>
+                    <label className={styles.formLabel}>Period</label>
+                    <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
+                      {monthNames[currentPeriod.month - 1]} {currentPeriod.year} ({currentPeriod.status})
+                    </Body1>
                   </div>
                 )}
-
-                {(addMode === 'single' || editId) && (
-                  <>
-                    {currentPeriod && (
-                      <div className={styles.formField}>
-                        <label className={styles.formLabel}>Period</label>
-                        <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
-                          {monthNames[currentPeriod.month - 1]} {currentPeriod.year} ({currentPeriod.status})
-                        </Body1>
-                      </div>
-                    )}
-                    <div className={styles.formField}>
-                      <label className={styles.formLabel}>Resource</label>
-                      <ResourcePicker
-                        resources={resources}
-                        value={formData.resource_id || ''}
-                        onChange={val =>
-                          setFormData(f => ({ ...f, resource_id: val }))
-                        }
-                        placeholder="Type name..."
-                      />
-                    </div>
-                    <div className={styles.formField}>
-                      <label className={styles.formLabel}>Project (optional)</label>
-                      <Select
-                        value={formData.project_id || ''}
-                        onChange={(_, data) =>
-                          setFormData(f => ({ ...f, project_id: data.value || '' }))
-                        }
-                      >
-                        <option value="">None</option>
-                        {projects.map(p => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                    <div className={styles.formField}>
-                      <label className={styles.formLabel}>FTE %</label>
-                      <Select
-                        value={String(formData.fte_percent)}
-                        onChange={(_, data) =>
-                          setFormData(f => ({ ...f, fte_percent: parseInt(data.value) }))
-                        }
-                      >
-                        {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map(
-                          val => (
-                            <option key={val} value={val}>
-                              {val}%
-                            </option>
-                          ),
-                        )}
-                      </Select>
-                    </div>
-                  </>
-                )}
-
-                {addMode === 'bulk' && !editId && (
-                  <>
-                    <div className={styles.formField}>
-                      <label className={styles.formLabel}>Resources</label>
-                      <Dropdown
-                        multiselect
-                        selectedOptions={bulkAddResources}
-                        onOptionSelect={(_, data) =>
-                          setBulkAddResources(data.selectedOptions as string[])
-                        }
-                        placeholder="Select resources..."
-                      >
-                        {resources.map(r => (
-                          <Option key={r.id} value={r.id}>
-                            {r.display_name}
-                          </Option>
-                        ))}
-                      </Dropdown>
-                    </div>
-                    <div className={styles.formField}>
-                      <label className={styles.formLabel}>Periods</label>
-                      <Dropdown
-                        multiselect
-                        selectedOptions={bulkAddPeriods.map(p => p.id)}
-                        onOptionSelect={(_, data) => {
-                          setBulkAddPeriods(
-                            openPeriods.filter(p => data.selectedOptions.includes(p.id)),
-                          );
-                        }}
-                        placeholder="Select open periods..."
-                      >
-                        {openPeriods.map(p => (
-                          <Option key={p.id} value={p.id}>
-                            {monthNames[p.month - 1]} {p.year}
-                          </Option>
-                        ))}
-                      </Dropdown>
-                    </div>
-                    <div className={styles.formField}>
-                      <label className={styles.formLabel}>Project (optional)</label>
-                      <Dropdown
-                        selectedOptions={bulkAddProjectId ? [bulkAddProjectId] : []}
-                        onOptionSelect={(_, data) =>
-                          setBulkAddProjectId(data.selectedOptions[0] || '')
-                        }
-                        placeholder="Select project or leave blank for general availability..."
-                      >
-                        <Option value="">None (General Availability)</Option>
-                        {projects.map(p => (
-                          <Option key={p.id} value={p.id}>
-                            {p.name}
-                          </Option>
-                        ))}
-                      </Dropdown>
-                    </div>
-                    <div className={styles.formField}>
-                      <label className={styles.formLabel}>FTE %</label>
-                      <Select
-                        value={String(bulkAddFte)}
-                        onChange={(_, data) => setBulkAddFte(parseInt(data.value))}
-                      >
-                        {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map(
-                          val => (
-                            <option key={val} value={val}>
-                              {val}%
-                            </option>
-                          ),
-                        )}
-                      </Select>
-                    </div>
-                    <Button
-                      appearance="secondary"
-                      onClick={handleBulkAddPreview}
-                      disabled={bulkAddResources.length === 0 || bulkAddPeriods.length === 0}
-                    >
-                      Preview
-                    </Button>
-                    {bulkAddPreview.length > 0 && (
-                      <div style={{ marginTop: 16 }}>
-                        <strong>Preview ({bulkAddPreview.length} lines):</strong>
-                        <Table className={styles.table}>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHeaderCell>Resource</TableHeaderCell>
-                              <TableHeaderCell>Year</TableHeaderCell>
-                              <TableHeaderCell>Month</TableHeaderCell>
-                              <TableHeaderCell>Project</TableHeaderCell>
-                              <TableHeaderCell>FTE %</TableHeaderCell>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {bulkAddPreview.map((line, idx) => (
-                              <TableRow key={idx}>
-                                <TableCell>
-                                  {resources.find(r => r.id === line.resource_id)?.display_name ||
-                                    line.resource_id}
-                                </TableCell>
-                                <TableCell>{line.year}</TableCell>
-                                <TableCell>{String(line.month).padStart(2, '0')}</TableCell>
-                                <TableCell>
-                                  {projects.find(p => p.id === line.project_id)?.name || '—'}
-                                </TableCell>
-                                <TableCell>{line.fte_percent}%</TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )}
-                  </>
-                )}
-              </DialogContent>
-              <DialogActions>
-                <Button
-                  onClick={() => {
-                    setIsDialogOpen(false);
-                    setEditId(null);
-                    setAddMode('single');
-                  }}
-                >
-                  Cancel
-                </Button>
-                {addMode === 'bulk' && !editId ? (
-                  <Button
-                    appearance="primary"
-                    onClick={handleBulkAddSubmit}
-                    disabled={bulkAddPreview.length === 0}
+                <div className={styles.formField}>
+                  <label className={styles.formLabel}>Resource</label>
+                  <ResourcePicker
+                    resources={resources}
+                    value={formData.resource_id || ''}
+                    onChange={val =>
+                      setFormData(f => ({ ...f, resource_id: val }))
+                    }
+                    placeholder="Type name..."
+                  />
+                </div>
+                <div className={styles.formField}>
+                  <label className={styles.formLabel}>Project (optional)</label>
+                  <Select
+                    value={formData.project_id || ''}
+                    onChange={(_, data) =>
+                      setFormData(f => ({ ...f, project_id: data.value || '' }))
+                    }
                   >
-                    Create All
-                  </Button>
-                ) : editId ? (
-                  <Button appearance="primary" onClick={handleSaveEdit}>
-                    Save
-                  </Button>
-                ) : (
-                  <Button appearance="primary" onClick={handleCreate}>
-                    Create
-                  </Button>
+                    <option value="">None</option>
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className={styles.formField}>
+                  <label className={styles.formLabel}>FTE %</label>
+                  <Select
+                    value={String(formData.fte_percent)}
+                    onChange={(_, data) =>
+                      setFormData(f => ({ ...f, fte_percent: parseInt(data.value) }))
+                    }
+                  >
+                    {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map(
+                      val => (
+                        <option key={val} value={val}>
+                          {val}%
+                        </option>
+                      ),
+                    )}
+                  </Select>
+                </div>
+              </>
+            )}
+
+            {addMode === 'bulk' && !editId && (
+              <>
+                <div className={styles.formField}>
+                  <label className={styles.formLabel}>Resources</label>
+                  <Dropdown
+                    multiselect
+                    selectedOptions={bulkAddResources}
+                    onOptionSelect={(_, data) =>
+                      setBulkAddResources(data.selectedOptions as string[])
+                    }
+                    placeholder="Select resources..."
+                  >
+                    {resources.map(r => (
+                      <Option key={r.id} value={r.id}>
+                        {r.display_name}
+                      </Option>
+                    ))}
+                  </Dropdown>
+                </div>
+                <div className={styles.formField}>
+                  <label className={styles.formLabel}>Periods</label>
+                  <Dropdown
+                    multiselect
+                    selectedOptions={bulkAddPeriods.map(p => p.id)}
+                    onOptionSelect={(_, data) => {
+                      setBulkAddPeriods(
+                        openPeriods.filter(p => data.selectedOptions.includes(p.id)),
+                      );
+                    }}
+                    placeholder="Select open periods..."
+                  >
+                    {openPeriods.map(p => (
+                      <Option key={p.id} value={p.id}>
+                        {monthNames[p.month - 1]} {p.year}
+                      </Option>
+                    ))}
+                  </Dropdown>
+                </div>
+                <div className={styles.formField}>
+                  <label className={styles.formLabel}>Project (optional)</label>
+                  <Dropdown
+                    selectedOptions={bulkAddProjectId ? [bulkAddProjectId] : []}
+                    onOptionSelect={(_, data) =>
+                      setBulkAddProjectId(data.selectedOptions[0] || '')
+                    }
+                    placeholder="Select project or leave blank for general availability..."
+                  >
+                    <Option value="">None (General Availability)</Option>
+                    {projects.map(p => (
+                      <Option key={p.id} value={p.id}>
+                        {p.name}
+                      </Option>
+                    ))}
+                  </Dropdown>
+                </div>
+                <div className={styles.formField}>
+                  <label className={styles.formLabel}>FTE %</label>
+                  <Select
+                    value={String(bulkAddFte)}
+                    onChange={(_, data) => setBulkAddFte(parseInt(data.value))}
+                  >
+                    {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map(
+                      val => (
+                        <option key={val} value={val}>
+                          {val}%
+                        </option>
+                      ),
+                    )}
+                  </Select>
+                </div>
+                <Button
+                  appearance="secondary"
+                  onClick={handleBulkAddPreview}
+                  disabled={bulkAddResources.length === 0 || bulkAddPeriods.length === 0}
+                >
+                  Preview
+                </Button>
+                {bulkAddPreview.length > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <strong>Preview ({bulkAddPreview.length} lines):</strong>
+                    <Table className={styles.table}>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHeaderCell>Resource</TableHeaderCell>
+                          <TableHeaderCell>Year</TableHeaderCell>
+                          <TableHeaderCell>Month</TableHeaderCell>
+                          <TableHeaderCell>Project</TableHeaderCell>
+                          <TableHeaderCell>FTE %</TableHeaderCell>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {bulkAddPreview.map((line, idx) => (
+                          <TableRow key={idx}>
+                            <TableCell>
+                              {resources.find(r => r.id === line.resource_id)?.display_name ||
+                                line.resource_id}
+                            </TableCell>
+                            <TableCell>{line.year}</TableCell>
+                            <TableCell>{String(line.month).padStart(2, '0')}</TableCell>
+                            <TableCell>
+                              {projects.find(p => p.id === line.project_id)?.name || '—'}
+                            </TableCell>
+                            <TableCell>{line.fte_percent}%</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
-              </DialogActions>
-            </DialogBody>
-          </DialogSurface>
-        </Dialog>
+              </>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: tokens.spacingHorizontalS, marginTop: tokens.spacingVerticalL }}>
+              <Button
+                onClick={() => {
+                  setIsDialogOpen(false);
+                  setEditId(null);
+                  setAddMode('single');
+                }}
+              >
+                Cancel
+              </Button>
+              {addMode === 'bulk' && !editId ? (
+                <Button
+                  appearance="primary"
+                  onClick={handleBulkAddSubmit}
+                  disabled={bulkAddPreview.length === 0}
+                >
+                  Create All
+                </Button>
+              ) : editId ? (
+                <Button appearance="primary" onClick={handleSaveEdit}>
+                  Save
+                </Button>
+              ) : (
+                <Button appearance="primary" onClick={handleCreate}>
+                  Create
+                </Button>
+              )}
+            </div>
+          </DrawerBody>
+        </Drawer>
       )}
       
-      {/* Supply by Cost Center chart */}
-      {supplies.length > 0 && (
-        <Card className={styles.chartCard}>
-          <div className={styles.chartCardHeader}>
-            <Title3 style={{ margin: 0 }}>Supply by Cost Center</Title3>
-          </div>
-          <div className={styles.chartCardBody}>
-            <BreakdownChart rows={ccBreakdown} supplyOnly />
-          </div>
-        </Card>
-      )}
-
       <Card className={styles.card}>
-        <CardHeader header={<Body1><strong>Supply Lines ({supplies.length})</strong></Body1>} />
+        <CardHeader header={<Body1><strong>Supply Lines ({filteredSupplies.length})</strong></Body1>} />
         
         <Table className={styles.table}>
           <TableHeader>
@@ -811,15 +1008,51 @@ export const Supply: React.FC = () => {
                 </TableHeaderCell>
               )}
               <TableHeaderCell>Cost Center</TableHeaderCell>
-              <TableHeaderCell>Resource</TableHeaderCell>
-              <TableHeaderCell>Project</TableHeaderCell>
-              <TableHeaderCell>Period</TableHeaderCell>
-              <TableHeaderCell>FTE %</TableHeaderCell>
+              <TableHeaderCell>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  onClick={() => handleSort('resource')}
+                >
+                  Resource
+                  {sortBy === 'resource' && (sortDir === 'asc' ? ' ▲' : ' ▼')}
+                </Button>
+              </TableHeaderCell>
+              <TableHeaderCell>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  onClick={() => handleSort('project')}
+                >
+                  Project
+                  {sortBy === 'project' && (sortDir === 'asc' ? ' ▲' : ' ▼')}
+                </Button>
+              </TableHeaderCell>
+              <TableHeaderCell>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  onClick={() => handleSort('period')}
+                >
+                  Period
+                  {sortBy === 'period' && (sortDir === 'asc' ? ' ▲' : ' ▼')}
+                </Button>
+              </TableHeaderCell>
+              <TableHeaderCell>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  onClick={() => handleSort('fte')}
+                >
+                  FTE %
+                  {sortBy === 'fte' && (sortDir === 'asc' ? ' ▲' : ' ▼')}
+                </Button>
+              </TableHeaderCell>
               <TableHeaderCell>Actions</TableHeaderCell>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {supplies.length === 0 ? (
+            {filteredSupplies.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={totalColumns} style={{ padding: tokens.spacingVerticalXXL }}>
                   <EmptyState
@@ -846,18 +1079,40 @@ export const Supply: React.FC = () => {
               </TableRow>
             ) : (
               <>
-                {groupedSupplies.map(cc => (
-                  <React.Fragment key={cc.costCenterId || '__none__'}>
+                {sortedGroupedSupplies.map(cc => {
+                  const groupKey = cc.costCenterId || '__none__';
+                  const isCollapsed = collapsedGroups.has(groupKey);
+                  const groupFte = cc.supplies.reduce((sum, s) => sum + (s.fte_percent ?? 0), 0);
+                  return (
+                  <React.Fragment key={groupKey}>
                     <TableRow className={styles.groupHeader}>
                       <TableCell colSpan={totalColumns}>
-                        {cc.costCenterName}
-                        <Badge appearance="outline" style={{ marginLeft: 8 }}>
-                          {cc.supplies.length} lines
-                        </Badge>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Button
+                              appearance="subtle"
+                              size="small"
+                              icon={isCollapsed ? <ChevronRight20Regular /> : <ChevronDown20Regular />}
+                              onClick={() => toggleGroupCollapsed(groupKey)}
+                            />
+                            <span>{cc.costCenterName}</span>
+                            <Badge appearance="outline" style={{ marginLeft: 8 }}>
+                              {cc.supplies.length} lines
+                            </Badge>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Badge appearance="outline" color="informative">
+                              Total FTE: {groupFte}
+                            </Badge>
+                          </div>
+                        </div>
                       </TableCell>
                     </TableRow>
-                    {cc.supplies.map(s => (
-                      <TableRow key={s.id}>
+                    {!isCollapsed && cc.supplies.map(s => (
+                      <TableRow
+                        key={s.id}
+                        style={selectedIds.includes(s.id) ? { backgroundColor: tokens.colorBrandBackground2 } : undefined}
+                      >
                         {canEdit && (
                           <TableCell>
                             <Checkbox checked={selectedIds.includes(s.id)} onChange={() => toggleSelect(s.id)} />
@@ -892,7 +1147,7 @@ export const Supply: React.FC = () => {
                       </TableRow>
                     ))}
                   </React.Fragment>
-                ))}
+                )})}
               </>
             )}
           </TableBody>

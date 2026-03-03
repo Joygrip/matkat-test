@@ -148,6 +148,16 @@ The Demand Planning page has been redesigned to focus on cost centers and provid
 - **Grouped, collapsible table**: Demand lines are grouped by **Cost center**, with each group showing **Total FTE** and line count. Groups can be expanded/collapsed for easier scanning, and key columns (Project, Resource, Period, FTE%) support click-to-sort.
 - **Drawer-based editing**: Adding and editing demand lines (including bulk add) now happens in a right-hand drawer with tabs for **Single line** and **Bulk add**, so you can keep the main table context visible while editing.
 
+## Supply Planning page
+
+The Supply Planning page mirrors the updated Demand UX, focused on resource availability:
+
+- **Compact filters**: A compact bar shows the current **Period** plus filters for **Project** and **Resource**. These filters apply instantly to the supply table.
+- **Active filter chips**: When filters are active, pill-style buttons appear under the toolbar (for example, `Resource: Alice`). Clicking a chip clears that filter; a **Clear all** button resets all supply filters.
+- **KPI summary cards**: Three small cards summarize **Total FTE%**, **Distinct resources**, and **Distinct projects** for the currently filtered supply lines.
+- **Grouped, collapsible table**: Supply lines are grouped by **Cost center**, each group showing **Total FTE** and line count. Groups can be expanded/collapsed, and key columns (Resource, Project, Period, FTE%) are sortable.
+- **Drawer-based editing**: Adding and editing supply lines (including bulk add) now uses a right-hand drawer with **Single line** and **Bulk add** tabs, so you can work on lines without losing the main table context.
+
 ### "Cannot reach API" or HTTP 0 (NETWORK_ERROR)
 
 If the app shows "Cannot reach the API" or requests fail with a network error when adding actuals or calling the API:

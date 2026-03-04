@@ -91,7 +91,7 @@ async def get_dashboard(
     period_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.DIRECTOR
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.DIRECTOR, UserRole.RO
     )),
 ):
     """
@@ -99,7 +99,7 @@ async def get_dashboard(
     
     Shows demand vs supply gaps, orphan demands, and over-allocations.
     
-    Accessible to: Admin, Finance, Director
+    Accessible to: Admin, Finance, Director, RO (view only)
     """
     service = ConsolidationService(db, current_user)
     return service.get_dashboard(period_id)
@@ -145,13 +145,13 @@ async def get_snapshot(
     snapshot_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.DIRECTOR
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.DIRECTOR, UserRole.RO
     )),
 ):
     """
     Get a specific snapshot with all its lines.
     
-    Accessible to: Admin, Finance, Director
+    Accessible to: Admin, Finance, Director, RO (view only)
     """
     service = ConsolidationService(db, current_user)
     snapshot = service.get_snapshot(snapshot_id)

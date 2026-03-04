@@ -33,7 +33,6 @@ import {
   MessageBar,
   MessageBarBody,
   Textarea,
-  ProgressBar,
   Drawer,
   DrawerBody,
   DrawerHeader,
@@ -133,17 +132,6 @@ const useStyles = makeStyles({
     display: 'flex',
     justifyContent: 'center',
     padding: tokens.spacingVerticalXXL,
-  },
-  totalBar: {
-    padding: tokens.spacingVerticalL,
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderRadius: tokens.borderRadiusLarge,
-    marginBottom: tokens.spacingVerticalM,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    transition: 'all 0.2s ease',
-    '&:hover': {
-      backgroundColor: tokens.colorNeutralBackground2,
-    },
   },
   overLimitRow: {
     backgroundColor: tokens.colorPaletteRedBackground1,
@@ -453,15 +441,6 @@ export const Actuals: React.FC = () => {
   const currentPeriod = ctxPeriod;
   const isLocked = currentPeriod?.status === 'locked';
   
-  // Calculate total by resource
-  const totalsByResource: Record<string, number> = {};
-  actuals.forEach(a => {
-    if (!totalsByResource[a.resource_id]) {
-      totalsByResource[a.resource_id] = 0;
-    }
-    totalsByResource[a.resource_id] += a.actual_fte_percent;
-  });
-  
   if (loading) {
     return (
       <div className={styles.loading}>
@@ -736,32 +715,6 @@ export const Actuals: React.FC = () => {
           )}
         </DrawerBody>
       </Drawer>
-      
-      {/* Resource totals */}
-      {Object.keys(totalsByResource).length > 0 && (
-        <Card className={styles.card}>
-          <CardHeader header={<Body1><strong>Resource Totals</strong></Body1>} />
-          <div style={{ padding: tokens.spacingVerticalM }}>
-            {Object.entries(totalsByResource).map(([resourceId, total]) => (
-              <div key={resourceId} className={styles.totalBar}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: tokens.spacingVerticalXS }}>
-                  <Body1>{getResourceName(resourceId)}</Body1>
-                  <Badge 
-                    appearance="filled" 
-                    color={total > 100 ? 'danger' : total === 100 ? 'success' : 'informative'}
-                  >
-                    {total}% / 100%
-                  </Badge>
-                </div>
-                <ProgressBar 
-                  value={Math.min(total, 100) / 100} 
-                  color={total > 100 ? 'error' : total === 100 ? 'success' : 'brand'}
-                />
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
       
       <Card className={styles.card}>
         <CardHeader header={<Body1><strong>Actual Lines ({actuals.length})</strong></Body1>} />

@@ -23,12 +23,12 @@ async def actuals_dashboard(
     cost_center_id: Optional[str] = Query(None),
     approval_status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.DIRECTOR)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.DIRECTOR, UserRole.RO)),
 ):
     """
     List all employee actuals with project, cost center, approval status, and current approval step.
     Filterable by project, cost center, period, approval status.
-    Accessible to: Finance, Director
+    Accessible to: Finance, Director, RO (view only)
     """
     service = FinanceService(db, current_user)
     return service.get_actuals_dashboard(year, month, project_id, cost_center_id, approval_status)
@@ -39,12 +39,12 @@ async def actuals_vs_plan(
     month: int = Query(...),
     cost_center_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.DIRECTOR)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.DIRECTOR, UserRole.RO)),
 ):
     """
     Get demand, supply, and actuals per cost center for a given period.
     Optionally filter to a single cost center.
-    Accessible to: Finance, Director
+    Accessible to: Finance, Director, RO (view only)
     """
     service = FinanceService(db, current_user)
     return service.get_cost_center_stats(year, month, cost_center_id)
@@ -57,12 +57,12 @@ async def actuals_vs_plan_by_employee(
     cost_center_id: Optional[str] = Query(None),
     project_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.DIRECTOR, UserRole.ADMIN)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.DIRECTOR, UserRole.ADMIN, UserRole.RO)),
 ):
     """
     Get demand vs actuals per employee for a given period.
     Optionally filter by cost center and/or project.
-    Accessible to: Finance, Director, Admin
+    Accessible to: Finance, Director, Admin, RO (view only)
     """
     service = FinanceService(db, current_user)
     return service.get_employee_stats(year, month, cost_center_id, project_id)

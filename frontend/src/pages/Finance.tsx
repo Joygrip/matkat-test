@@ -537,6 +537,7 @@ export const Finance: React.FC = () => {
   // ── Period management drawer ──
   const [isPeriodDrawerOpen, setIsPeriodDrawerOpen] = useState(false);
   const canManagePeriods = user?.role === 'Finance' || user?.role === 'Admin';
+  const canPublishSnapshot = user?.role === 'Finance' || user?.role === 'Admin';
   const [publishName, setPublishName] = useState('');
   const [publishDescription, setPublishDescription] = useState('');
 
@@ -739,14 +740,16 @@ export const Finance: React.FC = () => {
               Manage periods
             </Button>
           )}
-          <Button
-            appearance="primary"
-            icon={<ArrowDownload24Regular />}
-            onClick={() => setIsPublishDialogOpen(true)}
-          >
-            Publish Snapshot
-          </Button>
-          <Dialog open={isPublishDialogOpen} onOpenChange={(_, data) => setIsPublishDialogOpen(data.open)}>
+          {canPublishSnapshot && (
+            <>
+              <Button
+                appearance="primary"
+                icon={<ArrowDownload24Regular />}
+                onClick={() => setIsPublishDialogOpen(true)}
+              >
+                Publish Snapshot
+              </Button>
+              <Dialog open={isPublishDialogOpen} onOpenChange={(_, data) => setIsPublishDialogOpen(data.open)}>
             <DialogSurface>
               <DialogBody>
                 <DialogTitle>Publish Snapshot</DialogTitle>
@@ -796,6 +799,8 @@ export const Finance: React.FC = () => {
               </DialogBody>
             </DialogSurface>
           </Dialog>
+            </>
+          )}
         </div>
       </div>
 

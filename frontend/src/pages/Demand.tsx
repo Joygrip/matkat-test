@@ -685,7 +685,7 @@ export const Demand: React.FC = () => {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center', marginLeft: 'auto' }}>
           {!isLocked && canEdit && (
             <Button
               appearance="primary"

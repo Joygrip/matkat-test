@@ -50,6 +50,8 @@ import { formatApiError } from '../utils/errors';
 import { useAuth } from '../auth/AuthProvider';
 import { EmptyState } from '../components/EmptyState';
 import { StatusBanner } from '../components/StatusBanner';
+import { SearchableFilter } from '../components/SearchableFilter';
+import { SearchableMultiselect } from '../components/SearchableMultiselect';
 import { LoadingState } from '../components/LoadingState';
 import { ResourcePicker } from '../components/ResourcePicker';
 import { periodsApi } from '../api/periods';
@@ -304,7 +306,13 @@ export const Supply: React.FC = () => {
     return resource ? `Resource: ${resource.display_name}` : 'Resource filter';
   }, [resources, selectedResourceId]);
 
-  const hasActiveFilters = !!(activeProjectLabel || activeResourceLabel);
+  const activeCostCenterLabel = useMemo(() => {
+    if (!selectedCostCenterId) return null;
+    const cc = costCenters.find(c => c.id === selectedCostCenterId);
+    return cc ? `Cost center: ${cc.name}` : 'Cost center filter';
+  }, [costCenters, selectedCostCenterId]);
+
+  const hasActiveFilters = !!(activeProjectLabel || activeResourceLabel || activeCostCenterLabel);
 
   const totalFtePercent = useMemo(() => {
     return filteredSupplies.reduce((sum, s) => sum + (s.fte_percent ?? 0), 0);
@@ -609,7 +617,7 @@ export const Supply: React.FC = () => {
         </div>
       </div>
 
-      {/* Filters bar - RO-focused: period summary + project/resource filters. Cost center remains an API filter but is hidden from the main UI for now. */}
+      {/* Filters bar - period summary + project/resource/cost center filters (searchable) */}
       <div className={styles.filters}>
         <div className={styles.filterGroup}>
           <span className={styles.filterLabel}>Period</span>
@@ -621,31 +629,33 @@ export const Supply: React.FC = () => {
         </div>
         <div className={styles.filterGroup}>
           <span className={styles.filterLabel}>Project</span>
-          <Select
+          <SearchableFilter
+            options={projects.map(p => ({ id: p.id, label: p.name }))}
             value={selectedProjectId || ''}
-            onChange={(_, data) => setSelectedProjectId(data.value || null)}
-          >
-            <option value="">All projects</option>
-            {projects.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </Select>
+            onChange={(id) => setSelectedProjectId(id || null)}
+            placeholder="Type to search projects..."
+            allLabel="All projects"
+          />
         </div>
         <div className={styles.filterGroup}>
           <span className={styles.filterLabel}>Resource</span>
-          <Select
+          <SearchableFilter
+            options={resources.map(r => ({ id: r.id, label: r.display_name }))}
             value={selectedResourceId || ''}
-            onChange={(_, data) => setSelectedResourceId(data.value || null)}
-          >
-            <option value="">All resources</option>
-            {resources.map(r => (
-              <option key={r.id} value={r.id}>
-                {r.display_name}
-              </option>
-            ))}
-          </Select>
+            onChange={(id) => setSelectedResourceId(id || null)}
+            placeholder="Type to search resources..."
+            allLabel="All resources"
+          />
+        </div>
+        <div className={styles.filterGroup}>
+          <span className={styles.filterLabel}>Cost Center</span>
+          <SearchableFilter
+            options={costCenters.map(c => ({ id: c.id, label: c.name }))}
+            value={selectedCostCenterId}
+            onChange={setSelectedCostCenterId}
+            placeholder="Type to search cost centers..."
+            allLabel="All cost centers"
+          />
         </div>
       </div>
 
@@ -670,6 +680,15 @@ export const Supply: React.FC = () => {
                 {activeResourceLabel}
               </Button>
             )}
+            {activeCostCenterLabel && (
+              <Button
+                size="small"
+                appearance="outline"
+                onClick={() => setSelectedCostCenterId('')}
+              >
+                {activeCostCenterLabel}
+              </Button>
+            )}
           </div>
           <Button
             size="small"
@@ -677,6 +696,7 @@ export const Supply: React.FC = () => {
             onClick={() => {
               setSelectedProjectId(null);
               setSelectedResourceId(null);
+              setSelectedCostCenterId('');
             }}
           >
             Clear all
@@ -744,6 +764,7 @@ export const Supply: React.FC = () => {
         <Drawer
           type="overlay"
           position="end"
+          size="large"
           open={isDialogOpen}
           onOpenChange={(_, data) => {
             setIsDialogOpen(data.open);
@@ -836,20 +857,12 @@ export const Supply: React.FC = () => {
               <>
                 <div className={styles.formField}>
                   <label className={styles.formLabel}>Resources</label>
-                  <Dropdown
-                    multiselect
-                    selectedOptions={bulkAddResources}
-                    onOptionSelect={(_, data) =>
-                      setBulkAddResources(data.selectedOptions as string[])
-                    }
-                    placeholder="Select resources..."
-                  >
-                    {resources.map(r => (
-                      <Option key={r.id} value={r.id}>
-                        {r.display_name}
-                      </Option>
-                    ))}
-                  </Dropdown>
+                  <SearchableMultiselect
+                    options={resources.map(r => ({ id: r.id, label: r.display_name }))}
+                    value={bulkAddResources}
+                    onChange={setBulkAddResources}
+                    placeholder="Type to search resources..."
+                  />
                 </div>
                 <div className={styles.formField}>
                   <label className={styles.formLabel}>Periods</label>
@@ -864,7 +877,7 @@ export const Supply: React.FC = () => {
                     placeholder="Select open periods..."
                   >
                     {openPeriods.map(p => (
-                      <Option key={p.id} value={p.id}>
+                      <Option key={p.id} value={p.id} text={`${monthNames[p.month - 1]} ${p.year}`}>
                         {monthNames[p.month - 1]} {p.year}
                       </Option>
                     ))}
@@ -879,9 +892,9 @@ export const Supply: React.FC = () => {
                     }
                     placeholder="Select project or leave blank for general availability..."
                   >
-                    <Option value="">None (General Availability)</Option>
+                    <Option value="" text="None (General Availability)">None (General Availability)</Option>
                     {projects.map(p => (
-                      <Option key={p.id} value={p.id}>
+                      <Option key={p.id} value={p.id} text={p.name}>
                         {p.name}
                       </Option>
                     ))}

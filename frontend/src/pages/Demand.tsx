@@ -52,6 +52,8 @@ import { ResourcePicker } from '../components/ResourcePicker';
 import { PlaceholderPicker } from '../components/PlaceholderPicker';
 import { periodsApi } from '../api/periods';
 import { Period } from '../types';
+import { SearchableFilter } from '../components/SearchableFilter';
+import { SearchableMultiselect } from '../components/SearchableMultiselect';
 import { Dropdown, Option } from '@fluentui/react-components';
 
 const useStyles = makeStyles({
@@ -269,7 +271,7 @@ export const Demand: React.FC = () => {
   const [addMode, setAddMode] = useState<'single' | 'bulk'>('single');
   const [bulkAddProjects, setBulkAddProjects] = useState<string[]>([]);
   const [bulkAddResourceType, setBulkAddResourceType] = useState<'resource' | 'placeholder' | ''>('');
-  const [bulkAddResourceId, setBulkAddResourceId] = useState<string>('');
+  const [bulkAddResourceIds, setBulkAddResourceIds] = useState<string[]>([]);
   const [bulkAddPeriods, setBulkAddPeriods] = useState<Period[]>([]);
   const [bulkAddFte, setBulkAddFte] = useState<number>(50);
   const [bulkAddPreview, setBulkAddPreview] = useState<any[]>([]);
@@ -319,7 +321,13 @@ export const Demand: React.FC = () => {
     return 'Resource filter';
   }, [resources, placeholders, selectedResourceId]);
 
-  const hasActiveFilters = !!(activeProjectLabel || activeResourceLabel);
+  const activeCostCenterLabel = useMemo(() => {
+    if (!selectedCostCenterId) return null;
+    const cc = costCenters.find(c => c.id === selectedCostCenterId);
+    return cc ? `Cost center: ${cc.name}` : 'Cost center filter';
+  }, [costCenters, selectedCostCenterId]);
+
+  const hasActiveFilters = !!(activeProjectLabel || activeResourceLabel || activeCostCenterLabel);
 
   const totalFtePercent = useMemo(() => {
     return filteredDemands.reduce((sum, d) => sum + (d.fte_percent ?? 0), 0);
@@ -627,25 +635,27 @@ export const Demand: React.FC = () => {
 
 
   const handleBulkAddPreview = () => {
-    // Preview lines
+    // Preview lines: projects x resources/placeholders x periods
     const preview = [];
     for (const projectId of bulkAddProjects) {
-      for (const period of bulkAddPeriods) {
-        preview.push({
-          project_id: projectId,
-          year: period.year,
-          month: period.month,
-          resource_id: bulkAddResourceType === 'resource' ? bulkAddResourceId : undefined,
-          placeholder_id: bulkAddResourceType === 'placeholder' ? bulkAddResourceId : undefined,
-          fte_percent: bulkAddFte,
-        });
+      for (const resourceId of bulkAddResourceIds) {
+        for (const period of bulkAddPeriods) {
+          preview.push({
+            project_id: projectId,
+            year: period.year,
+            month: period.month,
+            resource_id: bulkAddResourceType === 'resource' ? resourceId : undefined,
+            placeholder_id: bulkAddResourceType === 'placeholder' ? resourceId : undefined,
+            fte_percent: bulkAddFte,
+          });
+        }
       }
     }
     setBulkAddPreview(preview);
   };
 
   const handleBulkAddSubmit = async () => {
-    if (!canEdit || bulkAddProjects.length === 0 || !bulkAddResourceType || !bulkAddResourceId || bulkAddPeriods.length === 0) {
+    if (!canEdit || bulkAddProjects.length === 0 || !bulkAddResourceType || bulkAddResourceIds.length === 0 || bulkAddPeriods.length === 0) {
       showError('Missing fields', 'Please fill all fields and preview before submitting.');
       return;
     }
@@ -702,7 +712,7 @@ export const Demand: React.FC = () => {
         </div>
       </div>
 
-      {/* Filters bar - RO-focused: period summary + project/resource filters. Cost center remains an API filter but is hidden from the main UI for now. */}
+      {/* Filters bar - period summary + project/resource/cost center filters (searchable) */}
       <div className={styles.filters}>
         <div className={styles.filterGroup}>
           <span className={styles.filterLabel}>Period</span>
@@ -714,36 +724,36 @@ export const Demand: React.FC = () => {
         </div>
         <div className={styles.filterGroup}>
           <span className={styles.filterLabel}>Project</span>
-          <Select
+          <SearchableFilter
+            options={projects.map(p => ({ id: p.id, label: p.name }))}
             value={selectedProjectId || ''}
-            onChange={(_, data) => setSelectedProjectId(data.value || null)}
-          >
-            <option value="">All projects</option>
-            {projects.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </Select>
+            onChange={(id) => setSelectedProjectId(id || null)}
+            placeholder="Type to search projects..."
+            allLabel="All projects"
+          />
         </div>
         <div className={styles.filterGroup}>
           <span className={styles.filterLabel}>Resource</span>
-          <Select
+          <SearchableFilter
+            options={[
+              ...resources.map(r => ({ id: r.id, label: r.display_name })),
+              ...placeholders.map(ph => ({ id: ph.id, label: `${ph.name} (placeholder)` })),
+            ]}
             value={selectedResourceId || ''}
-            onChange={(_, data) => setSelectedResourceId(data.value || null)}
-          >
-            <option value="">All resources</option>
-            {resources.map(r => (
-              <option key={r.id} value={r.id}>
-                {r.display_name}
-              </option>
-            ))}
-            {placeholders.map(ph => (
-              <option key={ph.id} value={ph.id}>
-                {ph.name} (placeholder)
-              </option>
-            ))}
-          </Select>
+            onChange={(id) => setSelectedResourceId(id || null)}
+            placeholder="Type to search resources..."
+            allLabel="All resources"
+          />
+        </div>
+        <div className={styles.filterGroup}>
+          <span className={styles.filterLabel}>Cost Center</span>
+          <SearchableFilter
+            options={costCenters.map(c => ({ id: c.id, label: c.name }))}
+            value={selectedCostCenterId}
+            onChange={setSelectedCostCenterId}
+            placeholder="Type to search cost centers..."
+            allLabel="All cost centers"
+          />
         </div>
       </div>
 
@@ -768,6 +778,15 @@ export const Demand: React.FC = () => {
                 {activeResourceLabel}
               </Button>
             )}
+            {activeCostCenterLabel && (
+              <Button
+                size="small"
+                appearance="outline"
+                onClick={() => setSelectedCostCenterId('')}
+              >
+                {activeCostCenterLabel}
+              </Button>
+            )}
           </div>
           <Button
             size="small"
@@ -775,6 +794,7 @@ export const Demand: React.FC = () => {
             onClick={() => {
               setSelectedProjectId(null);
               setSelectedResourceId(null);
+              setSelectedCostCenterId('');
             }}
           >
             Clear all
@@ -1025,12 +1045,18 @@ export const Demand: React.FC = () => {
         <Drawer
           type="overlay"
           position="end"
+          size="large"
           open={isDialogOpen}
           onOpenChange={(_, data) => {
             setIsDialogOpen(data.open);
             if (!data.open) {
               setEditId(null);
               setAddMode('single');
+              setBulkAddProjects([]);
+              setBulkAddResourceType('');
+              setBulkAddResourceIds([]);
+              setBulkAddPeriods([]);
+              setBulkAddPreview([]);
             }
           }}
         >
@@ -1117,13 +1143,13 @@ export const Demand: React.FC = () => {
                     placeholder="Select projects..."
                   >
                     {projects.map(p => (
-                      <Option key={p.id} value={p.id}>{p.name}</Option>
+                      <Option key={p.id} value={p.id} text={p.name}>{p.name}</Option>
                     ))}
                   </Dropdown>
                 </div>
                 <div className={styles.formField}>
                   <label className={styles.formLabel}>Assignment Type</label>
-                  <Select value={bulkAddResourceType} onChange={(_, data) => setBulkAddResourceType(data.value)}>
+                  <Select value={bulkAddResourceType} onChange={(_, data) => { setBulkAddResourceType(data.value); setBulkAddResourceIds([]); }}>
                     <option value="">Select...</option>
                     <option value="resource">Named Resource</option>
                     <option value="placeholder">Placeholder (TBD)</option>
@@ -1131,14 +1157,24 @@ export const Demand: React.FC = () => {
                 </div>
                 {bulkAddResourceType === 'resource' && (
                   <div className={styles.formField}>
-                    <label className={styles.formLabel}>Resource</label>
-                    <ResourcePicker resources={resources} value={bulkAddResourceId} onChange={setBulkAddResourceId} placeholder="Type name..." />
+                    <label className={styles.formLabel}>Resources</label>
+                    <SearchableMultiselect
+                      options={resources.map(r => ({ id: r.id, label: r.display_name }))}
+                      value={bulkAddResourceIds}
+                      onChange={setBulkAddResourceIds}
+                      placeholder="Type to search resources..."
+                    />
                   </div>
                 )}
                 {bulkAddResourceType === 'placeholder' && (
                   <div className={styles.formField}>
-                    <label className={styles.formLabel}>Placeholder</label>
-                    <PlaceholderPicker placeholders={placeholders} value={bulkAddResourceId} onChange={setBulkAddResourceId} placeholder="Type placeholder..." />
+                    <label className={styles.formLabel}>Placeholders</label>
+                    <SearchableMultiselect
+                      options={placeholders.map(ph => ({ id: ph.id, label: ph.name }))}
+                      value={bulkAddResourceIds}
+                      onChange={setBulkAddResourceIds}
+                      placeholder="Type to search placeholders..."
+                    />
                   </div>
                 )}
                 <div className={styles.formField}>
@@ -1152,7 +1188,7 @@ export const Demand: React.FC = () => {
                     placeholder="Select open periods..."
                   >
                     {openPeriods.map(p => (
-                      <Option key={p.id} value={p.id}>
+                      <Option key={p.id} value={p.id} text={`${monthNames[p.month - 1]} ${p.year}`}>
                         {monthNames[p.month - 1]} {p.year}
                       </Option>
                     ))}
@@ -1166,7 +1202,7 @@ export const Demand: React.FC = () => {
                     ))}
                   </Select>
                 </div>
-                <Button appearance="secondary" onClick={handleBulkAddPreview} disabled={bulkAddProjects.length === 0 || bulkAddPeriods.length === 0}>Preview</Button>
+                <Button appearance="secondary" onClick={handleBulkAddPreview} disabled={bulkAddProjects.length === 0 || bulkAddResourceIds.length === 0 || bulkAddPeriods.length === 0}>Preview</Button>
                 {bulkAddPreview.length > 0 && (
                   <div style={{ marginTop: 16 }}>
                     <strong>Preview ({bulkAddPreview.length} lines):</strong>
@@ -1174,6 +1210,7 @@ export const Demand: React.FC = () => {
                       <TableHeader>
                         <TableRow>
                           <TableHeaderCell>Project</TableHeaderCell>
+                          <TableHeaderCell>Resource</TableHeaderCell>
                           <TableHeaderCell>Year</TableHeaderCell>
                           <TableHeaderCell>Month</TableHeaderCell>
                           <TableHeaderCell>FTE %</TableHeaderCell>
@@ -1183,6 +1220,11 @@ export const Demand: React.FC = () => {
                         {bulkAddPreview.map((line, idx) => (
                           <TableRow key={idx}>
                             <TableCell>{projects.find(p => p.id === line.project_id)?.name || line.project_id}</TableCell>
+                            <TableCell>
+                              {line.resource_id
+                                ? (resources.find(r => r.id === line.resource_id)?.display_name || line.resource_id)
+                                : (placeholders.find(ph => ph.id === line.placeholder_id)?.name || line.placeholder_id || '—')}
+                            </TableCell>
                             <TableCell>{line.year}</TableCell>
                             <TableCell>{String(line.month).padStart(2, '0')}</TableCell>
                             <TableCell>{line.fte_percent}%</TableCell>

@@ -127,13 +127,13 @@ async def list_snapshots(
     period_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.DIRECTOR
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.DIRECTOR, UserRole.RO
     )),
 ):
     """
     List all published snapshots.
     
-    Accessible to: Admin, Finance, Director
+    Accessible to: Admin, Finance, Director, RO (view only)
     """
     service = ConsolidationService(db, current_user)
     snapshots = service.get_snapshots(period_id)

@@ -8,10 +8,14 @@ from alembic import context
 
 # Import models to ensure they're registered with Base
 from api.app.db.base import Base
-from api.app.models import core  # noqa: F401
-from api.app.models import planning  # noqa: F401
-from api.app.models import actuals  # noqa: F401
-from api.app.models import finance  # noqa: F401
+from api.app.models import core          # noqa: F401
+from api.app.models import planning      # noqa: F401
+from api.app.models import actuals       # noqa: F401
+from api.app.models import finance       # noqa: F401
+from api.app.models import approvals     # noqa: F401
+from api.app.models import consolidation # noqa: F401
+from api.app.models import notifications # noqa: F401
+from api.app.models import audit         # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -21,6 +25,12 @@ config = context.config
 # This line sets up loggers basically.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# Use the same DATABASE_URL source as the runtime engine so that
+# `alembic upgrade head` targets the correct database automatically
+# when DATABASE_URL is set in the environment.
+from api.app.config import get_settings as _get_settings  # noqa: E402
+config.set_main_option("sqlalchemy.url", _get_settings().database_url)
 
 # add your model's MetaData object here
 # for 'autogenerate' support

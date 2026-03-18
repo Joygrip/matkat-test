@@ -21,25 +21,20 @@ app = FastAPI(
 # CORS middleware for frontend. If you run the frontend from another origin
 # (e.g. http://192.168.x.x:5173), set ADDITIONAL_CORS_ORIGINS in .env or add it below.
 _settings = get_settings()
-allow_origins = [
-    "http://localhost:5173",  # Vite dev server (default)
-    "http://localhost:3000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:3000",
-]
 if _settings.is_dev:
-    allow_origins = allow_origins + [
+    allow_origins = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
         "http://[::1]:5173",
         "http://[::1]:3000",
-    ]
-    extra = _settings.additional_cors_origins_list
-    if extra:
-        allow_origins = allow_origins + extra
+    ] + _settings.additional_cors_origins_list
+else:
+    # Non-dev: only origins explicitly set via CORS_ORIGINS env var
+    allow_origins = _settings.cors_origins_list
 # In dev, allow all request headers to avoid CORS preflight rejection (e.g. on POST)
-allow_headers = ["*"] if _settings.is_dev else [
-    "Authorization",
-    "Content-Type",
-]
+allow_headers = ["*"] if _settings.is_dev else ["Authorization", "Content-Type"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
@@ -159,6 +154,25 @@ async def startup_event():
     """Initialize application on startup."""
     settings = get_settings()
     print(f"Starting Resource Allocation API in {settings.env} mode")
+
+    if settings.appinsights_connection_string:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+        configure_azure_monitor(connection_string=settings.appinsights_connection_string)
+
+    # Hard fail: bypass must never be active outside local dev
+    if settings.dev_auth_bypass and not settings.is_dev:
+        raise RuntimeError(
+            "DEV_AUTH_BYPASS=true is not allowed outside ENV=dev. "
+            "Remove DEV_AUTH_BYPASS from your Azure App Service configuration."
+        )
+
+    # Hard fail: SQLite must not reach UAT/PROD
+    if not settings.is_dev and settings.database_url.startswith("sqlite"):
+        raise RuntimeError(
+            "DATABASE_URL is SQLite but ENV is not 'dev'. "
+            "Set DATABASE_URL to a SQL Server connection string in Azure App Service."
+        )
+
     if settings.dev_auth_bypass:
         print("WARNING: DEV_AUTH_BYPASS is enabled. Do not use in production!")
         # --- Dev seeding: full example data (periods 2026-01 to 2026-12, demand, supply, actuals) ---

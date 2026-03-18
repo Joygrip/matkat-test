@@ -15,20 +15,20 @@ app = func.FunctionApp()
 
 
 def get_api_headers():
-    """Get headers for API calls - dev bypass or future managed identity."""
+    """Get headers for API calls — dev bypass or managed identity (production)."""
     if os.environ.get("DEV_AUTH_BYPASS", "false").lower() == "true":
         return {
             "X-Dev-Role": os.environ.get("DEV_ROLE", "Admin"),
             "X-Dev-Tenant": os.environ.get("DEV_TENANT", "dev-tenant-001"),
         }
     
-    # TODO: Implement managed identity token acquisition for production
-    # from azure.identity import DefaultAzureCredential
-    # credential = DefaultAzureCredential()
-    # token = credential.get_token("api://your-api-scope/.default")
-    # return {"Authorization": f"Bearer {token.token}"}
-    
-    return {}
+    # Production: acquire token via managed identity (Azure Functions) or
+    # Azure CLI credentials (local development without bypass).
+    from azure.identity import DefaultAzureCredential
+    client_id = os.environ["API_APP_CLIENT_ID"]
+    credential = DefaultAzureCredential()
+    token = credential.get_token(f"api://{client_id}/.default")
+    return {"Authorization": f"Bearer {token.token}"}
 
 
 def call_notification_api(phase: str, year: int, month: int):

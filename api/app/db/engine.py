@@ -24,9 +24,14 @@ def get_engine():
 
 
 def run_dev_migrations(engine) -> None:
-    """Run alembic upgrade head for SQLite (dev) databases. Idempotent.
+    """Run alembic upgrade head for SQLite (local dev) databases only.
 
-    - No-op in production (non-SQLite engines).
+    Non-SQLite (Azure SQL, Postgres, …): intentionally a no-op.
+    Migrations against a shared database must NOT run automatically at every
+    app start-up — they are a controlled release step.  Run before deploying:
+
+        DATABASE_URL="mssql+pyodbc://…" alembic upgrade head
+
     - No-op during pytest runs (PYTEST_CURRENT_TEST guard).
     - Raises RuntimeError with clear instructions if migration fails
       (e.g. untracked schema created via create_all without Alembic).

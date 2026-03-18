@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # CORS (dev): comma-separated extra origins, e.g. "http://192.168.1.10:5173"
     additional_cors_origins: str = ""
 
+    # CORS (non-dev): comma-separated allowed origins for UAT/PROD
+    # e.g. "https://app.azurestaticapps.net,https://custom.domain.com"
+    cors_origins: str = ""
+
     # Azure Application Insights
     appinsights_connection_string: str = ""
     
@@ -50,6 +54,12 @@ class Settings(BaseSettings):
         if not self.additional_cors_origins:
             return []
         return [o.strip() for o in self.additional_cors_origins.split(",") if o.strip()]
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        if not self.cors_origins:
+            return []
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
     def tenant_allowlist(self) -> list[str]:

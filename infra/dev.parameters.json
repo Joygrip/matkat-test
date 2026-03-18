@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "projectName": {
+      "value": "matkat"
+    },
+    "environmentName": {
+      "value": "dev"
+    },
+    "location": {
+      "value": "westeurope"
+    },
+    "sqlAdminLogin": {
+      "value": "sqladmin"
+    },
+    "sqlAdminPassword": {
+      "value": "REPLACE_BEFORE_DEPLOY"
+    },
+    "containerRegistryName": {
+      "value": "REPLACE_BEFORE_DEPLOY"
+    },
+    "backendImageName": {
+      "value": "matkat-api:latest"
+    },
+    "appServiceSkuName": {
+      "value": "B1"
+    },
+    "sqlDatabaseSku": {
+      "value": "Basic"
+    },
+    "staticWebAppSku": {
+      "value": "Free"
+    },
+    "frontendAuthClientId": {
+      "value": "REPLACE_BEFORE_DEPLOY"
+    },
+    "frontendAuthAuthority": {
+      "value": "https://login.microsoftonline.com/REPLACE_BEFORE_DEPLOY"
+    },
+    "frontendApiScope": {
+      "value": "api://REPLACE_BEFORE_DEPLOY/.default"
+    }
+  }
+}

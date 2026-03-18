@@ -1,0 +1,168 @@
+// ============================================================
+// main.bicep — Matkat Azure Infrastructure Orchestrator
+// Deploy with:
+//   az deployment group create \
+//     --resource-group rg-matkat-dev \
+//     --template-file infra/main.bicep \
+//     --parameters infra/dev.parameters.json
+// ============================================================
+
+@description('Short project name used in all resource naming (lowercase, no hyphens)')
+param projectName string
+
+@description('Environment name: dev or uat')
+@allowed(['dev', 'uat'])
+param environmentName string
+
+@description('Azure region for all resources (Static Web App always deploys to eastus2)')
+param location string = resourceGroup().location
+
+@description('SQL Server administrator login name')
+param sqlAdminLogin string
+
+@description('SQL Server administrator login password')
+@secure()
+param sqlAdminPassword string
+
+@description('Container registry name without the .azurecr.io suffix')
+param containerRegistryName string
+
+@description('Container image name and tag, e.g. matkat-api:latest')
+param backendImageName string
+
+@description('App Service Plan SKU name (e.g. B1, B2, S1)')
+param appServiceSkuName string = 'B1'
+
+@description('Azure SQL Database SKU (Basic, S0, GP_S_Gen5_1, etc.)')
+param sqlDatabaseSku string = 'Basic'
+
+@description('Static Web App SKU (Free or Standard)')
+@allowed(['Free', 'Standard'])
+param staticWebAppSku string = 'Free'
+
+@description('Azure AD client ID used by the frontend (MSAL)')
+param frontendAuthClientId string
+
+@description('MSAL authority URL, e.g. https://login.microsoftonline.com/<tenant-id>')
+param frontendAuthAuthority string
+
+@description('API scope for MSAL token requests, e.g. api://<api-app-id-uri>/.default')
+param frontendApiScope string
+
+// ── Derive Key Vault name upfront to break circular dependency ──────────────
+// appService needs KV secret URIs; keyVault needs appService principal ID.
+// We break the cycle by constructing KV URIs from known naming convention
+// rather than reading them from keyVault module outputs.
+var keyVaultName = '${projectName}-kv-${environmentName}'
+var kvBaseUri = 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets'
+
+var kvSecretUriTenantId      = '${kvBaseUri}/AzureTenantId/'
+var kvSecretUriApiClientId   = '${kvBaseUri}/ApiAppClientId/'
+var kvSecretUriApiIdUri       = '${kvBaseUri}/ApiAppIdUri/'
+var kvSecretUriDatabaseUrl   = '${kvBaseUri}/DatabaseUrl/'
+var kvSecretUriGraphClientId = '${kvBaseUri}/GraphClientId/'
+var kvSecretUriGraphClientSecret = '${kvBaseUri}/GraphClientSecret/'
+
+// ── 1. Storage Account ──────────────────────────────────────
+module storage 'modules/storage.bicep' = {
+  name: 'storage'
+  params: {
+    projectName: projectName
+    environmentName: environmentName
+    location: location
+  }
+}
+
+// ── 2. Monitoring (Log Analytics + App Insights) ────────────
+module monitoring 'modules/monitoring.bicep' = {
+  name: 'monitoring'
+  params: {
+    projectName: projectName
+    environmentName: environmentName
+    location: location
+  }
+}
+
+// ── 3. Database (SQL Server + Database) ─────────────────────
+module database 'modules/database.bicep' = {
+  name: 'database'
+  params: {
+    projectName: projectName
+    environmentName: environmentName
+    location: location
+    sqlAdminLogin: sqlAdminLogin
+    sqlAdminPassword: sqlAdminPassword
+    sqlDatabaseSku: sqlDatabaseSku
+  }
+}
+
+// ── 4. Static Web App (frontend) ────────────────────────────
+module staticWebApp 'modules/staticwebapp.bicep' = {
+  name: 'staticWebApp'
+  params: {
+    projectName: projectName
+    environmentName: environmentName
+    staticWebAppSku: staticWebAppSku
+    frontendAuthClientId: frontendAuthClientId
+    frontendAuthAuthority: frontendAuthAuthority
+    frontendApiScope: frontendApiScope
+    apiBaseUrl: 'https://${appService.outputs.webAppHostname}'
+  }
+  dependsOn: [appService]
+}
+
+// ── 5. App Service (backend container) ──────────────────────
+// KV secret URIs are constructed from the known naming pattern — no circular dep.
+module appService 'modules/appservice.bicep' = {
+  name: 'appService'
+  params: {
+    projectName: projectName
+    environmentName: environmentName
+    location: location
+    appServiceSkuName: appServiceSkuName
+    containerRegistryName: containerRegistryName
+    backendImageName: backendImageName
+    appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    kvSecretUriTenantId: kvSecretUriTenantId
+    kvSecretUriApiClientId: kvSecretUriApiClientId
+    kvSecretUriApiIdUri: kvSecretUriApiIdUri
+    kvSecretUriDatabaseUrl: kvSecretUriDatabaseUrl
+    kvSecretUriGraphClientId: kvSecretUriGraphClientId
+    kvSecretUriGraphClientSecret: kvSecretUriGraphClientSecret
+  }
+}
+
+// ── 6. Function App (scheduler) ─────────────────────────────
+module functionApp 'modules/functions.bicep' = {
+  name: 'functionApp'
+  params: {
+    projectName: projectName
+    environmentName: environmentName
+    location: location
+    storageConnectionString: storage.outputs.storageConnectionString
+    appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    webAppHostname: appService.outputs.webAppHostname
+  }
+}
+
+// ── 7. Key Vault (secrets + RBAC) ───────────────────────────
+// Deployed after App Service and Function App to capture their principal IDs.
+module keyVault 'modules/keyvault.bicep' = {
+  name: 'keyVault'
+  params: {
+    projectName: projectName
+    environmentName: environmentName
+    location: location
+    webAppPrincipalId: appService.outputs.webAppPrincipalId
+    funcAppPrincipalId: functionApp.outputs.funcAppPrincipalId
+  }
+}
+
+// ── Outputs ──────────────────────────────────────────────────
+output webAppHostname string = appService.outputs.webAppHostname
+output funcAppHostname string = functionApp.outputs.funcAppHostname
+output staticWebAppHostname string = staticWebApp.outputs.staticWebAppHostname
+output keyVaultUri string = keyVault.outputs.keyVaultUri
+output sqlServerFqdn string = database.outputs.sqlServerFqdn
+output sqlDatabaseName string = database.outputs.sqlDatabaseName
+output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString

@@ -2,167 +2,57 @@
 
 Multi-tenant resource allocation and planning system built with FastAPI and React.
 
+---
+
 ## Features
 
-- **Multi-tenant architecture** with tenant isolation
-- **Role-based access control** (Admin, Finance, PM, RO, Director, Employee)
-- **Planning**: Demand and Supply management with 4-month forecast window
-- **Actuals**: Time tracking with ≤100% enforcement per resource
-- **Approvals**: RO → Director workflow with automatic skip when RO=Director
-- **Consolidation**: Finance dashboard with gap analysis and snapshot publishing
-- **Notifications**: Scheduled reminders (Azure Functions stub)
+- **Multi-tenant architecture** with strict tenant isolation
+- **Role-based access control**: Admin, Finance, PM, RO, Director, Employee
+- **Planning**: Demand and Supply management with period-based (month/year) planning, 4-month forecast window, and FTE% in 5% increments
+- **Actuals**: Employee time tracking with ≤100% enforcement per resource/month, proxy sign by RO, and approval workflow
+- **Approvals**: RO → Director workflow, automatic skip if RO=Director, inbox refreshes instantly after actions
+- **Consolidation**: Finance dashboard with demand/supply gap analysis, cost center work queue, KPI scoreboard, and snapshot publishing (immutable period snapshots)
+- **Notifications**: Azure Functions stub for scheduled reminders (future)
+- **Audit Trail**: All master data and planning changes are logged with before/after values and user info
+- **Master Data Management**: Finance and Admin can manage departments, cost centers, projects, resources, placeholders, holidays, and settings
+- **Planning Insights**: PM/RO/Finance/Admin can view demand/supply gaps, orphan demand, and over-allocations per cost center
+- **Read-only UI**: Users without edit permissions see clear banners and disabled actions
+- **Dev Auth Bypass**: Switch roles and tenants instantly for local testing
+- **Comprehensive Test Coverage**: 100+ backend tests, frontend smoke/unit tests
+
+---
 
 ## Status
 
 ✅ **All core functionality implemented and tested**
-- Localhost repair complete (CORS, error handling, dependencies)
-- Enterprise UI refresh with read-only banners and role-aware navigation
-- Comprehensive verification checklist in README
-- See `docs/TODO.md` for detailed completion status
+- All major flows verified (see checklist below)
+- All backend tests pass (`pytest`)
+- TypeScript frontend builds cleanly (`npm run build`)
+- Enterprise UI refresh with Fluent UI v9, responsive layouts, and accessibility
+- See [`docs/TODO.md`](docs/TODO.md) and [`docs/VERIFY_LOCAL.md`](docs/VERIFY_LOCAL.md) for completion and verification status
+
+---
 
 ## Tech Stack
 
 ### Backend
 - FastAPI (Python 3.11+)
-- SQLAlchemy 2.x + Alembic
+- SQLAlchemy 2.x + Alembic (migrations)
 - SQLite (dev) / Azure SQL (production)
 - pytest for testing
 
 ### Frontend
 - React 18 + TypeScript
 - Vite
-- Fluent UI v9
+- Fluent UI v9 (design system)
 - MSAL React (Azure AD authentication)
+- Recharts, D3 (charts)
 
 ### Scheduler
 - Azure Functions (Python)
-- Timer triggers for notifications
+- Timer triggers for notifications (stub)
 
-## Quick Start
-
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- Git
-
-### Backend Setup
-
-**Windows PowerShell:**
-```powershell
-# Create virtual environment
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-
-# Install dependencies (from repo root)
-pip install -r api/requirements.txt
-
-# Set up environment
-cd api
-Copy-Item env.example.txt .env
-# Edit .env with your settings (set DEV_AUTH_BYPASS=true for local dev)
-
-# Run migrations
-alembic upgrade head
-
-# Run tests
-pytest
-
-# Start server (from repo root)
-cd ..
-uvicorn api.app.main:app --reload
-```
-
-**Linux/Mac (bash):**
-```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate
-
-# Install dependencies (from repo root)
-pip install -r api/requirements.txt
-
-# Set up environment
-cd api
-cp env.example.txt .env
-# Edit .env with your settings (set DEV_AUTH_BYPASS=true for local dev)
-
-# Run migrations
-alembic upgrade head
-
-# Run tests
-pytest
-
-# Start server (from repo root)
-cd ..
-uvicorn api.app.main:app --reload
-```
-
-**Note:** The backend must be run from the repo root so that `api.app.main` imports work correctly. If you need to run from the `api/` directory, set `PYTHONPATH=..` first.
-
-
-### Frontend Setup
-
-**Windows PowerShell:**
-```powershell
-cd frontend
-
-# Install dependencies
-npm install
-
-# Set up environment
-Copy-Item env.example.txt .env.local
-# Edit .env.local with your settings:
-#   VITE_DEV_AUTH_BYPASS=true
-#   VITE_API_BASE_URL=http://localhost:8000
-
-# Start dev server
-npm run dev
-```
-
-**Linux/Mac (bash):**
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Set up environment
-cp env.example.txt .env.local
-# Edit .env.local with your settings:
-#   VITE_DEV_AUTH_BYPASS=true
-#   VITE_API_BASE_URL=http://localhost:8000
-
-# Start dev server
-npm run dev
-```
-
-### Development Mode
-
-The app supports dev auth bypass for local development:
-
-1. Set `DEV_AUTH_BYPASS=true` in both backend and frontend `.env` files
-2. Use the dev login panel in the frontend to switch roles
-
-### Example Data
-
-In development mode, example data is automatically created on first startup if the database is empty. This includes:
-
-- **4 Departments**: Engineering, Operations, Sales & Marketing, Customer Support
-- **6 Cost Centers**: Software Development, QA, Infrastructure, DevOps, Marketing, Support Team
-- **14 Users**: All roles (Admin, Finance, PMs, ROs, Directors, Employees) with manager chains
-- **5 Projects**: Project Alpha, Beta, Gamma, Infrastructure Upgrade, Marketing Campaign
-- **8 Resources**: Employee resources and external contractors
-- **4 Placeholders**: For future hiring
-- **6 Periods**: December 2025 (locked), January 2026 (locked), February-May 2026 (open)
-- **10 Demand lines**: Across multiple projects and periods
-- **9 Supply lines**: Resource capacity allocation
-- **4 Actual lines**: January 2026 time tracking (locked period)
-- **2 Approval instances**: With RO and Director steps (for signed actuals)
-
-**To reset example data:**
-- Delete `api/dev.db` and restart the backend
-- Example data will be recreated automatically on next startup
-3. Backend accepts `X-Dev-Role` and `X-Dev-Tenant` headers
+---
 
 ## Project Structure
 
@@ -181,8 +71,104 @@ ResourceAllocation/
 │       ├── pages/       # Page components
 │       ├── components/  # Reusable components
 │       └── api/         # API client
-└── scheduler/           # Azure Functions
+├── scheduler/           # Azure Functions (notifications)
+└── scripts/             # Utility scripts (start, migration, etc.)
 ```
+
+---
+
+## Quick Start
+
+### Prerequisites
+- Python 3.11+
+- Node.js 18+
+- Git
+
+### Backend Setup
+
+**Windows PowerShell:**
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r api/requirements.txt
+cd api
+Copy-Item env.example.txt .env
+# Edit .env: set DEV_AUTH_BYPASS=true for local dev
+alembic upgrade head
+pytest
+cd ..
+uvicorn api.app.main:app --reload
+```
+
+**Linux/Mac (bash):**
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r api/requirements.txt
+cd api
+cp env.example.txt .env
+# Edit .env: set DEV_AUTH_BYPASS=true for local dev
+alembic upgrade head
+pytest
+cd ..
+uvicorn api.app.main:app --reload
+```
+
+**Note:** Run the backend from the repo root so that `api.app.main` imports work. If running from `api/`, set `PYTHONPATH=..`.
+
+### Frontend Setup
+
+**Windows PowerShell:**
+```powershell
+cd frontend
+npm install
+Copy-Item env.example.txt .env.local
+# Edit .env.local:
+#   VITE_DEV_AUTH_BYPASS=true
+#   VITE_API_BASE_URL=http://localhost:8000
+npm run dev
+```
+
+**Linux/Mac (bash):**
+```bash
+cd frontend
+npm install
+cp env.example.txt .env.local
+# Edit .env.local:
+#   VITE_DEV_AUTH_BYPASS=true
+#   VITE_API_BASE_URL=http://localhost:8000
+npm run dev
+```
+
+---
+
+## Development Mode
+
+- Set `DEV_AUTH_BYPASS=true` in both backend and frontend `.env` files
+- Use the Dev Login Panel in the frontend to switch roles and tenants instantly
+
+---
+
+## Example Data
+
+- On first startup (dev mode, empty DB), the backend auto-creates sample data:
+  - **Departments**: Engineering, Operations, Sales & Marketing, Customer Support
+  - **Cost Centers**: Software Development, QA, Infrastructure, DevOps, Marketing, Support Team
+  - **Users**: All roles (Admin, Finance, PMs, ROs, Directors, Employees) with manager chains
+  - **Projects**: Alpha, Beta, Gamma, Infrastructure Upgrade, Marketing Campaign
+  - **Resources**: Employees and external contractors
+  - **Placeholders**: For future hiring
+  - **Periods**: December 2025 (locked), January 2026 (locked), February-May 2026 (open)
+  - **Demand/Supply/Actual lines**: Example planning and actuals data
+  - **Approvals**: Example approval instances for signed actuals
+
+- **To reset example data:**  
+  Delete `api/dev.db` and restart the backend. Data will be recreated.
+
+- **Dev endpoints:**  
+  `/dev/seed`, `/dev/seed/run`, `/dev/seed/wipe` for advanced seeding (see [`frontend/src/api/devSeed.ts`](frontend/src/api/devSeed.ts)).
+
+---
 
 ## Testing
 
@@ -191,127 +177,89 @@ ResourceAllocation/
 cd api
 pytest -v
 
-# All tests should pass
+# Frontend build & test
+cd frontend
+npm run build
+npm run test
 ```
 
+- **All backend tests must pass**
+- Frontend must build without TypeScript errors
+
+---
+
 ## Local Run Guide
-
-### Quick Start
-
-1. **Backend** (from repo root):
-   ```powershell
-   # Windows PowerShell
-   python -m venv venv
-   .\venv\Scripts\Activate.ps1
-   pip install -r api/requirements.txt
-   cd api
-   Copy-Item env.example.txt .env
-   # Edit .env: set DEV_AUTH_BYPASS=true
-   alembic upgrade head
-   cd ..
-   uvicorn api.app.main:app --reload
-   ```
-
-2. **Frontend** (from repo root):
-   ```powershell
-   cd frontend
-   npm install
-   Copy-Item env.example.txt .env.local
-   # Edit .env.local: set VITE_DEV_AUTH_BYPASS=true, VITE_API_BASE_URL=http://localhost:8000
-   npm run dev
-   ```
-
-3. **Access**: http://localhost:5173 (use Dev Login Panel to switch roles)
-
-### How to Verify Locally
 
 ### Prerequisites Check
 1. **Backend running**: `uvicorn api.app.main:app --reload` (http://localhost:8000)
 2. **Frontend running**: `npm run dev` in `frontend/` (http://localhost:5173)
-3. **Dev auth bypass enabled**: Set `DEV_AUTH_BYPASS=true` in both `.env` files
-4. **Example data**: Automatically created on first startup if database is empty (dev mode only)
+3. **Dev auth bypass enabled**: `DEV_AUTH_BYPASS=true` in both `.env` files
+4. **Example data**: Auto-created on first startup if DB is empty
 
-### Manual Test Checklist
+---
+
+## Manual Test Checklist
 
 #### 1. Finance Role - Period Control
-- [ ] Login as Finance (use Dev Login Panel)
-- [ ] Navigate to Consolidation page
-- [ ] Create a new period (year/month)
-- [ ] Lock the period (requires reason)
-- [ ] Verify period status shows "locked"
-- [ ] Try to unlock/reopen (requires reason)
-- [ ] Verify period status changes back to "open"
+- [ ] Login as Finance (Dev Login Panel)
+- [ ] Create/lock/unlock periods, verify status changes
 
 #### 2. PM Role - Demand Planning
-- [ ] Login as PM
-- [ ] Verify navigation shows: Dashboard, Demand (no Supply visible)
-- [ ] Navigate to Demand page
-- [ ] Create demand line with resource (FTE 5-100, step 5)
-- [ ] Verify XOR: try to select both resource and placeholder → error
-- [ ] Verify 4MFC: try placeholder in current month → blocked
-- [ ] Create demand with placeholder for month 6+ months away → allowed
-- [ ] Verify Finance/Admin see Demand in read-only mode (no edit buttons)
+- [ ] Create demand lines (FTE 5-100, step 5)
+- [ ] Test XOR resource/placeholder rule
+- [ ] Test 4MFC placeholder rule (future months only)
+- [ ] Finance/Admin see Demand in read-only mode
 
 #### 3. RO Role - Supply Planning
-- [ ] Login as RO
-- [ ] Verify navigation shows: Dashboard, Demand, Supply, Actuals, Approvals
-- [ ] Navigate to Supply page
-- [ ] Create supply line (FTE 5-100, step 5)
-- [ ] Verify Finance/Admin see Supply in read-only mode
+- [ ] Create supply lines (FTE 5-100, step 5)
+- [ ] Finance/Admin see Supply in read-only mode
 
 #### 4. Employee Role - Actuals Entry
-- [ ] Login as Employee
-- [ ] Navigate to Actuals page
-- [ ] Create actual line (project + resource + FTE)
-- [ ] Create second line for same resource/month with total >100% → blocked with error showing total and offending IDs
-- [ ] Create lines totaling exactly 100% → allowed
-- [ ] Sign actuals → creates approval instance
+- [ ] Create actual lines (≤100% per resource/month)
+- [ ] Test over-100% block, sign actuals
 
 #### 5. RO Role - Proxy Sign & Approvals
-- [ ] Login as RO
-- [ ] Navigate to Actuals page
-- [ ] Find unsigned actuals for employee
-- [ ] Proxy sign with reason → creates approval instance
-- [ ] Navigate to Approvals page
-- [ ] Verify approval instance appears in inbox
-- [ ] Approve Step 1 (RO) → status remains "pending" (Director step pending)
-- [ ] Verify approval shows both RO and Director steps
+- [ ] Proxy sign for employees, verify approval instance, approve Step 1
 
 #### 6. Director Role - Approvals
-- [ ] Login as Director
-- [ ] Navigate to Approvals page
-- [ ] Verify approval from Step 5 appears in inbox
-- [ ] Approve Step 2 (Director) → status changes to "approved"
-- [ ] Test skip rule: if RO==Director, verify Director step is skipped and RO approval completes workflow
+- [ ] Approve Step 2, test skip rule if RO=Director
 
 #### 7. Finance Role - Consolidation & Publish
-- [ ] Login as Finance
-- [ ] Navigate to Consolidation page
-- [ ] View dashboard showing demand vs supply gaps
-- [ ] Publish snapshot → creates immutable snapshot
-- [ ] Verify snapshot lines remain stable (read-only)
+- [ ] View dashboard, publish snapshot, verify immutability
 
 #### 8. Error Handling
-- [ ] Test invalid FTE (e.g., 42) → shows FTE_INVALID error
-- [ ] Test locked period edit → shows PERIOD_LOCKED error
-- [ ] Test unauthorized role action → shows UNAUTHORIZED_ROLE error
-- [ ] Verify all errors show Problem Details format (code + message), not generic "Failed to fetch"
+- [ ] Invalid FTE → FTE_INVALID error
+- [ ] Locked period edit → PERIOD_LOCKED error
+- [ ] Unauthorized action → UNAUTHORIZED_ROLE error
+- [ ] All errors use Problem Details format
 
 #### 9. Multi-tenancy
-- [ ] Login as user in tenant-001
-- [ ] Create data (demand, supply, actuals)
-- [ ] Switch to tenant-002 (via Dev Login)
-- [ ] Verify no data from tenant-001 is visible
+- [ ] Switch tenants, verify strict data isolation
+
+---
 
 ## API Documentation
 
-Once the backend is running:
 - Swagger UI: http://localhost:8000/docs
 - Health check: http://localhost:8000/healthz
 
+---
+
 ## Environment Variables
 
-See `api/env.example.txt` and `frontend/env.example.txt` for required environment variables.
+See [`api/env.example.txt`](api/env.example.txt) and [`frontend/env.example.txt`](frontend/env.example.txt) for required variables.
+
+---
+
+## Documentation
+
+- [docs/TODO.md](docs/TODO.md): Full implementation plan and completion status
+- [docs/VERIFY_LOCAL.md](docs/VERIFY_LOCAL.md): Localhost verification checklist
+- [docs/START_LOCAL.md](docs/START_LOCAL.md): Local run and troubleshooting guide
+- [docs/TODO-planning.md](docs/TODO-planning.md): Planning UX improvements and acceptance criteria
+- [frontend/docs/UI_GUIDELINES.md](frontend/docs/UI_GUIDELINES.md): UI design guidelines and component patterns
+
+---
 
 ## License
 

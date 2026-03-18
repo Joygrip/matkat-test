@@ -1,14 +1,35 @@
 """Authentication dependencies."""
 from typing import Optional
+
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi_azure_auth import SingleTenantAzureAuthorizationCodeBearer
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from api.app.config import get_settings
-from api.app.models.core import UserRole
+from api.app.db.engine import get_db
+from api.app.models.core import User, UserRole
+from api.app.services.user_sync import sync_user_from_graph
 
 # HTTP Bearer scheme for token extraction
 security = HTTPBearer(auto_error=False)
+
+# Lazily-initialised Azure scheme (avoids import-time settings resolution)
+_azure_scheme: Optional[SingleTenantAzureAuthorizationCodeBearer] = None
+
+
+def _get_azure_scheme() -> SingleTenantAzureAuthorizationCodeBearer:
+    """Return the configured Azure auth scheme, creating it once on first call."""
+    global _azure_scheme
+    if _azure_scheme is None:
+        s = get_settings()
+        _azure_scheme = SingleTenantAzureAuthorizationCodeBearer(
+            app_client_id=s.api_app_client_id,
+            tenant_id=s.azure_tenant_id,
+            auto_error=True,
+        )
+    return _azure_scheme
 
 
 class CurrentUser(BaseModel):
@@ -18,11 +39,11 @@ class CurrentUser(BaseModel):
     email: str
     display_name: str
     role: UserRole
-    
+
     def has_role(self, *roles: UserRole) -> bool:
         """Check if user has any of the specified roles."""
         return self.role in roles
-    
+
     def require_role(self, *roles: UserRole) -> None:
         """Raise 403 if user doesn't have any of the specified roles."""
         if not self.has_role(*roles):
@@ -31,35 +52,40 @@ class CurrentUser(BaseModel):
                 detail={
                     "code": "UNAUTHORIZED_ROLE",
                     "message": f"This action requires one of: {[r.value for r in roles]}",
-                }
+                },
             )
 
 
 async def get_current_user(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db),
 ) -> CurrentUser:
     """
     Get current user from JWT token or dev bypass headers.
-    
-    In production: validates JWT via Azure AD.
-    In dev mode with DEV_AUTH_BYPASS=true: accepts X-Dev-Role and X-Dev-Tenant headers.
+
+    Production: validates the Entra JWT, then looks up the user's role in the DB
+    by object_id. Returns 403 USER_NOT_FOUND if the user is not yet provisioned.
+
+    Dev mode (ENV=dev AND DEV_AUTH_BYPASS=true): accepts X-Dev-* headers directly.
     """
     settings = get_settings()
-    
-    # Dev bypass mode
+
+    # ------------------------------------------------------------------
+    # Dev bypass mode (only active when ENV=dev AND DEV_AUTH_BYPASS=true)
+    # ------------------------------------------------------------------
     if settings.dev_auth_bypass and settings.is_dev:
         dev_role = request.headers.get("X-Dev-Role", "Employee")
         dev_tenant = request.headers.get("X-Dev-Tenant", "dev-tenant-001")
         dev_user_id = request.headers.get("X-Dev-User-Id", "dev-user-001")
         dev_email = request.headers.get("X-Dev-Email", "dev@example.com")
         dev_name = request.headers.get("X-Dev-Name", "Dev User")
-        
+
         try:
             role = UserRole(dev_role)
         except ValueError:
             role = UserRole.EMPLOYEE
-        
+
         return CurrentUser(
             tenant_id=dev_tenant,
             object_id=dev_user_id,
@@ -67,8 +93,10 @@ async def get_current_user(
             display_name=dev_name,
             role=role,
         )
-    
-    # Production: require token
+
+    # ------------------------------------------------------------------
+    # Production: validate Bearer JWT via Entra
+    # ------------------------------------------------------------------
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -78,23 +106,49 @@ async def get_current_user(
             },
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    # TODO: Implement real JWT validation with fastapi-azure-auth
-    # For now, in non-bypass mode without proper token, reject
-    # This will be replaced with azure_scheme dependency
-    
-    token = credentials.credentials
-    
-    # Placeholder for real token validation
-    # In production, use fastapi_azure_auth.SingleTenantAzureAuthorizationCodeBearer
-    # or MultiTenantAzureAuthorizationCodeBearer
-    
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail={
-            "code": "AUTH_NOT_CONFIGURED",
-            "message": "Azure AD authentication not configured. Enable DEV_AUTH_BYPASS for development.",
-        }
+
+    # Validate token – raises 401 automatically on failure (auto_error=True)
+    azure_user = await _get_azure_scheme()(request)
+
+    # Extract standard claims
+    claims = azure_user.claims if hasattr(azure_user, "claims") else {}
+    object_id: str = claims.get("oid") or claims.get("sub", "")
+    tenant_id: str = claims.get("tid", "")
+    # 'preferred_username' is present in v2 tokens; 'upn' in v1
+    email: str = (
+        claims.get("preferred_username")
+        or claims.get("upn")
+        or claims.get("email")
+        or ""
+    )
+    display_name: str = claims.get("name", email)
+
+    if not object_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "INVALID_TOKEN",
+                "message": "Token is missing the 'oid' claim.",
+            },
+        )
+
+    # Upsert user from JWT claims + best-effort Graph sync
+    db_user = await sync_user_from_graph(
+        db=db,
+        settings=settings,
+        user_access_token=credentials.credentials,
+        tenant_id=tenant_id,
+        object_id=object_id,
+        email=email,
+        display_name=display_name,
+    )
+
+    return CurrentUser(
+        tenant_id=db_user.tenant_id,
+        object_id=object_id,
+        email=db_user.email,
+        display_name=db_user.display_name,
+        role=db_user.role,
     )
 
 

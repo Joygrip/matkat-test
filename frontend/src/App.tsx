@@ -29,7 +29,7 @@ const useStyles = makeStyles({
 
 function App() {
   const styles = useStyles();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, login } = useAuth();
 
   if (isLoading) {
     return (
@@ -44,11 +44,29 @@ function App() {
     return <DevLoginPanel />;
   }
 
-  // Show login prompt for real auth (not implemented yet)
+  // Show real login screen for non-dev, non-authenticated users
   if (!isAuthenticated) {
     return (
       <div className={styles.loading}>
-        <p>Please configure Azure AD authentication or enable DEV_AUTH_BYPASS.</p>
+        <div style={{ textAlign: 'center' }}>
+          <p style={{ marginBottom: '1rem', color: 'var(--colorNeutralForeground2)' }}>
+            Sign in with your Microsoft account to continue.
+          </p>
+          <button
+            onClick={() => login()}
+            style={{
+              padding: '0.6rem 1.4rem',
+              fontSize: '0.95rem',
+              cursor: 'pointer',
+              borderRadius: '4px',
+              border: 'none',
+              background: 'var(--colorBrandBackground)',
+              color: 'var(--colorNeutralForegroundOnBrand)',
+            }}
+          >
+            Sign in with Microsoft
+          </button>
+        </div>
       </div>
     );
   }

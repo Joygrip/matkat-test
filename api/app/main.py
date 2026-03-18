@@ -39,11 +39,6 @@ if _settings.is_dev:
 allow_headers = ["*"] if _settings.is_dev else [
     "Authorization",
     "Content-Type",
-    "X-Dev-Role",
-    "X-Dev-Tenant",
-    "X-Dev-User-Id",
-    "X-Dev-Email",
-    "X-Dev-Name",
 ]
 app.add_middleware(
     CORSMiddleware,

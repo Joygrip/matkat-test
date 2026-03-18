@@ -13,9 +13,15 @@ class Settings(BaseSettings):
     dev_auth_bypass: bool = False
     
     # Azure AD
+    azure_tenant_id: str = ""       # Entra tenant GUID (required in non-dev mode)
     azure_tenant_allowlist: str = ""
     api_app_client_id: str = ""
     api_app_id_uri: str = ""
+
+    # Microsoft Graph (OBO flow for login-time profile sync)
+    graph_client_id: str = ""           # App client id (often same as api_app_client_id)
+    graph_client_secret: str = ""       # Client secret for OBO token exchange
+    graph_sync_interval_seconds: int = 3600  # Skip sync if synced within this window
     
     # Database
     database_url: str = "sqlite:///./dev.db"

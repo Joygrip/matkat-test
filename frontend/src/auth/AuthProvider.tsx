@@ -60,10 +60,23 @@ function AuthProviderInner({ children }: { children: ReactNode }) {
       });
       return response.accessToken;
     } catch {
-      // Token refresh failed, need interactive login
-      return null;
+      // Silent refresh failed – fall back to popup
+      try {
+        const response = await instance.acquireTokenPopup({
+          ...loginRequest,
+          account: accounts[0],
+        });
+        return response.accessToken;
+      } catch {
+        return null;
+      }
     }
   }, [instance, accounts]);
+
+  // Register the token getter on the API client whenever it changes
+  useEffect(() => {
+    apiClient.setTokenGetter(getAccessToken);
+  }, [getAccessToken]);
 
   // Fetch user info
   const fetchUserInfo = useCallback(async () => {

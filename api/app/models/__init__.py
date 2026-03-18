@@ -33,6 +33,9 @@ from api.app.models.notifications import (
     NotificationPhase,
     NotificationStatus,
 )
+from api.app.models.finance import (
+    FinanceSetting,
+)
 
 __all__ = [
     "User",
@@ -57,4 +60,5 @@ __all__ = [
     "NotificationLog",
     "NotificationPhase",
     "NotificationStatus",
+    "FinanceSetting",
 ]

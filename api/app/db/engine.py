@@ -23,21 +23,62 @@ def get_engine():
     return create_engine(url, echo=settings.is_dev)
 
 
-def ensure_resources_initials_column(engine):
-    """Add resources.initials column if missing (SQLite only). Idempotent."""
-    if not engine.dialect.name == "sqlite":
+def run_dev_migrations(engine) -> None:
+    """Run alembic upgrade head for SQLite (dev) databases. Idempotent.
+
+    - No-op in production (non-SQLite engines).
+    - No-op during pytest runs (PYTEST_CURRENT_TEST guard).
+    - Raises RuntimeError with clear instructions if migration fails
+      (e.g. untracked schema created via create_all without Alembic).
+    """
+    import os
+    if engine.dialect.name != "sqlite":
         return
-    with engine.connect() as conn:
-        result = conn.execute(text("PRAGMA table_info(resources)"))
-        columns = [row[1] for row in result.fetchall()]
-        if "initials" in columns:
-            return
-        conn.execute(text("ALTER TABLE resources ADD COLUMN initials VARCHAR(20)"))
-        conn.commit()
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+
+    from pathlib import Path
+    from alembic.config import Config
+    from alembic import command
+
+    # Resolve api/ root from this file: api/app/db/engine.py -> up 3 levels
+    api_root = Path(__file__).resolve().parent.parent.parent
+
+    alembic_cfg = Config()  # no ini file — avoids reconfiguring root logger
+    alembic_cfg.set_main_option("script_location", str(api_root / "alembic"))
+    alembic_cfg.set_main_option("sqlalchemy.url", str(engine.url))
+
+    def _upgrade(cfg: "Config") -> None:
+        command.upgrade(cfg, "head")
+
+    try:
+        _upgrade(alembic_cfg)
+        print("[DEV] SQLite schema is up to date (alembic upgrade head OK)")
+    except Exception as first_exc:
+        # Migration failed — likely an untracked schema created via create_all
+        # without Alembic (no alembic_version table).  Safe in dev: delete the
+        # stale file and let Alembic rebuild from scratch.
+        db_path = os.path.abspath(str(engine.url).replace("sqlite:///", ""))
+        print(
+            f"[DEV] Schema migration failed ({first_exc}); "
+            f"stale or untracked dev.db detected.\n"
+            f"      Deleting {db_path} and rebuilding schema from scratch..."
+        )
+        engine.dispose()  # release all pooled connections before deleting
+        if os.path.exists(db_path):
+            os.remove(db_path)
+        try:
+            _upgrade(alembic_cfg)
+            print("[DEV] SQLite schema rebuilt successfully (alembic upgrade head OK)")
+        except Exception as second_exc:
+            raise RuntimeError(
+                f"Dev database could not be created even on a fresh file. "
+                f"Original error: {second_exc}"
+            ) from second_exc
 
 
 engine = get_engine()
-ensure_resources_initials_column(engine)
+# ensure_resources_initials_column removed — superseded by Alembic migration 12
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

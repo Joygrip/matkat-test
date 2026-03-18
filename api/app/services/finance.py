@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
@@ -5,11 +6,15 @@ from api.app.auth.dependencies import CurrentUser
 from api.app.models.actuals import ActualLine
 from api.app.models.core import User, Project, Resource, CostCenter
 from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalStatus, StepStatus
+from api.app.models.finance import FinanceSetting
 from api.app.schemas.finance import (
     FinanceActualsDashboardResponse,
     FinanceCostCenterStatsResponse,
     FinanceEmployeeStatsResponse,
+    FinanceSettingResponse,
 )
+
+DEFAULT_MONTHLY_FTE_COST = "99000"
 
 class FinanceService:
     def __init__(self, db: Session, current_user: CurrentUser):
@@ -247,3 +252,56 @@ class FinanceService:
             )
             for row in rows
         ]
+
+    def get_setting(self, key: str) -> FinanceSettingResponse:
+        """Return a finance setting by key, or a default if not yet configured."""
+        row = (
+            self.db.query(FinanceSetting)
+            .filter(
+                FinanceSetting.tenant_id == self.current_user.tenant_id,
+                FinanceSetting.setting_key == key,
+            )
+            .first()
+        )
+        if row is None:
+            return FinanceSettingResponse(
+                setting_key=key,
+                setting_value=DEFAULT_MONTHLY_FTE_COST,
+            )
+        return FinanceSettingResponse(
+            setting_key=row.setting_key,
+            setting_value=row.setting_value,
+            updated_at=row.updated_at.isoformat() if row.updated_at else None,
+        )
+
+    def upsert_setting(self, key: str, value: str) -> FinanceSettingResponse:
+        """Create or update a finance setting."""
+        row = (
+            self.db.query(FinanceSetting)
+            .filter(
+                FinanceSetting.tenant_id == self.current_user.tenant_id,
+                FinanceSetting.setting_key == key,
+            )
+            .first()
+        )
+        now = datetime.utcnow()
+        if row is None:
+            row = FinanceSetting(
+                tenant_id=self.current_user.tenant_id,
+                setting_key=key,
+                setting_value=value,
+                updated_by=self.current_user.object_id,
+                updated_at=now,
+            )
+            self.db.add(row)
+        else:
+            row.setting_value = value
+            row.updated_by = self.current_user.object_id
+            row.updated_at = now
+        self.db.commit()
+        self.db.refresh(row)
+        return FinanceSettingResponse(
+            setting_key=row.setting_key,
+            setting_value=row.setting_value,
+            updated_at=row.updated_at.isoformat() if row.updated_at else None,
+        )

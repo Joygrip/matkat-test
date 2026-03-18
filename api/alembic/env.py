@@ -11,6 +11,7 @@ from api.app.db.base import Base
 from api.app.models import core  # noqa: F401
 from api.app.models import planning  # noqa: F401
 from api.app.models import actuals  # noqa: F401
+from api.app.models import finance  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

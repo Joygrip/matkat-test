@@ -1,6 +1,7 @@
 from typing import Optional
 from pydantic import BaseModel
 
+
 class FinanceActualsDashboardResponse(BaseModel):
     actual_id: str
     employee_name: str
@@ -29,3 +30,13 @@ class FinanceEmployeeStatsResponse(BaseModel):
     employee_name: str
     demand_fte: float
     actuals_fte: float
+
+
+class FinanceSettingResponse(BaseModel):
+    setting_key: str
+    setting_value: str  # caller parses to int/float as needed
+    updated_at: Optional[str] = None
+
+
+class FinanceSettingUpdate(BaseModel):
+    setting_value: str

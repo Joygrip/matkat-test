@@ -10,6 +10,8 @@ from api.app.schemas.finance import (
     FinanceActualsDashboardResponse,
     FinanceCostCenterStatsResponse,
     FinanceEmployeeStatsResponse,
+    FinanceSettingResponse,
+    FinanceSettingUpdate,
 )
 from api.app.services.finance import FinanceService
 
@@ -66,3 +68,32 @@ async def actuals_vs_plan_by_employee(
     """
     service = FinanceService(db, current_user)
     return service.get_employee_stats(year, month, cost_center_id, project_id)
+
+
+@router.get("/settings/{key}", response_model=FinanceSettingResponse)
+async def get_finance_setting(
+    key: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.ADMIN)),
+):
+    """
+    Get a finance setting by key. Returns the default value if not yet configured.
+    Accessible to: Finance, Admin
+    """
+    service = FinanceService(db, current_user)
+    return service.get_setting(key)
+
+
+@router.put("/settings/{key}", response_model=FinanceSettingResponse)
+async def update_finance_setting(
+    key: str,
+    body: FinanceSettingUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.ADMIN)),
+):
+    """
+    Create or update a finance setting.
+    Accessible to: Finance, Admin only
+    """
+    service = FinanceService(db, current_user)
+    return service.upsert_setting(key, body.setting_value)

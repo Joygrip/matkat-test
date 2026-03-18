@@ -34,3 +34,17 @@ export async function getEmployeeStats(
   const res = await apiClient.get<EmployeeStats[]>(`/finance/actuals-vs-plan-by-employee?${params.toString()}`);
   return res;
 }
+
+export interface FinanceSetting {
+  setting_key: string;
+  setting_value: string;
+  updated_at?: string;
+}
+
+export async function getFinanceSetting(key: string): Promise<FinanceSetting> {
+  return apiClient.get<FinanceSetting>(`/finance/settings/${key}`);
+}
+
+export async function updateFinanceSetting(key: string, value: string): Promise<FinanceSetting> {
+  return apiClient.put<FinanceSetting>(`/finance/settings/${key}`, { setting_value: value });
+}

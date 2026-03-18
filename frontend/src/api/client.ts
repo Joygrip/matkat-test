@@ -208,6 +208,62 @@ class ApiClient {
     }
   }
 
+  async getBlob(path: string): Promise<{ blob: Blob; filename: string }> {
+    try {
+      const headers = await this.getHeaders();
+      const blobHeaders = { ...headers } as Record<string, string>;
+      delete blobHeaders['Content-Type'];
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method: 'GET',
+        headers: blobHeaders,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!response.ok) {
+        let problem: ProblemDetail;
+        try {
+          problem = await response.json();
+        } catch {
+          problem = {
+            type: 'about:blank',
+            title: `HTTP ${response.status}`,
+            status: response.status,
+            detail: response.statusText,
+            code: 'HTTP_ERROR',
+          };
+        }
+        throw new ApiError(problem);
+      }
+      const blob = await response.blob();
+      const cd = response.headers.get('Content-Disposition') || '';
+      const match = cd.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : 'download.csv';
+      return { blob, filename };
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new ApiError({
+          type: 'about:blank',
+          title: 'Request Timeout',
+          status: 0,
+          detail: 'The request took too long to complete.',
+          code: 'TIMEOUT',
+        });
+      }
+      throw new ApiError({
+        type: 'about:blank',
+        title: 'Network Error',
+        status: 0,
+        detail: `Cannot reach the API at ${this.baseUrl}. Ensure the backend is running and you use an allowed origin (e.g. http://localhost:5173). Check the Network tab (F12) for details.`,
+        code: 'NETWORK_ERROR',
+      });
+    }
+  }
+
   // Typed API methods
   async getMe(): Promise<MeResponse> {
     return this.get<MeResponse>('/me');

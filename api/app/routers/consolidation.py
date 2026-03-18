@@ -1,6 +1,9 @@
 """Consolidation endpoints - dashboard and publishing."""
+import csv
+import io
 from typing import Optional
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -150,12 +153,64 @@ async def get_snapshot(
 ):
     """
     Get a specific snapshot with all its lines.
-    
+
     Accessible to: Admin, Finance, Director, RO (view only)
     """
     service = ConsolidationService(db, current_user)
     snapshot = service.get_snapshot(snapshot_id)
     if not snapshot:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Snapshot not found"})
     return _to_response(snapshot, include_lines=True)
+
+
+@router.get("/snapshots/{snapshot_id}/csv")
+async def download_snapshot_csv(
+    snapshot_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE)),
+):
+    """
+    Download a published snapshot as a CSV file.
+
+    Accessible to: Finance only
+    """
+    service = ConsolidationService(db, current_user)
+    snapshot = service.get_snapshot(snapshot_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Snapshot not found"})
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "period", "line_type",
+        "project_id", "project_name",
+        "resource_id", "resource_name",
+        "placeholder_id", "placeholder_name",
+        "fte_percent", "hours", "cost_cents",
+        "snapshot_name", "published_at", "published_by",
+    ])
+    for line in snapshot.lines:
+        writer.writerow([
+            f"{line.year}-{line.month:02d}",
+            line.line_type,
+            line.project_id or "",
+            line.project_name or "",
+            line.resource_id or "",
+            line.resource_name or "",
+            line.placeholder_id or "",
+            line.placeholder_name or "",
+            line.fte_percent if line.fte_percent is not None else "",
+            line.hours if line.hours is not None else "",
+            line.cost if line.cost is not None else "",
+            snapshot.name,
+            str(snapshot.published_at),
+            snapshot.published_by,
+        ])
+
+    output.seek(0)
+    filename = f"snapshot-{snapshot.period_id}-{snapshot_id}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

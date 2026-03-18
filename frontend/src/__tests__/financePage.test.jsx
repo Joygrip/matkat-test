@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { Finance } from '../pages/Finance';
 
@@ -61,6 +61,7 @@ vi.mock('../api/consolidation', () => ({
     getSnapshots: vi.fn().mockResolvedValue([]),
     publishSnapshot: vi.fn(),
     getSnapshot: vi.fn(),
+    downloadSnapshotCsv: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -145,5 +146,56 @@ describe('Finance page', () => {
     }).format(49500);
     // Value should contain the number 49 regardless of locale punctuation
     expect(formatted).toMatch(/49/);
+  });
+
+  it('shows Download CSV button in Snapshots tab for Finance role', async () => {
+    const { consolidationApi } = await import('../api/consolidation');
+    vi.mocked(consolidationApi.getSnapshots).mockResolvedValueOnce([
+      {
+        id: 'snap-1',
+        tenant_id: 'test-tenant-001',
+        period_id: 'p1',
+        name: 'February 2026 Final',
+        published_by: 'finance-001',
+        published_at: '2026-02-28T12:00:00',
+        lines_count: 10,
+      },
+    ]);
+
+    render(<Finance />);
+
+    // Navigate to Snapshots tab
+    const snapshotsTab = await screen.findByRole('tab', { name: /Snapshots/i });
+    fireEvent.click(snapshotsTab);
+
+    expect(await screen.findByRole('button', { name: /Download CSV/i })).toBeInTheDocument();
+  });
+
+  it('clicking Download CSV calls downloadSnapshotCsv with the snapshot id', async () => {
+    const { consolidationApi } = await import('../api/consolidation');
+    vi.mocked(consolidationApi.getSnapshots).mockResolvedValueOnce([
+      {
+        id: 'snap-2',
+        tenant_id: 'test-tenant-001',
+        period_id: 'p1',
+        name: 'March 2026 Final',
+        published_by: 'finance-001',
+        published_at: '2026-03-31T12:00:00',
+        lines_count: 5,
+      },
+    ]);
+
+    render(<Finance />);
+
+    // Navigate to Snapshots tab
+    const snapshotsTab = await screen.findByRole('tab', { name: /Snapshots/i });
+    fireEvent.click(snapshotsTab);
+
+    const downloadBtn = await screen.findByRole('button', { name: /Download CSV/i });
+    fireEvent.click(downloadBtn);
+
+    await waitFor(() =>
+      expect(vi.mocked(consolidationApi.downloadSnapshotCsv)).toHaveBeenCalledWith('snap-2'),
+    );
   });
 });

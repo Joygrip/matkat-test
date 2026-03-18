@@ -561,6 +561,7 @@ export const Finance: React.FC = () => {
   // ── Snapshots tab state ──
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [viewedSnapshot, setViewedSnapshot] = useState<SnapshotDetail | null>(null);
+  const [downloadingSnapshotId, setDownloadingSnapshotId] = useState<string | null>(null);
 
   // ── Publish dialog state ──
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
@@ -569,6 +570,7 @@ export const Finance: React.FC = () => {
   const [isPeriodDrawerOpen, setIsPeriodDrawerOpen] = useState(false);
   const canManagePeriods = user?.role === 'Finance' || user?.role === 'Admin';
   const canPublishSnapshot = user?.role === 'Finance' || user?.role === 'Admin';
+  const canDownloadCsv = user?.role === 'Finance';
   const [publishName, setPublishName] = useState('');
   const [publishDescription, setPublishDescription] = useState('');
 
@@ -1620,6 +1622,25 @@ export const Finance: React.FC = () => {
                         >
                           View
                         </Button>
+                        {canDownloadCsv && (
+                          <Button
+                            size="small"
+                            appearance="subtle"
+                            disabled={downloadingSnapshotId === snapshot.id}
+                            onClick={async () => {
+                              setDownloadingSnapshotId(snapshot.id);
+                              try {
+                                await consolidationApi.downloadSnapshotCsv(snapshot.id);
+                              } catch (err) {
+                                showApiError(err as Error, 'Failed to download snapshot');
+                              } finally {
+                                setDownloadingSnapshotId(null);
+                              }
+                            }}
+                          >
+                            {downloadingSnapshotId === snapshot.id ? 'Downloading...' : 'Download CSV'}
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

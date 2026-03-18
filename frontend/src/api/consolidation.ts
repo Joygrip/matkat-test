@@ -104,4 +104,16 @@ export const consolidationApi = {
   async getSnapshot(snapshotId: string): Promise<SnapshotDetail> {
     return apiClient.get<SnapshotDetail>(`/consolidation/snapshots/${snapshotId}`);
   },
+
+  async downloadSnapshotCsv(snapshotId: string): Promise<void> {
+    const { blob, filename } = await apiClient.getBlob(`/consolidation/snapshots/${snapshotId}/csv`);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
 };

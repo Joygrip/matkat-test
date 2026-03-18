@@ -298,18 +298,186 @@ def test_list_snapshots(client, db):
 def test_pm_cannot_publish(client, db):
     """Test that PM cannot publish snapshots."""
     from api.app.models.core import Period
-    
+
     tenant_id = "test-tenant"
-    
+
     period = Period(id="period-7", tenant_id=tenant_id, year=2026, month=6, status="open")
     db.add(period)
     db.commit()
-    
+
     headers = {"X-Dev-Role": "PM", "X-Dev-Tenant": tenant_id}
-    
+
     response = client.post(
         "/consolidation/publish/period-7",
         json={"name": "Unauthorized"},
         headers=headers,
     )
     assert response.status_code == 403
+
+
+# ── CSV download tests ─────────────────────────────────────────────────────────
+
+def test_download_snapshot_csv_finance_user_can_download(client, db):
+    """Finance user can download a snapshot as CSV with correct headers."""
+    from api.app.models.core import Period
+    from api.app.models.consolidation import PublishSnapshot, PublishSnapshotLine
+    from datetime import datetime
+
+    tenant_id = "test-tenant"
+
+    period = Period(id="period-csv1", tenant_id=tenant_id, year=2026, month=7, status="open")
+    db.add(period)
+
+    snapshot = PublishSnapshot(
+        id="snap-csv1",
+        tenant_id=tenant_id,
+        period_id="period-csv1",
+        name="July 2026",
+        published_by="finance-001",
+        published_at=datetime(2026, 7, 1, 12, 0, 0),
+    )
+    db.add(snapshot)
+    db.commit()
+
+    headers = {"X-Dev-Role": "Finance", "X-Dev-Tenant": tenant_id}
+    response = client.get("/consolidation/snapshots/snap-csv1/csv", headers=headers)
+
+    assert response.status_code == 200
+    assert "text/csv" in response.headers["content-type"]
+    assert 'attachment' in response.headers["content-disposition"]
+    assert "snap-csv1" in response.headers["content-disposition"]
+
+
+def test_download_snapshot_csv_unauthorized_role(client, db):
+    """Non-Finance roles get 403 when downloading CSV."""
+    from api.app.models.core import Period
+    from api.app.models.consolidation import PublishSnapshot
+    from datetime import datetime
+
+    tenant_id = "test-tenant"
+
+    period = Period(id="period-csv2", tenant_id=tenant_id, year=2026, month=8, status="open")
+    db.add(period)
+
+    snapshot = PublishSnapshot(
+        id="snap-csv2",
+        tenant_id=tenant_id,
+        period_id="period-csv2",
+        name="August 2026",
+        published_by="finance-001",
+        published_at=datetime.utcnow(),
+    )
+    db.add(snapshot)
+    db.commit()
+
+    for role in ("Employee", "PM", "Director", "RO"):
+        headers = {"X-Dev-Role": role, "X-Dev-Tenant": tenant_id}
+        response = client.get("/consolidation/snapshots/snap-csv2/csv", headers=headers)
+        assert response.status_code == 403, f"Expected 403 for role {role}"
+
+
+def test_download_snapshot_csv_missing_snapshot(client):
+    """Returns 404 for a non-existent snapshot."""
+    headers = {"X-Dev-Role": "Finance", "X-Dev-Tenant": "test-tenant"}
+    response = client.get("/consolidation/snapshots/does-not-exist/csv", headers=headers)
+    assert response.status_code == 404
+
+
+def test_download_snapshot_csv_has_header_row(client, db):
+    """CSV response contains the expected header row."""
+    from api.app.models.core import Period
+    from api.app.models.consolidation import PublishSnapshot
+    from datetime import datetime
+
+    tenant_id = "test-tenant"
+
+    period = Period(id="period-csv3", tenant_id=tenant_id, year=2026, month=9, status="open")
+    db.add(period)
+
+    snapshot = PublishSnapshot(
+        id="snap-csv3",
+        tenant_id=tenant_id,
+        period_id="period-csv3",
+        name="September 2026",
+        published_by="finance-001",
+        published_at=datetime.utcnow(),
+    )
+    db.add(snapshot)
+    db.commit()
+
+    headers = {"X-Dev-Role": "Finance", "X-Dev-Tenant": tenant_id}
+    response = client.get("/consolidation/snapshots/snap-csv3/csv", headers=headers)
+    assert response.status_code == 200
+
+    lines = response.text.strip().splitlines()
+    assert len(lines) >= 1
+    header = lines[0]
+    for col in ("period", "line_type", "project_name", "resource_name", "fte_percent", "snapshot_name", "published_at"):
+        assert col in header, f"Expected column '{col}' in header: {header}"
+
+
+def test_download_snapshot_csv_has_expected_rows(client, db):
+    """CSV body contains one row per snapshot line with correct values."""
+    from api.app.models.core import Period
+    from api.app.models.consolidation import PublishSnapshot, PublishSnapshotLine
+    from datetime import datetime
+
+    tenant_id = "test-tenant"
+
+    period = Period(id="period-csv4", tenant_id=tenant_id, year=2026, month=10, status="open")
+    db.add(period)
+
+    snapshot = PublishSnapshot(
+        id="snap-csv4",
+        tenant_id=tenant_id,
+        period_id="period-csv4",
+        name="October 2026",
+        published_by="finance-001",
+        published_at=datetime(2026, 10, 1),
+    )
+    db.add(snapshot)
+
+    line1 = PublishSnapshotLine(
+        id="line-csv1",
+        snapshot_id="snap-csv4",
+        line_type="demand",
+        project_id="proj-x",
+        project_name="Project X",
+        resource_id="res-x",
+        resource_name="Alice",
+        year=2026,
+        month=10,
+        fte_percent=75,
+    )
+    line2 = PublishSnapshotLine(
+        id="line-csv2",
+        snapshot_id="snap-csv4",
+        line_type="supply",
+        resource_id="res-x",
+        resource_name="Alice",
+        year=2026,
+        month=10,
+        fte_percent=100,
+    )
+    db.add(line1)
+    db.add(line2)
+    db.commit()
+
+    headers = {"X-Dev-Role": "Finance", "X-Dev-Tenant": tenant_id}
+    response = client.get("/consolidation/snapshots/snap-csv4/csv", headers=headers)
+    assert response.status_code == 200
+
+    lines = response.text.strip().splitlines()
+    # 1 header + 2 data rows
+    assert len(lines) == 3
+
+    # Check demand row values
+    assert "demand" in lines[1]
+    assert "Project X" in lines[1]
+    assert "Alice" in lines[1]
+    assert "2026-10" in lines[1]
+    assert "75" in lines[1]
+
+    # Check supply row
+    assert "supply" in lines[2]
+    assert "100" in lines[2]

@@ -10,8 +10,8 @@
 @description('Short project name used in all resource naming (lowercase, no hyphens)')
 param projectName string
 
-@description('Environment name: dev or uat')
-@allowed(['dev', 'uat'])
+@description('Environment name: dev, uat or prod')
+@allowed(['dev', 'uat', 'prod'])
 param environmentName string
 
 @description('Azure region for all resources (Static Web App always deploys to eastus2)')
@@ -48,6 +48,12 @@ param frontendAuthAuthority string
 
 @description('API scope for MSAL token requests, e.g. api://<api-app-id-uri>/.default')
 param frontendApiScope string
+
+@description('Comma-separated Entra tenant GUIDs allowed to authenticate against the API')
+param azureTenantAllowlist string = ''
+
+@description('Comma-separated CORS origins for the API backend, e.g. "https://app.azurestaticapps.net". Set after Static Web App is first deployed.')
+param corsOrigins string = ''
 
 // ── Derive Key Vault name upfront to break circular dependency ──────────────
 // appService needs KV secret URIs; keyVault needs appService principal ID.
@@ -129,6 +135,8 @@ module appService 'modules/appservice.bicep' = {
     kvSecretUriDatabaseUrl: kvSecretUriDatabaseUrl
     kvSecretUriGraphClientId: kvSecretUriGraphClientId
     kvSecretUriGraphClientSecret: kvSecretUriGraphClientSecret
+    corsOrigins: corsOrigins
+    azureTenantAllowlist: azureTenantAllowlist
   }
 }
 
@@ -142,6 +150,7 @@ module functionApp 'modules/functions.bicep' = {
     storageConnectionString: storage.outputs.storageConnectionString
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
     webAppHostname: appService.outputs.webAppHostname
+    kvSecretUriApiClientId: kvSecretUriApiClientId
   }
 }
 

@@ -37,6 +37,12 @@ param kvSecretUriGraphClientId string
 @description('Key Vault secret URI for GRAPH_CLIENT_SECRET')
 param kvSecretUriGraphClientSecret string
 
+@description('Comma-separated allowed CORS origins for the API, e.g. "https://app.azurestaticapps.net"')
+param corsOrigins string
+
+@description('Comma-separated Entra tenant GUIDs allowed to authenticate (leave empty to allow all)')
+param azureTenantAllowlist string = ''
+
 var appServicePlanName = '${projectName}-plan-${environmentName}'
 var webAppName = '${projectName}-api-${environmentName}'
 
@@ -85,6 +91,14 @@ resource webApp 'Microsoft.Web/sites@2023-01-01' = {
         {
           name: 'NOTIFY_MODE'
           value: 'email'
+        }
+        {
+          name: 'CORS_ORIGINS'
+          value: corsOrigins
+        }
+        {
+          name: 'AZURE_TENANT_ALLOWLIST'
+          value: azureTenantAllowlist
         }
         {
           name: 'APPINSIGHTS_CONNECTION_STRING'

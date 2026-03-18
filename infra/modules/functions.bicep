@@ -16,6 +16,9 @@ param appInsightsConnectionString string
 @description('Backend Web App hostname (used as API_BASE_URL)')
 param webAppHostname string
 
+@description('Key Vault secret URI for API_APP_CLIENT_ID (used by managed identity token acquisition)')
+param kvSecretUriApiClientId string
+
 var consumptionPlanName = '${projectName}-fnplan-${environmentName}'
 var funcAppName = '${projectName}-fn-${environmentName}'
 
@@ -64,6 +67,10 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
         {
           name: 'DEV_AUTH_BYPASS'
           value: 'false'
+        }
+        {
+          name: 'API_APP_CLIENT_ID'
+          value: '@Microsoft.KeyVault(SecretUri=${kvSecretUriApiClientId})'
         }
         {
           name: 'APPINSIGHTS_CONNECTION_STRING'

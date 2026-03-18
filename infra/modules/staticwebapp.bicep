@@ -47,6 +47,8 @@ resource staticWebAppSettings 'Microsoft.Web/staticSites/config@2023-01-01' = {
     VITE_AUTH_AUTHORITY: frontendAuthAuthority
     VITE_API_SCOPE: frontendApiScope
     VITE_API_BASE_URL: apiBaseUrl
+    VITE_DEV_AUTH_BYPASS: 'false'
+    VITE_DEV_SEED_ENABLED: 'false'
   }
 }
 

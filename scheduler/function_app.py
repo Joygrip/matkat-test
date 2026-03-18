@@ -116,6 +116,72 @@ def notification_daily(mytimer: func.TimerRequest) -> None:
             logging.error(f"{phase} notifications failed: {e}")
 
 
+# Timer trigger: Run nightly at 2:00 AM UTC — refresh all user profiles and manager
+# relationships from Microsoft Graph for every tenant user.
+@app.timer_trigger(schedule="0 0 2 * * *", arg_name="synctimer", run_on_startup=False)
+def graph_sync_daily(synctimer: func.TimerRequest) -> None:
+    """
+    Nightly Graph background sync.
+
+    Calls POST /admin/sync/graph-users on the API, which refreshes email,
+    display_name, and manager_object_id for all users in the tenant from
+    Microsoft Graph (client credentials / app-only flow).
+
+    Requires the app registration to have User.Read.All application permission
+    with admin consent, and the scheduler's DEV_ROLE to be 'Admin'.
+    """
+    base_url = os.environ.get("API_BASE_URL", "http://localhost:8000")
+    url = f"{base_url}/admin/sync/graph-users"
+    headers = get_api_headers()
+
+    logging.info("Graph sync daily timer triggered.")
+    try:
+        response = requests.post(url, headers=headers, timeout=120)
+        response.raise_for_status()
+        result = response.json()
+        logging.info(
+            "Graph sync completed: total=%s synced=%s missing=%s deactivated=%s "
+            "manager_changes=%s errors=%s",
+            result.get("total_users"),
+            result.get("synced"),
+            result.get("missing_from_graph"),
+            result.get("deactivated"),
+            result.get("manager_changes"),
+            result.get("errors"),
+        )
+    except Exception as e:
+        logging.error("Graph sync daily failed: %s", e)
+
+
+# HTTP trigger for manual on-demand Graph sync
+@app.route(route="sync-trigger", methods=["POST"])
+def manual_sync_trigger(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    HTTP endpoint for manually triggering the Graph user sync.
+
+    No query params required — always syncs the tenant associated with the
+    configured DEV_ROLE / managed identity credentials.
+    """
+    base_url = os.environ.get("API_BASE_URL", "http://localhost:8000")
+    url = f"{base_url}/admin/sync/graph-users"
+    headers = get_api_headers()
+
+    logging.info("Manual Graph sync trigger called.")
+    try:
+        response = requests.post(url, headers=headers, timeout=120)
+        response.raise_for_status()
+        return func.HttpResponse(
+            body=response.text,
+            status_code=200,
+            mimetype="application/json",
+        )
+    except Exception as e:
+        return func.HttpResponse(
+            body=f"Error: {str(e)}",
+            status_code=500,
+        )
+
+
 # HTTP trigger for manual testing
 @app.route(route="trigger", methods=["POST"])
 def manual_trigger(req: func.HttpRequest) -> func.HttpResponse:

@@ -11,7 +11,7 @@ from api.app.models.approvals import (
     ApprovalStatus, StepStatus,
 )
 from api.app.models.actuals import ActualLine
-from api.app.models.core import User, Resource
+from api.app.models.core import User, Resource, UserRole
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
 
@@ -26,30 +26,31 @@ class ApprovalsService:
     def create_approval_for_actuals(self, actual_line: ActualLine) -> ApprovalInstance:
         """
         Create an approval instance when actuals are signed.
-        
+
         Steps:
-        1. RO approval
-        2. Director approval (skipped if RO == Director)
+        1. Manager approval (SKIPPED if no synced manager)
+        2. RO approval
+        3. Director approval (SKIPPED if RO == Director)
         """
-        # Get the resource's RO (tenant-scoped)
+        # Get the resource (tenant-scoped)
         resource = self.db.query(Resource).filter(
             and_(
                 Resource.id == actual_line.resource_id,
                 Resource.tenant_id == self.current_user.tenant_id,
             )
         ).first()
-        
+
         if not resource:
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Resource not found"})
-        
-        # Get RO from cost center
+
+        # Get RO and Director from cost center
         ro_user_id = None
         director_user_id = None
-        
+
         if resource.cost_center:
             ro_user_id = resource.cost_center.ro_user_id
             director_user_id = resource.cost_center.director_user_id
-        
+
         # Create approval instance
         instance = ApprovalInstance(
             tenant_id=self.current_user.tenant_id,
@@ -58,37 +59,58 @@ class ApprovalsService:
             status=ApprovalStatus.PENDING,
             created_by=self.current_user.object_id,
         )
-        logging.info(f"Creating approval instance for actuals: resource_id={actual_line.resource_id}, ro_user_id={ro_user_id}, director_user_id={director_user_id}")
+        logging.info(
+            "Creating approval instance for actuals: resource_id=%s, ro_user_id=%s, director_user_id=%s",
+            actual_line.resource_id, ro_user_id, director_user_id,
+        )
         self.db.add(instance)
         self.db.flush()
-        
-        # Create RO step
-        ro_step = ApprovalStep(
+
+        # Resolve manager from synced DB relationship (no live Graph calls)
+        manager_user_id = self._resolve_manager_approver_id(resource)
+
+        # Manager step (step 1) — SKIPPED when no manager can be resolved
+        manager_step = ApprovalStep(
             instance_id=instance.id,
             step_order=1,
+            step_name="Manager",
+            approver_id=manager_user_id,
+            status=StepStatus.PENDING if manager_user_id else StepStatus.SKIPPED,
+        )
+        logging.info(
+            "Manager step: approver_id=%s, skipped=%s", manager_user_id, manager_user_id is None
+        )
+        self.db.add(manager_step)
+
+        # RO step (step 2)
+        ro_step = ApprovalStep(
+            instance_id=instance.id,
+            step_order=2,
             step_name="RO",
             approver_id=ro_user_id,
             status=StepStatus.PENDING,
         )
-        logging.info(f"RO step: approver_id={ro_user_id}")
+        logging.info("RO step: approver_id=%s", ro_user_id)
         self.db.add(ro_step)
-        
-        # Create Director step (may be skipped if RO == Director)
+
+        # Director step (step 3, skipped if RO == Director)
         skip_director = ro_user_id == director_user_id and ro_user_id is not None
-        
+
         director_step = ApprovalStep(
             instance_id=instance.id,
-            step_order=2,
+            step_order=3,
             step_name="Director",
             approver_id=director_user_id,
             status=StepStatus.SKIPPED if skip_director else StepStatus.PENDING,
         )
-        logging.info(f"Director step: approver_id={director_user_id}, skipped={skip_director}")
+        logging.info(
+            "Director step: approver_id=%s, skipped=%s", director_user_id, skip_director
+        )
         self.db.add(director_step)
-        
+
         self.db.commit()
         self.db.refresh(instance)
-        
+
         log_audit(
             self.db, self.current_user,
             action="create",
@@ -97,10 +119,11 @@ class ApprovalsService:
             new_values={
                 "subject_type": "actuals",
                 "subject_id": actual_line.id,
+                "manager_user_id": manager_user_id,
                 "skip_director": skip_director,
             }
         )
-        
+
         return instance
     
     def get_inbox(self) -> List[ApprovalInstance]:
@@ -295,6 +318,70 @@ class ApprovalsService:
             )
         ).first()
 
+    def _resolve_manager_approver_id(self, resource: Resource) -> Optional[str]:
+        """
+        Resolve the manager approver's User.id from the synced DB manager relationship.
+
+        Returns the manager's User.id if a valid, active, tenant-scoped manager is found.
+        Returns None (causing the Manager step to be SKIPPED) when:
+          - resource has no linked User (external/contractor without Entra account)
+          - the resource User has no synced manager_object_id
+          - manager_object_id does not resolve to a User record in this tenant
+          - the resolved manager is inactive
+
+        No live Microsoft Graph calls are made.
+        """
+        if not resource.user_id:
+            logging.info(
+                "approval_routing: resource %s has no user_id (external/non-Entra), skipping manager step",
+                resource.id,
+            )
+            return None
+
+        resource_user = self.db.query(User).filter(
+            and_(
+                User.id == resource.user_id,
+                User.tenant_id == self.current_user.tenant_id,
+            )
+        ).first()
+
+        if not resource_user:
+            logging.warning(
+                "approval_routing: resource %s references user_id %s not found in tenant %s",
+                resource.id, resource.user_id, self.current_user.tenant_id,
+            )
+            return None
+
+        if not resource_user.manager_object_id:
+            logging.info(
+                "approval_routing: user %s has no synced manager_object_id, skipping manager step",
+                resource_user.id,
+            )
+            return None
+
+        manager = self.db.query(User).filter(
+            and_(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == resource_user.manager_object_id,
+            )
+        ).first()
+
+        if not manager:
+            logging.warning(
+                "approval_routing: manager_object_id %s not found in tenant %s (not yet synced?), skipping manager step",
+                resource_user.manager_object_id, self.current_user.tenant_id,
+            )
+            return None
+
+        if not manager.is_active:
+            logging.warning(
+                "approval_routing: manager %s is inactive, skipping manager step",
+                manager.id,
+            )
+            return None
+
+        return manager.id
+
     def _get_current_step(self, instance: ApprovalInstance) -> Optional[ApprovalStep]:
         """Get the first pending step in order."""
         for step in sorted(instance.steps, key=lambda s: s.step_order):
@@ -307,10 +394,12 @@ class ApprovalsService:
         if step.approver_id:
             return step.approver_id == user.id
 
-        # If no explicit approver, require role match
+        # Role-based fallback (only applies when approver_id is None)
+        # Manager steps always have approver_id set when PENDING; this is a safety net.
         if step.step_name == "RO":
-            return user.role == "RO"
+            return user.role == UserRole.RO
         if step.step_name == "Director":
-            return user.role == "Director"
+            return user.role == UserRole.DIRECTOR
 
+        # Manager step with no approver_id is not actionable by anyone
         return False

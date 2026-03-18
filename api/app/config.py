@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     graph_client_id: str = ""           # App client id (often same as api_app_client_id)
     graph_client_secret: str = ""       # Client secret for OBO token exchange
     graph_sync_interval_seconds: int = 3600  # Skip sync if synced within this window
+
+    # Background sync behaviour (client credentials / app-only flow)
+    # Requires User.Read.All *application* permission with admin consent in Entra.
+    # When False (default): users missing from Graph (404) are logged but not deactivated.
+    # When True: users missing from Graph are also marked is_active=False in the DB.
+    graph_sync_deactivate_missing: bool = False
     
     # Database
     database_url: str = "sqlite:///./dev.db"

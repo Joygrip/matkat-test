@@ -6,6 +6,7 @@ from typing import Optional
 
 from api.app.db.engine import get_db
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
+from api.app.config import get_settings
 from api.app.models.core import (
     UserRole, CostCenter, Project, Resource, Placeholder, Holiday, Settings
 )
@@ -18,6 +19,7 @@ from api.app.schemas.admin import (
     SettingsCreate, SettingsUpdate, SettingsResponse,
 )
 from api.app.services.audit import log_audit
+from api.app.services.background_sync import run_graph_sync
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -577,3 +579,22 @@ async def delete_setting(
     db.commit()
     log_audit(db, current_user, "delete", "Settings", setting.id)
     return {"message": "Setting deleted"}
+
+
+# ============== GRAPH SYNC ==============
+
+@router.post("/sync/graph-users")
+async def trigger_graph_sync(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    """Trigger an on-demand Graph background sync for the current tenant.
+
+    Refreshes email, display_name, and manager_object_id for every user in the
+    tenant from Microsoft Graph using the client credentials (app-only) flow.
+    Requires the app registration to have User.Read.All application permission
+    with admin consent. (Admin only)
+    """
+    settings = get_settings()
+    result = run_graph_sync(db, settings, current_user.tenant_id)
+    return result.as_dict()

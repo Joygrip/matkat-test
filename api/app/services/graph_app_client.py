@@ -1,0 +1,134 @@
+"""Microsoft Graph API client using the client credentials (app-only) flow.
+
+Unlike GraphClient (OBO), this client acquires a token on behalf of the application
+itself — no user token required. Used exclusively for background sync jobs.
+
+Requires the app registration to have the User.Read.All *application* permission
+with admin consent granted in Entra.
+
+All public methods are best-effort: errors are logged and None / sentinel is returned
+so callers never have to handle Graph unavailability specially.
+"""
+import logging
+from typing import Optional
+
+import httpx
+
+from api.app.config import Settings
+
+logger = logging.getLogger(__name__)
+
+_GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+_USER_SELECT = "id,displayName,mail,userPrincipalName,accountEnabled"
+
+# Sentinel returned when a Graph call fails with a network / auth error.
+# Callers use `is` identity check to distinguish from a legitimate None value.
+FETCH_FAILED = "__GRAPH_APP_ERROR__"
+
+
+class GraphAppClient:
+    """Thin synchronous Graph client backed by the client credentials flow.
+
+    Synchronous (not async) because background sync runs in a regular DB session
+    context that is easier to manage without async overhead.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._token: Optional[str] = None
+
+    # ------------------------------------------------------------------
+    # Public helpers
+    # ------------------------------------------------------------------
+
+    def get_user(self, object_id: str) -> Optional[dict]:
+        """Fetch a user's profile from Graph.
+
+        Returns:
+            dict  — user profile fields on success
+            None  — user not found (404)
+            FETCH_FAILED sentinel — any other error
+        """
+        token = self._get_token()
+        if token is FETCH_FAILED:
+            return FETCH_FAILED
+        try:
+            with httpx.Client(timeout=10) as client:
+                resp = client.get(
+                    f"{_GRAPH_BASE}/users/{object_id}",
+                    params={"$select": _USER_SELECT},
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if resp.status_code == 404:
+                    return None
+                resp.raise_for_status()
+                return resp.json()
+        except Exception as exc:
+            logger.warning("Graph /users/%s call failed: %s", object_id, exc)
+            return FETCH_FAILED
+
+    def get_user_manager_id(self, object_id: str) -> Optional[str]:
+        """Return the manager's Entra object_id for a given user.
+
+        Returns:
+            str           — manager's object_id
+            None          — user has no manager (404)
+            FETCH_FAILED  — network / auth error
+        """
+        token = self._get_token()
+        if token is FETCH_FAILED:
+            return FETCH_FAILED
+        try:
+            with httpx.Client(timeout=10) as client:
+                resp = client.get(
+                    f"{_GRAPH_BASE}/users/{object_id}/manager",
+                    params={"$select": "id"},
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if resp.status_code == 404:
+                    return None
+                resp.raise_for_status()
+                data = resp.json()
+                return data.get("id") or None
+        except Exception as exc:
+            logger.warning("Graph /users/%s/manager call failed: %s", object_id, exc)
+            return FETCH_FAILED
+
+    # ------------------------------------------------------------------
+    # Token acquisition
+    # ------------------------------------------------------------------
+
+    def _get_token(self) -> Optional[str]:
+        """Acquire (or return cached) an app-only Graph token.
+
+        Returns the token string on success, or FETCH_FAILED sentinel on error.
+        """
+        if self._token:
+            return self._token
+
+        s = self._settings
+        if not s.graph_client_id or not s.graph_client_secret or not s.azure_tenant_id:
+            logger.debug(
+                "GraphAppClient: skipped — GRAPH_CLIENT_ID / GRAPH_CLIENT_SECRET / "
+                "AZURE_TENANT_ID not configured."
+            )
+            return FETCH_FAILED
+
+        token_url = (
+            f"https://login.microsoftonline.com/{s.azure_tenant_id}/oauth2/v2.0/token"
+        )
+        payload = {
+            "grant_type": "client_credentials",
+            "client_id": s.graph_client_id,
+            "client_secret": s.graph_client_secret,
+            "scope": "https://graph.microsoft.com/.default",
+        }
+        try:
+            with httpx.Client(timeout=10) as client:
+                resp = client.post(token_url, data=payload)
+                resp.raise_for_status()
+                self._token = resp.json()["access_token"]
+                return self._token
+        except Exception as exc:
+            logger.warning("GraphAppClient: token acquisition failed: %s", exc)
+            return FETCH_FAILED

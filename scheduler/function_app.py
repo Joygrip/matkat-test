@@ -154,7 +154,7 @@ def graph_sync_daily(synctimer: func.TimerRequest) -> None:
 
 
 # HTTP trigger for manual on-demand Graph sync
-@app.route(route="sync-trigger", methods=["POST"])
+@app.route(route="sync-trigger", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def manual_sync_trigger(req: func.HttpRequest) -> func.HttpResponse:
     """
     HTTP endpoint for manually triggering the Graph user sync.
@@ -183,7 +183,7 @@ def manual_sync_trigger(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # HTTP trigger for manual testing
-@app.route(route="trigger", methods=["POST"])
+@app.route(route="trigger", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def manual_trigger(req: func.HttpRequest) -> func.HttpResponse:
     """
     HTTP endpoint for manually triggering notifications.

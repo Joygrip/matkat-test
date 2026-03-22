@@ -69,6 +69,7 @@ resource webApp 'Microsoft.Web/sites@2023-01-01' = {
     httpsOnly: true
     siteConfig: {
       linuxFxVersion: 'DOCKER|${containerRegistryName}.azurecr.io/${backendImageName}'
+      acrUseManagedIdentity: true
       alwaysOn: true
       minTlsVersion: '1.2'
       appSettings: [

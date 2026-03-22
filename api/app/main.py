@@ -29,7 +29,7 @@ if _settings.is_dev:
         "http://127.0.0.1:3000",
         "http://[::1]:5173",
         "http://[::1]:3000",
-    ] + _settings.additional_cors_origins_list
+    ] + _settings.additional_cors_origins_list + _settings.cors_origins_list
 else:
     # Non-dev: only origins explicitly set via CORS_ORIGINS env var
     allow_origins = _settings.cors_origins_list

@@ -40,6 +40,9 @@
     },
     "frontendApiScope": {
       "value": "api://REPLACE_BEFORE_DEPLOY/.default"
+    },
+    "corsOrigins": {
+      "value": "REPLACE_AFTER_SWA_DEPLOY"
     }
   }
 }

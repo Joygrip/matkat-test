@@ -594,7 +594,18 @@ async def trigger_graph_sync(
     tenant from Microsoft Graph using the client credentials (app-only) flow.
     Requires the app registration to have User.Read.All application permission
     with admin consent. (Admin only)
+
+    After syncing user profiles, rebuilds the reporting_cache so that
+    RO/Director scoped access reflects the latest org chart.
     """
+    from api.app.services.reporting import ReportingService
+
     settings = get_settings()
     result = run_graph_sync(db, settings, current_user.tenant_id)
-    return result.as_dict()
+
+    # Rebuild reporting cache from fresh manager_object_id data
+    hierarchy_rows = ReportingService.rebuild_cache_for_tenant(current_user.tenant_id, db)
+
+    response = result.as_dict()
+    response["reporting_cache_rows"] = hierarchy_rows
+    return response

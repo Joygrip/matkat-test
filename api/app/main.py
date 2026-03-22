@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 
 from api.app.config import get_settings
 from api.app.routers import health, me, dev, periods, admin, planning, actuals, approvals, consolidation, notifications, lookups
-from api.app.routers import finance, audit, dashboard
+from api.app.routers import finance, audit, dashboard, reporting
 
 # Create FastAPI app
 app = FastAPI(
@@ -147,6 +147,7 @@ app.include_router(notifications.router)
 app.include_router(finance.router, prefix="/finance")
 app.include_router(audit.router)
 app.include_router(dashboard.router)
+app.include_router(reporting.router)
 
 
 @app.on_event("startup")

@@ -42,8 +42,9 @@ import {
   PersonQuestionMarkRegular,
   CalendarRegular,
   SettingsRegular,
+  PeopleTeamRegular,
 } from '@fluentui/react-icons';
-import { adminApi, CostCenter, Project, Resource, Placeholder, Holiday, Setting } from '../api/admin';
+import { adminApi, CostCenter, Project, Resource, Placeholder, Holiday, Setting, ManagerOverride } from '../api/admin';
 import { useToast } from '../hooks/useToast';
 import { useAuth } from '../auth/AuthProvider';
 import { config } from '../config';
@@ -79,7 +80,7 @@ const useStyles = makeStyles({
   },
 });
 
-type TabValue = 'cost-centers' | 'projects' | 'resources' | 'placeholders' | 'holidays' | 'settings';
+type TabValue = 'cost-centers' | 'projects' | 'resources' | 'placeholders' | 'holidays' | 'settings' | 'manager-overrides';
 
 export function Admin() {
   const styles = useStyles();
@@ -97,6 +98,7 @@ export function Admin() {
   const [placeholders, setPlaceholders] = useState<Placeholder[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [settings, setSettings] = useState<Setting[]>([]);
+  const [managerOverrides, setManagerOverrides] = useState<ManagerOverride[]>([]);
   
   // Dialog states
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -136,6 +138,11 @@ export function Admin() {
         case 'settings':
           if (canManageSettings) {
             setSettings(await adminApi.listSettings());
+          }
+          break;
+        case 'manager-overrides':
+          if (canManageSettings) {
+            setManagerOverrides(await adminApi.listManagerOverrides());
           }
           break;
       }
@@ -224,8 +231,22 @@ export function Admin() {
             await adminApi.createSetting(formData as { key: string; value: string });
           }
           break;
+        case 'manager-overrides':
+          if (!canManageSettings) {
+            showApiError(new Error('Only Admin can manage overrides'), 'Permission denied');
+            return;
+          }
+          if (editItem) {
+            await adminApi.patchManagerOverride(
+              (editItem as ManagerOverride).id,
+              { is_active: formData.is_active as boolean, note: formData.note as string | undefined },
+            );
+          } else {
+            await adminApi.createManagerOverride(formData as { employee_object_id: string; manager_object_id: string; note?: string });
+          }
+          break;
       }
-      
+
       showSuccess('Saved', `${selectedTab} saved successfully`);
       setDialogOpen(false);
       loadData();
@@ -261,8 +282,11 @@ export function Admin() {
           }
           await adminApi.deleteSetting((item as Setting).key);
           break;
+        case 'manager-overrides':
+          await adminApi.deleteManagerOverride((item as ManagerOverride).id);
+          break;
       }
-      
+
       showSuccess('Deleted', 'Item deleted successfully');
       loadData();
     } catch (error) {
@@ -506,6 +530,59 @@ export function Admin() {
             </TableBody>
           </Table>
         );
+
+      case 'manager-overrides':
+        return (
+          <>
+            <div style={{ marginBottom: tokens.spacingVerticalM, display: 'flex', gap: tokens.spacingHorizontalS }}>
+              <Button
+                appearance="secondary"
+                onClick={async () => {
+                  try {
+                    const result = await adminApi.syncReportingCache();
+                    showSuccess('Cache rebuilt', result.message);
+                  } catch (error) {
+                    showApiError(error as Error, 'Failed to rebuild cache');
+                  }
+                }}
+              >
+                Rebuild Reporting Cache
+              </Button>
+              <p style={{ fontSize: '12px', color: tokens.colorNeutralForeground3, margin: 'auto 0' }}>
+                Rebuilds the manager hierarchy from current Graph data. Run after any org chart changes.
+              </p>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHeaderCell>Employee (object ID)</TableHeaderCell>
+                  <TableHeaderCell>Manager (object ID)</TableHeaderCell>
+                  <TableHeaderCell>Active</TableHeaderCell>
+                  <TableHeaderCell>Note</TableHeaderCell>
+                  <TableHeaderCell>Actions</TableHeaderCell>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {managerOverrides.map((override) => (
+                  <TableRow key={override.id}>
+                    <TableCell>{override.employee_object_id}</TableCell>
+                    <TableCell>{override.manager_object_id}</TableCell>
+                    <TableCell>
+                      <Badge appearance="filled" color={override.is_active ? 'success' : 'danger'}>
+                        {override.is_active ? 'Active' : 'Inactive'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{override.note || '-'}</TableCell>
+                    <TableCell>
+                      <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(override)} />
+                      <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(override)} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
+        );
     }
   };
   
@@ -712,6 +789,45 @@ export function Admin() {
             </div>
           </>
         );
+
+      case 'manager-overrides':
+        return (
+          <>
+            {!editItem ? (
+              <>
+                <div className={styles.dialogField}>
+                  <Label required>Employee Entra Object ID</Label>
+                  <Input
+                    value={String(formData.employee_object_id || '')}
+                    onChange={(_, d) => setFormData({ ...formData, employee_object_id: d.value })}
+                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  />
+                </div>
+                <div className={styles.dialogField}>
+                  <Label required>Manager Entra Object ID</Label>
+                  <Input
+                    value={String(formData.manager_object_id || '')}
+                    onChange={(_, d) => setFormData({ ...formData, manager_object_id: d.value })}
+                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  />
+                </div>
+              </>
+            ) : (
+              <Checkbox
+                label="Active"
+                checked={formData.is_active !== false}
+                onChange={(_, d) => setFormData({ ...formData, is_active: d.checked })}
+              />
+            )}
+            <div className={styles.dialogField}>
+              <Label>Note</Label>
+              <Input
+                value={String(formData.note || '')}
+                onChange={(_, d) => setFormData({ ...formData, note: d.value })}
+              />
+            </div>
+          </>
+        );
     }
   };
   
@@ -722,6 +838,7 @@ export function Admin() {
     'placeholders': 'Placeholders',
     'holidays': 'Holidays',
     'settings': 'Settings',
+    'manager-overrides': 'Manager Overrides',
   };
   
   return (
@@ -735,6 +852,9 @@ export function Admin() {
           <Tab value="holidays" icon={<CalendarRegular />}>Holidays</Tab>
           {canManageSettings && (
             <Tab value="settings" icon={<SettingsRegular />}>Settings</Tab>
+          )}
+          {canManageSettings && (
+            <Tab value="manager-overrides" icon={<PeopleTeamRegular />}>Manager Overrides</Tab>
           )}
         </TabList>
         
@@ -753,7 +873,7 @@ export function Admin() {
                 </p>
               )}
             </div>
-            {(canManageMasterData || (selectedTab === 'settings' && canManageSettings)) && (
+            {(canManageMasterData || ((selectedTab === 'settings' || selectedTab === 'manager-overrides') && canManageSettings)) && (
               <Button
                 appearance="primary"
                 icon={<AddRegular />}

@@ -233,14 +233,70 @@ class Settings(Base):
 class Holiday(Base):
     """Holiday calendar for deadline calculations."""
     __tablename__ = "holidays"
-    
+
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     is_company_wide: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    
+
     __table_args__ = (
         Index("ix_holidays_tenant_date", "tenant_id", "date", unique=True),
+    )
+
+
+class ReportingCache(Base):
+    """
+    Flattened, precomputed manager → subordinate hierarchy.
+    One row per (employee, manager) pair at any depth.
+    Rebuilt periodically from MS Graph or on demand.
+    """
+    __tablename__ = "reporting_cache"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    # Subordinate's Entra object ID
+    employee_object_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    # Manager's Entra object ID
+    manager_object_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    # 1 = direct report, 2 = skip-level, etc.
+    depth: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 'graph' or 'override'
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_rc_tenant_manager", "tenant_id", "manager_object_id"),
+        Index(
+            "ix_rc_tenant_employee_manager",
+            "tenant_id", "employee_object_id", "manager_object_id",
+            unique=True,
+        ),
+    )
+
+
+class ManagerOverride(Base):
+    """
+    Manual manager → employee mapping for fallback when MS Graph is unavailable
+    or the org chart doesn't reflect the resource allocation responsibility.
+    Managed by Admins.
+    """
+    __tablename__ = "manager_overrides"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    employee_object_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    manager_object_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)  # object_id of admin
+
+    __table_args__ = (
+        Index(
+            "ix_mo_tenant_employee_manager",
+            "tenant_id", "employee_object_id", "manager_object_id",
+            unique=True,
+        ),
     )

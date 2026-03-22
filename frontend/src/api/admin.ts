@@ -141,4 +141,27 @@ export const adminApi = {
     apiClient.patch<Setting>(`/admin/settings/${key}`, data),
   deleteSetting: (key: string) =>
     apiClient.delete<{ message: string }>(`/admin/settings/${key}`),
+
+  // Manager Overrides
+  listManagerOverrides: () => apiClient.get<ManagerOverride[]>('/admin/reporting/overrides'),
+  createManagerOverride: (data: { employee_object_id: string; manager_object_id: string; note?: string }) =>
+    apiClient.post<ManagerOverride>('/admin/reporting/overrides', data),
+  patchManagerOverride: (id: string, data: { is_active?: boolean; note?: string }) =>
+    apiClient.patch<ManagerOverride>(`/admin/reporting/overrides/${id}`, data),
+  deleteManagerOverride: (id: string) =>
+    apiClient.delete<void>(`/admin/reporting/overrides/${id}`),
+  syncReportingCache: () =>
+    apiClient.post<{ rows_written: number; message: string }>('/admin/reporting/sync-cache', {}),
 };
+
+// Types for reporting
+export interface ManagerOverride {
+  id: string;
+  tenant_id: string;
+  employee_object_id: string;
+  manager_object_id: string;
+  is_active: boolean;
+  note: string | null;
+  created_at: string;
+  created_by: string;
+}

@@ -7,10 +7,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 from api.app.models.planning import DemandLine, SupplyLine
-from api.app.models.core import Period, Project, Resource, Placeholder, PeriodStatus
+from api.app.models.core import Period, Project, Resource, Placeholder, PeriodStatus, UserRole
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
 from api.app.schemas.common import ErrorCode
+
+_SCOPED_ROLES = (UserRole.RO, UserRole.DIRECTOR)
 
 
 def get_4mfc_boundary() -> tuple[int, int]:
@@ -71,6 +73,16 @@ class DemandService:
         
         return period
     
+    def _get_scoped_resource_ids(self) -> Optional[list[str]]:
+        """
+        Return the list of resource IDs the current user may access, or None
+        if the user has unscoped (full-tenant) access.
+        """
+        if self.current_user.role not in _SCOPED_ROLES:
+            return None
+        from api.app.services.reporting import ReportingService
+        return ReportingService(self.db, self.current_user).get_accessible_resource_ids()
+
     def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None, *, period_id: Optional[str] = None) -> list[DemandLine]:
         """Get all demand lines, optionally filtered by period/year/month/project/resource."""
         query = self.db.query(DemandLine).filter(
@@ -86,16 +98,29 @@ class DemandService:
             query = query.filter(DemandLine.project_id == project_id)
         if resource_id:
             query = query.filter(DemandLine.resource_id == resource_id)
+
+        # RO/Director: restrict to resources within their reporting line
+        scoped_ids = self._get_scoped_resource_ids()
+        if scoped_ids is not None:
+            query = query.filter(DemandLine.resource_id.in_(scoped_ids))
+
         return query.all()
-    
+
     def get_by_id(self, demand_id: str) -> Optional[DemandLine]:
         """Get a demand line by ID."""
-        return self.db.query(DemandLine).filter(
+        demand = self.db.query(DemandLine).filter(
             and_(
                 DemandLine.id == demand_id,
                 DemandLine.tenant_id == self.current_user.tenant_id,
             )
         ).first()
+
+        if demand and demand.resource_id:
+            scoped_ids = self._get_scoped_resource_ids()
+            if scoped_ids is not None and demand.resource_id not in scoped_ids:
+                return None  # Treat as not found to avoid leaking existence
+
+        return demand
     
     def create(
         self,
@@ -310,11 +335,18 @@ class DemandService:
 
 class SupplyService:
     """Service for supply line operations."""
-    
+
     def __init__(self, db: Session, current_user: CurrentUser):
         self.db = db
         self.current_user = current_user
-    
+
+    def _get_scoped_resource_ids(self) -> Optional[list[str]]:
+        """Return scoped resource IDs for RO/Director, or None for full access."""
+        if self.current_user.role not in _SCOPED_ROLES:
+            return None
+        from api.app.services.reporting import ReportingService
+        return ReportingService(self.db, self.current_user).get_accessible_resource_ids()
+
     def _check_period_open(self, year: int, month: int) -> Period:
         """Check if the period exists and is open."""
         period = self.db.query(Period).filter(
@@ -358,16 +390,29 @@ class SupplyService:
             query = query.filter(SupplyLine.month == month)
         if resource_id:
             query = query.filter(SupplyLine.resource_id == resource_id)
+
+        # RO/Director: restrict to resources within their reporting line
+        scoped_ids = self._get_scoped_resource_ids()
+        if scoped_ids is not None:
+            query = query.filter(SupplyLine.resource_id.in_(scoped_ids))
+
         return query.all()
-    
+
     def get_by_id(self, supply_id: str) -> Optional[SupplyLine]:
         """Get a supply line by ID."""
-        return self.db.query(SupplyLine).filter(
+        supply = self.db.query(SupplyLine).filter(
             and_(
                 SupplyLine.id == supply_id,
                 SupplyLine.tenant_id == self.current_user.tenant_id,
             )
         ).first()
+
+        if supply:
+            scoped_ids = self._get_scoped_resource_ids()
+            if scoped_ids is not None and supply.resource_id not in scoped_ids:
+                return None
+
+        return supply
     
     def create(
         self,

@@ -12,6 +12,8 @@ from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
 from api.app.schemas.common import ErrorCode
 
+_SCOPED_ROLES = (UserRole.RO, UserRole.DIRECTOR)
+
 
 class ActualsService:
     """Service for actuals operations."""
@@ -20,6 +22,13 @@ class ActualsService:
         self.db = db
         self.current_user = current_user
     
+    def _get_scoped_resource_ids(self) -> "Optional[list[str]]":
+        """Return scoped resource IDs for RO/Director, or None for full access."""
+        if self.current_user.role not in _SCOPED_ROLES:
+            return None
+        from api.app.services.reporting import ReportingService
+        return ReportingService(self.db, self.current_user).get_accessible_resource_ids()
+
     def _check_employee_owns_resource(self, resource_id: str) -> None:
         """
         If the current user is an Employee, verify they own the resource.
@@ -199,17 +208,22 @@ class ActualsService:
         month: Optional[int] = None,
         resource_id: Optional[str] = None,
     ) -> list[ActualLine]:
-        """Get all actuals (for RO/Finance)."""
+        """Get all actuals (for RO/Finance/Admin). RO/Director see only their reporting line."""
         query = self.db.query(ActualLine).filter(
             ActualLine.tenant_id == self.current_user.tenant_id
         )
-        
+
         if year:
             query = query.filter(ActualLine.year == year)
         if month:
             query = query.filter(ActualLine.month == month)
         if resource_id:
             query = query.filter(ActualLine.resource_id == resource_id)
+
+        # RO/Director: restrict to resources within their reporting line
+        scoped_ids = self._get_scoped_resource_ids()
+        if scoped_ids is not None:
+            query = query.filter(ActualLine.resource_id.in_(scoped_ids))
 
         query = query.options(
             joinedload(ActualLine.resource),
@@ -493,7 +507,18 @@ class ActualsService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "NOT_FOUND", "message": "Actual line not found"}
             )
-        
+
+        # RO/Director: verify this employee is in their reporting line
+        scoped_ids = self._get_scoped_resource_ids()
+        if scoped_ids is not None and actual.resource_id not in scoped_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "UNAUTHORIZED_RESOURCE",
+                    "message": "You do not have access to records for this employee.",
+                },
+            )
+
         if actual.employee_signed_at:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

@@ -66,6 +66,7 @@ import { usePeriod } from '../contexts/PeriodContext';
 import { apiClient } from '../api/client';
 import { lookupsApi } from '../api/lookups';
 import { PeriodPanel } from '../components/PeriodPanel';
+import { PeriodSelector } from '../components/PeriodSelector';
 import { EmptyState } from '../components/EmptyState';
 import { LoadingState } from '../components/LoadingState';
 import { useToast } from '../hooks/useToast';
@@ -273,13 +274,37 @@ const useStyles = makeStyles({
     top: 0,
     zIndex: 10,
     backgroundColor: tokens.colorNeutralBackground1,
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
     marginBottom: tokens.spacingVerticalL,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: tokens.spacingVerticalS,
+  },
+  toolbarRow: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalL,
     flexWrap: 'wrap' as const,
+  },
+  toolbarFilters: {
+    display: 'flex',
+    alignItems: 'flex-end',
+    gap: tokens.spacingHorizontalL,
+    flexWrap: 'wrap' as const,
+  },
+  filterGroup: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: tokens.spacingVerticalXXS,
+    minWidth: '140px',
+  },
+  filterLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.5px',
   },
   toolbarLabel: {
     fontSize: tokens.fontSizeBase200,
@@ -913,90 +938,88 @@ export const Finance: React.FC = () => {
 
       {/* Sticky toolbar */}
       <div className={styles.toolbar}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
-          <span className={styles.toolbarLabel}>Period</span>
-          <Select
-            value={periods.some(p => p.id === selectedPeriodId) ? selectedPeriodId : periods[0]?.id ?? ''}
-            onChange={(_, data) => setSelectedPeriodId(data.value)}
-            style={{ minWidth: 140 }}
-          >
-            {periods.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.year}-{String(p.month).padStart(2, '0')} ({p.status})
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
-          <span className={styles.toolbarLabel}>Cost center</span>
-          <Select
-            value={activeTab === 'actuals' ? (actualsQueueCostCenterId ?? '') : selectedCostCenterId}
-            onChange={(_, data) => {
-              const val = data.value ?? '';
-              if (activeTab === 'actuals') {
-                setActualsQueueCostCenterId(val || null);
-              } else {
-                setSelectedCostCenterId(val);
+        <div className={styles.toolbarRow}>
+          <TabList
+            selectedValue={activeTab}
+            onTabSelect={(_, data) => {
+              setActiveTab(data.value as string);
+              if (data.value === 'actuals') {
+                setActualsQueueCostCenterId(selectedCostCenterId || null);
+                loadActuals();
               }
             }}
-            style={{ minWidth: 160 }}
           >
-            <option value="">All cost centers</option>
-            {costCenters.map(cc => (
-              <option key={cc.id} value={cc.id}>{cc.name}</option>
-            ))}
-          </Select>
+            <Tab value="dashboard" icon={<DocumentBulletList24Regular />}>Overview</Tab>
+            <Tab value="costcenters" icon={<BuildingRegular />}>Cost Centers</Tab>
+            <Tab value="actuals" icon={<MoneyRegular />}>Actuals</Tab>
+            <Tab value="snapshots" icon={<ArrowDownload24Regular />}>Snapshots</Tab>
+            {canSeeCostReport && (
+              <Tab value="costreport" icon={<MoneyRegular />}>Cost Report</Tab>
+            )}
+          </TabList>
+          <span className={styles.toolbarLastSnapshot}>
+            {latestSnapshot ? `Last snapshot: ${new Date(latestSnapshot.published_at).toLocaleDateString()}` : 'No snapshots yet'}
+          </span>
         </div>
-        {activeTab === 'actuals' && (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
-              <span className={styles.toolbarLabel}>Project</span>
-              <Select
-                value={actualsProjectId}
-                onChange={(_, data) => setActualsProjectId(data.value ?? '')}
-                style={{ minWidth: 140 }}
-              >
-                <option value="">All projects</option>
-                {projects.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </Select>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
-              <span className={styles.toolbarLabel}>Approval</span>
-              <Select
-                value={actualsApprovalStatus}
-                onChange={(_, data) => setActualsApprovalStatus(data.value ?? '')}
-                style={{ minWidth: 120 }}
-              >
-                {approvalStatusOptions.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </Select>
-            </div>
-          </>
-        )}
-        <TabList
-          selectedValue={activeTab}
-          onTabSelect={(_, data) => {
-            setActiveTab(data.value as string);
-            if (data.value === 'actuals') {
-              setActualsQueueCostCenterId(selectedCostCenterId || null);
-              loadActuals();
-            }
-          }}
-        >
-          <Tab value="dashboard" icon={<DocumentBulletList24Regular />}>Overview</Tab>
-          <Tab value="costcenters" icon={<BuildingRegular />}>Cost Centers</Tab>
-          <Tab value="actuals" icon={<MoneyRegular />}>Actuals</Tab>
-          <Tab value="snapshots" icon={<ArrowDownload24Regular />}>Snapshots</Tab>
-          {canSeeCostReport && (
-            <Tab value="costreport" icon={<MoneyRegular />}>Cost Report</Tab>
+        <div className={styles.toolbarFilters}>
+          <div className={styles.filterGroup}>
+            <span className={styles.filterLabel}>Period</span>
+            <PeriodSelector
+              periods={periods}
+              selectedId={selectedPeriodId}
+              onSelect={setSelectedPeriodId}
+            />
+          </div>
+          <div className={styles.filterGroup}>
+            <span className={styles.filterLabel}>Cost center</span>
+            <Select
+              value={activeTab === 'actuals' ? (actualsQueueCostCenterId ?? '') : selectedCostCenterId}
+              onChange={(_, data) => {
+                const val = data.value ?? '';
+                if (activeTab === 'actuals') {
+                  setActualsQueueCostCenterId(val || null);
+                } else {
+                  setSelectedCostCenterId(val);
+                }
+              }}
+              style={{ minWidth: 160 }}
+            >
+              <option value="">All cost centers</option>
+              {costCenters.map(cc => (
+                <option key={cc.id} value={cc.id}>{cc.name}</option>
+              ))}
+            </Select>
+          </div>
+          {activeTab === 'actuals' && (
+            <>
+              <div className={styles.filterGroup}>
+                <span className={styles.filterLabel}>Project</span>
+                <Select
+                  value={actualsProjectId}
+                  onChange={(_, data) => setActualsProjectId(data.value ?? '')}
+                  style={{ minWidth: 140 }}
+                >
+                  <option value="">All projects</option>
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </Select>
+              </div>
+              <div className={styles.filterGroup}>
+                <span className={styles.filterLabel}>Approval</span>
+                <Select
+                  value={actualsApprovalStatus}
+                  onChange={(_, data) => setActualsApprovalStatus(data.value ?? '')}
+                  style={{ minWidth: 120 }}
+                >
+                  {approvalStatusOptions.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </Select>
+              </div>
+            </>
           )}
-        </TabList>
-        <span className={styles.toolbarLastSnapshot}>
-          {latestSnapshot ? `Last snapshot: ${new Date(latestSnapshot.published_at).toLocaleDateString()}` : 'No snapshots yet'}
-        </span>
+        </div>
       </div>
 
       {/* ═══════════════ Cost Centers Tab (work queue + details) ═══════════════ */}

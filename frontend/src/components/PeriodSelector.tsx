@@ -199,7 +199,7 @@ const useStyles = makeStyles({
   },
   dropdown: {
     position: 'absolute',
-    right: 0,
+    left: 0,
     top: 'calc(100% + 4px)',
     minWidth: '240px',
     backgroundColor: tokens.colorNeutralBackground1,

@@ -16,7 +16,6 @@ import {
   MenuPopover,
   Badge,
   Tooltip,
-  Select,
 } from '@fluentui/react-components';
 import {
   HomeRegular,
@@ -41,6 +40,7 @@ import {
 } from '@fluentui/react-icons';
 import { useAuth } from '../auth/AuthProvider';
 import { config } from '../config';
+import { PeriodSelector } from './PeriodSelector';
 
 const Home = bundleIcon(HomeFilled, HomeRegular);
 const Demand = bundleIcon(CalendarFilled, CalendarRegular);
@@ -410,18 +410,12 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Tooltip content={`Role: ${user?.role}`} relationship="description">
               <Badge appearance="outline" color="brand">{user?.role}</Badge>
             </Tooltip>
-            {/* Period selector: Finance/Admin see all periods; others see only open */}
-            <Select
-              value={visiblePeriods.some((p) => p.id === selectedPeriodId) ? selectedPeriodId : visiblePeriods[0]?.id ?? ''}
-              onChange={(_, data) => setSelectedPeriodId(data.value)}
-              style={{ minWidth: 120 }}
-            >
-              {visiblePeriods.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.year}-{String(p.month).padStart(2, '0')} ({p.status})
-                </option>
-              ))}
-            </Select>
+            {/* Period selector: searchable, year-grouped */}
+            <PeriodSelector
+              periods={visiblePeriods}
+              selectedId={visiblePeriods.some((p) => p.id === selectedPeriodId) ? selectedPeriodId : visiblePeriods[0]?.id ?? ''}
+              onSelect={setSelectedPeriodId}
+            />
           </div>
         </header>
 

@@ -119,7 +119,7 @@ export const GroupedBarChart: React.FC<GroupedBarChartProps> = ({ data, demandKe
       <ResponsiveContainer width="100%" height={360}>
         <BarChart data={data} margin={{ top: 16, right: 32, left: 8, bottom: 24 }}>
           <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="label" angle={-20} textAnchor="end" height={60} />
+          <XAxis dataKey="label" angle={0} textAnchor="middle" height={40} tick={{ fontSize: 13 }} minTickGap={8} />
           <YAxis />
           <Tooltip content={<CustomTooltip />} />
           {projectNames.map((project) => [

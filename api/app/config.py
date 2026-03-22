@@ -33,7 +33,10 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./dev.db"
     
     # Notifications
-    notify_mode: str = "stub"
+    notify_mode: str = "stub"          # "stub" = log only, "graph" = send via Graph API
+    notify_from_email: str = ""        # NOTIFY_FROM_EMAIL — mailbox UPN for Graph sendMail (Mail.Send permission required)
+    notify_conflict_schedule: str = "PM_RO"          # NOTIFY_CONFLICT_SCHEDULE — which phase cadence triggers conflict alerts
+    notify_missing_actuals_schedule: str = "Employee" # NOTIFY_MISSING_ACTUALS_SCHEDULE — which phase cadence triggers missing actuals alerts
 
     # CORS (dev): comma-separated extra origins, e.g. "http://192.168.1.10:5173"
     additional_cors_origins: str = ""

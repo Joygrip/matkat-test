@@ -1,47 +1,69 @@
-"""Notifications service - sending reminders and tracking."""
+"""Notifications service — sending reminders and tracking.
+
+Covers two categories of notification:
+
+Legacy phases (role-blast, global-per-phase idempotency):
+  PM_RO, FINANCE, EMPLOYEE, RO_DIRECTOR
+
+Targeted alert phases (per-entity idempotency keyed on resource_id + recipient):
+  CONFLICT_ALERT   — RO + PM when demand > supply for a resource
+  MISSING_ACTUALS  — Employee when actuals are unsigned / missing
+"""
+import logging
 import uuid
 from datetime import datetime, date, timedelta
-from dateutil.relativedelta import relativedelta
 from typing import Optional, List, Dict, Any
+
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
-from api.app.models.core import Period, User, Holiday
+from api.app.models.core import User, Holiday
 from api.app.models.notifications import NotificationLog, NotificationPhase, NotificationStatus
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
+from api.app.services.conflict_detection import ConflictDetectionService
+from api.app.services.graph_mail import GraphMailService
+from api.app.services.missing_actuals import MissingActualsService
 from api.app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class NotificationsService:
     """Service for notification operations."""
-    
-    def __init__(self, db: Session, current_user: Optional[CurrentUser] = None):
+
+    def __init__(
+        self,
+        db: Session,
+        current_user: Optional[CurrentUser] = None,
+        mail_service: Optional[GraphMailService] = None,
+    ):
         self.db = db
         self.current_user = current_user
         self.settings = get_settings()
-    
+        # Lazy-initialised if not injected (useful for testing)
+        self._mail_service = mail_service
+
+    # ------------------------------------------------------------------
+    # Deadline helpers
+    # ------------------------------------------------------------------
+
     def calculate_deadline(self, year: int, month: int, base_day: int = 5) -> date:
         """
         Calculate the notification deadline, rolling forward if it falls on a holiday.
-        
+
         Args:
             year: Target year
-            month: Target month  
+            month: Target month
             base_day: Base deadline day of month (default: 5th)
-        
+
         Returns:
             date: Adjusted deadline date
         """
-        # Start with base deadline
         deadline = date(year, month, base_day)
-        
-        # Get tenant ID for holiday lookup
         tenant_id = self.current_user.tenant_id if self.current_user else None
-        
         if not tenant_id:
             return deadline
-        
         return self._shift_to_next_workday(deadline, tenant_id)
 
     def calculate_phase_deadline(self, phase: NotificationPhase, year: int, month: int) -> date:
@@ -55,18 +77,15 @@ class NotificationsService:
         base_date = self._get_phase_base_date(phase, year, month)
         tenant_id = self.current_user.tenant_id if self.current_user else None
         return self._shift_to_next_workday(base_date, tenant_id)
-    
+
+    # ------------------------------------------------------------------
+    # Preview
+    # ------------------------------------------------------------------
+
     def get_preview(self, phase: NotificationPhase, year: int, month: int) -> Dict[str, Any]:
-        """
-        Get a preview of what notifications would be sent.
-        
-        Returns list of recipients without actually sending.
-        """
-        tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
-        
+        """Get a preview of what notifications would be sent (no side effects)."""
         recipients = self._get_recipients_for_phase(phase)
         deadline = self.calculate_phase_deadline(phase, year, month)
-        
         return {
             "phase": phase.value,
             "year": year,
@@ -84,17 +103,50 @@ class NotificationsService:
             ],
             "message_template": self._get_message_template(phase, year, month, deadline),
         }
-    
+
+    def get_preview_conflict_alerts(self, year: int, month: int) -> Dict[str, Any]:
+        """Preview conflict alerts without writing any logs."""
+        tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
+        detector = ConflictDetectionService(self.db, tenant_id)
+        conflicts = detector.find_conflicts(year, month)
+
+        items = []
+        for c in conflicts:
+            recipients = []
+            if c.ro_recipient:
+                recipients.append({"role": "RO", "email": c.ro_recipient.email, "user_id": c.ro_recipient.id})
+            for pm in c.pm_recipients:
+                recipients.append({"role": "PM", "email": pm.email, "user_id": pm.id})
+            items.append({
+                "resource_id": c.resource_id,
+                "resource_name": c.resource.display_name,
+                "total_demand": c.total_demand,
+                "total_supply": c.total_supply,
+                "recipients": recipients,
+            })
+
+        return {
+            "phase": NotificationPhase.CONFLICT_ALERT.value,
+            "year": year,
+            "month": month,
+            "conflicts_count": len(conflicts),
+            "conflicts": items,
+        }
+
+    # ------------------------------------------------------------------
+    # Legacy phase notifications (role-blast, global idempotency)
+    # ------------------------------------------------------------------
+
     def run_notifications(self, phase: NotificationPhase, year: int, month: int) -> Dict[str, Any]:
         """
-        Run notifications for a phase (stub - records but doesn't actually send).
-        
-        Uses run_id for idempotency - same run won't duplicate notifications.
+        Run notifications for a phase (records log; sends via Graph if notify_mode='graph').
+
+        Uses global run_id idempotency — same phase/period won't be duplicated.
         """
         tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
         run_id = str(uuid.uuid4())
-        
-        # Check if already run for this phase/period
+
+        # Global idempotency check for legacy phases
         existing = self.db.query(NotificationLog).filter(
             and_(
                 NotificationLog.tenant_id == tenant_id,
@@ -103,21 +155,23 @@ class NotificationsService:
                 NotificationLog.month == month,
             )
         ).first()
-        
+
         if existing:
             return {
                 "status": "already_run",
                 "message": "Notifications already sent for this phase and period",
                 "existing_run_id": existing.run_id,
             }
-        
+
         recipients = self._get_recipients_for_phase(phase)
         deadline = self.calculate_phase_deadline(phase, year, month)
         message_template = self._get_message_template(phase, year, month, deadline)
-        
+
         notifications_created = []
-        
+
         for recipient in recipients:
+            if not recipient.email:
+                continue
             log = NotificationLog(
                 tenant_id=tenant_id,
                 phase=phase,
@@ -125,19 +179,25 @@ class NotificationsService:
                 month=month,
                 recipient_user_id=recipient.id,
                 recipient_email=recipient.email,
-                status=NotificationStatus.SENT if self.settings.notify_mode == "stub" else NotificationStatus.PENDING,
+                status=NotificationStatus.PENDING,
                 message=message_template,
                 run_id=run_id,
-                sent_at=datetime.utcnow() if self.settings.notify_mode == "stub" else None,
             )
             self.db.add(log)
+
+            if self.settings.notify_mode == "graph":
+                self._dispatch_mail(log)
+            else:
+                log.status = NotificationStatus.SENT
+                log.sent_at = datetime.utcnow()
+
             notifications_created.append({
                 "recipient_email": recipient.email,
                 "status": log.status.value,
             })
-        
+
         self.db.commit()
-        
+
         if self.current_user:
             log_audit(
                 self.db, self.current_user,
@@ -151,7 +211,7 @@ class NotificationsService:
                     "recipients_count": len(recipients),
                 }
             )
-        
+
         return {
             "status": "success",
             "run_id": run_id,
@@ -162,23 +222,318 @@ class NotificationsService:
             "notifications": notifications_created,
             "mode": self.settings.notify_mode,
         }
-    
-    def _get_recipients_for_phase(self, phase: NotificationPhase) -> List[User]:
-        """Get users who should receive notifications for a phase."""
+
+    # ------------------------------------------------------------------
+    # Targeted alert: demand > supply conflicts
+    # ------------------------------------------------------------------
+
+    def run_conflict_alerts(self, year: int, month: int) -> Dict[str, Any]:
+        """Detect demand > supply conflicts and notify affected ROs and PMs.
+
+        Per-entity idempotent: a (phase, year, month, resource_id, recipient_user_id)
+        combination that already has a SENT log is skipped.
+        """
+        tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
+        run_id = str(uuid.uuid4())
+        phase = NotificationPhase.CONFLICT_ALERT
+
+        detector = ConflictDetectionService(self.db, tenant_id)
+        conflicts = detector.find_conflicts(year, month)
+
+        sent_count = 0
+        skipped_count = 0
+
+        for conflict in conflicts:
+            # Collect unique recipients: RO + all PMs
+            recipients: List[User] = []
+            if conflict.ro_recipient:
+                recipients.append(conflict.ro_recipient)
+            recipients.extend(conflict.pm_recipients)
+
+            # Deduplicate by user_id (a user might be both RO and PM)
+            seen_ids: set = set()
+            for recipient in recipients:
+                if recipient.id in seen_ids:
+                    continue
+                seen_ids.add(recipient.id)
+
+                if not recipient.email:
+                    continue
+
+                if self._already_sent(phase, year, month, conflict.resource_id, recipient.id):
+                    skipped_count += 1
+                    continue
+
+                message = self._conflict_message(conflict, year, month)
+                log = self._create_entity_log(
+                    phase=phase,
+                    year=year,
+                    month=month,
+                    run_id=run_id,
+                    recipient_user_id=recipient.id,
+                    recipient_email=recipient.email,
+                    resource_id=conflict.resource_id,
+                    message=message,
+                )
+                self.db.add(log)
+
+                if self.settings.notify_mode == "graph":
+                    self._dispatch_mail(log)
+                else:
+                    log.status = NotificationStatus.SENT
+                    log.sent_at = datetime.utcnow()
+
+                sent_count += 1
+
+        self.db.commit()
+
+        if self.current_user:
+            log_audit(
+                self.db, self.current_user,
+                action="run_conflict_alerts",
+                entity_type="NotificationLog",
+                entity_id=run_id,
+                new_values={
+                    "phase": phase.value,
+                    "year": year,
+                    "month": month,
+                    "conflicts": len(conflicts),
+                    "sent": sent_count,
+                    "skipped": skipped_count,
+                }
+            )
+
+        logger.info(
+            "run_conflict_alerts: year=%d month=%d sent=%d skipped=%d (tenant=%s)",
+            year, month, sent_count, skipped_count, tenant_id,
+        )
+
+        return {
+            "run_id": run_id,
+            "phase": phase.value,
+            "year": year,
+            "month": month,
+            "conflicts": len(conflicts),
+            "sent": sent_count,
+            "skipped": skipped_count,
+            "mode": self.settings.notify_mode,
+        }
+
+    # ------------------------------------------------------------------
+    # Targeted alert: missing actuals
+    # ------------------------------------------------------------------
+
+    def run_missing_actuals_alerts(self, year: int, month: int) -> Dict[str, Any]:
+        """Find employees with unsigned/absent actuals and send reminders.
+
+        Per-entity idempotent: a (phase, year, month, resource_id, recipient_user_id)
+        combination that already has a SENT log is skipped.
+        """
+        tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
+        run_id = str(uuid.uuid4())
+        phase = NotificationPhase.MISSING_ACTUALS
+
+        detector = MissingActualsService(self.db, tenant_id)
+        missing = detector.find_missing(year, month)
+
+        sent_count = 0
+        skipped_count = 0
+
+        for item in missing:
+            recipient = item.recipient
+            if not recipient.email:
+                continue
+
+            if self._already_sent(phase, year, month, item.resource_id, recipient.id):
+                skipped_count += 1
+                continue
+
+            message = self._missing_actuals_message(item.resource, year, month)
+            log = self._create_entity_log(
+                phase=phase,
+                year=year,
+                month=month,
+                run_id=run_id,
+                recipient_user_id=recipient.id,
+                recipient_email=recipient.email,
+                resource_id=item.resource_id,
+                message=message,
+            )
+            self.db.add(log)
+
+            if self.settings.notify_mode == "graph":
+                self._dispatch_mail(log)
+            else:
+                log.status = NotificationStatus.SENT
+                log.sent_at = datetime.utcnow()
+
+            sent_count += 1
+
+        self.db.commit()
+
+        if self.current_user:
+            log_audit(
+                self.db, self.current_user,
+                action="run_missing_actuals_alerts",
+                entity_type="NotificationLog",
+                entity_id=run_id,
+                new_values={
+                    "phase": phase.value,
+                    "year": year,
+                    "month": month,
+                    "missing": len(missing),
+                    "sent": sent_count,
+                    "skipped": skipped_count,
+                }
+            )
+
+        logger.info(
+            "run_missing_actuals_alerts: year=%d month=%d sent=%d skipped=%d (tenant=%s)",
+            year, month, sent_count, skipped_count, tenant_id,
+        )
+
+        return {
+            "run_id": run_id,
+            "phase": phase.value,
+            "year": year,
+            "month": month,
+            "missing": len(missing),
+            "sent": sent_count,
+            "skipped": skipped_count,
+            "mode": self.settings.notify_mode,
+        }
+
+    # ------------------------------------------------------------------
+    # Logs
+    # ------------------------------------------------------------------
+
+    def get_logs(
+        self,
+        phase: Optional[NotificationPhase] = None,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+    ) -> List[NotificationLog]:
+        """Get notification logs with optional filters."""
         tenant_id = self.current_user.tenant_id if self.current_user else None
-        
+
+        query = self.db.query(NotificationLog).filter(
+            NotificationLog.tenant_id == tenant_id
+        )
+
+        if phase:
+            query = query.filter(NotificationLog.phase == phase)
+        if year:
+            query = query.filter(NotificationLog.year == year)
+        if month:
+            query = query.filter(NotificationLog.month == month)
+
+        return query.order_by(NotificationLog.created_at.desc()).all()
+
+    # ------------------------------------------------------------------
+    # Private: idempotency
+    # ------------------------------------------------------------------
+
+    def _already_sent(
+        self,
+        phase: NotificationPhase,
+        year: int,
+        month: int,
+        resource_id: str,
+        recipient_user_id: str,
+    ) -> bool:
+        """Per-entity idempotency check for targeted alert phases."""
+        tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
+        exists = self.db.query(NotificationLog).filter(
+            and_(
+                NotificationLog.tenant_id == tenant_id,
+                NotificationLog.phase == phase,
+                NotificationLog.year == year,
+                NotificationLog.month == month,
+                NotificationLog.resource_id == resource_id,
+                NotificationLog.recipient_user_id == recipient_user_id,
+                NotificationLog.status == NotificationStatus.SENT,
+            )
+        ).first()
+        return exists is not None
+
+    # ------------------------------------------------------------------
+    # Private: mail dispatch
+    # ------------------------------------------------------------------
+
+    def _get_mail_service(self) -> GraphMailService:
+        if self._mail_service is None:
+            self._mail_service = GraphMailService(self.settings)
+        return self._mail_service
+
+    def _dispatch_mail(self, log: NotificationLog) -> None:
+        """Send via Graph and update log.status in place (not yet committed)."""
+        subject = self._subject_for_phase(log.phase)
+        body_html = self._html_body(log.message or "")
+        success = self._get_mail_service().send_mail(
+            to_email=log.recipient_email,
+            subject=subject,
+            body_html=body_html,
+        )
+        if success:
+            log.status = NotificationStatus.SENT
+            log.sent_at = datetime.utcnow()
+        else:
+            log.status = NotificationStatus.FAILED
+            log.error = "GraphMailService returned an error — see application logs"
+            logger.warning(
+                "Mail dispatch failed: phase=%s recipient=%s", log.phase, log.recipient_email
+            )
+
+    # ------------------------------------------------------------------
+    # Private: log factory
+    # ------------------------------------------------------------------
+
+    def _create_entity_log(
+        self,
+        phase: NotificationPhase,
+        year: int,
+        month: int,
+        run_id: str,
+        recipient_user_id: str,
+        recipient_email: str,
+        resource_id: str,
+        message: str,
+    ) -> NotificationLog:
+        tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
+        return NotificationLog(
+            tenant_id=tenant_id,
+            phase=phase,
+            year=year,
+            month=month,
+            recipient_user_id=recipient_user_id,
+            recipient_email=recipient_email,
+            resource_id=resource_id,
+            status=NotificationStatus.PENDING,
+            message=message,
+            run_id=run_id,
+        )
+
+    # ------------------------------------------------------------------
+    # Private: recipient resolution (legacy phases)
+    # ------------------------------------------------------------------
+
+    def _get_recipients_for_phase(self, phase: NotificationPhase) -> List[User]:
+        """Get users who should receive notifications for a legacy phase."""
+        tenant_id = self.current_user.tenant_id if self.current_user else None
         if not tenant_id:
             return []
-        
+
         role_map = {
             NotificationPhase.PM_RO: ["PM", "RO"],
             NotificationPhase.FINANCE: ["Finance"],
             NotificationPhase.EMPLOYEE: ["Employee"],
             NotificationPhase.RO_DIRECTOR: ["RO", "Director"],
         }
-        
+
         roles = role_map.get(phase, [])
-        
+        if not roles:
+            return []
+
         return self.db.query(User).filter(
             and_(
                 User.tenant_id == tenant_id,
@@ -186,6 +541,10 @@ class NotificationsService:
                 User.is_active == True,
             )
         ).all()
+
+    # ------------------------------------------------------------------
+    # Private: deadline helpers
+    # ------------------------------------------------------------------
 
     def _get_phase_base_date(self, phase: NotificationPhase, year: int, month: int) -> date:
         """Get the base date for the phase before holiday shifting."""
@@ -210,7 +569,6 @@ class NotificationsService:
         if not tenant_id:
             return base_date
 
-        # Load holidays for a reasonable window
         window_start = datetime.combine(base_date, datetime.min.time())
         window_end = datetime.combine(base_date + timedelta(days=14), datetime.max.time())
         holidays = self.db.query(Holiday).filter(
@@ -226,37 +584,71 @@ class NotificationsService:
         }
 
         deadline = base_date
-        for _ in range(14):  # Safety limit
+        for _ in range(14):
             if deadline.weekday() >= 5 or deadline in holiday_dates:
                 deadline = deadline + timedelta(days=1)
                 continue
             break
 
         return deadline
-    
-    def _get_message_template(self, phase: NotificationPhase, year: int, month: int, deadline: date) -> str:
-        """Get the message template for a notification phase."""
+
+    # ------------------------------------------------------------------
+    # Private: message templates
+    # ------------------------------------------------------------------
+
+    def _get_message_template(
+        self, phase: NotificationPhase, year: int, month: int, deadline: date
+    ) -> str:
         templates = {
-            NotificationPhase.PM_RO: f"Reminder: Please complete demand and supply planning for {month:02d}/{year} by {deadline}.",
-            NotificationPhase.FINANCE: f"Reminder: Planning data for {month:02d}/{year} is ready for review. Please consolidate by {deadline}.",
-            NotificationPhase.EMPLOYEE: f"Reminder: Please enter your actuals for {month:02d}/{year} by {deadline}.",
-            NotificationPhase.RO_DIRECTOR: f"Reminder: Actuals for {month:02d}/{year} are awaiting your approval. Please review by {deadline}.",
+            NotificationPhase.PM_RO: (
+                f"Reminder: Please complete demand and supply planning for "
+                f"{month:02d}/{year} by {deadline}."
+            ),
+            NotificationPhase.FINANCE: (
+                f"Reminder: Planning data for {month:02d}/{year} is ready for review. "
+                f"Please consolidate by {deadline}."
+            ),
+            NotificationPhase.EMPLOYEE: (
+                f"Reminder: Please enter your actuals for {month:02d}/{year} by {deadline}."
+            ),
+            NotificationPhase.RO_DIRECTOR: (
+                f"Reminder: Actuals for {month:02d}/{year} are awaiting your approval. "
+                f"Please review by {deadline}."
+            ),
         }
         return templates.get(phase, "Notification reminder.")
-    
-    def get_logs(self, phase: Optional[NotificationPhase] = None, year: Optional[int] = None, month: Optional[int] = None) -> List[NotificationLog]:
-        """Get notification logs with optional filters."""
-        tenant_id = self.current_user.tenant_id if self.current_user else None
-        
-        query = self.db.query(NotificationLog).filter(
-            NotificationLog.tenant_id == tenant_id
+
+    def _conflict_message(self, conflict, year: int, month: int) -> str:
+        return (
+            f"Resource allocation conflict detected for {conflict.resource.display_name} "
+            f"in {month:02d}/{year}: total demand is {conflict.total_demand}% FTE but "
+            f"supply is only {conflict.total_supply}% FTE. "
+            f"Please review and adjust demand or supply lines."
         )
-        
-        if phase:
-            query = query.filter(NotificationLog.phase == phase)
-        if year:
-            query = query.filter(NotificationLog.year == year)
-        if month:
-            query = query.filter(NotificationLog.month == month)
-        
-        return query.order_by(NotificationLog.created_at.desc()).all()
+
+    def _missing_actuals_message(self, resource, year: int, month: int) -> str:
+        return (
+            f"Reminder: Actuals for {month:02d}/{year} have not been fully submitted "
+            f"for {resource.display_name}. Please sign your actual lines as soon as possible."
+        )
+
+    def _subject_for_phase(self, phase: NotificationPhase) -> str:
+        subjects = {
+            NotificationPhase.PM_RO: "MatKat: Planning reminder",
+            NotificationPhase.FINANCE: "MatKat: Finance consolidation reminder",
+            NotificationPhase.EMPLOYEE: "MatKat: Actuals entry reminder",
+            NotificationPhase.RO_DIRECTOR: "MatKat: Actuals approval reminder",
+            NotificationPhase.CONFLICT_ALERT: "MatKat: Resource allocation conflict detected",
+            NotificationPhase.MISSING_ACTUALS: "MatKat: Actuals submission reminder",
+        }
+        return subjects.get(phase, "MatKat: Notification")
+
+    def _html_body(self, plain_message: str) -> str:
+        """Wrap a plain message in minimal HTML for Graph sendMail."""
+        safe = plain_message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return (
+            f"<html><body>"
+            f"<p>{safe}</p>"
+            f"<p style='color:#888;font-size:12px;'>This is an automated message from MatKat.</p>"
+            f"</body></html>"
+        )

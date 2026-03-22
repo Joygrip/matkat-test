@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest api/tests/test_planning.py::test_create_demand_with_resource -v --no-header)"
+    ]
+  }
+}

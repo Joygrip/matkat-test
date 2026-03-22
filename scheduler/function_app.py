@@ -13,6 +13,11 @@ import azure.functions as func
 
 app = func.FunctionApp()
 
+NOTIFY_CONFLICT_SCHEDULE = os.environ.get("NOTIFY_CONFLICT_SCHEDULE", "PM_RO")
+NOTIFY_MISSING_ACTUALS_SCHEDULE = os.environ.get("NOTIFY_MISSING_ACTUALS_SCHEDULE", "Employee")
+
+PHASES = ["PM_RO", "Finance", "Employee", "RO_Director"]
+
 
 def get_api_headers():
     """Get headers for API calls — dev bypass or managed identity (production)."""
@@ -21,7 +26,7 @@ def get_api_headers():
             "X-Dev-Role": os.environ.get("DEV_ROLE", "Admin"),
             "X-Dev-Tenant": os.environ.get("DEV_TENANT", "dev-tenant-001"),
         }
-    
+
     # Production: acquire token via managed identity (Azure Functions) or
     # Azure CLI credentials (local development without bypass).
     from azure.identity import DefaultAzureCredential
@@ -35,15 +40,15 @@ def call_notification_api(phase: str, year: int, month: int):
     """Call the notification run endpoint."""
     base_url = os.environ.get("API_BASE_URL", "http://localhost:8000")
     url = f"{base_url}/notifications/run"
-    
+
     params = {
         "phase": phase,
         "year": year,
         "month": month,
     }
-    
+
     headers = get_api_headers()
-    
+
     try:
         response = requests.post(url, params=params, headers=headers, timeout=30)
         response.raise_for_status()
@@ -53,7 +58,28 @@ def call_notification_api(phase: str, year: int, month: int):
         raise
 
 
-PHASES = ["PM_RO", "Finance", "Employee", "RO_Director"]
+def call_alert_api(alert_type: str, year: int, month: int):
+    """Call a targeted alert endpoint.
+
+    alert_type: 'conflict' → /notifications/run-conflict-alerts
+                'missing_actuals' → /notifications/run-missing-actuals
+    """
+    base_url = os.environ.get("API_BASE_URL", "http://localhost:8000")
+    route_map = {
+        "conflict": "/notifications/run-conflict-alerts",
+        "missing_actuals": "/notifications/run-missing-actuals",
+    }
+    url = f"{base_url}{route_map[alert_type]}"
+    params = {"year": year, "month": month}
+    headers = get_api_headers()
+
+    try:
+        response = requests.post(url, params=params, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to call alert API ({alert_type}): {e}")
+        raise
 
 
 def get_phase_deadline(phase: str, year: int, month: int) -> date:
@@ -89,7 +115,7 @@ def get_due_phases(today: date) -> list[str]:
 
 # Timer trigger: Run daily at 8:00 AM UTC, then fire phases due today
 @app.timer_trigger(schedule="0 0 8 * * *", arg_name="mytimer", run_on_startup=False)
-def notification_daily(mytimer: func.TimerRequest) -> None:
+def notification_daily(_mytimer: func.TimerRequest) -> None:
     """
     Daily trigger to run phases due today.
 
@@ -98,6 +124,11 @@ def notification_daily(mytimer: func.TimerRequest) -> None:
     - Finance: 3rd Friday
     - Employee: 4th Monday
     - RO_Director: 4th Tuesday
+
+    Conflict and missing-actuals alerts fire on the same day as their
+    configured schedule phase (NOTIFY_CONFLICT_SCHEDULE and
+    NOTIFY_MISSING_ACTUALS_SCHEDULE env vars, defaulting to PM_RO and
+    Employee respectively).
     """
     now = datetime.utcnow()
     today = now.date()
@@ -106,20 +137,41 @@ def notification_daily(mytimer: func.TimerRequest) -> None:
     due_phases = get_due_phases(today)
     if not due_phases:
         logging.info("No notification phases due today.")
-        return
+    else:
+        for phase in due_phases:
+            try:
+                result = call_notification_api(phase, today.year, today.month)
+                logging.info(f"{phase} notifications result: {result}")
+            except Exception as e:
+                logging.error(f"{phase} notifications failed: {e}")
 
-    for phase in due_phases:
-        try:
-            result = call_notification_api(phase, today.year, today.month)
-            logging.info(f"{phase} notifications result: {result}")
-        except Exception as e:
-            logging.error(f"{phase} notifications failed: {e}")
+    # Conflict alerts — fire on same day as NOTIFY_CONFLICT_SCHEDULE deadline
+    try:
+        conflict_deadline = get_phase_deadline(
+            NOTIFY_CONFLICT_SCHEDULE, today.year, today.month
+        )
+        if conflict_deadline == today:
+            result = call_alert_api("conflict", today.year, today.month)
+            logging.info(f"Conflict alerts result: {result}")
+    except Exception as e:
+        logging.error(f"Conflict alerts failed: {e}")
+
+    # Missing actuals alerts — fire on same day as NOTIFY_MISSING_ACTUALS_SCHEDULE deadline
+    try:
+        missing_deadline = get_phase_deadline(
+            NOTIFY_MISSING_ACTUALS_SCHEDULE, today.year, today.month
+        )
+        if missing_deadline == today:
+            result = call_alert_api("missing_actuals", today.year, today.month)
+            logging.info(f"Missing actuals alerts result: {result}")
+    except Exception as e:
+        logging.error(f"Missing actuals alerts failed: {e}")
 
 
 # Timer trigger: Run nightly at 2:00 AM UTC — refresh all user profiles and manager
 # relationships from Microsoft Graph for every tenant user.
 @app.timer_trigger(schedule="0 0 2 * * *", arg_name="synctimer", run_on_startup=False)
-def graph_sync_daily(synctimer: func.TimerRequest) -> None:
+def graph_sync_daily(_synctimer: func.TimerRequest) -> None:
     """
     Nightly Graph background sync.
 
@@ -155,7 +207,7 @@ def graph_sync_daily(synctimer: func.TimerRequest) -> None:
 
 # HTTP trigger for manual on-demand Graph sync
 @app.route(route="sync-trigger", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
-def manual_sync_trigger(req: func.HttpRequest) -> func.HttpResponse:
+def manual_sync_trigger(_req: func.HttpRequest) -> func.HttpResponse:
     """
     HTTP endpoint for manually triggering the Graph user sync.
 
@@ -182,27 +234,66 @@ def manual_sync_trigger(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-# HTTP trigger for manual testing
+# HTTP trigger for manual testing of legacy phase notifications
 @app.route(route="trigger", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def manual_trigger(req: func.HttpRequest) -> func.HttpResponse:
     """
     HTTP endpoint for manually triggering notifications.
-    
+
     Query params:
     - phase: PM_RO, Finance, Employee, RO_Director
     - year: Year (optional, defaults to current)
     - month: Month (optional, defaults to current)
     """
     now = datetime.utcnow()
-    
+
     phase = req.params.get("phase", "PM_RO")
     year = int(req.params.get("year", now.year))
     month = int(req.params.get("month", now.month))
-    
+
     logging.info(f"Manual trigger: phase={phase}, year={year}, month={month}")
-    
+
     try:
         result = call_notification_api(phase, year, month)
+        return func.HttpResponse(
+            body=str(result),
+            status_code=200,
+            mimetype="application/json"
+        )
+    except Exception as e:
+        return func.HttpResponse(
+            body=f"Error: {str(e)}",
+            status_code=500
+        )
+
+
+# HTTP trigger for manual testing of targeted alert notifications
+@app.route(route="trigger-alerts", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
+def manual_alert_trigger(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    HTTP endpoint for manually triggering conflict or missing-actuals alerts.
+
+    Query params:
+    - type: 'conflict' or 'missing_actuals'
+    - year: Year (optional, defaults to current)
+    - month: Month (optional, defaults to current)
+    """
+    now = datetime.utcnow()
+
+    alert_type = req.params.get("type", "conflict")
+    year = int(req.params.get("year", now.year))
+    month = int(req.params.get("month", now.month))
+
+    if alert_type not in ("conflict", "missing_actuals"):
+        return func.HttpResponse(
+            body="type must be 'conflict' or 'missing_actuals'",
+            status_code=400,
+        )
+
+    logging.info(f"Manual alert trigger: type={alert_type}, year={year}, month={month}")
+
+    try:
+        result = call_alert_api(alert_type, year, month)
         return func.HttpResponse(
             body=str(result),
             status_code=200,

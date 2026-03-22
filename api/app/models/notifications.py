@@ -7,7 +7,6 @@ from sqlalchemy import (
     Integer,
     DateTime,
     Text,
-    Boolean,
     Index,
     Enum as SQLEnum,
 )
@@ -27,6 +26,9 @@ class NotificationPhase(str, enum.Enum):
     FINANCE = "Finance"  # Remind Finance to review
     EMPLOYEE = "Employee"  # Remind employees to enter actuals
     RO_DIRECTOR = "RO_Director"  # Remind approvers
+    # Targeted alerts (per resource, not role-blast)
+    CONFLICT_ALERT = "ConflictAlert"   # RO + PM when demand > supply for a resource
+    MISSING_ACTUALS = "MissingActuals" # Employee when actuals are unsigned/missing
 
 
 class NotificationStatus(str, enum.Enum):
@@ -39,31 +41,36 @@ class NotificationStatus(str, enum.Enum):
 class NotificationLog(Base):
     """Log of sent notifications."""
     __tablename__ = "notification_logs"
-    
+
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    
+
     phase: Mapped[NotificationPhase] = mapped_column(SQLEnum(NotificationPhase), nullable=False)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     month: Mapped[int] = mapped_column(Integer, nullable=False)
-    
+
     # Target info
     recipient_user_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     recipient_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    
+
     # Status
     status: Mapped[NotificationStatus] = mapped_column(
         SQLEnum(NotificationStatus), nullable=False, default=NotificationStatus.PENDING
     )
     message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
+
     # Run tracking (for idempotency)
     run_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    
+
+    # Entity that triggered this notification (resource_id for ConflictAlert / MissingActuals)
+    resource_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    
+
     __table_args__ = (
         Index('ix_notification_run', 'tenant_id', 'phase', 'year', 'month', 'run_id'),
+        # Per-entity idempotency index (used by ConflictAlert and MissingActuals phases)
+        Index('ix_notification_entity', 'tenant_id', 'phase', 'year', 'month', 'resource_id', 'recipient_user_id'),
     )

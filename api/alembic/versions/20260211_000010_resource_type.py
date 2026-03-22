@@ -42,11 +42,12 @@ def upgrade() -> None:
                 END
             """))
         else:
+            # Use 1/0 for booleans for SQL Server/Azure SQL compatibility
             conn.execute(sa.text("""
                 UPDATE resources SET resource_type = CASE
-                    WHEN is_operator = true OR is_equipment = true THEN 'OOP'
-                    WHEN is_external = true THEN 'External'
-                    WHEN is_student = true THEN 'Student'
+                    WHEN is_operator = 1 OR is_equipment = 1 THEN 'OOP'
+                    WHEN is_external = 1 THEN 'External'
+                    WHEN is_student = 1 THEN 'Student'
                     ELSE 'Employee'
                 END
             """))
@@ -86,12 +87,13 @@ def downgrade() -> None:
                 is_equipment = CASE WHEN resource_type = 'OOP' THEN 1 ELSE 0 END
         """))
     else:
+        # Use CASE WHEN for SQL Server compatibility
         conn.execute(sa.text("""
             UPDATE resources SET
-                is_external = (resource_type = 'External'),
-                is_student = (resource_type = 'Student'),
-                is_operator = (resource_type = 'OOP'),
-                is_equipment = (resource_type = 'OOP')
+                is_external = CASE WHEN resource_type = 'External' THEN 1 ELSE 0 END,
+                is_student = CASE WHEN resource_type = 'Student' THEN 1 ELSE 0 END,
+                is_operator = CASE WHEN resource_type = 'OOP' THEN 1 ELSE 0 END,
+                is_equipment = CASE WHEN resource_type = 'OOP' THEN 1 ELSE 0 END
         """))
 
     op.alter_column('resources', 'is_external', nullable=False, server_default='0')

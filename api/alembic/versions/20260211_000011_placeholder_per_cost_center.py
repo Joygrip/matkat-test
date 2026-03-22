@@ -30,17 +30,30 @@ def upgrade() -> None:
         cc_id, tenant_id, cc_name = row[0], row[1], row[2]
         ph_id = str(uuid.uuid4())
         name = f"Placeholder: {cc_name}"
-        conn.execute(sa.text("""
-            INSERT INTO placeholders (id, tenant_id, cost_center_id, name, description, skill_profile, estimated_cost, is_active, created_at, updated_at)
-            VALUES (:id, :tenant_id, :cost_center_id, :name, NULL, NULL, NULL, 1, datetime('now'), datetime('now'))
-        """), {"id": ph_id, "tenant_id": tenant_id, "cost_center_id": cc_id, "name": name})
+        if conn.dialect.name == 'sqlite':
+            conn.execute(sa.text("""
+                INSERT INTO placeholders (id, tenant_id, cost_center_id, name, description, skill_profile, estimated_cost, is_active, created_at, updated_at)
+                VALUES (:id, :tenant_id, :cost_center_id, :name, NULL, NULL, NULL, 1, datetime('now'), datetime('now'))
+            """), {"id": ph_id, "tenant_id": tenant_id, "cost_center_id": cc_id, "name": name})
+        else:
+            conn.execute(sa.text("""
+                INSERT INTO placeholders (id, tenant_id, cost_center_id, name, description, skill_profile, estimated_cost, is_active, created_at, updated_at)
+                VALUES (:id, :tenant_id, :cost_center_id, :name, NULL, NULL, NULL, 1, GETDATE(), GETDATE())
+            """), {"id": ph_id, "tenant_id": tenant_id, "cost_center_id": cc_id, "name": name})
 
     # 2) Assign placeholders with null cost_center_id to first cost center of their tenant
-    conn.execute(sa.text("""
-        UPDATE placeholders SET cost_center_id = (
-            SELECT id FROM cost_centers WHERE cost_centers.tenant_id = placeholders.tenant_id LIMIT 1
-        ) WHERE cost_center_id IS NULL
-    """))
+    if conn.dialect.name == 'sqlite':
+        conn.execute(sa.text("""
+            UPDATE placeholders SET cost_center_id = (
+                SELECT id FROM cost_centers WHERE cost_centers.tenant_id = placeholders.tenant_id LIMIT 1
+            ) WHERE cost_center_id IS NULL
+        """))
+    else:
+        conn.execute(sa.text("""
+            UPDATE placeholders SET cost_center_id = (
+                SELECT TOP 1 id FROM cost_centers WHERE cost_centers.tenant_id = placeholders.tenant_id
+            ) WHERE cost_center_id IS NULL
+        """))
 
     # 3) Deduplicate: for each (tenant_id, cost_center_id) keep one placeholder (min id), point demand_lines to it, delete others
     result = conn.execute(sa.text("""

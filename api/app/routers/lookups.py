@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 from api.app.db.engine import get_db
-from api.app.auth.dependencies import get_current_user, CurrentUser
+from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
 from api.app.models.core import (
-    CostCenter, Project, Resource, Placeholder
+    CostCenter, Project, Resource, Placeholder, User, UserRole
 )
 from api.app.schemas.admin import (
     CostCenterResponse, ProjectResponse,
@@ -106,3 +106,28 @@ async def list_placeholders(
         query = query.filter(Placeholder.cost_center_id == cost_center_id)
     placeholders = query.order_by(Placeholder.name).all()
     return [_enrich_placeholder(p) for p in placeholders]
+
+
+@router.get("/users")
+async def list_users(
+    role: Optional[str] = Query(None, description="Filter by role (e.g. PM, Finance, Admin)"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE)),
+):
+    """
+    List active users, optionally filtered by role.
+    Accessible to Admin and Finance (used for PM assignment dropdowns).
+    """
+    query = db.query(User).filter(
+        and_(
+            User.tenant_id == current_user.tenant_id,
+            User.is_active == True,
+        )
+    )
+    if role:
+        query = query.filter(User.role == role)
+    users = query.order_by(User.display_name).all()
+    return [
+        {"id": u.id, "display_name": u.display_name, "email": u.email, "role": u.role}
+        for u in users
+    ]

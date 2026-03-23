@@ -1,0 +1,198 @@
+import { useState } from 'react';
+import {
+  makeStyles,
+  tokens,
+  Body1,
+  Body2,
+  Card,
+  CardHeader,
+  Button,
+  Dialog,
+  DialogSurface,
+  DialogBody,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Table,
+  TableHeader,
+  TableRow,
+  TableHeaderCell,
+  TableBody,
+  TableCell,
+} from '@fluentui/react-components';
+import { consolidationApi, Snapshot, SnapshotDetail } from '../../api/consolidation';
+
+export interface SnapshotsTabProps {
+  snapshots: Snapshot[];
+  canDownloadCsv: boolean;
+  showApiError: (err: Error, ctx?: string) => void;
+}
+
+const useStyles = makeStyles({
+  card: {
+    borderRadius: tokens.borderRadiusLarge,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    boxShadow: tokens.shadow4,
+  },
+  table: { width: '100%' },
+  sortableTable: {
+    width: '100%',
+    '& thead': {
+      backgroundColor: tokens.colorNeutralBackground2,
+    },
+    '& th': {
+      fontWeight: tokens.fontWeightSemibold,
+      fontSize: tokens.fontSizeBase300,
+      color: tokens.colorNeutralForeground2,
+      padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
+      textTransform: 'uppercase',
+      letterSpacing: '0.5px',
+      borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+    },
+    '& td': {
+      padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
+      borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+    },
+    '& tbody tr:hover': { backgroundColor: tokens.colorNeutralBackground2 },
+  },
+  emptyState: {
+    padding: `${tokens.spacingVerticalXL} ${tokens.spacingHorizontalL}`,
+    textAlign: 'center' as const,
+    color: tokens.colorNeutralForeground3,
+  },
+  actionCell: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalXS,
+    alignItems: 'center',
+  },
+});
+
+export function SnapshotsTab({ snapshots, canDownloadCsv, showApiError }: SnapshotsTabProps) {
+  const styles = useStyles();
+  const [viewedSnapshot, setViewedSnapshot] = useState<SnapshotDetail | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const handleView = async (id: string) => {
+    try {
+      const detail = await consolidationApi.getSnapshot(id);
+      setViewedSnapshot(detail);
+    } catch (err) {
+      showApiError(err as Error, 'Failed to load snapshot');
+    }
+  };
+
+  const handleDownload = async (id: string) => {
+    setDownloadingId(id);
+    try {
+      await consolidationApi.downloadSnapshotCsv(id);
+    } catch (err) {
+      showApiError(err as Error, 'Failed to download snapshot');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  return (
+    <>
+      <Card className={styles.card}>
+        <CardHeader header={<Body1><strong>Published Snapshots</strong></Body1>} />
+        {snapshots.length > 0 ? (
+          <Table className={styles.sortableTable}>
+            <TableHeader>
+              <TableRow>
+                <TableHeaderCell>Name</TableHeaderCell>
+                <TableHeaderCell>Description</TableHeaderCell>
+                <TableHeaderCell>Lines</TableHeaderCell>
+                <TableHeaderCell>Published At</TableHeaderCell>
+                <TableHeaderCell>Published By</TableHeaderCell>
+                <TableHeaderCell>Actions</TableHeaderCell>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {snapshots.map(snapshot => (
+                <TableRow key={snapshot.id}>
+                  <TableCell><strong>{snapshot.name}</strong></TableCell>
+                  <TableCell>{snapshot.description || '—'}</TableCell>
+                  <TableCell>{snapshot.lines_count}</TableCell>
+                  <TableCell>{new Date(snapshot.published_at).toLocaleString()}</TableCell>
+                  <TableCell>{snapshot.published_by}</TableCell>
+                  <TableCell>
+                    <div className={styles.actionCell}>
+                      <Button size="small" appearance="subtle" onClick={() => handleView(snapshot.id)}>
+                        View
+                      </Button>
+                      {canDownloadCsv && (
+                        <Button
+                          size="small"
+                          appearance="subtle"
+                          disabled={downloadingId === snapshot.id}
+                          onClick={() => handleDownload(snapshot.id)}
+                        >
+                          {downloadingId === snapshot.id ? 'Downloading…' : 'Download CSV'}
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <div className={styles.emptyState}>
+            <Body1>No snapshots published for this period yet.</Body1>
+          </div>
+        )}
+      </Card>
+
+      {/* Detail dialog */}
+      <Dialog open={!!viewedSnapshot} onOpenChange={(_, d) => !d.open && setViewedSnapshot(null)}>
+        <DialogSurface style={{ maxWidth: 720 }}>
+          <DialogBody>
+            <DialogTitle>{viewedSnapshot?.name ?? 'Snapshot'}</DialogTitle>
+            <DialogContent>
+              {viewedSnapshot && (
+                <>
+                  <Body2 style={{ marginBottom: tokens.spacingVerticalM, color: tokens.colorNeutralForeground3 }}>
+                    {viewedSnapshot.description || 'No description'} · {viewedSnapshot.lines_count} lines · {new Date(viewedSnapshot.published_at).toLocaleString()}
+                  </Body2>
+                  <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+                    <Table className={styles.table}>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHeaderCell>Type</TableHeaderCell>
+                          <TableHeaderCell>Project</TableHeaderCell>
+                          <TableHeaderCell>Resource</TableHeaderCell>
+                          <TableHeaderCell>Period</TableHeaderCell>
+                          <TableHeaderCell>FTE %</TableHeaderCell>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {viewedSnapshot.lines.slice(0, 100).map((line, i) => (
+                          <TableRow key={i}>
+                            <TableCell>{line.line_type}</TableCell>
+                            <TableCell>{line.project_name || '—'}</TableCell>
+                            <TableCell>{line.resource_name || line.placeholder_name || '—'}</TableCell>
+                            <TableCell>{line.year}-{String(line.month).padStart(2, '0')}</TableCell>
+                            <TableCell>{line.fte_percent ?? '—'}%</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                    {viewedSnapshot.lines.length > 100 && (
+                      <Body2 style={{ marginTop: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
+                        Showing first 100 of {viewedSnapshot.lines.length} lines.
+                      </Body2>
+                    )}
+                  </div>
+                </>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setViewedSnapshot(null)}>Close</Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+    </>
+  );
+}

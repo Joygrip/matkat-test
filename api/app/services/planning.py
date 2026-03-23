@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 from api.app.models.planning import DemandLine, SupplyLine
-from api.app.models.core import Period, Project, Resource, Placeholder, PeriodStatus, UserRole
+from api.app.models.core import Period, Project, Resource, Placeholder, User, PeriodStatus, UserRole
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
 from api.app.schemas.common import ErrorCode
@@ -73,6 +73,30 @@ class DemandService:
         
         return period
     
+    def _check_pm_authorized(self, project: Project) -> None:
+        """Raise 403 if the current user is a PM but not the assigned PM for this project.
+
+        Only enforced when the project has an assigned PM (pm_user_id is not None).
+        If no PM is assigned yet, any PM-role user may manage demand.
+
+        Project.pm_user_id stores the DB User.id; CurrentUser carries object_id
+        (Entra OID). We resolve the assigned PM's object_id from DB and compare.
+        """
+        if self.current_user.role != UserRole.PM:
+            return
+        if project.pm_user_id is None:
+            return  # No PM assigned — any PM can manage demand
+
+        assigned_pm = self.db.query(User).filter(User.id == project.pm_user_id).first()
+        if not assigned_pm or assigned_pm.object_id != self.current_user.object_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "PM_NOT_AUTHORIZED",
+                    "message": "Only the assigned project manager can manage demand for this project",
+                },
+            )
+
     def _get_scoped_resource_ids(self) -> Optional[list[str]]:
         """
         Return the list of resource IDs the current user may access, or None
@@ -187,7 +211,10 @@ class DemandService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "NOT_FOUND", "message": "Project not found"}
             )
-        
+
+        # PM can only manage demand for projects they are assigned to
+        self._check_pm_authorized(project)
+
         # Validate resource/placeholder exists
         if resource_id:
             resource = self.db.query(Resource).filter(
@@ -280,7 +307,10 @@ class DemandService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "NOT_FOUND", "message": "Demand line not found"}
             )
-        
+
+        # PM can only manage demand for their assigned project
+        self._check_pm_authorized(demand.project)
+
         # Check period is open
         self._check_period_open(demand.year, demand.month)
         
@@ -318,7 +348,10 @@ class DemandService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "NOT_FOUND", "message": "Demand line not found"}
             )
-        
+
+        # PM can only manage demand for their assigned project
+        self._check_pm_authorized(demand.project)
+
         # Check period is open
         self._check_period_open(demand.year, demand.month)
         

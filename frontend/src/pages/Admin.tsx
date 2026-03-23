@@ -1,7 +1,7 @@
 /**
  * Admin page for managing master data.
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   TabList,
@@ -31,6 +31,7 @@ import {
   Select,
   MessageBar,
   MessageBarBody,
+  Text,
 } from '@fluentui/react-components';
 import {
   AddRegular,
@@ -43,11 +44,23 @@ import {
   CalendarRegular,
   SettingsRegular,
   PeopleTeamRegular,
+  ChevronRightRegular,
 } from '@fluentui/react-icons';
-import { adminApi, CostCenter, Project, Resource, Placeholder, Holiday, Setting, ManagerOverride } from '../api/admin';
+import {
+  adminApi,
+  CostCenter,
+  Project,
+  Resource,
+  Placeholder,
+  Holiday,
+  Setting,
+  ManagerOverride,
+  AdminUser,
+} from '../api/admin';
 import { useToast } from '../hooks/useToast';
 import { useAuth } from '../auth/AuthProvider';
-import { config } from '../config';
+import { AdminToolbar } from '../components/admin/AdminToolbar';
+import { StatusPill, projectStatus, resourceStatus } from '../components/admin/StatusPill';
 
 const useStyles = makeStyles({
   container: {
@@ -62,7 +75,7 @@ const useStyles = makeStyles({
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: tokens.spacingVerticalL,
+    marginBottom: tokens.spacingVerticalM,
   },
   tabContent: {
     marginTop: tokens.spacingVerticalL,
@@ -78,9 +91,64 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalL,
     flexWrap: 'wrap',
   },
+  clickableRow: {
+    cursor: 'pointer',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+  },
+  statusToggle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  detailGrid: {
+    display: 'grid',
+    gap: tokens.spacingVerticalS,
+    gridTemplateColumns: '140px 1fr',
+  },
+  detailLabel: {
+    fontWeight: 600,
+    color: tokens.colorNeutralForeground2,
+  },
+  sectionTitle: {
+    fontWeight: 600,
+    marginBottom: tokens.spacingVerticalS,
+    marginTop: tokens.spacingVerticalM,
+    color: tokens.colorNeutralForeground1,
+  },
+  resourceChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground3,
+    margin: `0 ${tokens.spacingHorizontalXS} ${tokens.spacingVerticalXS} 0`,
+    fontSize: tokens.fontSizeBase200,
+  },
+  emptyHint: {
+    color: tokens.colorNeutralForeground3,
+    fontStyle: 'italic',
+    fontSize: tokens.fontSizeBase200,
+  },
+  nativeSelect: {
+    padding: '8px',
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    fontSize: tokens.fontSizeBase300,
+    width: '100%',
+  },
 });
 
-type TabValue = 'cost-centers' | 'projects' | 'resources' | 'placeholders' | 'holidays' | 'settings' | 'manager-overrides';
+type TabValue =
+  | 'cost-centers'
+  | 'projects'
+  | 'resources'
+  | 'placeholders'
+  | 'holidays'
+  | 'settings'
+  | 'manager-overrides';
 
 export function Admin() {
   const styles = useStyles();
@@ -88,10 +156,11 @@ export function Admin() {
   const { user } = useAuth();
   const [selectedTab, setSelectedTab] = useState<TabValue>('cost-centers');
   const [loading, setLoading] = useState(true);
-  
+
   const canManageMasterData = user?.role === 'Admin' || user?.role === 'Finance';
   const canManageSettings = user?.role === 'Admin';
-  
+
+  // Data
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
@@ -99,77 +168,113 @@ export function Admin() {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [settings, setSettings] = useState<Setting[]>([]);
   const [managerOverrides, setManagerOverrides] = useState<ManagerOverride[]>([]);
-  
-  // Dialog states
+  const [pmUsers, setPmUsers] = useState<AdminUser[]>([]);
+
+  // Filter state
+  const [searchText, setSearchText] = useState('');
+  const [filterCostCenter, setFilterCostCenter] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+
+  // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<unknown>(null);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
-  const [detailItem, setDetailItem] = useState<Resource | Placeholder | null>(null);
-  const [detailType, setDetailType] = useState<'resource' | 'placeholder' | null>(null);
-  
-  useEffect(() => {
-    loadData();
-  }, [selectedTab]);
-  
-  const loadData = async () => {
+
+  // Detail dialog state (cost center resources, resource/placeholder details)
+  const [detailItem, setDetailItem] = useState<CostCenter | Resource | Placeholder | null>(null);
+  const [detailType, setDetailType] = useState<'cost-center' | 'resource' | 'placeholder' | null>(null);
+  const [detailResources, setDetailResources] = useState<Resource[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       switch (selectedTab) {
         case 'cost-centers':
           setCostCenters(await adminApi.listCostCenters());
           break;
-        case 'projects':
-          setProjects(await adminApi.listProjects());
+        case 'projects': {
+          const [projs, pms] = await Promise.all([
+            adminApi.listProjects(),
+            canManageMasterData ? adminApi.listUsers('PM') : Promise.resolve([]),
+          ]);
+          setProjects(projs);
+          setPmUsers(pms);
           break;
-        case 'resources':
-          const [resData, ccData2] = await Promise.all([
+        }
+        case 'resources': {
+          const [resData, ccData] = await Promise.all([
             adminApi.listResources(),
             adminApi.listCostCenters(),
           ]);
           setResources(resData);
+          setCostCenters(ccData);
+          break;
+        }
+        case 'placeholders': {
+          const [phData, ccData2] = await Promise.all([
+            adminApi.listPlaceholders(),
+            adminApi.listCostCenters(),
+          ]);
+          setPlaceholders(phData);
           setCostCenters(ccData2);
           break;
-        case 'placeholders':
-          setPlaceholders(await adminApi.listPlaceholders());
-          break;
+        }
         case 'holidays':
           setHolidays(await adminApi.listHolidays());
           break;
         case 'settings':
-          if (canManageSettings) {
-            setSettings(await adminApi.listSettings());
-          }
+          if (canManageSettings) setSettings(await adminApi.listSettings());
           break;
         case 'manager-overrides':
-          if (canManageSettings) {
-            setManagerOverrides(await adminApi.listManagerOverrides());
-          }
+          if (canManageSettings) setManagerOverrides(await adminApi.listManagerOverrides());
           break;
       }
     } catch (error) {
-      console.error('Admin loadData error:', error);
       showApiError(error as Error, 'Failed to load admin data');
     } finally {
       setLoading(false);
     }
-  };
-  
+  }, [selectedTab, canManageMasterData, canManageSettings]);
+
+  useEffect(() => {
+    loadData();
+    setSearchText('');
+    setFilterCostCenter('');
+    setFilterStatus('');
+  }, [selectedTab]);
+
   const handleTabSelect: SelectTabEventHandler = (_, data) => {
     setSelectedTab(data.value as TabValue);
   };
-  
+
   const openCreateDialog = () => {
     setEditItem(null);
     setFormData({});
     setDialogOpen(true);
   };
-  
+
   const openEditDialog = (item: unknown) => {
     setEditItem(item);
     setFormData(item as Record<string, unknown>);
     setDialogOpen(true);
   };
-  
+
+  const openCostCenterDetail = async (cc: CostCenter) => {
+    setDetailItem(cc);
+    setDetailType('cost-center');
+    setDetailResources([]);
+    setDetailLoading(true);
+    try {
+      const res = await adminApi.listResources();
+      setDetailResources(res.filter((r) => r.cost_center_id === cc.id));
+    } catch {
+      setDetailResources([]);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
   const handleSave = async () => {
     try {
       switch (selectedTab) {
@@ -184,7 +289,7 @@ export function Admin() {
           if (editItem) {
             await adminApi.updateProject((editItem as Project).id, formData as Partial<Project>);
           } else {
-            await adminApi.createProject(formData as { code: string; name: string });
+            await adminApi.createProject(formData as { code: string; name: string; pm_user_id?: string });
           }
           break;
         case 'resources':
@@ -254,10 +359,9 @@ export function Admin() {
       showApiError(error as Error, 'Failed to save');
     }
   };
-  
+
   const handleDelete = async (item: unknown) => {
     if (!confirm('Are you sure you want to delete this item?')) return;
-    
     try {
       switch (selectedTab) {
         case 'cost-centers':
@@ -286,192 +390,325 @@ export function Admin() {
           await adminApi.deleteManagerOverride((item as ManagerOverride).id);
           break;
       }
-
       showSuccess('Deleted', 'Item deleted successfully');
       loadData();
     } catch (error) {
       showApiError(error as Error, 'Failed to delete');
     }
   };
-  
+
+  // ── Filter helpers ────────────────────────────────────────────────────────
+
+  const filterCostCenterOptions = costCenters.map((cc) => ({ value: cc.id, label: cc.name }));
+
+  const filteredCostCenters = costCenters.filter((cc) => {
+    const q = searchText.toLowerCase();
+    return !q || cc.code.toLowerCase().includes(q) || cc.name.toLowerCase().includes(q);
+  });
+
+  const filteredProjects = projects.filter((p) => {
+    const q = searchText.toLowerCase();
+    const matchSearch = !q || p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q);
+    const matchStatus =
+      !filterStatus ||
+      (filterStatus === 'active' && p.is_active) ||
+      (filterStatus === 'on_hold' && !p.is_active);
+    return matchSearch && matchStatus;
+  });
+
+  const filteredResources = resources.filter((r) => {
+    const q = searchText.toLowerCase();
+    const matchSearch =
+      !q ||
+      r.display_name.toLowerCase().includes(q) ||
+      r.employee_id.toLowerCase().includes(q) ||
+      (r.email ?? '').toLowerCase().includes(q);
+    const matchCC = !filterCostCenter || r.cost_center_id === filterCostCenter;
+    return matchSearch && matchCC;
+  });
+
+  const filteredPlaceholders = placeholders.filter((ph) => {
+    const q = searchText.toLowerCase();
+    const matchSearch =
+      !q ||
+      ph.name.toLowerCase().includes(q) ||
+      (ph.skill_profile ?? '').toLowerCase().includes(q) ||
+      (ph.cost_center_name ?? '').toLowerCase().includes(q);
+    const matchCC = !filterCostCenter || ph.cost_center_id === filterCostCenter;
+    return matchSearch && matchCC;
+  });
+
+  const clearFilters = () => {
+    setSearchText('');
+    setFilterCostCenter('');
+    setFilterStatus('');
+  };
+
+  const pmNameById = (id: string | null) =>
+    id ? (pmUsers.find((u) => u.id === id)?.display_name ?? id) : '—';
+
+  // ── Table renderers ──────────────────────────────────────────────────────
+
   const renderTable = () => {
     if (loading) return <Spinner label="Loading..." />;
-    
+
     switch (selectedTab) {
       case 'cost-centers':
         return (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell>Code</TableHeaderCell>
-                <TableHeaderCell>Name</TableHeaderCell>
-                <TableHeaderCell>Status</TableHeaderCell>
-                <TableHeaderCell>Actions</TableHeaderCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {costCenters.map((cc) => (
-                <TableRow key={cc.id}>
-                  <TableCell>{cc.code}</TableCell>
-                  <TableCell>{cc.name}</TableCell>
-                  <TableCell>
-                    <Badge color={cc.is_active ? 'success' : 'danger'}>
-                      {cc.is_active ? 'Active' : 'Inactive'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {canManageMasterData && (
-                      <>
-                        <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(cc)} />
-                        <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(cc)} />
-                      </>
-                    )}
-                  </TableCell>
+          <>
+            <AdminToolbar
+              searchValue={searchText}
+              onSearchChange={setSearchText}
+              searchPlaceholder="Search by code or name…"
+              onClear={clearFilters}
+            />
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHeaderCell>Code</TableHeaderCell>
+                  <TableHeaderCell>Name</TableHeaderCell>
+                  <TableHeaderCell>Actions</TableHeaderCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filteredCostCenters.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={3}>
+                      <Text className={styles.emptyHint}>No cost centers match the current filter.</Text>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {filteredCostCenters.map((cc) => (
+                  <TableRow
+                    key={cc.id}
+                    className={styles.clickableRow}
+                    onClick={() => openCostCenterDetail(cc)}
+                  >
+                    <TableCell>{cc.code}</TableCell>
+                    <TableCell>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {cc.name}
+                        <ChevronRightRegular style={{ color: tokens.colorNeutralForeground3, fontSize: 14 }} />
+                      </span>
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      {canManageMasterData && (
+                        <>
+                          <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(cc)} />
+                          <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(cc)} />
+                        </>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
         );
-      
+
       case 'projects':
         return (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell>Code</TableHeaderCell>
-                <TableHeaderCell>Name</TableHeaderCell>
-                <TableHeaderCell>Status</TableHeaderCell>
-                <TableHeaderCell>Actions</TableHeaderCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {projects.map((project) => (
-                <TableRow key={project.id}>
-                  <TableCell>{project.code}</TableCell>
-                  <TableCell>{project.name}</TableCell>
-                  <TableCell>
-                    {canManageMasterData ? (
-                      <select
-                        value={project.is_active ? 'active' : 'on_hold'}
-                        onChange={async (e) => {
-                          const newStatus = e.target.value === 'active';
-                          try {
-                            await adminApi.updateProject(project.id, { is_active: newStatus });
-                            setProjects((prev) => prev.map((p) => p.id === project.id ? { ...p, is_active: newStatus } : p));
-                            showSuccess('Project status updated');
-                          } catch (err) {
-                            showApiError(err);
-                          }
-                        }}
-                        style={{ minWidth: 90 }}
-                      >
-                        <option value="active">Active</option>
-                        <option value="on_hold">On Hold</option>
-                      </select>
-                    ) : (
-                      <Badge color={project.is_active ? 'success' : 'danger'}>
-                        {project.is_active ? 'Active' : 'On Hold'}
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {canManageMasterData && (
-                      <>
-                        <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(project)} />
-                        <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(project)} />
-                      </>
-                    )}
-                  </TableCell>
+          <>
+            <AdminToolbar
+              searchValue={searchText}
+              onSearchChange={setSearchText}
+              searchPlaceholder="Search by code or name…"
+              filterValue={filterStatus}
+              onFilterChange={setFilterStatus}
+              filterOptions={[
+                { value: 'active', label: 'Active' },
+                { value: 'on_hold', label: 'On Hold' },
+              ]}
+              filterPlaceholder="All statuses"
+              onClear={clearFilters}
+            />
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHeaderCell>Code</TableHeaderCell>
+                  <TableHeaderCell>Name</TableHeaderCell>
+                  <TableHeaderCell>Project Manager</TableHeaderCell>
+                  <TableHeaderCell>Status</TableHeaderCell>
+                  <TableHeaderCell>Actions</TableHeaderCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filteredProjects.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5}>
+                      <Text className={styles.emptyHint}>No projects match the current filter.</Text>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {filteredProjects.map((project) => (
+                  <TableRow key={project.id}>
+                    <TableCell>{project.code}</TableCell>
+                    <TableCell>{project.name}</TableCell>
+                    <TableCell>{pmNameById(project.pm_user_id)}</TableCell>
+                    <TableCell>
+                      {canManageMasterData ? (
+                        <div className={styles.statusToggle}>
+                          <StatusPill status={projectStatus(project.is_active)} />
+                          <Select
+                            size="small"
+                            value={project.is_active ? 'active' : 'on_hold'}
+                            onChange={async (_, d) => {
+                              const newStatus = d.value === 'active';
+                              try {
+                                await adminApi.updateProject(project.id, { is_active: newStatus });
+                                setProjects((prev) =>
+                                  prev.map((p) => (p.id === project.id ? { ...p, is_active: newStatus } : p))
+                                );
+                                showSuccess('Status updated');
+                              } catch (err) {
+                                showApiError(err);
+                              }
+                            }}
+                            style={{ minWidth: 100 }}
+                          >
+                            <option value="active">Active</option>
+                            <option value="on_hold">On Hold</option>
+                          </Select>
+                        </div>
+                      ) : (
+                        <StatusPill status={projectStatus(project.is_active)} />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {canManageMasterData && (
+                        <>
+                          <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(project)} />
+                          <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(project)} />
+                        </>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
         );
-      
+
       case 'resources':
         return (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell>Employee ID</TableHeaderCell>
-                <TableHeaderCell>Name</TableHeaderCell>
-                <TableHeaderCell>Initials</TableHeaderCell>
-                <TableHeaderCell>Cost Center</TableHeaderCell>
-                <TableHeaderCell>Type</TableHeaderCell>
-                <TableHeaderCell>Actions</TableHeaderCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {resources.map((resource) => (
-                <TableRow
-                  key={resource.id}
-                  onClick={() => { setDetailItem(resource); setDetailType('resource'); }}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <TableCell>{resource.employee_id}</TableCell>
-                  <TableCell>{resource.display_name}</TableCell>
-                  <TableCell>{resource.initials ?? '-'}</TableCell>
-                  <TableCell>{costCenters.find(cc => cc.id === resource.cost_center_id)?.name || '-'}</TableCell>
-                  <TableCell>
-                    <Badge color={resource.resource_type === 'Employee' ? 'brand' : 'warning'}>
-                      {resource.resource_type}
-                    </Badge>
-                  </TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    {canManageMasterData && (
-                      <>
-                        <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(resource)} />
-                        <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(resource)} />
-                      </>
-                    )}
-                  </TableCell>
+          <>
+            <AdminToolbar
+              searchValue={searchText}
+              onSearchChange={setSearchText}
+              searchPlaceholder="Search by name or employee ID…"
+              filterValue={filterCostCenter}
+              onFilterChange={setFilterCostCenter}
+              filterOptions={filterCostCenterOptions}
+              filterPlaceholder="All cost centers"
+              onClear={clearFilters}
+            />
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHeaderCell>Employee ID</TableHeaderCell>
+                  <TableHeaderCell>Name</TableHeaderCell>
+                  <TableHeaderCell>Initials</TableHeaderCell>
+                  <TableHeaderCell>Cost Center</TableHeaderCell>
+                  <TableHeaderCell>Type</TableHeaderCell>
+                  <TableHeaderCell>Actions</TableHeaderCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filteredResources.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6}>
+                      <Text className={styles.emptyHint}>No resources match the current filter.</Text>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {filteredResources.map((resource) => (
+                  <TableRow
+                    key={resource.id}
+                    className={styles.clickableRow}
+                    onClick={() => { setDetailItem(resource); setDetailType('resource'); }}
+                  >
+                    <TableCell>{resource.employee_id}</TableCell>
+                    <TableCell>{resource.display_name}</TableCell>
+                    <TableCell>{resource.initials ?? '—'}</TableCell>
+                    <TableCell>{costCenters.find((cc) => cc.id === resource.cost_center_id)?.name || '—'}</TableCell>
+                    <TableCell>
+                      <Badge color={resource.resource_type === 'Employee' ? 'brand' : 'warning'}>
+                        {resource.resource_type}
+                      </Badge>
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      {canManageMasterData && (
+                        <>
+                          <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(resource)} />
+                          <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(resource)} />
+                        </>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
         );
-      
+
       case 'placeholders':
         return (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell>Cost Center</TableHeaderCell>
-                <TableHeaderCell>Placeholder Name</TableHeaderCell>
-                <TableHeaderCell>Skill Profile</TableHeaderCell>
-                <TableHeaderCell>Status</TableHeaderCell>
-                <TableHeaderCell>Actions</TableHeaderCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {placeholders.map((ph) => (
-                <TableRow
-                  key={ph.id}
-                  onClick={() => { setDetailItem(ph); setDetailType('placeholder'); }}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <TableCell>{ph.cost_center_name || '-'}</TableCell>
-                  <TableCell>{ph.name}</TableCell>
-                  <TableCell>{ph.skill_profile || '-'}</TableCell>
-                  <TableCell>
-                    <Badge color={ph.is_active ? 'success' : 'danger'}>
-                      {ph.is_active ? 'Active' : 'Inactive'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    {canManageMasterData && (
-                      <>
-                        <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(ph)} />
-                        <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(ph)} title="Deactivate" />
-                      </>
-                    )}
-                  </TableCell>
+          <>
+            <AdminToolbar
+              searchValue={searchText}
+              onSearchChange={setSearchText}
+              searchPlaceholder="Search by name or skill profile…"
+              filterValue={filterCostCenter}
+              onFilterChange={setFilterCostCenter}
+              filterOptions={filterCostCenterOptions}
+              filterPlaceholder="All cost centers"
+              onClear={clearFilters}
+            />
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHeaderCell>Cost Center</TableHeaderCell>
+                  <TableHeaderCell>Placeholder Name</TableHeaderCell>
+                  <TableHeaderCell>Skill Profile</TableHeaderCell>
+                  <TableHeaderCell>Status</TableHeaderCell>
+                  <TableHeaderCell>Actions</TableHeaderCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filteredPlaceholders.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5}>
+                      <Text className={styles.emptyHint}>No placeholders match the current filter.</Text>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {filteredPlaceholders.map((ph) => (
+                  <TableRow
+                    key={ph.id}
+                    className={styles.clickableRow}
+                    onClick={() => { setDetailItem(ph); setDetailType('placeholder'); }}
+                  >
+                    <TableCell>{ph.cost_center_name || '—'}</TableCell>
+                    <TableCell>{ph.name}</TableCell>
+                    <TableCell>{ph.skill_profile || '—'}</TableCell>
+                    <TableCell>
+                      <StatusPill status={resourceStatus(ph.is_active)} />
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      {canManageMasterData && (
+                        <>
+                          <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(ph)} />
+                          <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(ph)} title="Deactivate" />
+                        </>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
         );
-      
+
       case 'holidays':
         return (
           <Table>
@@ -499,7 +736,7 @@ export function Admin() {
             </TableBody>
           </Table>
         );
-      
+
       case 'settings':
         return (
           <Table>
@@ -516,7 +753,7 @@ export function Admin() {
                 <TableRow key={setting.id}>
                   <TableCell>{setting.key}</TableCell>
                   <TableCell>{setting.value}</TableCell>
-                  <TableCell>{setting.description || '-'}</TableCell>
+                  <TableCell>{setting.description || '—'}</TableCell>
                   <TableCell>
                     {canManageSettings && (
                       <>
@@ -572,7 +809,7 @@ export function Admin() {
                         {override.is_active ? 'Active' : 'Inactive'}
                       </Badge>
                     </TableCell>
-                    <TableCell>{override.note || '-'}</TableCell>
+                    <TableCell>{override.note || '—'}</TableCell>
                     <TableCell>
                       <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(override)} />
                       <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(override)} />
@@ -585,7 +822,9 @@ export function Admin() {
         );
     }
   };
-  
+
+  // ── Dialog form renderers ────────────────────────────────────────────────
+
   const renderDialogForm = () => {
     switch (selectedTab) {
       case 'cost-centers':
@@ -607,7 +846,7 @@ export function Admin() {
             </div>
           </>
         );
-      
+
       case 'projects':
         return (
           <>
@@ -625,18 +864,33 @@ export function Admin() {
                 onChange={(_, d) => setFormData({ ...formData, name: d.value })}
               />
             </div>
+            <div className={styles.dialogField}>
+              <Label>Project Manager</Label>
+              <select
+                className={styles.nativeSelect}
+                value={String(formData.pm_user_id || '')}
+                onChange={(e) => setFormData({ ...formData, pm_user_id: e.target.value || null })}
+              >
+                <option value="">— No PM assigned —</option>
+                {pmUsers.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.display_name} ({u.email})
+                  </option>
+                ))}
+              </select>
+            </div>
           </>
         );
-      
+
       case 'resources':
         return (
           <>
             <div className={styles.dialogField}>
               <Label required>Cost Center</Label>
               <select
+                className={styles.nativeSelect}
                 value={String(formData.cost_center_id || '')}
                 onChange={(e) => setFormData({ ...formData, cost_center_id: e.target.value })}
-                style={{ padding: '8px', borderRadius: '4px' }}
               >
                 <option value="">Select Cost Center</option>
                 {costCenters.map((cc) => (
@@ -673,11 +927,11 @@ export function Admin() {
               />
             </div>
             <div className={styles.dialogField}>
-              <Label>Resource type</Label>
+              <Label>Resource Type</Label>
               <select
+                className={styles.nativeSelect}
                 value={String(formData.resource_type || 'Employee')}
                 onChange={(e) => setFormData({ ...formData, resource_type: e.target.value })}
-                style={{ padding: '8px', borderRadius: '4px' }}
               >
                 <option value="Employee">Employee</option>
                 <option value="External">External</option>
@@ -687,22 +941,22 @@ export function Admin() {
             </div>
           </>
         );
-      
+
       case 'placeholders':
         return (
           <>
             {editItem ? (
               <div className={styles.dialogField}>
                 <Label>Cost Center</Label>
-                <Input value={String((editItem as Placeholder).cost_center_name || '-')} readOnly disabled />
+                <Input value={String((editItem as Placeholder).cost_center_name || '—')} readOnly disabled />
               </div>
             ) : (
               <div className={styles.dialogField}>
                 <Label required>Cost Center</Label>
                 <select
+                  className={styles.nativeSelect}
                   value={String(formData.cost_center_id || '')}
                   onChange={(e) => setFormData({ ...formData, cost_center_id: e.target.value })}
-                  style={{ padding: '8px', borderRadius: '4px' }}
                 >
                   <option value="">Select Cost Center</option>
                   {costCenters.map((cc) => (
@@ -734,7 +988,7 @@ export function Admin() {
             </div>
           </>
         );
-      
+
       case 'holidays':
         return (
           <>
@@ -760,7 +1014,7 @@ export function Admin() {
             />
           </>
         );
-      
+
       case 'settings':
         return (
           <>
@@ -830,7 +1084,83 @@ export function Admin() {
         );
     }
   };
-  
+
+  // ── Detail dialog content ────────────────────────────────────────────────
+
+  const renderDetailContent = () => {
+    if (!detailItem || !detailType) return null;
+
+    if (detailType === 'cost-center') {
+      const cc = detailItem as CostCenter;
+      return (
+        <>
+          <div className={styles.detailGrid}>
+            <span className={styles.detailLabel}>Code</span><span>{cc.code}</span>
+            <span className={styles.detailLabel}>Name</span><span>{cc.name}</span>
+            <span className={styles.detailLabel}>Status</span>
+            <span><StatusPill status={resourceStatus(cc.is_active)} /></span>
+          </div>
+          <div className={styles.sectionTitle}>Resources in this cost center</div>
+          {detailLoading ? (
+            <Spinner size="tiny" label="Loading resources…" />
+          ) : detailResources.length === 0 ? (
+            <Text className={styles.emptyHint}>No active resources assigned to this cost center.</Text>
+          ) : (
+            <div>
+              {detailResources.map((r) => (
+                <span key={r.id} className={styles.resourceChip}>
+                  <Badge color={r.resource_type === 'Employee' ? 'brand' : 'warning'} size="small">
+                    {r.resource_type[0]}
+                  </Badge>
+                  {r.display_name}
+                  {r.initials ? ` (${r.initials})` : ''}
+                </span>
+              ))}
+            </div>
+          )}
+        </>
+      );
+    }
+
+    if (detailType === 'resource') {
+      const r = detailItem as Resource;
+      return (
+        <div className={styles.detailGrid}>
+          <span className={styles.detailLabel}>Employee ID</span><span>{r.employee_id}</span>
+          <span className={styles.detailLabel}>Display Name</span><span>{r.display_name}</span>
+          <span className={styles.detailLabel}>Initials</span><span>{r.initials ?? '—'}</span>
+          <span className={styles.detailLabel}>Email</span><span>{r.email ?? '—'}</span>
+          <span className={styles.detailLabel}>Cost Center</span>
+          <span>{costCenters.find((cc) => cc.id === r.cost_center_id)?.name ?? '—'}</span>
+          <span className={styles.detailLabel}>Type</span>
+          <span><Badge color={r.resource_type === 'Employee' ? 'brand' : 'warning'}>{r.resource_type}</Badge></span>
+          <span className={styles.detailLabel}>Hourly Cost</span><span>{r.hourly_cost != null ? r.hourly_cost : '—'}</span>
+          <span className={styles.detailLabel}>Status</span>
+          <span><StatusPill status={resourceStatus(r.is_active)} /></span>
+        </div>
+      );
+    }
+
+    if (detailType === 'placeholder') {
+      const ph = detailItem as Placeholder;
+      return (
+        <div className={styles.detailGrid}>
+          <span className={styles.detailLabel}>Name</span><span>{ph.name}</span>
+          <span className={styles.detailLabel}>Cost Center</span><span>{ph.cost_center_name ?? '—'}</span>
+          <span className={styles.detailLabel}>Description</span><span>{ph.description ?? '—'}</span>
+          <span className={styles.detailLabel}>Skill Profile</span><span>{ph.skill_profile ?? '—'}</span>
+          <span className={styles.detailLabel}>Estimated Cost</span><span>{ph.estimated_cost != null ? ph.estimated_cost : '—'}</span>
+          <span className={styles.detailLabel}>Status</span>
+          <span><StatusPill status={resourceStatus(ph.is_active)} /></span>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  // ── Tab labels ───────────────────────────────────────────────────────────
+
   const tabLabels: Record<TabValue, string> = {
     'cost-centers': 'Cost Centers',
     'projects': 'Projects',
@@ -840,7 +1170,16 @@ export function Admin() {
     'settings': 'Settings',
     'manager-overrides': 'Manager Overrides',
   };
-  
+
+  const detailDialogTitle =
+    detailType === 'cost-center'
+      ? `Cost Center: ${(detailItem as CostCenter)?.name ?? ''}`
+      : detailType === 'resource'
+      ? 'Resource Details'
+      : 'Placeholder Details';
+
+  // ── Render ───────────────────────────────────────────────────────────────
+
   return (
     <div className={styles.container}>
       <Card className={styles.card}>
@@ -857,14 +1196,14 @@ export function Admin() {
             <Tab value="manager-overrides" icon={<PeopleTeamRegular />}>Manager Overrides</Tab>
           )}
         </TabList>
-        
+
         <div className={styles.tabContent}>
           <div className={styles.header}>
             <div>
               <Title3>{tabLabels[selectedTab]}</Title3>
               {selectedTab === 'cost-centers' && (
                 <p style={{ fontSize: '12px', color: tokens.colorNeutralForeground3, margin: '4px 0 0 0' }}>
-                  A placeholder is created automatically for each cost center.
+                  A placeholder is created automatically for each cost center. Click a row to see assigned resources.
                 </p>
               )}
               {selectedTab === 'placeholders' && (
@@ -873,127 +1212,56 @@ export function Admin() {
                 </p>
               )}
             </div>
-            {(canManageMasterData || ((selectedTab === 'settings' || selectedTab === 'manager-overrides') && canManageSettings)) && (
-              <Button
-                appearance="primary"
-                icon={<AddRegular />}
-                onClick={openCreateDialog}
-              >
-                Add {tabLabels[selectedTab].slice(0, -1)}
+            {(canManageMasterData ||
+              ((selectedTab === 'settings' || selectedTab === 'manager-overrides') && canManageSettings)) && (
+              <Button appearance="primary" icon={<AddRegular />} onClick={openCreateDialog}>
+                Add {tabLabels[selectedTab].replace(/s$/, '')}
               </Button>
             )}
           </div>
-          
+
           {renderTable()}
         </div>
       </Card>
-      
-      {/* Create/Edit Dialog */}
+
+      {/* Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(_, data) => setDialogOpen(data.open)}>
         <DialogSurface>
           <DialogBody>
             <DialogTitle>
-              {editItem ? 'Edit' : 'Create'} {tabLabels[selectedTab].slice(0, -1)}
+              {editItem ? 'Edit' : 'Create'} {tabLabels[selectedTab].replace(/s$/, '')}
             </DialogTitle>
-            <DialogContent>
-              {renderDialogForm()}
-            </DialogContent>
+            <DialogContent>{renderDialogForm()}</DialogContent>
             <DialogActions>
-              <Button appearance="secondary" onClick={() => setDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button appearance="primary" onClick={handleSave}>
-                Save
-              </Button>
+              <Button appearance="secondary" onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button appearance="primary" onClick={handleSave}>Save</Button>
             </DialogActions>
           </DialogBody>
         </DialogSurface>
       </Dialog>
-      
-      {/* Detail dialog for resource or placeholder */}
-      <Dialog open={detailItem != null} onOpenChange={(_, data) => { if (!data.open) { setDetailItem(null); setDetailType(null); } }}>
-        <DialogSurface>
+
+      {/* Detail Dialog (cost center resources / resource / placeholder) */}
+      <Dialog
+        open={detailItem != null}
+        onOpenChange={(_, data) => {
+          if (!data.open) {
+            setDetailItem(null);
+            setDetailType(null);
+          }
+        }}
+      >
+        <DialogSurface style={{ minWidth: 480 }}>
           <DialogBody>
-            <DialogTitle>
-              {detailType === 'resource' ? 'Resource details' : 'Placeholder details'}
-            </DialogTitle>
-            <DialogContent>
-              {detailType === 'resource' && detailItem && 'display_name' in detailItem && (
-                <div className={styles.dialogField}>
-                  <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: '120px 1fr' }}>
-                    <span style={{ fontWeight: 600 }}>Employee ID</span><span>{(detailItem as Resource).employee_id}</span>
-                    <span style={{ fontWeight: 600 }}>Display name</span><span>{(detailItem as Resource).display_name}</span>
-                    <span style={{ fontWeight: 600 }}>Initials</span><span>{(detailItem as Resource).initials ?? '-'}</span>
-                    <span style={{ fontWeight: 600 }}>Email</span><span>{(detailItem as Resource).email ?? '-'}</span>
-                    <span style={{ fontWeight: 600 }}>Cost Center</span><span>{costCenters.find(cc => cc.id === (detailItem as Resource).cost_center_id)?.name ?? '-'}</span>
-                    <span style={{ fontWeight: 600 }}>Type</span><span>{(detailItem as Resource).resource_type}</span>
-                    <span style={{ fontWeight: 600 }}>Hourly cost</span><span>{(detailItem as Resource).hourly_cost != null ? (detailItem as Resource).hourly_cost : '-'}</span>
-                    <span style={{ fontWeight: 600 }}>Active</span><span>{(detailItem as Resource).is_active ? 'Yes' : 'No'}</span>
-                  </div>
-                </div>
-              )}
-              {detailType === 'placeholder' && detailItem && 'cost_center_id' in detailItem && (
-                <div className={styles.dialogField}>
-                  <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: '120px 1fr' }}>
-                    <span style={{ fontWeight: 600 }}>Name</span><span>{(detailItem as Placeholder).name}</span>
-                    <span style={{ fontWeight: 600 }}>Cost Center</span><span>{(detailItem as Placeholder).cost_center_name ?? '-'}</span>
-                    <span style={{ fontWeight: 600 }}>Description</span><span>{(detailItem as Placeholder).description ?? '-'}</span>
-                    <span style={{ fontWeight: 600 }}>Skill profile</span><span>{(detailItem as Placeholder).skill_profile ?? '-'}</span>
-                    <span style={{ fontWeight: 600 }}>Estimated cost</span><span>{(detailItem as Placeholder).estimated_cost != null ? (detailItem as Placeholder).estimated_cost : '-'}</span>
-                    <span style={{ fontWeight: 600 }}>Active</span><span>{(detailItem as Placeholder).is_active ? 'Yes' : 'No'}</span>
-                  </div>
-                </div>
-              )}
-              {detailType === 'project' && detailItem && 'name' in detailItem && (
-                <div className={styles.dialogField}>
-                  <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: '120px 1fr' }}>
-                    <span style={{ fontWeight: 600 }}>Name</span><span>{detailItem.name}</span>
-                    <span style={{ fontWeight: 600 }}>Code</span><span>{detailItem.code}</span>
-                    <span style={{ fontWeight: 600 }}>Status</span>
-                    {canManageMasterData ? (
-                      <select
-                        value={detailItem.is_active ? 'active' : 'on_hold'}
-                        onChange={async (e) => {
-                          const newStatus = e.target.value === 'active';
-                          try {
-                            await adminApi.updateProject(detailItem.id, { is_active: newStatus });
-                            setProjects((prev) => prev.map((p) => p.id === detailItem.id ? { ...p, is_active: newStatus } : p));
-                            setDetailItem((prev: any) => prev ? { ...prev, is_active: newStatus } : prev);
-                            showSuccess('Project status updated');
-                          } catch (err) {
-                            showApiError(err);
-                          }
-                        }}
-                        style={{ minWidth: 90 }}
-                      >
-                        <option value="active">Active</option>
-                        <option value="on_hold">On Hold</option>
-                      </select>
-                    ) : (
-                      <span style={{
-                        display: 'inline-block',
-                        padding: '2px 12px',
-                        borderRadius: 8,
-                        background: detailItem.is_active ? '#E6F4EA' : '#FFF9E5',
-                        color: detailItem.is_active ? '#1A7F37' : '#B38600',
-                        fontWeight: 600,
-                        fontSize: 14,
-                        border: detailItem.is_active ? '1px solid #B7E4C7' : '1px solid #FFE066',
-                      }}>
-                        {detailItem.is_active ? 'Active' : 'On Hold'}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-            </DialogContent>
+            <DialogTitle>{detailDialogTitle}</DialogTitle>
+            <DialogContent>{renderDetailContent()}</DialogContent>
             <DialogActions>
-              <Button appearance="primary" onClick={() => { setDetailItem(null); setDetailType(null); }}>Close</Button>
+              <Button appearance="primary" onClick={() => { setDetailItem(null); setDetailType(null); }}>
+                Close
+              </Button>
             </DialogActions>
           </DialogBody>
         </DialogSurface>
       </Dialog>
-      
     </div>
   );
 }

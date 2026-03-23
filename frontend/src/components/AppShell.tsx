@@ -415,6 +415,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               periods={visiblePeriods}
               selectedId={visiblePeriods.some((p) => p.id === selectedPeriodId) ? selectedPeriodId : visiblePeriods[0]?.id ?? ''}
               onSelect={setSelectedPeriodId}
+              align="right"
             />
           </div>
         </header>

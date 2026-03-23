@@ -82,6 +82,13 @@ export interface Setting {
   updated_at: string;
 }
 
+export interface AdminUser {
+  id: string;
+  display_name: string;
+  email: string;
+  role: string;
+}
+
 // API methods
 export const adminApi = {
   // Cost Centers
@@ -92,6 +99,10 @@ export const adminApi = {
     apiClient.patch<CostCenter>(`/admin/cost-centers/${id}`, data),
   deleteCostCenter: (id: string) =>
     apiClient.delete<{ message: string }>(`/admin/cost-centers/${id}`),
+
+  // Users (for PM assignment dropdowns)
+  listUsers: (role?: string) =>
+    apiClient.get<AdminUser[]>(`/lookups/users${role ? `?role=${encodeURIComponent(role)}` : ''}`),
 
   // Projects
   listProjects: () => apiClient.get<Project[]>('/admin/projects'),

@@ -25,9 +25,10 @@ export interface PeriodSelectorProps {
   periods: Period[];
   selectedId: string;
   onSelect: (id: string) => void;
+  align?: 'left' | 'right';
 }
 
-export function PeriodSelector({ periods, selectedId, onSelect }: PeriodSelectorProps) {
+export function PeriodSelector({ periods, selectedId, onSelect, align = 'left' }: PeriodSelectorProps) {
   const styles = useStyles();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -111,7 +112,7 @@ export function PeriodSelector({ periods, selectedId, onSelect }: PeriodSelector
 
       {/* dropdown */}
       {open && (
-        <div className={styles.dropdown} role="listbox">
+        <div className={styles.dropdown} role="listbox" style={align === 'right' ? { left: 'auto', right: 0 } : undefined}>
           <div className={styles.searchBox}>
             <Input
               contentBefore={<SearchRegular fontSize={16} />}

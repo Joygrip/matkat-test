@@ -210,7 +210,8 @@ function CcDetailPanel({
 }) {
   const styles = useStyles();
   const [detailTab, setDetailTab] = useState<'resources' | 'issues'>('resources');
-  const issueCount = cc.placeholders.length + overAllocs.length;
+  const understaffedResources = cc.resources.filter(r => r.status === 'under');
+  const issueCount = cc.placeholders.length + overAllocs.length + understaffedResources.length;
 
   return (
     <>
@@ -337,6 +338,33 @@ function CcDetailPanel({
               </Table>
             </div>
           )}
+          {understaffedResources.length > 0 && (
+            <div className={styles.issueCard}>
+              <div className={styles.issueCardHeader}>
+                <Body1><strong>Understaffed resources ({understaffedResources.length})</strong></Body1>
+              </div>
+              <Table className={styles.table}>
+                <TableHeader>
+                  <TableRow>
+                    <TableHeaderCell>Resource</TableHeaderCell>
+                    <TableHeaderCell>Demand</TableHeaderCell>
+                    <TableHeaderCell>Supply</TableHeaderCell>
+                    <TableHeaderCell>Gap</TableHeaderCell>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {understaffedResources.map(r => (
+                    <TableRow key={r.resource_id}>
+                      <TableCell>{r.resource_name}</TableCell>
+                      <TableCell>{r.demand_fte}%</TableCell>
+                      <TableCell>{r.supply_fte}%</TableCell>
+                      <TableCell><GapBadge gap={r.gap_fte} /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
           {issueCount === 0 && (
             <Body1 style={{ color: tokens.colorNeutralForeground3, padding: tokens.spacingVerticalM }}>
               No issues for this cost center.
@@ -371,6 +399,14 @@ export function OverviewTab({ dashboard, loading }: OverviewTabProps) {
     ];
   }, [dashboard]);
 
+  const understaffedCount = useMemo(() => {
+    if (!dashboard) return 0;
+    return dashboard.cost_centers.reduce(
+      (sum, cc) => sum + cc.resources.filter(r => r.status === 'under').length,
+      0,
+    );
+  }, [dashboard]);
+
   const filteredCcs = useMemo(() => {
     if (!dashboard) return [];
     let ccs = dashboard.cost_centers;
@@ -378,6 +414,9 @@ export function OverviewTab({ dashboard, loading }: OverviewTabProps) {
     if (ccFilter === 'overalloc') {
       const overIds = new Set(dashboard.over_allocations.map(oa => oa.cost_center_id ?? '__none__'));
       ccs = ccs.filter(cc => overIds.has(cc.cost_center_id ?? '__none__'));
+    }
+    if (ccFilter === 'understaffed') {
+      ccs = ccs.filter(cc => cc.resources.some(r => r.status === 'under'));
     }
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -446,6 +485,7 @@ export function OverviewTab({ dashboard, loading }: OverviewTabProps) {
       <FinanceIssueAlerts
         orphansCount={dashboard.summary.orphans_count}
         overAllocsCount={dashboard.summary.over_allocations_count}
+        understaffedCount={understaffedCount}
         activeFilter={ccFilter}
         onFilterChange={filter => {
           setCcFilter(filter);
@@ -498,6 +538,11 @@ export function OverviewTab({ dashboard, loading }: OverviewTabProps) {
                   <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS, flexShrink: 0 }}>
                     {cc.placeholders.length > 0 && (
                       <Badge appearance="outline" color="warning" size="small">{cc.placeholders.length} orphan</Badge>
+                    )}
+                    {cc.resources.filter(r => r.status === 'under').length > 0 && (
+                      <Badge appearance="outline" color="warning" size="small">
+                        {cc.resources.filter(r => r.status === 'under').length} understaffed
+                      </Badge>
                     )}
                   </div>
                 </div>

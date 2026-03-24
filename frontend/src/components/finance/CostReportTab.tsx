@@ -98,6 +98,29 @@ const useStyles = makeStyles({
 const formatDKK = (n: number): string =>
   new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', maximumFractionDigits: 0 }).format(n);
 
+function toCsv(rows: any[], monthlyFteCost: number) {
+  const header = [
+    'Employee',
+    'Project',
+    'Month',
+    'Actual %',
+    'Monthly FTE Cost',
+    'Cost (DKK)'
+  ];
+  const lines = [header.join(',')];
+  rows.forEach(r => {
+    lines.push([
+      r.employee_name,
+      r.project_name,
+      `${r.year}-${String(r.month).padStart(2, '0')}`,
+      r.fte_percent,
+      monthlyFteCost,
+      r.cost
+    ].join(','));
+  });
+  return lines.join('\r\n');
+}
+
 export function CostReportTab({
   actualsData,
   actualsLoading,
@@ -165,6 +188,20 @@ export function CostReportTab({
 
   const grandTotal = useMemo(() => costRows.reduce((s, r) => s + r.cost, 0), [costRows]);
 
+  const handleDownloadCsv = useCallback(() => {
+    const allRows = costByProject.flatMap(g => g.rows);
+    const csv = toCsv(allRows, monthlyFteCost);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cost-report-${selectedPeriodId}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [costByProject, monthlyFteCost, selectedPeriodId]);
+
   return (
     <>
       {/* Cost setting toolbar */}
@@ -183,6 +220,13 @@ export function CostReportTab({
           disabled={costOverrideSaving}
         >
           {costOverrideSaving ? 'Saving…' : 'Apply'}
+        </Button>
+        <Button
+          appearance="secondary"
+          onClick={handleDownloadCsv}
+          icon={<MoneyRegular />}
+        >
+          Download CSV
         </Button>
         <Body2 style={{ color: tokens.colorNeutralForeground3 }}>
           Current: {formatDKK(monthlyFteCost)}

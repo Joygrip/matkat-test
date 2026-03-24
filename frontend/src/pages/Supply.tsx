@@ -1116,7 +1116,7 @@ export const Supply: React.FC = () => {
                         <TableCell>{s.project_name || '—'}</TableCell>
                         <TableCell>{s.year}-{String(s.month).padStart(2, '0')}</TableCell>
                         <TableCell>
-                          <Badge appearance="filled" color="success">{s.fte_percent}%</Badge>
+                          <Badge appearance="filled" color="informative">{s.fte_percent}%</Badge>
                         </TableCell>
                         <TableCell>
                           {!isLocked && canEdit && (

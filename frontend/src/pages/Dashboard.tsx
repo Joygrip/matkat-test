@@ -323,7 +323,7 @@ export function Dashboard() {
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenter[]>([]);
   const [lookupsProjects, setLookupsProjects] = useState<Project[]>([]);
   const [selectedPeriodIds, setSelectedPeriodIds] = useState<string[]>([]);
-  const [periodPreset, setPeriodPreset] = useState<'all' | 'last3' | 'last6' | 'custom'>('all');
+  const [periodPreset, setPeriodPreset] = useState<'all' | 'first3' | 'first6' | 'custom'>('all');
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -413,7 +413,8 @@ export function Dashboard() {
       setSelectedPeriodIds([]);
       return;
     }
-    const slice = sortedPeriods.slice(-n);
+    const openPeriods = sortedPeriods.filter(p => p.status === 'open');
+    const slice = openPeriods.slice(0, n);
     setSelectedPeriodIds(slice.map(p => `${p.year}-${p.month}`));
   };
 
@@ -684,23 +685,23 @@ export function Dashboard() {
                   </Button>
                   <Button
                     size="small"
-                    appearance={periodPreset === 'last3' ? 'primary' : 'secondary'}
+                    appearance={periodPreset === 'first3' ? 'primary' : 'secondary'}
                     onClick={() => {
-                      setPeriodPreset('last3');
+                      setPeriodPreset('first3');
                       applyLastNPeriods(3);
                     }}
                   >
-                    Last 3
+                    First 3
                   </Button>
                   <Button
                     size="small"
-                    appearance={periodPreset === 'last6' ? 'primary' : 'secondary'}
+                    appearance={periodPreset === 'first6' ? 'primary' : 'secondary'}
                     onClick={() => {
-                      setPeriodPreset('last6');
+                      setPeriodPreset('first6');
                       applyLastNPeriods(6);
                     }}
                   >
-                    Last 6
+                    First 6
                   </Button>
                   <Button
                     size="small"

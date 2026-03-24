@@ -21,7 +21,7 @@ param frontendApiScope string
 param apiBaseUrl string
 
 // Static Web Apps have limited region support; eastus2 is broadly available
-var staticWebAppLocation = 'eastus2'
+var staticWebAppLocation = 'westeurope'
 var staticWebAppName = '${projectName}-web-${environmentName}'
 
 resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {

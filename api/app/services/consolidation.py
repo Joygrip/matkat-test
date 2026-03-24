@@ -85,7 +85,7 @@ class ConsolidationService:
             )
         ).all()
         for s in supplies:
-            supply_by_resource[s.resource_id] = s.fte_percent
+            supply_by_resource[s.resource_id] += s.fte_percent
 
         placeholder_demands = self.db.query(DemandLine).filter(
             and_(

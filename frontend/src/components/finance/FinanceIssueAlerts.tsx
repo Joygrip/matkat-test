@@ -1,11 +1,12 @@
 import { makeStyles, tokens, MessageBar, MessageBarBody, Button } from '@fluentui/react-components';
-import { Warning24Regular, ErrorCircle24Regular } from '@fluentui/react-icons';
+import { Warning24Regular, ErrorCircle24Regular, PersonAlert24Regular } from '@fluentui/react-icons';
 
-export type IssueFilter = 'none' | 'orphans' | 'overalloc';
+export type IssueFilter = 'none' | 'orphans' | 'overalloc' | 'understaffed';
 
 export interface FinanceIssueAlertsProps {
   orphansCount: number;
   overAllocsCount: number;
+  understaffedCount: number;
   activeFilter: IssueFilter;
   onFilterChange: (filter: IssueFilter) => void;
 }

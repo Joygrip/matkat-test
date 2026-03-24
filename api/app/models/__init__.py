@@ -36,6 +36,10 @@ from api.app.models.notifications import (
 from api.app.models.finance import (
     FinanceSetting,
 )
+from api.app.models.project_costs import (
+    ProjectExternalLine,
+    ProjectEquipmentLine,
+)
 
 __all__ = [
     "User",
@@ -61,4 +65,6 @@ __all__ = [
     "NotificationPhase",
     "NotificationStatus",
     "FinanceSetting",
+    "ProjectExternalLine",
+    "ProjectEquipmentLine",
 ]

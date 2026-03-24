@@ -16,6 +16,7 @@ import { Approvals } from './pages/Approvals';
 import { Admin } from './pages/Admin';
 import { Finance } from './pages/Finance';
 import { AuditLogs } from './pages/AuditLogs';
+import { ProjectCosts } from './pages/ProjectCosts';
 import { config } from './config';
 
 const useStyles = makeStyles({
@@ -86,6 +87,7 @@ function App() {
           <Route path="/finance-dashboard" element={<Navigate to="/finance" replace />} />
           <Route path="/consolidation" element={<Navigate to="/finance" replace />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/project-costs" element={<ProjectCosts />} />
           <Route path="/audit-logs" element={<AuditLogs />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

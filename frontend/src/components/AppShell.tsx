@@ -34,6 +34,8 @@ import {
   SettingsFilled,
   DocumentBulletListRegular,
   DocumentBulletListFilled,
+  MoneyHandRegular,
+  MoneyHandFilled,
   SignOutRegular,
   PersonRegular,
   bundleIcon,
@@ -50,6 +52,7 @@ const Approvals = bundleIcon(CheckmarkCircleFilled, CheckmarkCircleRegular);
 const Consolidation = bundleIcon(ChartMultipleFilled, ChartMultipleRegular);
 const Admin = bundleIcon(SettingsFilled, SettingsRegular);
 const AuditLogsIcon = bundleIcon(DocumentBulletListFilled, DocumentBulletListRegular);
+const ProjectCostsIcon = bundleIcon(MoneyHandFilled, MoneyHandRegular);
 
 const useStyles = makeStyles({
   container: {
@@ -249,6 +252,7 @@ const navItems: NavItem[] = [
   { path: '/supply', label: 'Supply', icon: Supply, roles: ['Admin', 'Finance', 'PM', 'RO', 'Director'], section: 'planning' },
   { path: '/actuals', label: 'Actuals', icon: Actuals, roles: ['Admin', 'Finance', 'RO', 'Employee'], section: 'operations' },
   { path: '/finance', label: 'Finance', icon: Consolidation, roles: ['Admin', 'Finance', 'Director', 'RO'], section: 'operations' },
+  { path: '/project-costs', label: 'Project Costs', icon: ProjectCostsIcon, roles: ['Admin', 'Finance', 'PM', 'Director', 'RO'], section: 'operations' },
   { path: '/approvals', label: 'Approvals', icon: Approvals, roles: ['Admin', 'RO', 'Director'], section: 'operations' },
   { path: '/admin', label: 'Admin', icon: Admin, roles: ['Admin', 'Finance'], section: 'admin' },
   { path: '/audit-logs', label: 'Audit logs', icon: AuditLogsIcon, roles: ['Admin', 'Finance'], section: 'admin' },
@@ -268,6 +272,7 @@ const pageTitles: Record<string, string> = {
   '/actuals': 'Actuals Entry',
   '/finance': 'Finance',
   '/approvals': 'Approvals',
+  '/project-costs': 'Project Costs',
   '/admin': 'Administration',
   '/audit-logs': 'Audit logs',
 };

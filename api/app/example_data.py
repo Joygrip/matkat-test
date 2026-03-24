@@ -9,6 +9,7 @@ from api.app.models.core import (
 from api.app.models.planning import DemandLine, SupplyLine
 from api.app.models.actuals import ActualLine
 from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalStatus, StepStatus
+from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
 
 
 def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
@@ -323,6 +324,78 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
         status=StepStatus.PENDING,
     )
     db.add(feb_step2_director)
+
+    # Project cost seed data — externals and equipment for Feb 2026
+    # PM1 (users[2]) owns PRJ-001, PRJ-002, PRJ-005
+    # PM2 (users[3]) owns PRJ-003, PRJ-004
+    # resources[7] = EXT-001 External Contractor (ResourceType.EXTERNAL)
+    ext_resource = resources[7]
+    project_external_lines = [
+        ProjectExternalLine(
+            tenant_id=tenant_id,
+            project_id=projects[0].id,   # Project Alpha
+            period_id=feb_period.id,
+            resource_id=ext_resource.id,
+            description="Frontend development",
+            hours=80,
+            rate=15000,          # 150.00 DKK/hr
+            total_cost=1200000,  # 12,000.00 DKK
+            created_by=users[2].object_id,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        ),
+        ProjectExternalLine(
+            tenant_id=tenant_id,
+            project_id=projects[1].id,   # Project Beta
+            period_id=feb_period.id,
+            resource_id=ext_resource.id,
+            description="UX review",
+            hours=40,
+            rate=12500,          # 125.00 DKK/hr
+            total_cost=500000,   # 5,000.00 DKK
+            created_by=users[2].object_id,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        ),
+        ProjectExternalLine(
+            tenant_id=tenant_id,
+            project_id=projects[2].id,   # Project Gamma
+            period_id=feb_period.id,
+            resource_id=ext_resource.id,
+            description="QA automation",
+            hours=60,
+            rate=10000,          # 100.00 DKK/hr
+            total_cost=600000,   # 6,000.00 DKK
+            created_by=users[3].object_id,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        ),
+    ]
+    db.add_all(project_external_lines)
+
+    project_equipment_lines = [
+        ProjectEquipmentLine(
+            tenant_id=tenant_id,
+            project_id=projects[0].id,   # Project Alpha
+            period_id=feb_period.id,
+            description="Server hardware lease",
+            cost=350000,         # 3,500.00 DKK
+            created_by=users[2].object_id,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        ),
+        ProjectEquipmentLine(
+            tenant_id=tenant_id,
+            project_id=projects[2].id,   # Project Gamma
+            period_id=feb_period.id,
+            description="Test equipment",
+            cost=120000,         # 1,200.00 DKK
+            created_by=users[3].object_id,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        ),
+    ]
+    db.add_all(project_equipment_lines)
 
     db.commit()
     print("Example data created successfully")

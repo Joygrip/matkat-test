@@ -28,4 +28,15 @@ export const lookupsApi = {
     const qs = params.toString();
     return apiClient.get<Placeholder[]>(`/lookups/placeholders${qs ? `?${qs}` : ''}`);
   },
+
+  listProjectsScoped: async (): Promise<Project[]> => {
+    return apiClient.get<Project[]>('/lookups/projects/scoped');
+  },
+
+  listResourcesScoped: async (costCenterId?: string): Promise<Resource[]> => {
+    const params = new URLSearchParams();
+    if (costCenterId) params.set('cost_center_id', costCenterId);
+    const qs = params.toString();
+    return apiClient.get<Resource[]>(`/lookups/resources/scoped${qs ? `?${qs}` : ''}`);
+  },
 };

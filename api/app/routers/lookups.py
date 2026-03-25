@@ -2,13 +2,15 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 
 from api.app.db.engine import get_db
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
 from api.app.models.core import (
     CostCenter, Project, Resource, Placeholder, User, UserRole
 )
+
+_SCOPED_ROLES = (UserRole.RO, UserRole.DIRECTOR)
 from api.app.schemas.admin import (
     CostCenterResponse, ProjectResponse,
     ResourceResponse, PlaceholderResponse,
@@ -106,6 +108,58 @@ async def list_placeholders(
         query = query.filter(Placeholder.cost_center_id == cost_center_id)
     placeholders = query.order_by(Placeholder.name).all()
     return [_enrich_placeholder(p) for p in placeholders]
+
+
+@router.get("/projects/scoped", response_model=list[ProjectResponse])
+async def list_projects_scoped(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.PM, UserRole.FINANCE)),
+):
+    """
+    Projects scoped to the current user:
+    - PM: only projects where pm_user_id matches this user OR pm_user_id is NULL
+    - Admin/Finance: all projects (same as /lookups/projects)
+    """
+    query = db.query(Project).filter(Project.tenant_id == current_user.tenant_id)
+    if current_user.role == UserRole.PM:
+        pm_user = db.query(User).filter(
+            and_(
+                User.tenant_id == current_user.tenant_id,
+                User.object_id == current_user.object_id,
+            )
+        ).first()
+        if pm_user:
+            query = query.filter(
+                or_(Project.pm_user_id == pm_user.id, Project.pm_user_id.is_(None))
+            )
+    return query.order_by(Project.name).all()
+
+
+@router.get("/resources/scoped", response_model=list[ResourceResponse])
+async def list_resources_scoped(
+    cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.RO, UserRole.FINANCE, UserRole.DIRECTOR)),
+):
+    """
+    Resources scoped to the current user's reporting line:
+    - RO/Director: only resources in their org hierarchy
+    - Admin/Finance: all active resources
+    """
+    query = db.query(Resource).filter(
+        and_(
+            Resource.tenant_id == current_user.tenant_id,
+            Resource.is_active == True,
+        )
+    )
+    if cost_center_id:
+        query = query.filter(Resource.cost_center_id == cost_center_id)
+    if current_user.role in _SCOPED_ROLES:
+        from api.app.services.reporting import ReportingService
+        scoped_ids = ReportingService(db, current_user).get_accessible_resource_ids()
+        if scoped_ids is not None:
+            query = query.filter(Resource.id.in_(scoped_ids))
+    return query.order_by(Resource.display_name).all()
 
 
 @router.get("/users")

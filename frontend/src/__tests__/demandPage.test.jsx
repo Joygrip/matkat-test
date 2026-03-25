@@ -2,6 +2,22 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { Demand } from '../pages/Demand';
+import { lookupsApi } from '../api/lookups';
+
+const mockDemands = vi.hoisted(() => [
+  {
+    id: 'd1',
+    project_id: 'p1',
+    project_name: 'Project Alpha',
+    cost_center_id: 'cc1',
+    cost_center_name: 'Cost Center 1',
+    resource_id: 'r1',
+    resource_name: 'Alice',
+    year: 2026,
+    month: 2,
+    fte_percent: 50,
+  },
+]);
 
 vi.mock('../auth/AuthProvider', () => ({
   useAuth: () => ({ user: { role: 'Finance' } }),
@@ -22,21 +38,6 @@ vi.mock('../hooks/useToast', () => ({
   }),
 }));
 
-const mockDemands = [
-  {
-    id: 'd1',
-    project_id: 'p1',
-    project_name: 'Project Alpha',
-    cost_center_id: 'cc1',
-    cost_center_name: 'Cost Center 1',
-    resource_id: 'r1',
-    resource_name: 'Alice',
-    year: 2026,
-    month: 2,
-    fte_percent: 50,
-  },
-];
-
 vi.mock('../api/planning', () => ({
   planningApi: {
     getDemandLines: vi.fn().mockResolvedValue(mockDemands),
@@ -50,6 +51,9 @@ vi.mock('../api/planning', () => ({
 vi.mock('../api/lookups', () => ({
   lookupsApi: {
     listProjects: vi.fn().mockResolvedValue([
+      { id: 'p1', name: 'Project Alpha' },
+    ]),
+    listProjectsScoped: vi.fn().mockResolvedValue([
       { id: 'p1', name: 'Project Alpha' },
     ]),
     listResources: vi.fn().mockResolvedValue([
@@ -78,5 +82,15 @@ describe('Demand page', () => {
     expect(screen.getByText(/Distinct projects/i)).toBeInTheDocument();
     expect(screen.getByText(/Demand Lines/)).toBeInTheDocument();
   });
-});
 
+  it('Finance role uses listProjects (not scoped)', async () => {
+    render(<Demand />);
+
+    await waitFor(() =>
+      expect(screen.getByText(/Demand Planning/i)).toBeInTheDocument(),
+    );
+
+    expect(vi.mocked(lookupsApi.listProjects)).toHaveBeenCalled();
+    expect(vi.mocked(lookupsApi.listProjectsScoped)).not.toHaveBeenCalled();
+  });
+});

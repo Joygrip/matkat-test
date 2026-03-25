@@ -55,6 +55,48 @@ def test_pm_cannot_create_project_via_admin(client, pm_headers):
     assert response.json()["code"] == "UNAUTHORIZED_ROLE"
 
 
+def test_scoped_projects_pm_returns_list(client, pm_headers):
+    """PM gets 200 from /lookups/projects/scoped."""
+    response = client.get("/lookups/projects/scoped", headers=pm_headers)
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
+def test_scoped_projects_finance_sees_all(client, finance_headers):
+    """Finance sees the same projects from scoped and unscoped endpoints."""
+    all_resp = client.get("/lookups/projects", headers=finance_headers)
+    scoped_resp = client.get("/lookups/projects/scoped", headers=finance_headers)
+    assert scoped_resp.status_code == 200
+    assert len(scoped_resp.json()) == len(all_resp.json())
+
+
+def test_scoped_projects_employee_forbidden(client, employee_headers):
+    """Employee cannot access /lookups/projects/scoped (not in allowed roles)."""
+    response = client.get("/lookups/projects/scoped", headers=employee_headers)
+    assert response.status_code == 403
+
+
+def test_scoped_resources_ro_returns_list(client, ro_headers):
+    """RO gets 200 from /lookups/resources/scoped (may be empty if no reporting chain)."""
+    response = client.get("/lookups/resources/scoped", headers=ro_headers)
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
+def test_scoped_resources_finance_sees_all(client, finance_headers, admin_headers):
+    """Finance sees same resources from scoped and unscoped endpoints."""
+    all_resp = client.get("/lookups/resources", headers=finance_headers)
+    scoped_resp = client.get("/lookups/resources/scoped", headers=finance_headers)
+    assert scoped_resp.status_code == 200
+    assert len(scoped_resp.json()) == len(all_resp.json())
+
+
+def test_scoped_resources_pm_forbidden(client, pm_headers):
+    """PM cannot access /lookups/resources/scoped (not in allowed roles)."""
+    response = client.get("/lookups/resources/scoped", headers=pm_headers)
+    assert response.status_code == 403
+
+
 def test_lookups_filter_by_tenant(client, pm_headers, db):
     """Lookups endpoints filter by tenant_id."""
     from api.app.models.core import Project

@@ -4,5 +4,9 @@
       "Bash(python -m pytest api/tests/test_planning.py::test_create_demand_with_resource -v --no-header)",
       "Bash(python -m pytest api/tests/test_planning.py -v --no-header)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "claude-flow"
+  ],
+  "enableAllProjectMcpServers": true
 }

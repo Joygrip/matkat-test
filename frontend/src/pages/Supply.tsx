@@ -22,7 +22,6 @@ import {
   tokens,
   makeStyles,
   Input,
-  Select,
   Dialog,
   DialogSurface,
   DialogBody,
@@ -391,7 +390,7 @@ export const Supply: React.FC = () => {
     try {
       setLoading(true);
       const [resourcesData, projectsData, costCentersData] = await Promise.all([
-        lookupsApi.listResources(),
+        (user?.role === 'RO' || user?.role === 'Director') ? lookupsApi.listResourcesScoped() : lookupsApi.listResources(),
         lookupsApi.listProjects(),
         lookupsApi.listCostCenters(),
       ]);
@@ -807,48 +806,44 @@ export const Supply: React.FC = () => {
                   </div>
                 )}
                 <div className={styles.formField}>
-                  <label className={styles.formLabel}>Resource</label>
-                  <ResourcePicker
-                    resources={resources}
-                    value={formData.resource_id || ''}
-                    onChange={val =>
-                      setFormData(f => ({ ...f, resource_id: val }))
-                    }
-                    placeholder="Type name..."
-                  />
+                  <label className={styles.formLabel}>Resource *</label>
+                  {resources.length === 0 && !loading ? (
+                    <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
+                      No resources in your reporting line. Contact your admin.
+                    </Body1>
+                  ) : (
+                    <ResourcePicker
+                      resources={resources}
+                      value={formData.resource_id || ''}
+                      onChange={val =>
+                        setFormData(f => ({ ...f, resource_id: val }))
+                      }
+                      placeholder="Type name..."
+                    />
+                  )}
                 </div>
                 <div className={styles.formField}>
                   <label className={styles.formLabel}>Project (optional)</label>
-                  <Select
+                  <SearchableFilter
+                    options={projects.map(p => ({ id: p.id, label: p.name }))}
                     value={formData.project_id || ''}
-                    onChange={(_, data) =>
-                      setFormData(f => ({ ...f, project_id: data.value || '' }))
-                    }
-                  >
-                    <option value="">None</option>
-                    {projects.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </Select>
+                    onChange={val => setFormData(f => ({ ...f, project_id: val || '' }))}
+                    placeholder="Type project name..."
+                    allLabel="None (general availability)"
+                  />
                 </div>
                 <div className={styles.formField}>
-                  <label className={styles.formLabel}>FTE %</label>
-                  <Select
+                  <label className={styles.formLabel}>FTE % <span style={{ fontWeight: 400, color: 'gray', fontSize: 12 }}>(5–100, multiples of 5)</span></label>
+                  <Input
+                    type="number"
+                    min={5}
+                    max={100}
+                    step={5}
+                    placeholder="e.g. 100"
                     value={String(formData.fte_percent)}
-                    onChange={(_, data) =>
-                      setFormData(f => ({ ...f, fte_percent: parseInt(data.value) }))
-                    }
-                  >
-                    {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map(
-                      val => (
-                        <option key={val} value={val}>
-                          {val}%
-                        </option>
-                      ),
-                    )}
-                  </Select>
+                    onChange={e => setFormData(f => ({ ...f, fte_percent: e.target.value ? parseInt(e.target.value) : 100 }))}
+                    style={{ width: 120 }}
+                  />
                 </div>
               </>
             )}
@@ -856,13 +851,19 @@ export const Supply: React.FC = () => {
             {addMode === 'bulk' && !editId && (
               <>
                 <div className={styles.formField}>
-                  <label className={styles.formLabel}>Resources</label>
-                  <SearchableMultiselect
-                    options={resources.map(r => ({ id: r.id, label: r.display_name }))}
-                    value={bulkAddResources}
-                    onChange={setBulkAddResources}
-                    placeholder="Type to search resources..."
-                  />
+                  <label className={styles.formLabel}>Resources *</label>
+                  {resources.length === 0 && !loading ? (
+                    <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
+                      No resources in your reporting line. Contact your admin.
+                    </Body1>
+                  ) : (
+                    <SearchableMultiselect
+                      options={resources.map(r => ({ id: r.id, label: r.display_name }))}
+                      value={bulkAddResources}
+                      onChange={setBulkAddResources}
+                      placeholder="Type to search resources..."
+                    />
+                  )}
                 </div>
                 <div className={styles.formField}>
                   <label className={styles.formLabel}>Periods</label>
@@ -885,35 +886,25 @@ export const Supply: React.FC = () => {
                 </div>
                 <div className={styles.formField}>
                   <label className={styles.formLabel}>Project (optional)</label>
-                  <Dropdown
-                    selectedOptions={bulkAddProjectId ? [bulkAddProjectId] : []}
-                    onOptionSelect={(_, data) =>
-                      setBulkAddProjectId(data.selectedOptions[0] || '')
-                    }
-                    placeholder="Select project or leave blank for general availability..."
-                  >
-                    <Option value="" text="None (General Availability)">None (General Availability)</Option>
-                    {projects.map(p => (
-                      <Option key={p.id} value={p.id} text={p.name}>
-                        {p.name}
-                      </Option>
-                    ))}
-                  </Dropdown>
+                  <SearchableFilter
+                    options={projects.map(p => ({ id: p.id, label: p.name }))}
+                    value={bulkAddProjectId}
+                    onChange={val => setBulkAddProjectId(val)}
+                    placeholder="Type project name..."
+                    allLabel="None (General Availability)"
+                  />
                 </div>
                 <div className={styles.formField}>
-                  <label className={styles.formLabel}>FTE %</label>
-                  <Select
+                  <label className={styles.formLabel}>FTE % <span style={{ fontWeight: 400, color: 'gray', fontSize: 12 }}>(5–100, multiples of 5)</span></label>
+                  <Input
+                    type="number"
+                    min={5}
+                    max={100}
+                    step={5}
                     value={String(bulkAddFte)}
-                    onChange={(_, data) => setBulkAddFte(parseInt(data.value))}
-                  >
-                    {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map(
-                      val => (
-                        <option key={val} value={val}>
-                          {val}%
-                        </option>
-                      ),
-                    )}
-                  </Select>
+                    onChange={e => setBulkAddFte(e.target.value ? parseInt(e.target.value) : 100)}
+                    style={{ width: 120 }}
+                  />
                 </div>
                 <Button
                   appearance="secondary"

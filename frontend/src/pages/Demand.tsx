@@ -22,6 +22,7 @@ import {
   tokens,
   makeStyles,
   Select,
+  Input,
   Checkbox,
   Toolbar,
   ToolbarButton,
@@ -415,7 +416,7 @@ export const Demand: React.FC = () => {
     try {
       setLoading(true);
       const [projectsData, resourcesData, placeholdersData, costCentersData] = await Promise.all([
-        lookupsApi.listProjects(),
+        user?.role === 'PM' ? lookupsApi.listProjectsScoped() : lookupsApi.listProjects(),
         lookupsApi.listResources(),
         lookupsApi.listPlaceholders(),
         lookupsApi.listCostCenters(),
@@ -852,16 +853,17 @@ export const Demand: React.FC = () => {
                   </Select>
                 </div>
                 <div className={styles.formField}>
-                  <label className={styles.formLabel}>FTE %</label>
-                  <Select
+                  <label className={styles.formLabel}>FTE % <span style={{ fontWeight: 400, color: 'gray', fontSize: 12 }}>(5–100, multiples of 5; leave blank = no change)</span></label>
+                  <Input
+                    type="number"
+                    min={5}
+                    max={100}
+                    step={5}
+                    placeholder="No change"
                     value={bulkEditForm.fte_percent ? String(bulkEditForm.fte_percent) : ''}
-                    onChange={(_, data) => setBulkEditForm(f => ({ ...f, fte_percent: data.value ? parseInt(data.value) : undefined }))}
-                  >
-                    <option value="">No change</option>
-                    {[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100].map(val => (
-                      <option key={val} value={val}>{val}%</option>
-                    ))}
-                  </Select>
+                    onChange={e => setBulkEditForm(f => ({ ...f, fte_percent: e.target.value ? parseInt(e.target.value) : undefined }))}
+                    style={{ width: 120 }}
+                  />
                 </div>
               </DialogContent>
               <DialogActions>
@@ -1085,16 +1087,20 @@ export const Demand: React.FC = () => {
             {(addMode === 'single' || editId) && (
               <>
                 <div className={styles.formField}>
-                  <label className={styles.formLabel}>Project</label>
-                  <Select
-                    value={formData.project_id || ''}
-                    onChange={(_, data) => setFormData(f => ({ ...f, project_id: data.value }))}
-                  >
-                    <option value="">Select project...</option>
-                    {projects.map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </Select>
+                  <label className={styles.formLabel}>Project *</label>
+                  {projects.length === 0 && !loading ? (
+                    <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
+                      No projects available. Contact your admin.
+                    </Body1>
+                  ) : (
+                    <SearchableFilter
+                      options={projects.map(p => ({ id: p.id, label: p.name }))}
+                      value={formData.project_id || ''}
+                      onChange={val => setFormData(f => ({ ...f, project_id: val }))}
+                      placeholder="Type project name..."
+                      allLabel="Select project..."
+                    />
+                  )}
                 </div>
                 <div className={styles.formField}>
                   <label className={styles.formLabel}>Assignment Type</label>
@@ -1118,16 +1124,17 @@ export const Demand: React.FC = () => {
                   </div>
                 )}
                 <div className={styles.formField}>
-                  <label className={styles.formLabel}>FTE %</label>
-                  <Select
+                  <label className={styles.formLabel}>FTE % <span style={{ fontWeight: 400, color: 'gray', fontSize: 12 }}>(5–100, multiples of 5)</span></label>
+                  <Input
+                    type="number"
+                    min={5}
+                    max={100}
+                    step={5}
+                    placeholder="e.g. 50"
                     value={formData.fte_percent ? String(formData.fte_percent) : ''}
-                    onChange={(_, data) => setFormData(f => ({ ...f, fte_percent: data.value ? parseInt(data.value) : undefined }))}
-                  >
-                    <option value="">Select FTE %...</option>
-                    {[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100].map(val => (
-                      <option key={val} value={val}>{val}%</option>
-                    ))}
-                  </Select>
+                    onChange={e => setFormData(f => ({ ...f, fte_percent: e.target.value ? parseInt(e.target.value) : 50 }))}
+                    style={{ width: 120 }}
+                  />
                 </div>
               </>
             )}
@@ -1135,17 +1142,19 @@ export const Demand: React.FC = () => {
             {addMode === 'bulk' && !editId && (
               <>
                 <div className={styles.formField}>
-                  <label className={styles.formLabel}>Projects</label>
-                  <Dropdown
-                    multiselect
-                    selectedOptions={bulkAddProjects}
-                    onOptionSelect={(_, data) => setBulkAddProjects(data.selectedOptions as string[])}
-                    placeholder="Select projects..."
-                  >
-                    {projects.map(p => (
-                      <Option key={p.id} value={p.id} text={p.name}>{p.name}</Option>
-                    ))}
-                  </Dropdown>
+                  <label className={styles.formLabel}>Projects *</label>
+                  {projects.length === 0 && !loading ? (
+                    <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
+                      No projects available. Contact your admin.
+                    </Body1>
+                  ) : (
+                    <SearchableMultiselect
+                      options={projects.map(p => ({ id: p.id, label: p.name }))}
+                      value={bulkAddProjects}
+                      onChange={setBulkAddProjects}
+                      placeholder="Type to search projects..."
+                    />
+                  )}
                 </div>
                 <div className={styles.formField}>
                   <label className={styles.formLabel}>Assignment Type</label>
@@ -1195,12 +1204,16 @@ export const Demand: React.FC = () => {
                   </Dropdown>
                 </div>
                 <div className={styles.formField}>
-                  <label className={styles.formLabel}>FTE %</label>
-                  <Select value={String(bulkAddFte)} onChange={(_, data) => setBulkAddFte(parseInt(data.value))}>
-                    {[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100].map(val => (
-                      <option key={val} value={val}>{val}%</option>
-                    ))}
-                  </Select>
+                  <label className={styles.formLabel}>FTE % <span style={{ fontWeight: 400, color: 'gray', fontSize: 12 }}>(5–100, multiples of 5)</span></label>
+                  <Input
+                    type="number"
+                    min={5}
+                    max={100}
+                    step={5}
+                    value={String(bulkAddFte)}
+                    onChange={e => setBulkAddFte(e.target.value ? parseInt(e.target.value) : 50)}
+                    style={{ width: 120 }}
+                  />
                 </div>
                 <Button appearance="secondary" onClick={handleBulkAddPreview} disabled={bulkAddProjects.length === 0 || bulkAddResourceIds.length === 0 || bulkAddPeriods.length === 0}>Preview</Button>
                 {bulkAddPreview.length > 0 && (

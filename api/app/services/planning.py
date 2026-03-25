@@ -380,6 +380,20 @@ class SupplyService:
         from api.app.services.reporting import ReportingService
         return ReportingService(self.db, self.current_user).get_accessible_resource_ids()
 
+    def _check_ro_resource_authorized(self, resource_id: str) -> None:
+        """Raise 403 if the current user is an RO but the resource is outside their scope."""
+        if self.current_user.role != UserRole.RO:
+            return
+        scoped_ids = self._get_scoped_resource_ids()
+        if scoped_ids is not None and resource_id not in scoped_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "RO_NOT_AUTHORIZED",
+                    "message": "You may only manage supply lines for resources in your reporting line",
+                },
+            )
+
     def _check_period_open(self, year: int, month: int) -> Period:
         """Check if the period exists and is open."""
         period = self.db.query(Period).filter(
@@ -481,7 +495,10 @@ class SupplyService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "NOT_FOUND", "message": "Resource not found"}
             )
-        
+
+        # Enforce RO scope: RO can only create supply for their own resources
+        self._check_ro_resource_authorized(resource_id)
+
         # Validate project exists (if provided)
         if project_id:
             project = self.db.query(Project).filter(

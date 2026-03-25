@@ -50,7 +50,8 @@ frontend/.vite/
 *.swo
 *~
 .DS_Store
-
+.claude-flow/
+.claude/
 # OS
 Thumbs.db
 Desktop.ini

@@ -16,7 +16,7 @@ import {
   Body2,
   Caption1,
 } from '@fluentui/react-components';
-import { AddRegular, EditRegular, DeleteRegular, DocumentTableRegular } from '@fluentui/react-icons';
+import { AddRegular, EditRegular, DeleteRegular, DocumentTableRegular, ArrowDownloadRegular } from '@fluentui/react-icons';
 import { projectCostsApi, EquipmentLine } from '../../api/projectCosts';
 import { useHasRole } from '../../auth/AuthProvider';
 import { useToast } from '../../hooks/useToast';
@@ -234,17 +234,42 @@ export const EquipmentPanel: React.FC<Props> = ({ periodId, projectId, projects 
 
   const grandTotal = lines.reduce((s, l) => s + l.cost, 0);
 
+  const downloadCsv = () => {
+    const header = ['Project', 'Description', 'Cost (DKK)'];
+    const escape = (v: string | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = lines.map((l) => [
+      escape(l.project_name ?? l.project_id),
+      escape(l.description ?? ''),
+      (l.cost / 100).toFixed(2),
+    ]);
+    const csv = [header, ...rows].map((r) => r.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'project_costs_equipment.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) return <div className={styles.loading}><Spinner /></div>;
 
   return (
     <div>
       <div className={styles.toolbar}>
         <Body2 className={styles.muted}>{lines.length} line{lines.length !== 1 ? 's' : ''}</Body2>
-        {canEdit && (
-          <Button appearance="primary" icon={<AddRegular />} onClick={openCreate}>
-            Add Equipment
-          </Button>
-        )}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {lines.length > 0 && (
+            <Button appearance="outline" icon={<ArrowDownloadRegular />} onClick={downloadCsv}>
+              Download CSV
+            </Button>
+          )}
+          {canEdit && (
+            <Button appearance="primary" icon={<AddRegular />} onClick={openCreate}>
+              Add Equipment
+            </Button>
+          )}
+        </div>
       </div>
 
       {lines.length === 0 ? (

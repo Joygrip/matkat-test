@@ -22,7 +22,7 @@ htmlcov/
 *.sqlite3
 #dev.db
 test.db
-
+fn.parameters.json
 # Environment variables
 .env
 .env.local

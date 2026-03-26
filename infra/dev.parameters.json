@@ -15,13 +15,13 @@
       "value": "sqladmin"
     },
     "sqlAdminPassword": {
-      "value": "REPLACE_BEFORE_DEPLOY"
+      "value": "HECv3Edyj4R1BvDmnjZy"
     },
     "containerRegistryName": {
-      "value": "REPLACE_BEFORE_DEPLOY"
+      "value": "matkatregistrydev01"
     },
     "backendImageName": {
-      "value": "matkat-api:latest"
+      "value": "matkat-api:526f67b"
     },
     "appServiceSkuName": {
       "value": "B1"
@@ -33,13 +33,13 @@
       "value": "Free"
     },
     "frontendAuthClientId": {
-      "value": "REPLACE_BEFORE_DEPLOY"
+      "value": "988550be-2d8a-46ed-9581-240fbfb7375f"
     },
     "frontendAuthAuthority": {
-      "value": "https://login.microsoftonline.com/REPLACE_BEFORE_DEPLOY"
+      "value": "https://login.microsoftonline.com/3c356d1d-7740-4a57-921a-948c6a97c210"
     },
     "frontendApiScope": {
-      "value": "api://REPLACE_BEFORE_DEPLOY/.default"
+      "value": "api://988550be-2d8a-46ed-9581-240fbfb7375f/.default"
     },
     "corsOrigins": {
       "value": "REPLACE_AFTER_SWA_DEPLOY"

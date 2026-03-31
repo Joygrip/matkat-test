@@ -164,5 +164,4 @@ def require_roles(*roles: UserRole):
 require_admin = require_roles(UserRole.ADMIN)
 require_finance = require_roles(UserRole.ADMIN, UserRole.FINANCE)
 require_pm = require_roles(UserRole.ADMIN, UserRole.PM)
-require_ro = require_roles(UserRole.ADMIN, UserRole.RO)
-require_director = require_roles(UserRole.ADMIN, UserRole.DIRECTOR)
+require_manager = require_roles(UserRole.ADMIN, UserRole.MANAGER)

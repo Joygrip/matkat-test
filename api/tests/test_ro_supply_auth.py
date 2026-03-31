@@ -42,7 +42,7 @@ def ro_supply_setup(client, admin_headers, finance_headers):
 
 
 def test_ro_cannot_create_supply_for_out_of_scope_resource(client, ro_headers, ro_supply_setup):
-    """RO without reporting chain cannot create supply for a resource outside their scope."""
+    """Manager without reporting chain cannot create supply for a resource outside their scope."""
     data = ro_supply_setup
     response = client.post(
         "/supply-lines",
@@ -55,7 +55,7 @@ def test_ro_cannot_create_supply_for_out_of_scope_resource(client, ro_headers, r
         headers=ro_headers,
     )
     assert response.status_code == 403
-    assert response.json()["code"] == "RO_NOT_AUTHORIZED"
+    assert response.json()["code"] == "MANAGER_NOT_AUTHORIZED"
 
 
 def test_finance_can_create_supply_for_any_resource(client, finance_headers, ro_supply_setup):

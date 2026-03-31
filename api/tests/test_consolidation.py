@@ -370,7 +370,7 @@ def test_download_snapshot_csv_unauthorized_role(client, db):
     db.add(snapshot)
     db.commit()
 
-    for role in ("Employee", "PM", "Director", "RO"):
+    for role in ("Employee", "PM", "Manager"):
         headers = {"X-Dev-Role": role, "X-Dev-Tenant": tenant_id}
         response = client.get("/consolidation/snapshots/snap-csv2/csv", headers=headers)
         assert response.status_code == 403, f"Expected 403 for role {role}"

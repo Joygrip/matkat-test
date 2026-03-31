@@ -6,8 +6,8 @@ from pydantic import BaseModel
 
 from api.app.db.engine import get_db
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
-from api.app.models.core import UserRole
 from api.app.models.actuals import ActualLine
+from api.app.models.core import UserRole
 from api.app.services.approvals import ApprovalsService
 
 router = APIRouter(prefix="/approvals", tags=["Approvals"])
@@ -101,14 +101,12 @@ def _to_response(instance, **enrichment) -> ApprovalInstanceResponse:
 @router.get("/inbox", response_model=list[ApprovalInstanceResponse])
 async def get_inbox(
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(
-        UserRole.RO, UserRole.DIRECTOR
-    )),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER)),
 ):
     """
     Get approval instances awaiting current user's action.
-    
-    Accessible to: RO, Director
+
+    Accessible to: Admin, Manager
     """
     service = ApprovalsService(db, current_user)
     instances = service.get_inbox()
@@ -119,9 +117,7 @@ async def get_inbox(
 async def get_approval(
     instance_id: str,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(
-        UserRole.RO, UserRole.DIRECTOR
-    )),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Get a specific approval instance."""
     service = ApprovalsService(db, current_user)
@@ -138,9 +134,7 @@ async def approve_step(
     step_id: str,
     data: ActionRequest,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(
-        UserRole.RO, UserRole.DIRECTOR
-    )),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """
     Approve a step.
@@ -158,9 +152,7 @@ async def proxy_approve_step(
     step_id: str,
     data: ActionRequest,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(
-        UserRole.RO, UserRole.DIRECTOR
-    )),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """
     Proxy-approve a Director step (e.g. when Director is unavailable).
@@ -186,9 +178,7 @@ async def reject_step(
     step_id: str,
     data: ActionRequest,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(
-        UserRole.RO, UserRole.DIRECTOR
-    )),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """
     Reject a step.

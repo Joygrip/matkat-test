@@ -12,7 +12,7 @@ from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
 from api.app.schemas.common import ErrorCode
 
-_SCOPED_ROLES = (UserRole.RO, UserRole.DIRECTOR)
+_SCOPED_ROLES = (UserRole.MANAGER,)
 
 
 def get_4mfc_boundary() -> tuple[int, int]:
@@ -381,15 +381,15 @@ class SupplyService:
         return ReportingService(self.db, self.current_user).get_accessible_resource_ids()
 
     def _check_ro_resource_authorized(self, resource_id: str) -> None:
-        """Raise 403 if the current user is an RO but the resource is outside their scope."""
-        if self.current_user.role != UserRole.RO:
+        """Raise 403 if the current user is a Manager but the resource is outside their scope."""
+        if self.current_user.role != UserRole.MANAGER:
             return
         scoped_ids = self._get_scoped_resource_ids()
         if scoped_ids is not None and resource_id not in scoped_ids:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
-                    "code": "RO_NOT_AUTHORIZED",
+                    "code": "MANAGER_NOT_AUTHORIZED",
                     "message": "You may only manage supply lines for resources in your reporting line",
                 },
             )

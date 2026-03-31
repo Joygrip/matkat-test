@@ -26,7 +26,7 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 # Allowed roles for read access (master data)
 READ_ROLES = (UserRole.ADMIN, UserRole.FINANCE)
 # Allowed roles for read access to planning-related data (projects, resources, placeholders)
-PLANNING_READ_ROLES = (UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.RO)
+PLANNING_READ_ROLES = (UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER)
 # Allowed roles for write access
 WRITE_ROLES = (UserRole.ADMIN,)
 # Allowed roles for master data write access (Admin + Finance)

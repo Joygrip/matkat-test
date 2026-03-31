@@ -103,13 +103,13 @@ def pm_headers():
 
 @pytest.fixture
 def ro_headers():
-    """Headers for RO user."""
+    """Headers for Manager user (formerly RO)."""
     return {
-        "X-Dev-Role": "RO",
+        "X-Dev-Role": "Manager",
         "X-Dev-Tenant": "test-tenant-001",
         "X-Dev-User-Id": "ro-001",
         "X-Dev-Email": "ro@test.com",
-        "X-Dev-Name": "RO User",
+        "X-Dev-Name": "Manager User",
     }
 
 
@@ -127,11 +127,11 @@ def employee_headers():
 
 @pytest.fixture
 def director_headers():
-    """Headers for Director user."""
+    """Headers for Manager user (formerly Director)."""
     return {
-        "X-Dev-Role": "Director",
+        "X-Dev-Role": "Manager",
         "X-Dev-Tenant": "test-tenant-001",
         "X-Dev-User-Id": "director-001",
         "X-Dev-Email": "director@test.com",
-        "X-Dev-Name": "Director User",
+        "X-Dev-Name": "Senior Manager User",
     }

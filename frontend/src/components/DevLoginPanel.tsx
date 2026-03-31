@@ -77,7 +77,7 @@ const useStyles = makeStyles({
   },
 });
 
-const roles: UserRole[] = ['Admin', 'Finance', 'PM', 'RO', 'Director', 'Employee'];
+const roles: UserRole[] = ['Admin', 'Finance', 'PM', 'Manager', 'Employee'];
 
 export function DevLoginPanel() {
   const styles = useStyles();

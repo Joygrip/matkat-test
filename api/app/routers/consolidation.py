@@ -94,7 +94,7 @@ async def get_dashboard(
     period_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.DIRECTOR, UserRole.RO
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER
     )),
 ):
     """
@@ -130,7 +130,7 @@ async def list_snapshots(
     period_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.DIRECTOR, UserRole.RO
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER
     )),
 ):
     """
@@ -148,7 +148,7 @@ async def get_snapshot(
     snapshot_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.DIRECTOR, UserRole.RO
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER
     )),
 ):
     """

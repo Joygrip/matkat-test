@@ -218,7 +218,7 @@ def _equip_to_response(line: ProjectEquipmentLine, project_name: Optional[str] =
 async def list_external_resources(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.DIRECTOR, UserRole.RO
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER
     )),
 ):
     """Return all active resources of type External (initials starting with X)."""
@@ -246,7 +246,7 @@ async def list_externals(
     project_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.DIRECTOR, UserRole.RO
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER
     )),
 ):
     pm_project_ids = _get_pm_project_ids(db, current_user)
@@ -359,7 +359,7 @@ async def list_equipment(
     project_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.DIRECTOR, UserRole.RO
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER
     )),
 ):
     pm_project_ids = _get_pm_project_ids(db, current_user)
@@ -461,7 +461,7 @@ async def get_summary(
     project_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.DIRECTOR, UserRole.RO
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER
     )),
 ):
     pm_project_ids = _get_pm_project_ids(db, current_user)

@@ -50,8 +50,8 @@ def seed_database_for_tenant(db: Session, tenant_id: str) -> str:
         User(tenant_id=tenant_id, object_id="admin-001", email="admin@example.com", display_name="Admin User", role=UserRole.ADMIN),
         User(tenant_id=tenant_id, object_id="finance-001", email="finance@example.com", display_name="Finance User", role=UserRole.FINANCE),
         User(tenant_id=tenant_id, object_id="pm-001", email="pm@example.com", display_name="Project Manager", role=UserRole.PM),
-        User(tenant_id=tenant_id, object_id="ro-001", email="ro@example.com", display_name="Resource Owner", role=UserRole.RO, cost_center_id=cc_software.id),
-        User(tenant_id=tenant_id, object_id="director-001", email="director@example.com", display_name="Director", role=UserRole.DIRECTOR, cost_center_id=cc_software.id),
+        User(tenant_id=tenant_id, object_id="manager-001", email="manager@example.com", display_name="Manager", role=UserRole.MANAGER, cost_center_id=cc_software.id),
+        User(tenant_id=tenant_id, object_id="senior-manager-001", email="seniormanager@example.com", display_name="Senior Manager", role=UserRole.MANAGER, cost_center_id=cc_software.id),
         User(tenant_id=tenant_id, object_id="employee-001", email="employee@example.com", display_name="Employee User", role=UserRole.EMPLOYEE, cost_center_id=cc_software.id),
     ]
     users[5].manager_object_id = users[3].object_id

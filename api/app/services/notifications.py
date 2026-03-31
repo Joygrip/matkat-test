@@ -114,7 +114,7 @@ class NotificationsService:
         for c in conflicts:
             recipients = []
             if c.ro_recipient:
-                recipients.append({"role": "RO", "email": c.ro_recipient.email, "user_id": c.ro_recipient.id})
+                recipients.append({"role": "Manager", "email": c.ro_recipient.email, "user_id": c.ro_recipient.id})
             for pm in c.pm_recipients:
                 recipients.append({"role": "PM", "email": pm.email, "user_id": pm.id})
             items.append({
@@ -524,10 +524,10 @@ class NotificationsService:
             return []
 
         role_map = {
-            NotificationPhase.PM_RO: ["PM", "RO"],
+            NotificationPhase.PM_RO: ["PM", "Manager"],
             NotificationPhase.FINANCE: ["Finance"],
             NotificationPhase.EMPLOYEE: ["Employee"],
-            NotificationPhase.RO_DIRECTOR: ["RO", "Director"],
+            NotificationPhase.RO_DIRECTOR: ["Manager"],
         }
 
         roles = role_map.get(phase, [])

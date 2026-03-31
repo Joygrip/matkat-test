@@ -39,11 +39,11 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
         User(tenant_id=tenant_id, object_id="finance-001", email="finance@example.com", display_name="Finance Manager", role=UserRole.FINANCE),
         User(tenant_id=tenant_id, object_id="pm-001", email="pm1@example.com", display_name="Project Manager 1", role=UserRole.PM),
         User(tenant_id=tenant_id, object_id="pm-002", email="pm2@example.com", display_name="Project Manager 2", role=UserRole.PM),
-        User(tenant_id=tenant_id, object_id="ro-001", email="ro1@example.com", display_name="RO Software", role=UserRole.RO, cost_center_id=cc_software.id),
-        User(tenant_id=tenant_id, object_id="ro-002", email="ro2@example.com", display_name="RO QA", role=UserRole.RO, cost_center_id=cc_qa.id),
-        User(tenant_id=tenant_id, object_id="ro-003", email="ro3@example.com", display_name="RO Infrastructure", role=UserRole.RO, cost_center_id=cc_infra.id),
-        User(tenant_id=tenant_id, object_id="director-001", email="director1@example.com", display_name="Engineering Director", role=UserRole.DIRECTOR, cost_center_id=cc_software.id),
-        User(tenant_id=tenant_id, object_id="director-002", email="director2@example.com", display_name="Operations Director", role=UserRole.DIRECTOR, cost_center_id=cc_infra.id),
+        User(tenant_id=tenant_id, object_id="ro-001", email="ro1@example.com", display_name="RO Software", role=UserRole.MANAGER, cost_center_id=cc_software.id),
+        User(tenant_id=tenant_id, object_id="ro-002", email="ro2@example.com", display_name="RO QA", role=UserRole.MANAGER, cost_center_id=cc_qa.id),
+        User(tenant_id=tenant_id, object_id="ro-003", email="ro3@example.com", display_name="RO Infrastructure", role=UserRole.MANAGER, cost_center_id=cc_infra.id),
+        User(tenant_id=tenant_id, object_id="director-001", email="director1@example.com", display_name="Engineering Director", role=UserRole.MANAGER, cost_center_id=cc_software.id),
+        User(tenant_id=tenant_id, object_id="director-002", email="director2@example.com", display_name="Operations Director", role=UserRole.MANAGER, cost_center_id=cc_infra.id),
         User(tenant_id=tenant_id, object_id="emp-001", email="emp1@example.com", display_name="Alice Developer", role=UserRole.EMPLOYEE, cost_center_id=cc_software.id),
         User(tenant_id=tenant_id, object_id="emp-002", email="emp2@example.com", display_name="Bob Tester", role=UserRole.EMPLOYEE, cost_center_id=cc_qa.id),
         User(tenant_id=tenant_id, object_id="emp-003", email="emp3@example.com", display_name="Charlie DevOps", role=UserRole.EMPLOYEE, cost_center_id=cc_devops.id),
@@ -199,7 +199,7 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
     step1_ro = ApprovalStep(
         instance_id=approval1.id,
         step_order=1,
-        step_name="RO",
+        step_name="Manager",
         approver_id=users[4].id,
         status=StepStatus.PENDING,
     )
@@ -208,7 +208,7 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
     step1_director = ApprovalStep(
         instance_id=approval1.id,
         step_order=2,
-        step_name="Director",
+        step_name="Senior Manager",
         approver_id=users[7].id,
         status=StepStatus.PENDING,
     )
@@ -232,7 +232,7 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
     step2_ro = ApprovalStep(
         instance_id=approval2.id,
         step_order=1,
-        step_name="RO",
+        step_name="Manager",
         approver_id=users[5].id,
         status=StepStatus.PENDING,
     )
@@ -241,7 +241,7 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
     step2_director = ApprovalStep(
         instance_id=approval2.id,
         step_order=2,
-        step_name="Director",
+        step_name="Senior Manager",
         approver_id=users[7].id,
         status=StepStatus.PENDING,
     )
@@ -277,7 +277,7 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
     feb_step1_ro = ApprovalStep(
         instance_id=feb_approval1.id,
         step_order=1,
-        step_name="RO",
+        step_name="Manager",
         approver_id=users[4].id,
         status=StepStatus.PENDING,
     )
@@ -286,7 +286,7 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
     feb_step1_director = ApprovalStep(
         instance_id=feb_approval1.id,
         step_order=2,
-        step_name="Director",
+        step_name="Senior Manager",
         approver_id=users[7].id,
         status=StepStatus.PENDING,
     )
@@ -310,7 +310,7 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
     feb_step2_ro = ApprovalStep(
         instance_id=feb_approval2.id,
         step_order=1,
-        step_name="RO",
+        step_name="Manager",
         approver_id=users[5].id,
         status=StepStatus.PENDING,
     )
@@ -319,7 +319,7 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
     feb_step2_director = ApprovalStep(
         instance_id=feb_approval2.id,
         step_order=2,
-        step_name="Director",
+        step_name="Senior Manager",
         approver_id=users[7].id,
         status=StepStatus.PENDING,
     )

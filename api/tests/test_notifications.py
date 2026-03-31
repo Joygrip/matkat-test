@@ -90,14 +90,14 @@ def test_notifications_idempotent(client, db):
     
     tenant_id = "test-tenant"
     
-    # Create a Director user
+    # Create a Manager user
     user = User(
         id="director-1",
         tenant_id=tenant_id,
         object_id="director-oid",
         email="director@test.com",
-        display_name="Director User",
-        role="Director",
+        display_name="Manager User",
+        role="Manager",
         is_active=True,
     )
     db.add(user)
@@ -303,7 +303,7 @@ def _seed_conflict_data(db, tenant_id: str):
 
     ro = User(
         id="ro-conflict-1", tenant_id=tenant_id, object_id="ro-oid-c",
-        email="ro@test.com", display_name="RO User", role="RO", is_active=True,
+        email="ro@test.com", display_name="Manager User", role="Manager", is_active=True,
     )
     pm = User(
         id="pm-conflict-1", tenant_id=tenant_id, object_id="pm-oid-c",

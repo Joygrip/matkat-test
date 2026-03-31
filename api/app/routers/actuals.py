@@ -81,13 +81,13 @@ async def list_actuals(
     resource_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.RO
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER
     )),
 ):
     """
-    List all actuals (for RO/Finance/Admin).
-    
-    Accessible to: Admin, Finance, RO
+    List all actuals (for RO/Finance/Admin/Director).
+
+    Accessible to: Admin, Finance, RO, Director
     """
     service = ActualsService(db, current_user)
     lines = service.get_all(year, month, resource_id)
@@ -117,7 +117,7 @@ async def create_actual(
     data: ActualLineCreate,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.EMPLOYEE, UserRole.RO
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.EMPLOYEE, UserRole.MANAGER
     )),
 ):
     """
@@ -148,7 +148,7 @@ async def update_actual(
     data: ActualLineUpdate,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.EMPLOYEE, UserRole.RO
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.EMPLOYEE, UserRole.MANAGER
     )),
 ):
     """
@@ -166,7 +166,7 @@ async def delete_actual(
     actual_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.EMPLOYEE, UserRole.RO
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.EMPLOYEE, UserRole.MANAGER
     )),
 ):
     """
@@ -205,7 +205,7 @@ async def proxy_sign_actual(
     data: ProxySignRequest,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.RO
+        UserRole.ADMIN, UserRole.MANAGER
     )),
 ):
     """

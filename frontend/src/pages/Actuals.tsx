@@ -203,7 +203,7 @@ export const Actuals: React.FC = () => {
   const [supplyLines, setSupplyLines] = useState<SupplyLine[]>([]);
   
   const isEmployee = user?.role === 'Employee';
-  const isRO = user?.role === 'RO';
+  const isManager = user?.role === 'Manager';
   
   // Form state
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -787,12 +787,12 @@ export const Actuals: React.FC = () => {
                           onClick={() => openSignDialog(a, false)}
                         />
                       )}
-                      {/* RO can proxy-sign for absent employees */}
-                      {isRO && (
+                      {/* Manager can proxy-sign for absent employees */}
+                      {isManager && (
                         <Button
                           icon={<Signature24Regular />}
                           appearance="subtle"
-                          title="Proxy Sign (RO)"
+                          title="Proxy Sign"
                           onClick={() => openSignDialog(a, true)}
                         />
                       )}

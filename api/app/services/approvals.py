@@ -11,7 +11,7 @@ from api.app.models.approvals import (
     ApprovalStatus, StepStatus,
 )
 from api.app.models.actuals import ActualLine
-from api.app.models.core import User, Resource, UserRole
+from api.app.models.core import User, Resource, ManagerOverride
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
 
@@ -28,9 +28,12 @@ class ApprovalsService:
         Create an approval instance when actuals are signed.
 
         Steps:
-        1. Manager approval (SKIPPED if no synced manager)
-        2. RO approval
-        3. Director approval (SKIPPED if RO == Director)
+        1. RO = requester's direct manager from synced DB hierarchy
+        2. Director = RO's direct manager from synced DB hierarchy (SKIPPED if same as RO or not found)
+
+        ManagerOverride entries take precedence over User.manager_object_id at each level.
+        Falls back to CostCenter.ro_user_id / director_user_id when no hierarchy data exists.
+        No live Graph calls are made.
         """
         # Get the resource (tenant-scoped)
         resource = self.db.query(Resource).filter(
@@ -43,13 +46,13 @@ class ApprovalsService:
         if not resource:
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Resource not found"})
 
-        # Get RO and Director from cost center
-        ro_user_id = None
-        director_user_id = None
+        # Resolve RO and Director from DB hierarchy (no live Graph calls)
+        ro_user_id, director_user_id = self._resolve_hierarchy_approvers(resource)
 
-        if resource.cost_center:
-            ro_user_id = resource.cost_center.ro_user_id
-            director_user_id = resource.cost_center.director_user_id
+        logging.info(
+            "Creating approval instance for actuals: resource_id=%s, ro_user_id=%s, director_user_id=%s",
+            actual_line.resource_id, ro_user_id, director_user_id,
+        )
 
         # Create approval instance
         instance = ApprovalInstance(
@@ -59,52 +62,31 @@ class ApprovalsService:
             status=ApprovalStatus.PENDING,
             created_by=self.current_user.object_id,
         )
-        logging.info(
-            "Creating approval instance for actuals: resource_id=%s, ro_user_id=%s, director_user_id=%s",
-            actual_line.resource_id, ro_user_id, director_user_id,
-        )
         self.db.add(instance)
         self.db.flush()
 
-        # Resolve manager from synced DB relationship (no live Graph calls)
-        manager_user_id = self._resolve_manager_approver_id(resource)
-
-        # Manager step (step 1) — SKIPPED when no manager can be resolved
-        manager_step = ApprovalStep(
+        # Step 1: Manager (requester's direct manager from hierarchy)
+        ro_step = ApprovalStep(
             instance_id=instance.id,
             step_order=1,
             step_name="Manager",
-            approver_id=manager_user_id,
-            status=StepStatus.PENDING if manager_user_id else StepStatus.SKIPPED,
-        )
-        logging.info(
-            "Manager step: approver_id=%s, skipped=%s", manager_user_id, manager_user_id is None
-        )
-        self.db.add(manager_step)
-
-        # RO step (step 2)
-        ro_step = ApprovalStep(
-            instance_id=instance.id,
-            step_order=2,
-            step_name="RO",
             approver_id=ro_user_id,
-            status=StepStatus.PENDING,
+            status=StepStatus.PENDING if ro_user_id else StepStatus.SKIPPED,
         )
-        logging.info("RO step: approver_id=%s", ro_user_id)
+        logging.info("Manager step: approver_id=%s, skipped=%s", ro_user_id, ro_user_id is None)
         self.db.add(ro_step)
 
-        # Director step (step 3, skipped if RO == Director)
-        skip_director = ro_user_id == director_user_id and ro_user_id is not None
-
+        # Step 2: Senior Manager (manager's direct manager); skip if same person or not found
+        skip_director = (director_user_id == ro_user_id and ro_user_id is not None) or not director_user_id
         director_step = ApprovalStep(
             instance_id=instance.id,
-            step_order=3,
-            step_name="Director",
+            step_order=2,
+            step_name="Senior Manager",
             approver_id=director_user_id,
             status=StepStatus.SKIPPED if skip_director else StepStatus.PENDING,
         )
         logging.info(
-            "Director step: approver_id=%s, skipped=%s", director_user_id, skip_director
+            "Senior Manager step: approver_id=%s, skipped=%s", director_user_id, skip_director
         )
         self.db.add(director_step)
 
@@ -119,7 +101,8 @@ class ApprovalsService:
             new_values={
                 "subject_type": "actuals",
                 "subject_id": actual_line.id,
-                "manager_user_id": manager_user_id,
+                "ro_user_id": ro_user_id,
+                "director_user_id": director_user_id,
                 "skip_director": skip_director,
             }
         )
@@ -318,25 +301,21 @@ class ApprovalsService:
             )
         ).first()
 
-    def _resolve_manager_approver_id(self, resource: Resource) -> Optional[str]:
+    def _resolve_hierarchy_approvers(
+        self, resource: Resource
+    ) -> tuple[Optional[str], Optional[str]]:
         """
-        Resolve the manager approver's User.id from the synced DB manager relationship.
+        Resolve (ro_user_id, director_user_id) from the synced DB hierarchy.
 
-        Returns the manager's User.id if a valid, active, tenant-scoped manager is found.
-        Returns None (causing the Manager step to be SKIPPED) when:
-          - resource has no linked User (external/contractor without Entra account)
-          - the resource User has no synced manager_object_id
-          - manager_object_id does not resolve to a User record in this tenant
-          - the resolved manager is inactive
+        RO  = requester's direct manager (ManagerOverride > manager_object_id > CostCenter fallback)
+        Dir = RO's direct manager        (ManagerOverride > manager_object_id > CostCenter fallback)
 
-        No live Microsoft Graph calls are made.
+        Returns User.id values (not object_ids). None means the step will be SKIPPED.
+        No live Graph calls are made.
         """
         if not resource.user_id:
-            logging.info(
-                "approval_routing: resource %s has no user_id (external/non-Entra), skipping manager step",
-                resource.id,
-            )
-            return None
+            # External/non-Entra resource — fall back to CostCenter immediately
+            return self._cc_fallback(resource)
 
         resource_user = self.db.query(User).filter(
             and_(
@@ -350,37 +329,66 @@ class ApprovalsService:
                 "approval_routing: resource %s references user_id %s not found in tenant %s",
                 resource.id, resource.user_id, self.current_user.tenant_id,
             )
-            return None
+            return self._cc_fallback(resource)
 
-        if not resource_user.manager_object_id:
+        # Resolve RO = direct manager of the resource's user
+        ro_user = self._resolve_direct_manager(resource_user)
+
+        if ro_user is None:
+            # No hierarchy data yet — fall back to CostCenter
             logging.info(
-                "approval_routing: user %s has no synced manager_object_id, skipping manager step",
+                "approval_routing: no hierarchy manager found for user %s, using CostCenter fallback",
                 resource_user.id,
             )
+            return self._cc_fallback(resource)
+
+        # Resolve Director = direct manager of the RO
+        director_user = self._resolve_direct_manager(ro_user)
+        return ro_user.id, (director_user.id if director_user else None)
+
+    def _resolve_direct_manager(self, user: User) -> Optional[User]:
+        """
+        Resolve a user's direct manager via ManagerOverride (preferred) or manager_object_id.
+
+        Returns the manager User if found and active; None otherwise.
+        Scoped to the current tenant. No live Graph calls.
+        """
+        tenant_id = self.current_user.tenant_id
+
+        # ManagerOverride takes precedence over synced manager_object_id
+        override = self.db.query(ManagerOverride).filter(
+            and_(
+                ManagerOverride.tenant_id == tenant_id,
+                ManagerOverride.employee_object_id == user.object_id,
+                ManagerOverride.is_active.is_(True),
+            )
+        ).first()
+
+        manager_object_id = override.manager_object_id if override else user.manager_object_id
+
+        if not manager_object_id:
             return None
 
         manager = self.db.query(User).filter(
             and_(
-                User.tenant_id == self.current_user.tenant_id,
-                User.object_id == resource_user.manager_object_id,
+                User.tenant_id == tenant_id,
+                User.object_id == manager_object_id,
+                User.is_active.is_(True),
             )
         ).first()
 
         if not manager:
             logging.warning(
-                "approval_routing: manager_object_id %s not found in tenant %s (not yet synced?), skipping manager step",
-                resource_user.manager_object_id, self.current_user.tenant_id,
+                "approval_routing: manager_object_id %s not found or inactive in tenant %s",
+                manager_object_id, tenant_id,
             )
-            return None
+        return manager
 
-        if not manager.is_active:
-            logging.warning(
-                "approval_routing: manager %s is inactive, skipping manager step",
-                manager.id,
-            )
-            return None
-
-        return manager.id
+    def _cc_fallback(self, resource: Resource) -> tuple[Optional[str], Optional[str]]:
+        """Return (ro_user_id, director_user_id) from CostCenter fields as fallback."""
+        if not resource.cost_center:
+            return None, None
+        return resource.cost_center.ro_user_id, resource.cost_center.director_user_id
 
     def _get_current_step(self, instance: ApprovalInstance) -> Optional[ApprovalStep]:
         """Get the first pending step in order."""
@@ -393,13 +401,5 @@ class ApprovalsService:
         """Check if the user can act on the given step."""
         if step.approver_id:
             return step.approver_id == user.id
-
-        # Role-based fallback (only applies when approver_id is None)
-        # Manager steps always have approver_id set when PENDING; this is a safety net.
-        if step.step_name == "RO":
-            return user.role == UserRole.RO
-        if step.step_name == "Director":
-            return user.role == UserRole.DIRECTOR
-
-        # Manager step with no approver_id is not actionable by anyone
+        # Step with no approver_id and status PENDING is not actionable by anyone
         return False

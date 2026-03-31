@@ -19,7 +19,7 @@ def _make_cost_center(db, cc_id, ro_user_id=None):
     return cc
 
 
-def _make_user(db, user_id, role="RO", email=None):
+def _make_user(db, user_id, role="Manager", email=None):
     from api.app.models.core import User
     u = User(
         id=user_id,
@@ -191,7 +191,7 @@ def test_placeholder_demand_excluded(db):
 
 
 def test_ro_recipient_resolved(db):
-    ro = _make_user(db, "ro-user", role="RO")
+    ro = _make_user(db, "ro-user", role="Manager")
     _make_cost_center(db, "cc1", ro_user_id="ro-user")
     _make_resource(db, "r1", "cc1")
     period = _make_period(db, "p1")

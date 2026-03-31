@@ -70,8 +70,8 @@ class ApprovalStep(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     instance_id: Mapped[str] = mapped_column(String(36), ForeignKey("approval_instances.id"), nullable=False)
     
-    step_order: Mapped[int] = mapped_column(Integer, nullable=False)  # 1 = RO, 2 = Director
-    step_name: Mapped[str] = mapped_column(String(50), nullable=False)  # "RO", "Director"
+    step_order: Mapped[int] = mapped_column(Integer, nullable=False)  # 1 = Manager, 2 = Senior Manager
+    step_name: Mapped[str] = mapped_column(String(50), nullable=False)  # "Manager", "Senior Manager"
     approver_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)  # User who should approve
     
     # Status

@@ -276,7 +276,7 @@ export const Supply: React.FC = () => {
 
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const isLocked = currentPeriod?.status === 'locked';
-  const canEdit = user?.role === 'Finance' || user?.role === 'RO';
+  const canEdit = user?.role === 'Finance' || user?.role === 'Manager';
 
   const filteredSupplies = useMemo(() => {
     return supplies.filter(s => {
@@ -390,7 +390,7 @@ export const Supply: React.FC = () => {
     try {
       setLoading(true);
       const [resourcesData, projectsData, costCentersData] = await Promise.all([
-        (user?.role === 'RO' || user?.role === 'Director') ? lookupsApi.listResourcesScoped() : lookupsApi.listResources(),
+        user?.role === 'Manager' ? lookupsApi.listResourcesScoped() : lookupsApi.listResources(),
         lookupsApi.listProjects(),
         lookupsApi.listCostCenters(),
       ]);

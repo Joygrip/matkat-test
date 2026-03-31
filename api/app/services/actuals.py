@@ -12,7 +12,7 @@ from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
 from api.app.schemas.common import ErrorCode
 
-_SCOPED_ROLES = (UserRole.RO, UserRole.DIRECTOR)
+_SCOPED_ROLES = (UserRole.MANAGER,)
 
 
 class ActualsService:

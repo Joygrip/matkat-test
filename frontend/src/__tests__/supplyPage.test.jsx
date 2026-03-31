@@ -20,7 +20,7 @@ const mockSupplies = vi.hoisted(() => [
 ]);
 
 vi.mock('../auth/AuthProvider', () => ({
-  useAuth: () => ({ user: { role: 'RO' } }),
+  useAuth: () => ({ user: { role: 'Manager' } }),
 }));
 
 vi.mock('../contexts/PeriodContext', () => ({

@@ -10,7 +10,7 @@ from api.app.models.core import (
     CostCenter, Project, Resource, Placeholder, User, UserRole
 )
 
-_SCOPED_ROLES = (UserRole.RO, UserRole.DIRECTOR)
+_SCOPED_ROLES = (UserRole.MANAGER,)
 from api.app.schemas.admin import (
     CostCenterResponse, ProjectResponse,
     ResourceResponse, PlaceholderResponse,
@@ -139,7 +139,7 @@ async def list_projects_scoped(
 async def list_resources_scoped(
     cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.RO, UserRole.FINANCE, UserRole.DIRECTOR)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER)),
 ):
     """
     Resources scoped to the current user's reporting line:

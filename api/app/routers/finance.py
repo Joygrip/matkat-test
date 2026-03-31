@@ -27,7 +27,7 @@ async def actuals_dashboard(
     cost_center_id: Optional[str] = Query(None),
     approval_status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.DIRECTOR, UserRole.RO)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.MANAGER)),
 ):
     """
     List all employee actuals with project, cost center, approval status, and current approval step.
@@ -43,7 +43,7 @@ async def actuals_vs_plan(
     month: int = Query(...),
     cost_center_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.DIRECTOR, UserRole.RO)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.MANAGER)),
 ):
     """
     Get demand, supply, and actuals per cost center for a given period.
@@ -61,7 +61,7 @@ async def actuals_vs_plan_by_employee(
     cost_center_id: Optional[str] = Query(None),
     project_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.DIRECTOR, UserRole.ADMIN, UserRole.RO)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.ADMIN, UserRole.MANAGER)),
 ):
     """
     Get demand vs actuals per employee for a given period.
@@ -81,7 +81,7 @@ async def consolidated_cost_detail(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM,
-        UserRole.DIRECTOR, UserRole.RO,
+        UserRole.MANAGER,
     )),
 ):
     """
@@ -106,7 +106,7 @@ async def consolidated_costs(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM,
-        UserRole.DIRECTOR, UserRole.RO,
+        UserRole.MANAGER,
     )),
 ):
     """

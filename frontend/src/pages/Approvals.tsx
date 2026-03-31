@@ -410,17 +410,17 @@ export const Approvals: React.FC = () => {
   const getCurrentStep = (approval: ApprovalInstance): ApprovalStep | null =>
     approval.steps.find(s => s.status === 'pending') || null;
 
-  const getRoStep = (approval: ApprovalInstance): ApprovalStep | null =>
-    approval.steps.find(s => s.step_name === 'RO') || null;
+  const getManagerStep = (approval: ApprovalInstance): ApprovalStep | null =>
+    approval.steps.find(s => s.step_name === 'Manager') || null;
 
-  const getDirectorStep = (approval: ApprovalInstance): ApprovalStep | null =>
-    approval.steps.find(s => s.step_name === 'Director') || null;
+  const getSeniorManagerStep = (approval: ApprovalInstance): ApprovalStep | null =>
+    approval.steps.find(s => s.step_name === 'Senior Manager') || null;
 
   const canProxyApprove = (approval: ApprovalInstance): boolean => {
-    if (user?.role !== 'RO') return false;
-    const roStep = getRoStep(approval);
-    const directorStep = getDirectorStep(approval);
-    return roStep?.status === 'approved' && directorStep?.status === 'pending';
+    if (user?.role !== 'Manager') return false;
+    const managerStep = getManagerStep(approval);
+    const seniorManagerStep = getSeniorManagerStep(approval);
+    return managerStep?.status === 'approved' && seniorManagerStep?.status === 'pending';
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -476,7 +476,7 @@ export const Approvals: React.FC = () => {
             const currentStep = getCurrentStep(approval);
             const proxy = canProxyApprove(approval);
             const awaitingRO =
-              user?.role === 'Director' && getRoStep(approval)?.status === 'pending';
+              user?.role === 'Manager' && getManagerStep(approval)?.status === 'pending';
 
             // Determine if the connector between consecutive steps should be "done"
             const connectorDone = (idx: number) => {

@@ -4,7 +4,7 @@ from datetime import datetime
 
 
 def test_inbox_requires_role(client):
-    """Test that inbox requires approver role (RO/Director)."""
+    """Test that inbox requires Manager role."""
     # Without auth headers in dev mode, defaults to Employee which can't approve
     response = client.get("/approvals/inbox")
     assert response.status_code == 403
@@ -12,8 +12,8 @@ def test_inbox_requires_role(client):
 
 def test_inbox_returns_empty_list(client):
     """Test that inbox returns empty list when no pending approvals."""
-    headers = {"X-Dev-Role": "RO", "X-Dev-Tenant": "test-tenant"}
-    
+    headers = {"X-Dev-Role": "Manager", "X-Dev-Tenant": "test-tenant"}
+
     response = client.get("/approvals/inbox", headers=headers)
     assert response.status_code == 200
     assert response.json() == []
@@ -21,14 +21,14 @@ def test_inbox_returns_empty_list(client):
 
 def test_approval_not_found(client):
     """Test getting non-existent approval."""
-    headers = {"X-Dev-Role": "RO", "X-Dev-Tenant": "test-tenant"}
+    headers = {"X-Dev-Role": "Manager", "X-Dev-Tenant": "test-tenant"}
     
     response = client.get("/approvals/non-existent-id", headers=headers)
     assert response.status_code == 404
 
 
 def test_full_approval_workflow(client, db):
-    """Test complete approval workflow: sign → RO approve → Director approve."""
+    """Test complete approval workflow: sign → Manager approve → Senior Manager approve."""
     from api.app.models.core import User, CostCenter, Resource, Period, Project
 
     tenant_id = "test-tenant"
@@ -38,8 +38,8 @@ def test_full_approval_workflow(client, db):
         tenant_id=tenant_id,
         object_id="ro-oid",
         email="ro@test.com",
-        display_name="RO User",
-        role="RO",
+        display_name="Manager User",
+        role="Manager",
     )
     db.add(ro_user)
 
@@ -48,8 +48,8 @@ def test_full_approval_workflow(client, db):
         tenant_id=tenant_id,
         object_id="director-oid",
         email="director@test.com",
-        display_name="Director User",
-        role="Director",
+        display_name="Senior Manager User",
+        role="Manager",
     )
     db.add(director_user)
 
@@ -124,35 +124,35 @@ def test_full_approval_workflow(client, db):
     sign_resp = client.post(f"/actuals/{actual_id}/sign", headers=employee_headers)
     assert sign_resp.status_code == 200
 
-    # RO user should see approval in inbox
-    ro_headers = {"X-Dev-Role": "RO", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": "ro-oid"}
-    
-    response = client.get("/approvals/inbox", headers=ro_headers)
+    # Manager (step 1) should see approval in inbox
+    manager_headers = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": "ro-oid"}
+
+    response = client.get("/approvals/inbox", headers=manager_headers)
     assert response.status_code == 200
     inbox = response.json()
     assert len(inbox) == 1
     approval_id = inbox[0]["id"]
     assert inbox[0]["status"] == "pending"
-    ro_step = next(step for step in inbox[0]["steps"] if step["step_name"] == "RO")
-    director_step = next(step for step in inbox[0]["steps"] if step["step_name"] == "Director")
-    
-    # RO approves step 1
+    manager_step = next(step for step in inbox[0]["steps"] if step["step_name"] == "Manager")
+    senior_manager_step = next(step for step in inbox[0]["steps"] if step["step_name"] == "Senior Manager")
+
+    # Manager approves step 1
     response = client.post(
-        f"/approvals/{approval_id}/steps/{ro_step['id']}/approve",
+        f"/approvals/{approval_id}/steps/{manager_step['id']}/approve",
         json={"comment": "Looks good"},
-        headers=ro_headers,
+        headers=manager_headers,
     )
     assert response.status_code == 200
     result = response.json()
-    assert result["status"] == "pending"  # Still pending (Director step remains)
-    
-    # Director approves step 2
-    director_headers = {"X-Dev-Role": "Director", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": "director-oid"}
-    
+    assert result["status"] == "pending"  # Still pending (Senior Manager step remains)
+
+    # Senior Manager approves step 2
+    senior_manager_headers = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": "director-oid"}
+
     response = client.post(
-        f"/approvals/{approval_id}/steps/{director_step['id']}/approve",
-        json={"comment": "Approved by Director"},
-        headers=director_headers,
+        f"/approvals/{approval_id}/steps/{senior_manager_step['id']}/approve",
+        json={"comment": "Approved by Senior Manager"},
+        headers=senior_manager_headers,
     )
     assert response.status_code == 200
     result = response.json()
@@ -160,7 +160,7 @@ def test_full_approval_workflow(client, db):
 
 
 def test_skip_director_when_ro_equals_director(client, db):
-    """Test that Director step is skipped when RO is also the Director."""
+    """Test that Senior Manager step is skipped when manager and senior manager are the same person."""
     from api.app.models.core import User, CostCenter, Resource, Period, Project
 
     tenant_id = "test-tenant"
@@ -170,8 +170,8 @@ def test_skip_director_when_ro_equals_director(client, db):
         tenant_id=tenant_id,
         object_id="ro-director-oid",
         email="ro-director@test.com",
-        display_name="RO Director User",
-        role="Director",
+        display_name="Manager User",
+        role="Manager",
     )
     db.add(ro_director_user)
 
@@ -246,33 +246,33 @@ def test_skip_director_when_ro_equals_director(client, db):
     sign_resp = client.post(f"/actuals/{actual_id}/sign", headers=employee_headers)
     assert sign_resp.status_code == 200
 
-    # When RO approves, the whole instance should be approved (Director skipped)
-    headers = {"X-Dev-Role": "Director", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": "ro-director-oid"}
-    
+    # When manager approves, the whole instance should be approved (Senior Manager skipped)
+    headers = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": "ro-director-oid"}
+
     inbox_resp = client.get("/approvals/inbox", headers=headers)
     assert inbox_resp.status_code == 200
     inbox = inbox_resp.json()
     assert len(inbox) == 1
     approval_id = inbox[0]["id"]
-    ro_step = next(step for step in inbox[0]["steps"] if step["step_name"] == "RO")
-    director_step = next(step for step in inbox[0]["steps"] if step["step_name"] == "Director")
-    assert director_step["status"] == "skipped"
+    manager_step = next(step for step in inbox[0]["steps"] if step["step_name"] == "Manager")
+    senior_manager_step = next(step for step in inbox[0]["steps"] if step["step_name"] == "Senior Manager")
+    assert senior_manager_step["status"] == "skipped"
 
     response = client.post(
-        f"/approvals/{approval_id}/steps/{ro_step['id']}/approve",
-        json={"comment": "RO+Director approval"},
+        f"/approvals/{approval_id}/steps/{manager_step['id']}/approve",
+        json={"comment": "Single-approver approval"},
         headers=headers,
     )
     assert response.status_code == 200
     result = response.json()
-    
-    # Should be fully approved since Director step was skipped
+
+    # Should be fully approved since Senior Manager step was skipped
     assert result["status"] == "approved"
-    
+
     # Verify steps
     steps = {s["step_name"]: s["status"] for s in result["steps"]}
-    assert steps["RO"] == "approved"
-    assert steps["Director"] == "skipped"
+    assert steps["Manager"] == "approved"
+    assert steps["Senior Manager"] == "skipped"
 
 
 def test_rejection_sets_instance_rejected(client, db):
@@ -287,8 +287,8 @@ def test_rejection_sets_instance_rejected(client, db):
         tenant_id=tenant_id,
         object_id="ro-oid-3",
         email="ro3@test.com",
-        display_name="RO User 3",
-        role="RO",
+        display_name="Manager User 3",
+        role="Manager",
     )
     db.add(ro_user)
     
@@ -304,21 +304,21 @@ def test_rejection_sets_instance_rejected(client, db):
     db.add(instance)
     db.flush()
     
-    # RO step
+    # Manager step
     ro_step = ApprovalStep(
         id="step-5",
         instance_id="approval-3",
         step_order=1,
-        step_name="RO",
+        step_name="Manager",
         approver_id="ro-user-3",
         status=StepStatus.PENDING,
     )
     db.add(ro_step)
-    
+
     db.commit()
-    
-    # RO rejects
-    headers = {"X-Dev-Role": "RO", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": "ro-oid-3"}
+
+    # Manager rejects
+    headers = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": "ro-oid-3"}
     
     response = client.post(
         "/approvals/approval-3/steps/step-5/reject",
@@ -356,13 +356,13 @@ def test_cannot_approve_already_actioned_step(client, db):
         id="step-6",
         instance_id="approval-4",
         step_order=1,
-        step_name="RO",
+        step_name="Manager",
         status=StepStatus.APPROVED,  # Already approved
     )
     db.add(step)
     db.commit()
-    
-    headers = {"X-Dev-Role": "RO", "X-Dev-Tenant": tenant_id}
+
+    headers = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id}
     
     response = client.post(
         "/approvals/approval-4/steps/step-6/approve",
@@ -376,6 +376,7 @@ def test_cannot_approve_already_actioned_step(client, db):
 def test_employee_cannot_access_inbox(client):
     """Test that Employee role cannot access approvals inbox."""
     headers = {"X-Dev-Role": "Employee", "X-Dev-Tenant": "test-tenant"}
+
     
     response = client.get("/approvals/inbox", headers=headers)
     assert response.status_code == 403

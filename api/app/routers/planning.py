@@ -91,7 +91,7 @@ async def list_demand_lines(
     cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.RO, UserRole.DIRECTOR,
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER,
         UserRole.EMPLOYEE,
     )),
 ):
@@ -114,7 +114,7 @@ async def get_demand_line(
     demand_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.RO, UserRole.DIRECTOR
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER
     )),
 ):
     """Get a specific demand line."""
@@ -259,7 +259,7 @@ async def list_supply_lines(
     cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.RO, UserRole.DIRECTOR,
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER,
         UserRole.EMPLOYEE,
     )),
 ):
@@ -282,7 +282,7 @@ async def get_supply_line(
     supply_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.RO, UserRole.DIRECTOR
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER
     )),
 ):
     """Get a specific supply line."""
@@ -299,7 +299,7 @@ async def get_supply_line(
 async def create_supply_line(
     data: SupplyLineCreate,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.RO, UserRole.FINANCE)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.MANAGER, UserRole.FINANCE)),
 ):
     """
     Create a new supply line.
@@ -328,7 +328,7 @@ async def update_supply_line(
     supply_id: str,
     data: SupplyLineUpdate,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.RO, UserRole.FINANCE)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.MANAGER, UserRole.FINANCE)),
 ):
     """
     Update a supply line's FTE.
@@ -345,7 +345,7 @@ async def update_supply_line(
 async def delete_supply_line(
     supply_id: str,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.RO, UserRole.FINANCE)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.MANAGER, UserRole.FINANCE)),
 ):
     """
     Delete a supply line.
@@ -361,7 +361,7 @@ async def delete_supply_line(
 async def bulk_supply_lines(
     req: BulkSupplyLineRequest,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE, UserRole.RO)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER)),
 ):
     """
     Bulk create, update, and delete supply lines.

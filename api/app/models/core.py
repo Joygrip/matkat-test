@@ -27,8 +27,7 @@ class UserRole(str, enum.Enum):
     ADMIN = "Admin"
     FINANCE = "Finance"
     PM = "PM"
-    RO = "RO"
-    DIRECTOR = "Director"
+    MANAGER = "Manager"
     EMPLOYEE = "Employee"
 
 

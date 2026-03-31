@@ -159,7 +159,7 @@ export const Finance: React.FC = () => {
   const styles = useStyles();
   const { showSuccess, showError, showApiError } = useToast();
   const { user } = useAuth();
-  const canSeeStats = useHasRole('Finance', 'Director', 'Admin');
+  const canSeeStats = useHasRole('Finance', 'Manager', 'Admin');
   const canSeeCostReport = useHasRole('Finance', 'Admin');
   const canManagePeriods = user?.role === 'Finance' || user?.role === 'Admin';
   const canPublishSnapshot = user?.role === 'Finance' || user?.role === 'Admin';

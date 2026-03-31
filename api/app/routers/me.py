@@ -54,17 +54,13 @@ def get_permissions_for_role(role: UserRole) -> list[str]:
             "read:supply",
             "read:actuals",
         ],
-        UserRole.RO: [
+        UserRole.MANAGER: [
             "read:cost_center",
             "write:supply",
             "read:demand",
             "read:actuals",
             "approve:actuals",
             "proxy_sign:actuals",
-        ],
-        UserRole.DIRECTOR: [
-            "read:cost_center",
-            "approve:actuals",
             "read:consolidation",
         ],
         UserRole.EMPLOYEE: [

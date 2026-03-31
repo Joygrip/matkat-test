@@ -258,7 +258,7 @@ const useStyles = makeStyles({
 
 export const ConsolidatedCostChart: React.FC = () => {
   const styles = useStyles();
-  const { periods } = usePeriod();
+  const { periods, selectedPeriod } = usePeriod();
 
   // Raw API data
   const [rawData, setRawData] = useState<ConsolidatedCostRow[]>([]);
@@ -268,9 +268,13 @@ export const ConsolidatedCostChart: React.FC = () => {
   const [projectOptions, setProjectOptions] = useState<Project[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenter[]>([]);
 
-  // Filter state
-  const [selectedPeriodIds, setSelectedPeriodIds] = useState<string[]>([]);
-  const [periodPreset, setPeriodPreset] = useState<'all' | 'first3' | 'first6' | 'custom'>('all');
+  // Filter state — default to the globally selected period so values match Project Costs
+  const [selectedPeriodIds, setSelectedPeriodIds] = useState<string[]>(
+    () => selectedPeriod ? [`${selectedPeriod.year}-${selectedPeriod.month}`] : []
+  );
+  const [periodPreset, setPeriodPreset] = useState<'all' | 'first3' | 'first6' | 'custom'>(
+    () => selectedPeriod ? 'custom' : 'all'
+  );
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
 
@@ -769,8 +773,8 @@ export const ConsolidatedCostChart: React.FC = () => {
                     {[
                       { label: 'Planned Labor', value: drillDownData.demand_lines.reduce((s, l) => s + l.cost, 0) },
                       { label: 'Actual Labor', value: drillDownData.actual_lines.reduce((s, l) => s + l.cost, 0) },
-                      { label: 'OoP', value: drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) },
-                      { label: 'Equipment', value: drillDownData.equipment_lines.reduce((s, l) => s + l.cost, 0) },
+                      { label: 'OoP', value: drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100 },
+                      { label: 'Equipment', value: drillDownData.equipment_lines.reduce((s, l) => s + l.cost, 0) / 100 },
                     ].map(({ label, value }) => (
                       <div key={label} className={styles.detailKpiCard}>
                         <div className={styles.detailKpiLabel}>{label}</div>
@@ -890,8 +894,8 @@ export const ConsolidatedCostChart: React.FC = () => {
                                 <TableCell>{l.resource_name ?? '—'}</TableCell>
                                 <TableCell>{l.notes ?? '—'}</TableCell>
                                 <TableCell style={{ textAlign: 'right' }}>{l.hours}</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{dkkDetail(l.rate)}</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{dkk(drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100)}</TableCell>
+                                <TableCell style={{ textAlign: 'right' }}>{dkkDetail(l.rate / 100)}</TableCell>
+                                <TableCell style={{ textAlign: 'right' }}>{dkk(l.total_cost / 100)}</TableCell>
                               </TableRow>
                             ))}
                             <TableRow className={styles.totalRow}>
@@ -899,7 +903,7 @@ export const ConsolidatedCostChart: React.FC = () => {
                               <TableCell>Total</TableCell>
                               <TableCell /><TableCell /><TableCell />
                               <TableCell style={{ textAlign: 'right' }}>
-                                {dkk(drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0))}
+                                {dkk(drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100)}
                               </TableCell>
                             </TableRow>
                           </TableBody>

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel
 
 
@@ -40,3 +40,63 @@ class FinanceSettingResponse(BaseModel):
 
 class FinanceSettingUpdate(BaseModel):
     setting_value: str
+
+
+class ConsolidatedCostByProject(BaseModel):
+    project_id: str
+    project_name: str
+    year: int
+    month: int
+    demand_cost: int       # planned labor cost in cents
+    actuals_cost: int      # actual labor cost in cents
+    externals_cost: int    # external contractor cost in cents
+    equipment_cost: int    # equipment cost in cents
+
+
+class ConsolidatedCostResponse(BaseModel):
+    data: List[ConsolidatedCostByProject]
+    monthly_fte_cost: int  # cents, so frontend can display rate context
+
+
+class DemandLineDetail(BaseModel):
+    resource_name: str
+    fte_percent: int
+    cost: int  # cents
+    project_name: Optional[str] = None  # populated when drilling from cost center
+
+
+class ActualLineDetail(BaseModel):
+    resource_name: str
+    fte_percent: int  # actual_fte_percent
+    cost: int  # cents
+    project_name: Optional[str] = None
+
+
+class ExternalLineDetail(BaseModel):
+    resource_name: Optional[str]
+    notes: Optional[str]
+    hours: int
+    rate: int       # cents/hr
+    total_cost: int  # cents
+    project_name: Optional[str] = None
+
+
+class EquipmentLineDetail(BaseModel):
+    description: Optional[str]
+    cost: int  # cents
+    project_name: Optional[str] = None
+
+
+class ConsolidatedCostDetail(BaseModel):
+    # One of project_id or cost_center_id will be set depending on drill-down mode
+    project_id: Optional[str] = None
+    project_name: Optional[str] = None
+    cost_center_id: Optional[str] = None
+    cost_center_name: Optional[str] = None
+    year: int
+    month: int
+    monthly_fte_cost: int
+    demand_lines: List[DemandLineDetail]
+    actual_lines: List[ActualLineDetail]
+    external_lines: List[ExternalLineDetail]
+    equipment_lines: List[EquipmentLineDetail]

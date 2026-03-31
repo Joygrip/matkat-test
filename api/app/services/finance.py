@@ -12,6 +12,13 @@ from api.app.schemas.finance import (
     FinanceCostCenterStatsResponse,
     FinanceEmployeeStatsResponse,
     FinanceSettingResponse,
+    ConsolidatedCostByProject,
+    ConsolidatedCostResponse,
+    DemandLineDetail,
+    ActualLineDetail,
+    ExternalLineDetail,
+    EquipmentLineDetail,
+    ConsolidatedCostDetail,
 )
 
 DEFAULT_MONTHLY_FTE_COST = "99000"
@@ -253,6 +260,276 @@ class FinanceService:
             for row in rows
         ]
 
+    def get_consolidated_cost_detail(
+        self,
+        year: int,
+        month: int,
+        project_id: Optional[str] = None,
+        cost_center_id: Optional[str] = None,
+    ) -> ConsolidatedCostDetail:
+        """Return per-line detail for one project or cost center + period."""
+        from api.app.models.planning import DemandLine
+        from api.app.models.actuals import ActualLine
+        from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
+        from api.app.models.core import Period, Project, Resource, CostCenter
+        from fastapi import HTTPException
+
+        # Resolve period UUID
+        period = (
+            self.db.query(Period)
+            .filter(
+                Period.tenant_id == self.current_user.tenant_id,
+                Period.year == year,
+                Period.month == month,
+            )
+            .first()
+        )
+        if period is None:
+            raise HTTPException(status_code=404, detail="Period not found.")
+
+        setting = self.get_setting("monthly_fte_cost")
+        monthly_fte_cost = int(setting.setting_value)
+
+        if cost_center_id:
+            # CC mode — load all projects in this cost center
+            cc = (
+                self.db.query(CostCenter)
+                .filter(
+                    CostCenter.tenant_id == self.current_user.tenant_id,
+                    CostCenter.id == cost_center_id,
+                )
+                .first()
+            )
+            if cc is None:
+                raise HTTPException(status_code=404, detail="Cost center not found.")
+
+            projects_q = self.db.query(Project).filter(
+                Project.tenant_id == self.current_user.tenant_id,
+                Project.cost_center_id == cost_center_id,
+            )
+            if self.current_user.role == "PM":
+                projects_q = projects_q.filter(Project.pm_user_id == self.current_user.object_id)
+            projects = projects_q.all()
+            project_map = {p.id: p.name for p in projects}
+            project_ids = list(project_map.keys())
+
+            demand_lines: list[DemandLineDetail] = []
+            actual_lines: list[ActualLineDetail] = []
+            external_lines: list[ExternalLineDetail] = []
+            equipment_lines: list[EquipmentLineDetail] = []
+
+            if project_ids:
+                demand_rows = (
+                    self.db.query(DemandLine, Resource)
+                    .join(Resource, DemandLine.resource_id == Resource.id)
+                    .filter(
+                        DemandLine.tenant_id == self.current_user.tenant_id,
+                        DemandLine.project_id.in_(project_ids),
+                        DemandLine.period_id == period.id,
+                        DemandLine.resource_id.isnot(None),
+                    )
+                    .all()
+                )
+                demand_lines = [
+                    DemandLineDetail(
+                        resource_name=resource.display_name,
+                        fte_percent=line.fte_percent,
+                        cost=int(line.fte_percent * monthly_fte_cost // 100),
+                        project_name=project_map.get(line.project_id),
+                    )
+                    for line, resource in demand_rows
+                ]
+
+                actual_rows = (
+                    self.db.query(ActualLine, Resource)
+                    .join(Resource, ActualLine.resource_id == Resource.id)
+                    .filter(
+                        ActualLine.tenant_id == self.current_user.tenant_id,
+                        ActualLine.project_id.in_(project_ids),
+                        ActualLine.period_id == period.id,
+                    )
+                    .all()
+                )
+                actual_lines = [
+                    ActualLineDetail(
+                        resource_name=resource.display_name,
+                        fte_percent=line.actual_fte_percent,
+                        cost=int(line.actual_fte_percent * monthly_fte_cost // 100),
+                        project_name=project_map.get(line.project_id),
+                    )
+                    for line, resource in actual_rows
+                ]
+
+                ext_rows = (
+                    self.db.query(ProjectExternalLine, Resource)
+                    .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
+                    .filter(
+                        ProjectExternalLine.tenant_id == self.current_user.tenant_id,
+                        ProjectExternalLine.project_id.in_(project_ids),
+                        ProjectExternalLine.period_id == period.id,
+                    )
+                    .all()
+                )
+                external_lines = [
+                    ExternalLineDetail(
+                        resource_name=resource.display_name if resource else None,
+                        notes=line.description,
+                        hours=line.hours,
+                        rate=line.rate,
+                        total_cost=line.total_cost,
+                        project_name=project_map.get(line.project_id),
+                    )
+                    for line, resource in ext_rows
+                ]
+
+                equip_rows = (
+                    self.db.query(ProjectEquipmentLine)
+                    .filter(
+                        ProjectEquipmentLine.tenant_id == self.current_user.tenant_id,
+                        ProjectEquipmentLine.project_id.in_(project_ids),
+                        ProjectEquipmentLine.period_id == period.id,
+                    )
+                    .all()
+                )
+                equipment_lines = [
+                    EquipmentLineDetail(
+                        description=line.description,
+                        cost=line.cost,
+                        project_name=project_map.get(line.project_id),
+                    )
+                    for line in equip_rows
+                ]
+
+            return ConsolidatedCostDetail(
+                cost_center_id=cc.id,
+                cost_center_name=cc.name,
+                year=year,
+                month=month,
+                monthly_fte_cost=monthly_fte_cost,
+                demand_lines=demand_lines,
+                actual_lines=actual_lines,
+                external_lines=external_lines,
+                equipment_lines=equipment_lines,
+            )
+
+        # Project mode
+        if self.current_user.role == "PM":
+            proj = (
+                self.db.query(Project)
+                .filter(
+                    Project.tenant_id == self.current_user.tenant_id,
+                    Project.id == project_id,
+                    Project.pm_user_id == self.current_user.object_id,
+                )
+                .first()
+            )
+            if proj is None:
+                raise HTTPException(status_code=403, detail="Access denied to this project.")
+        else:
+            proj = (
+                self.db.query(Project)
+                .filter(
+                    Project.tenant_id == self.current_user.tenant_id,
+                    Project.id == project_id,
+                )
+                .first()
+            )
+            if proj is None:
+                raise HTTPException(status_code=404, detail="Project not found.")
+
+        # Demand lines (planned labor) — skip placeholders
+        demand_rows = (
+            self.db.query(DemandLine, Resource)
+            .join(Resource, DemandLine.resource_id == Resource.id)
+            .filter(
+                DemandLine.tenant_id == self.current_user.tenant_id,
+                DemandLine.project_id == project_id,
+                DemandLine.period_id == period.id,
+                DemandLine.resource_id.isnot(None),
+            )
+            .all()
+        )
+        demand_lines = [
+            DemandLineDetail(
+                resource_name=resource.display_name,
+                fte_percent=line.fte_percent,
+                cost=int(line.fte_percent * monthly_fte_cost // 100),
+            )
+            for line, resource in demand_rows
+        ]
+
+        # Actual lines
+        actual_rows = (
+            self.db.query(ActualLine, Resource)
+            .join(Resource, ActualLine.resource_id == Resource.id)
+            .filter(
+                ActualLine.tenant_id == self.current_user.tenant_id,
+                ActualLine.project_id == project_id,
+                ActualLine.period_id == period.id,
+            )
+            .all()
+        )
+        actual_lines = [
+            ActualLineDetail(
+                resource_name=resource.display_name,
+                fte_percent=line.actual_fte_percent,
+                cost=int(line.actual_fte_percent * monthly_fte_cost // 100),
+            )
+            for line, resource in actual_rows
+        ]
+
+        # External lines — join Resource for display name, description is the notes field
+        ext_rows = (
+            self.db.query(ProjectExternalLine, Resource)
+            .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
+            .filter(
+                ProjectExternalLine.tenant_id == self.current_user.tenant_id,
+                ProjectExternalLine.project_id == project_id,
+                ProjectExternalLine.period_id == period.id,
+            )
+            .all()
+        )
+        external_lines = [
+            ExternalLineDetail(
+                resource_name=resource.display_name if resource else None,
+                notes=line.description,
+                hours=line.hours,
+                rate=line.rate,
+                total_cost=line.total_cost,
+            )
+            for line, resource in ext_rows
+        ]
+
+        # Equipment lines
+        equip_rows = (
+            self.db.query(ProjectEquipmentLine)
+            .filter(
+                ProjectEquipmentLine.tenant_id == self.current_user.tenant_id,
+                ProjectEquipmentLine.project_id == project_id,
+                ProjectEquipmentLine.period_id == period.id,
+            )
+            .all()
+        )
+        equipment_lines = [
+            EquipmentLineDetail(
+                description=line.description,
+                cost=line.cost,
+            )
+            for line in equip_rows
+        ]
+
+        return ConsolidatedCostDetail(
+            project_id=proj.id,
+            project_name=proj.name,
+            year=year,
+            month=month,
+            monthly_fte_cost=monthly_fte_cost,
+            demand_lines=demand_lines,
+            actual_lines=actual_lines,
+            external_lines=external_lines,
+            equipment_lines=equipment_lines,
+        )
+
     def get_setting(self, key: str) -> FinanceSettingResponse:
         """Return a finance setting by key, or a default if not yet configured."""
         row = (
@@ -273,6 +550,149 @@ class FinanceService:
             setting_value=row.setting_value,
             updated_at=row.updated_at.isoformat() if row.updated_at else None,
         )
+
+    def get_consolidated_costs(
+        self,
+        project_id: Optional[str] = None,
+        cost_center_id: Optional[str] = None,
+    ) -> ConsolidatedCostResponse:
+        """Aggregate planned labor, actual labor, externals, and equipment costs per project/period."""
+        from collections import defaultdict
+        from api.app.models.planning import DemandLine
+        from api.app.models.actuals import ActualLine
+        from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
+        from api.app.models.core import Period, Project
+
+        # 1. Resolve monthly FTE cost setting
+        setting = self.get_setting("monthly_fte_cost")
+        monthly_fte_cost = int(setting.setting_value)
+
+        # 2. Load all periods for this tenant (open and locked)
+        all_periods = (
+            self.db.query(Period)
+            .filter(Period.tenant_id == self.current_user.tenant_id)
+            .all()
+        )
+        period_ids = [p.id for p in all_periods]
+        period_map = {p.id: (p.year, p.month) for p in all_periods}
+
+        if not period_ids:
+            return ConsolidatedCostResponse(data=[], monthly_fte_cost=monthly_fte_cost)
+
+        # 3. If cost_center_id given, resolve to project IDs
+        allowed_project_ids: Optional[set] = None
+        if cost_center_id:
+            proj_rows = (
+                self.db.query(Project.id)
+                .filter(
+                    Project.tenant_id == self.current_user.tenant_id,
+                    Project.cost_center_id == cost_center_id,
+                )
+                .all()
+            )
+            allowed_project_ids = {row.id for row in proj_rows}
+            if not allowed_project_ids:
+                return ConsolidatedCostResponse(data=[], monthly_fte_cost=monthly_fte_cost)
+
+        # 4. PM role restriction — only their own projects
+        pm_project_ids: Optional[set] = None
+        if self.current_user.role == "PM":
+            pm_rows = (
+                self.db.query(Project.id)
+                .filter(
+                    Project.tenant_id == self.current_user.tenant_id,
+                    Project.pm_user_id == self.current_user.object_id,
+                )
+                .all()
+            )
+            pm_project_ids = {row.id for row in pm_rows}
+
+        # 5. Build project name lookup
+        project_name_map = {
+            row.id: row.name
+            for row in self.db.query(Project.id, Project.name)
+            .filter(Project.tenant_id == self.current_user.tenant_id)
+            .all()
+        }
+
+        # 6. Accumulator: (project_id, year, month) → cost buckets
+        agg: dict = defaultdict(lambda: {"demand_cost": 0, "actuals_cost": 0, "externals_cost": 0, "equipment_cost": 0})
+
+        def _allowed(proj_id: str) -> bool:
+            if allowed_project_ids is not None and proj_id not in allowed_project_ids:
+                return False
+            if pm_project_ids is not None and proj_id not in pm_project_ids:
+                return False
+            return True
+
+        # 7. Demand lines → planned labor cost
+        demand_q = self.db.query(DemandLine).filter(
+            DemandLine.tenant_id == self.current_user.tenant_id,
+            DemandLine.period_id.in_(period_ids),
+            DemandLine.resource_id.isnot(None),
+        )
+        if project_id:
+            demand_q = demand_q.filter(DemandLine.project_id == project_id)
+        for line in demand_q.all():
+            if not _allowed(line.project_id):
+                continue
+            year, month = period_map[line.period_id]
+            agg[(line.project_id, year, month)]["demand_cost"] += int(line.fte_percent * monthly_fte_cost // 100)
+
+        # 8. Actual lines → actual labor cost
+        actuals_q = self.db.query(ActualLine).filter(
+            ActualLine.tenant_id == self.current_user.tenant_id,
+            ActualLine.period_id.in_(period_ids),
+        )
+        if project_id:
+            actuals_q = actuals_q.filter(ActualLine.project_id == project_id)
+        for line in actuals_q.all():
+            if not _allowed(line.project_id):
+                continue
+            year, month = period_map[line.period_id]
+            agg[(line.project_id, year, month)]["actuals_cost"] += int(line.actual_fte_percent * monthly_fte_cost // 100)
+
+        # 9. External lines → contractor cost
+        ext_q = self.db.query(ProjectExternalLine).filter(
+            ProjectExternalLine.tenant_id == self.current_user.tenant_id,
+            ProjectExternalLine.period_id.in_(period_ids),
+        )
+        if project_id:
+            ext_q = ext_q.filter(ProjectExternalLine.project_id == project_id)
+        for line in ext_q.all():
+            if not _allowed(line.project_id):
+                continue
+            year, month = period_map[line.period_id]
+            agg[(line.project_id, year, month)]["externals_cost"] += line.total_cost
+
+        # 10. Equipment lines → equipment cost
+        equip_q = self.db.query(ProjectEquipmentLine).filter(
+            ProjectEquipmentLine.tenant_id == self.current_user.tenant_id,
+            ProjectEquipmentLine.period_id.in_(period_ids),
+        )
+        if project_id:
+            equip_q = equip_q.filter(ProjectEquipmentLine.project_id == project_id)
+        for line in equip_q.all():
+            if not _allowed(line.project_id):
+                continue
+            year, month = period_map[line.period_id]
+            agg[(line.project_id, year, month)]["equipment_cost"] += line.cost
+
+        # 11. Build response
+        data = [
+            ConsolidatedCostByProject(
+                project_id=proj_id,
+                project_name=project_name_map.get(proj_id, proj_id),
+                year=year,
+                month=month,
+                demand_cost=costs["demand_cost"],
+                actuals_cost=costs["actuals_cost"],
+                externals_cost=costs["externals_cost"],
+                equipment_cost=costs["equipment_cost"],
+            )
+            for (proj_id, year, month), costs in agg.items()
+        ]
+        return ConsolidatedCostResponse(data=data, monthly_fte_cost=monthly_fte_cost)
 
     def upsert_setting(self, key: str, value: str) -> FinanceSettingResponse:
         """Create or update a finance setting."""

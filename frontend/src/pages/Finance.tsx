@@ -55,6 +55,7 @@ import { OverviewTab } from '../components/finance/OverviewTab';
 import { ActualsTab, FinanceActualRow } from '../components/finance/ActualsTab';
 import { SnapshotsTab } from '../components/finance/SnapshotsTab';
 import { CostReportTab } from '../components/finance/CostReportTab';
+import { ConsolidatedCostChart } from '../components/finance/ConsolidatedCostChart';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -68,7 +69,7 @@ const approvalStatusOptions = [
   { value: 'N/A', label: 'N/A (Unsigned)' },
 ];
 
-type ActiveTab = 'overview' | 'actuals' | 'snapshots' | 'costreport';
+type ActiveTab = 'overview' | 'actuals' | 'snapshots' | 'costreport' | 'costoverview';
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
@@ -424,6 +425,7 @@ export const Finance: React.FC = () => {
             <Tab value="actuals">Actuals</Tab>
             <Tab value="snapshots">Snapshots</Tab>
             {canSeeCostReport && <Tab value="costreport">Cost Report</Tab>}
+            {canSeeStats && <Tab value="costoverview">Cost Overview</Tab>}
           </TabList>
           <span className={styles.toolbarMeta}>
             {latestSnapshot
@@ -514,6 +516,10 @@ export const Finance: React.FC = () => {
           showError={showError}
           showApiError={showApiError}
         />
+      )}
+
+      {activeTab === 'costoverview' && canSeeStats && (
+        <ConsolidatedCostChart />
       )}
     </div>
   );

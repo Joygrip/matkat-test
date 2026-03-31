@@ -12,6 +12,8 @@ from api.app.schemas.finance import (
     FinanceEmployeeStatsResponse,
     FinanceSettingResponse,
     FinanceSettingUpdate,
+    ConsolidatedCostResponse,
+    ConsolidatedCostDetail,
 )
 from api.app.services.finance import FinanceService
 
@@ -68,6 +70,53 @@ async def actuals_vs_plan_by_employee(
     """
     service = FinanceService(db, current_user)
     return service.get_employee_stats(year, month, cost_center_id, project_id)
+
+
+@router.get("/consolidated-costs/detail", response_model=ConsolidatedCostDetail)
+async def consolidated_cost_detail(
+    year: int = Query(...),
+    month: int = Query(...),
+    project_id: Optional[str] = Query(None),
+    cost_center_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM,
+        UserRole.DIRECTOR, UserRole.RO,
+    )),
+):
+    """
+    Return per-line detail (demand, actuals, externals, equipment) for one project or cost center + period.
+    Exactly one of project_id or cost_center_id must be provided.
+    PM role is restricted to their own projects (403 otherwise).
+    Accessible to: Admin, Finance, PM, Director, RO
+    """
+    from fastapi import HTTPException
+    if not project_id and not cost_center_id:
+        raise HTTPException(status_code=422, detail="Provide either project_id or cost_center_id.")
+    if project_id and cost_center_id:
+        raise HTTPException(status_code=422, detail="Provide only one of project_id or cost_center_id.")
+    service = FinanceService(db, current_user)
+    return service.get_consolidated_cost_detail(year, month, project_id=project_id, cost_center_id=cost_center_id)
+
+
+@router.get("/consolidated-costs", response_model=ConsolidatedCostResponse)
+async def consolidated_costs(
+    project_id: Optional[str] = Query(None),
+    cost_center_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM,
+        UserRole.DIRECTOR, UserRole.RO,
+    )),
+):
+    """
+    Aggregate planned labor, actual labor, external contractor, and equipment costs
+    per project per period. Filterable by project and/or cost center.
+    PM role is restricted to their own projects.
+    Accessible to: Admin, Finance, PM, Director, RO
+    """
+    service = FinanceService(db, current_user)
+    return service.get_consolidated_costs(project_id, cost_center_id)
 
 
 @router.get("/settings/{key}", response_model=FinanceSettingResponse)

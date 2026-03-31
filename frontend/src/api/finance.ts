@@ -48,3 +48,88 @@ export async function getFinanceSetting(key: string): Promise<FinanceSetting> {
 export async function updateFinanceSetting(key: string, value: string): Promise<FinanceSetting> {
   return apiClient.put<FinanceSetting>(`/finance/settings/${key}`, { setting_value: value });
 }
+
+export interface ConsolidatedCostRow {
+  project_id: string;
+  project_name: string;
+  year: number;
+  month: number;
+  demand_cost: number;    // cents — planned labor
+  actuals_cost: number;   // cents — actual labor
+  externals_cost: number; // cents — external contractors
+  equipment_cost: number; // cents — equipment
+}
+
+export interface ConsolidatedCostResponse {
+  data: ConsolidatedCostRow[];
+  monthly_fte_cost: number; // cents
+}
+
+export async function getConsolidatedCosts(params?: {
+  project_id?: string;
+  cost_center_id?: string;
+}): Promise<ConsolidatedCostResponse> {
+  const query = new URLSearchParams();
+  if (params?.project_id) query.append('project_id', params.project_id);
+  if (params?.cost_center_id) query.append('cost_center_id', params.cost_center_id);
+  const qs = query.toString();
+  return apiClient.get<ConsolidatedCostResponse>(`/finance/consolidated-costs${qs ? `?${qs}` : ''}`);
+}
+
+export interface DemandLineDetail {
+  resource_name: string;
+  fte_percent: number;
+  cost: number;       // cents
+  project_name: string | null;
+}
+
+export interface ActualLineDetail {
+  resource_name: string;
+  fte_percent: number;
+  cost: number;       // cents
+  project_name: string | null;
+}
+
+export interface ExternalLineDetail {
+  resource_name: string | null;
+  notes: string | null;
+  hours: number;
+  rate: number;       // cents/hr
+  total_cost: number; // cents
+  project_name: string | null;
+}
+
+export interface EquipmentLineDetail {
+  description: string | null;
+  cost: number;       // cents
+  project_name: string | null;
+}
+
+export interface ConsolidatedCostDetail {
+  project_id: string | null;
+  project_name: string | null;
+  cost_center_id: string | null;
+  cost_center_name: string | null;
+  year: number;
+  month: number;
+  monthly_fte_cost: number;
+  demand_lines: DemandLineDetail[];
+  actual_lines: ActualLineDetail[];
+  external_lines: ExternalLineDetail[];
+  equipment_lines: EquipmentLineDetail[];
+}
+
+export async function getConsolidatedCostDetail(params: {
+  year: number;
+  month: number;
+  project_id?: string;
+  cost_center_id?: string;
+}): Promise<ConsolidatedCostDetail> {
+  const query = new URLSearchParams({
+    year: String(params.year),
+    month: String(params.month),
+  });
+  if (params.project_id) query.append('project_id', params.project_id);
+  if (params.cost_center_id) query.append('cost_center_id', params.cost_center_id);
+  return apiClient.get<ConsolidatedCostDetail>(`/finance/consolidated-costs/detail?${query.toString()}`);
+}

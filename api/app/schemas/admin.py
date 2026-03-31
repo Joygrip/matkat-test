@@ -1,7 +1,7 @@
 """Admin/Master data schemas."""
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 # Cost Center schemas
@@ -41,7 +41,7 @@ class CostCenterResponse(CostCenterBase):
 class ProjectBase(BaseModel):
     code: str
     name: str
-    pm_user_id: Optional[str] = None
+    pm_user_ids: list[str] = []
     cost_center_id: Optional[str] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
@@ -54,22 +54,25 @@ class ProjectCreate(ProjectBase):
 class ProjectUpdate(BaseModel):
     code: Optional[str] = None
     name: Optional[str] = None
-    pm_user_id: Optional[str] = None
+    pm_user_ids: Optional[list[str]] = None
     cost_center_id: Optional[str] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     is_active: Optional[bool] = None
 
 
-class ProjectResponse(ProjectBase):
+class ProjectResponse(BaseModel):
     id: str
     tenant_id: str
+    code: str
+    name: str
+    pm_user_ids: list[str] = []
+    cost_center_id: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
-    
-    class Config:
-        from_attributes = True
 
 
 # Resource schemas - resource_type: Employee | External | Student | OOP
@@ -196,6 +199,33 @@ class SettingsResponse(SettingsBase):
     tenant_id: str
     created_at: datetime
     updated_at: datetime
-    
+
     class Config:
         from_attributes = True
+
+
+# Approval Delegate schemas
+class ApprovalDelegateCreate(BaseModel):
+    delegator_id: str
+    delegate_id: str
+    note: Optional[str] = None
+
+
+class ApprovalDelegatePatch(BaseModel):
+    is_active: Optional[bool] = None
+    note: Optional[str] = None
+
+
+class ApprovalDelegateResponse(BaseModel):
+    id: str
+    tenant_id: str
+    delegator_id: str
+    delegate_id: str
+    delegator_name: Optional[str] = None
+    delegate_name: Optional[str] = None
+    is_active: bool
+    note: Optional[str]
+    created_at: datetime
+    created_by: str
+
+    model_config = ConfigDict(from_attributes=True)

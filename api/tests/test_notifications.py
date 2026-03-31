@@ -321,9 +321,12 @@ def _seed_conflict_data(db, tenant_id: str):
 
     project = Project(
         id="proj-conflict-1", tenant_id=tenant_id, code="PR-C1",
-        name="Conflict Project", pm_user_id=pm.id, is_active=True,
+        name="Conflict Project", is_active=True,
     )
     db.add(project)
+    db.flush()
+    from api.app.models.core import ProjectPM
+    db.add(ProjectPM(project_id=project.id, user_id=pm.id, tenant_id=tenant_id))
     db.flush()
 
     resource = Resource(

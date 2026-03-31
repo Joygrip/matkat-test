@@ -68,7 +68,7 @@ def pm_demand_setup(client, db, admin_headers, finance_headers):
     # Project assigned to PM_DB_ID
     proj_resp = client.post(
         "/admin/projects",
-        json={"code": "PRJ-PM", "name": "PM Project", "pm_user_id": PM_DB_ID},
+        json={"code": "PRJ-PM", "name": "PM Project", "pm_user_ids": [PM_DB_ID]},
         headers=admin_headers,
     )
     project_id = proj_resp.json()["id"]

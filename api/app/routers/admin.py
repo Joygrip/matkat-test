@@ -8,7 +8,8 @@ from api.app.db.engine import get_db
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
 from api.app.config import get_settings
 from api.app.models.core import (
-    UserRole, CostCenter, Project, Resource, Placeholder, Holiday, Settings
+    UserRole, User, CostCenter, Project, ProjectPM, Resource, Placeholder, Holiday, Settings,
+    ApprovalDelegate,
 )
 from api.app.schemas.admin import (
     CostCenterCreate, CostCenterUpdate, CostCenterResponse,
@@ -17,9 +18,11 @@ from api.app.schemas.admin import (
     PlaceholderCreate, PlaceholderUpdate, PlaceholderResponse,
     HolidayCreate, HolidayResponse,
     SettingsCreate, SettingsUpdate, SettingsResponse,
+    ApprovalDelegateCreate, ApprovalDelegatePatch, ApprovalDelegateResponse,
 )
 from api.app.services.audit import log_audit
 from api.app.services.background_sync import run_graph_sync
+from api.app.schemas.user import UserAdminResponse, UserAdminUpdate
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -139,15 +142,32 @@ async def delete_cost_center(
 
 # ============== PROJECTS ==============
 
+def _enrich_project(project: Project) -> dict:
+    return {
+        "id": project.id,
+        "tenant_id": project.tenant_id,
+        "code": project.code,
+        "name": project.name,
+        "pm_user_ids": [u.id for u in project.pm_users],
+        "cost_center_id": project.cost_center_id,
+        "start_date": project.start_date,
+        "end_date": project.end_date,
+        "is_active": project.is_active,
+        "created_at": project.created_at,
+        "updated_at": project.updated_at,
+    }
+
+
 @router.get("/projects", response_model=list[ProjectResponse])
 async def list_projects(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(*PLANNING_READ_ROLES)),
 ):
     """List all projects. Accessible to Admin, Finance, PM, RO."""
-    return db.query(Project).filter(
+    projects = db.query(Project).filter(
         Project.tenant_id == current_user.tenant_id
     ).all()
+    return [_enrich_project(p) for p in projects]
 
 
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
@@ -162,7 +182,7 @@ async def get_project(
     ).first()
     if not project:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Project not found"})
-    return project
+    return _enrich_project(project)
 
 
 @router.post("/projects", response_model=ProjectResponse)
@@ -172,12 +192,17 @@ async def create_project(
     current_user: CurrentUser = Depends(require_roles(*MASTER_DATA_WRITE_ROLES)),
 ):
     """Create a new project. (Admin, Finance)"""
-    project = Project(tenant_id=current_user.tenant_id, **data.model_dump())
+    pm_user_ids = data.pm_user_ids
+    project_data = data.model_dump(exclude={"pm_user_ids"})
+    project = Project(tenant_id=current_user.tenant_id, **project_data)
     db.add(project)
+    db.flush()
+    for user_id in pm_user_ids:
+        db.add(ProjectPM(project_id=project.id, user_id=user_id, tenant_id=current_user.tenant_id))
     db.commit()
     db.refresh(project)
     log_audit(db, current_user, "create", "Project", project.id, new_values=data.model_dump())
-    return project
+    return _enrich_project(project)
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)
@@ -193,17 +218,23 @@ async def update_project(
     ).first()
     if not project:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Project not found"})
-    
+
     update_data = data.model_dump(exclude_unset=True)
+    pm_user_ids = update_data.pop("pm_user_ids", None)
     old_values = {k: getattr(project, k) for k in update_data}
-    
+
     for key, value in update_data.items():
         setattr(project, key, value)
-    
+
+    if pm_user_ids is not None:
+        db.query(ProjectPM).filter(ProjectPM.project_id == project.id).delete()
+        for user_id in pm_user_ids:
+            db.add(ProjectPM(project_id=project.id, user_id=user_id, tenant_id=current_user.tenant_id))
+
     db.commit()
     db.refresh(project)
     log_audit(db, current_user, "update", "Project", project.id, old_values=old_values, new_values=update_data)
-    return project
+    return _enrich_project(project)
 
 
 @router.delete("/projects/{project_id}")
@@ -609,3 +640,232 @@ async def trigger_graph_sync(
     response = result.as_dict()
     response["reporting_cache_rows"] = hierarchy_rows
     return response
+
+
+# ============== USERS ==============
+
+def _enrich_user(user: User) -> dict:
+    return {
+        "id": user.id,
+        "tenant_id": user.tenant_id,
+        "object_id": user.object_id,
+        "email": user.email,
+        "display_name": user.display_name,
+        "role": user.role,
+        "is_active": user.is_active,
+        "cost_center_id": user.cost_center_id,
+        "cost_center_name": user.cost_center.name if user.cost_center else None,
+        "created_at": user.created_at,
+        "updated_at": user.updated_at,
+    }
+
+
+@router.get("/users", response_model=list[UserAdminResponse])
+async def list_admin_users(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    """List all users in the tenant. Admin only."""
+    users = db.query(User).filter(
+        User.tenant_id == current_user.tenant_id
+    ).order_by(User.display_name).all()
+    return [_enrich_user(u) for u in users]
+
+
+@router.patch("/users/{user_id}", response_model=UserAdminResponse)
+async def update_admin_user(
+    user_id: str,
+    data: UserAdminUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    """Update a user's role and/or active status. Admin only."""
+    user = db.query(User).filter(
+        and_(User.id == user_id, User.tenant_id == current_user.tenant_id)
+    ).first()
+    if not user:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "User not found"})
+    if user.object_id == current_user.object_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "SELF_EDIT_FORBIDDEN", "message": "Cannot change your own role or status."},
+        )
+    update_data = data.model_dump(exclude_unset=True)
+    old_values = {k: getattr(user, k) for k in update_data}
+    for key, value in update_data.items():
+        setattr(user, key, value)
+    db.commit()
+    db.refresh(user)
+    log_audit(db, current_user, "update", "User", user.id, old_values=old_values, new_values=update_data)
+    return _enrich_user(user)
+
+
+# ============== APPROVAL DELEGATES ==============
+
+DELEGATE_ROLES = (UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER)
+
+
+def _enrich_delegate(d: ApprovalDelegate, user_map: dict) -> dict:
+    return {
+        "id": d.id,
+        "tenant_id": d.tenant_id,
+        "delegator_id": d.delegator_id,
+        "delegate_id": d.delegate_id,
+        "delegator_name": user_map.get(d.delegator_id),
+        "delegate_name": user_map.get(d.delegate_id),
+        "is_active": d.is_active,
+        "note": d.note,
+        "created_at": d.created_at,
+        "created_by": d.created_by,
+    }
+
+
+def _build_user_map(db: Session, tenant_id: str) -> dict:
+    """Return {user.id: user.display_name} for all users in the tenant."""
+    users = db.query(User).filter(User.tenant_id == tenant_id).all()
+    return {u.id: u.display_name for u in users}
+
+
+@router.get("/delegates", response_model=list[ApprovalDelegateResponse])
+async def list_delegates(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(*DELEGATE_ROLES)),
+):
+    """List approval delegates. Admin/Finance see all; Manager sees only their own."""
+    query = db.query(ApprovalDelegate).filter(
+        ApprovalDelegate.tenant_id == current_user.tenant_id
+    )
+    if current_user.role == UserRole.MANAGER:
+        me = db.query(User).filter(
+            and_(User.tenant_id == current_user.tenant_id, User.object_id == current_user.object_id)
+        ).first()
+        if not me:
+            return []
+        query = query.filter(ApprovalDelegate.delegator_id == me.id)
+    delegates = query.order_by(ApprovalDelegate.created_at.desc()).all()
+    user_map = _build_user_map(db, current_user.tenant_id)
+    return [_enrich_delegate(d, user_map) for d in delegates]
+
+
+@router.post("/delegates", response_model=ApprovalDelegateResponse, status_code=201)
+async def create_delegate(
+    data: ApprovalDelegateCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(*DELEGATE_ROLES)),
+):
+    """Create an approval delegation. Manager can only delegate their own approvals."""
+    import uuid
+    if current_user.role == UserRole.MANAGER:
+        me = db.query(User).filter(
+            and_(User.tenant_id == current_user.tenant_id, User.object_id == current_user.object_id)
+        ).first()
+        if not me or data.delegator_id != me.id:
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "UNAUTHORIZED_ROLE", "message": "Managers can only delegate their own approvals"},
+            )
+
+    # Validate delegator exists in tenant
+    delegator = db.query(User).filter(
+        and_(User.id == data.delegator_id, User.tenant_id == current_user.tenant_id)
+    ).first()
+    if not delegator:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Delegator user not found"})
+
+    # Validate delegate exists in tenant
+    delegate = db.query(User).filter(
+        and_(User.id == data.delegate_id, User.tenant_id == current_user.tenant_id)
+    ).first()
+    if not delegate:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Delegate user not found"})
+
+    # Reactivate existing soft-deleted record if present
+    existing = db.query(ApprovalDelegate).filter(
+        and_(
+            ApprovalDelegate.tenant_id == current_user.tenant_id,
+            ApprovalDelegate.delegator_id == data.delegator_id,
+            ApprovalDelegate.delegate_id == data.delegate_id,
+        )
+    ).first()
+    if existing:
+        existing.is_active = True
+        existing.note = data.note
+        db.commit()
+        db.refresh(existing)
+        log_audit(db, current_user, "update", "ApprovalDelegate", existing.id)
+        user_map = _build_user_map(db, current_user.tenant_id)
+        return _enrich_delegate(existing, user_map)
+
+    new_delegate = ApprovalDelegate(
+        id=str(uuid.uuid4()),
+        tenant_id=current_user.tenant_id,
+        delegator_id=data.delegator_id,
+        delegate_id=data.delegate_id,
+        is_active=True,
+        note=data.note,
+        created_by=current_user.object_id,
+    )
+    db.add(new_delegate)
+    db.commit()
+    db.refresh(new_delegate)
+    log_audit(db, current_user, "create", "ApprovalDelegate", new_delegate.id)
+    user_map = _build_user_map(db, current_user.tenant_id)
+    return _enrich_delegate(new_delegate, user_map)
+
+
+@router.patch("/delegates/{delegate_id}", response_model=ApprovalDelegateResponse)
+async def patch_delegate(
+    delegate_id: str,
+    data: ApprovalDelegatePatch,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(*DELEGATE_ROLES)),
+):
+    """Toggle active status or update note on a delegation."""
+    d = db.query(ApprovalDelegate).filter(
+        and_(ApprovalDelegate.id == delegate_id, ApprovalDelegate.tenant_id == current_user.tenant_id)
+    ).first()
+    if not d:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Delegation not found"})
+    if current_user.role == UserRole.MANAGER:
+        me = db.query(User).filter(
+            and_(User.tenant_id == current_user.tenant_id, User.object_id == current_user.object_id)
+        ).first()
+        if not me or d.delegator_id != me.id:
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "UNAUTHORIZED_ROLE", "message": "Managers can only edit their own delegations"},
+            )
+    update_data = data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(d, key, value)
+    db.commit()
+    db.refresh(d)
+    log_audit(db, current_user, "update", "ApprovalDelegate", d.id)
+    user_map = _build_user_map(db, current_user.tenant_id)
+    return _enrich_delegate(d, user_map)
+
+
+@router.delete("/delegates/{delegate_id}", status_code=204)
+async def delete_delegate(
+    delegate_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(*DELEGATE_ROLES)),
+):
+    """Permanently delete a delegation."""
+    d = db.query(ApprovalDelegate).filter(
+        and_(ApprovalDelegate.id == delegate_id, ApprovalDelegate.tenant_id == current_user.tenant_id)
+    ).first()
+    if not d:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Delegation not found"})
+    if current_user.role == UserRole.MANAGER:
+        me = db.query(User).filter(
+            and_(User.tenant_id == current_user.tenant_id, User.object_id == current_user.object_id)
+        ).first()
+        if not me or d.delegator_id != me.id:
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "UNAUTHORIZED_ROLE", "message": "Managers can only delete their own delegations"},
+            )
+    log_audit(db, current_user, "delete", "ApprovalDelegate", d.id)
+    db.delete(d)
+    db.commit()

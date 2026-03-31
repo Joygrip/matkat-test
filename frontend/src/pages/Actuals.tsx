@@ -38,14 +38,15 @@ import {
   DrawerHeader,
   DrawerHeaderTitle,
 } from '@fluentui/react-components';
-import { 
-  Add24Regular, 
-  Delete24Regular, 
+import {
+  Add24Regular,
+  Delete24Regular,
   Signature24Regular,
   CheckmarkCircle24Regular,
   ClipboardTaskRegular,
+  ArrowUndo24Regular,
 } from '@fluentui/react-icons';
-import { actualsApi, ActualLine, CreateActualLine } from '../api/actuals';
+import { actualsApi, ActualLine, ActualApprovalStatus, CreateActualLine } from '../api/actuals';
 import { lookupsApi, Project, Resource } from '../api/lookups';
 import { usePeriod } from '../contexts/PeriodContext';
 import { planningApi, DemandLine, SupplyLine } from '../api/planning';
@@ -228,6 +229,8 @@ export const Actuals: React.FC = () => {
   const [editProjectId, setEditProjectId] = useState<string | undefined>(undefined);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 
+  const [approvalStatuses, setApprovalStatuses] = useState<Record<string, ActualApprovalStatus>>({});
+
   const [linesDrawerOpen, setLinesDrawerOpen] = useState(false);
   const [linesDrawerType, setLinesDrawerType] = useState<'demand' | 'supply' | 'project'>('demand');
   const [linesDrawerProjectId, setLinesDrawerProjectId] = useState<string | null>(null);
@@ -279,7 +282,14 @@ export const Actuals: React.FC = () => {
         : await actualsApi.getActualLines(undefined, ctxPeriod?.year, ctxPeriod?.month);
       setActuals(data);
       setOverLimitIds([]);
-      
+
+      // For employees, load approval statuses concurrently
+      if (isEmployee) {
+        actualsApi.getMyApprovalStatuses(ctxPeriod?.year, ctxPeriod?.month)
+          .then(statuses => setApprovalStatuses(statuses))
+          .catch(() => { /* non-blocking */ });
+      }
+
       // For employees, also load demand and supply lines for their resource only
       if (isEmployee && selectedPeriodId && myResourceId) {
         try {
@@ -388,6 +398,17 @@ export const Actuals: React.FC = () => {
     }
   };
   
+  const handleUnsign = async (actualId: string) => {
+    if (!window.confirm('Remove your signature? You will be able to edit and re-submit this actual for approval.')) return;
+    try {
+      await actualsApi.unsignActual(actualId);
+      showSuccess('Signature removed. You can now edit and re-submit.');
+      await reloadActuals();
+    } catch (err) {
+      showApiError(err as Error, 'Failed to unsign actual');
+    }
+  };
+
   const openSignDialog = (actual: ActualLine, proxy: boolean = false) => {
     setSelectedActual(actual);
     setIsProxySign(proxy);
@@ -398,11 +419,16 @@ export const Actuals: React.FC = () => {
   const reloadActuals = async () => {
     try {
       setLoading(true);
-      const data = isEmployee 
+      const data = isEmployee
         ? await actualsApi.getMyActuals(ctxPeriod?.year, ctxPeriod?.month)
         : await actualsApi.getActualLines(undefined, ctxPeriod?.year, ctxPeriod?.month);
       setActuals(data);
       setOverLimitIds([]);
+      if (isEmployee) {
+        actualsApi.getMyApprovalStatuses(ctxPeriod?.year, ctxPeriod?.month)
+          .then(statuses => setApprovalStatuses(statuses))
+          .catch(() => { /* non-blocking */ });
+      }
     } catch (err: unknown) {
       showApiError(err as Error, 'Failed to load actuals');
     } finally {
@@ -440,6 +466,7 @@ export const Actuals: React.FC = () => {
   
   const currentPeriod = ctxPeriod;
   const isLocked = currentPeriod?.status === 'locked';
+  const hasRejectedActuals = isEmployee && Object.values(approvalStatuses).some(s => s.status === 'rejected');
   
   if (loading) {
     return (
@@ -457,6 +484,13 @@ export const Actuals: React.FC = () => {
             <MessageBar intent="warning" style={{ flex: '1 1 100%' }}>
               <MessageBarBody>
                 This period is locked. Select an open period in the dropdown above, or ask Finance to unlock this period.
+              </MessageBarBody>
+            </MessageBar>
+          )}
+          {hasRejectedActuals && !isLocked && (
+            <MessageBar intent="error" style={{ flex: '1 1 100%' }}>
+              <MessageBarBody>
+                One or more of your actuals were rejected. Click <strong>Unsign</strong> on the rejected line to make corrections and re-submit for approval.
               </MessageBarBody>
             </MessageBar>
           )}
@@ -760,11 +794,31 @@ export const Actuals: React.FC = () => {
                     <Badge appearance="filled" color="informative">{a.actual_fte_percent}%</Badge>
                   </TableCell>
                   <TableCell>
-                    {a.employee_signed_at ? (
-                      <Badge appearance="filled" color="success" icon={<CheckmarkCircle24Regular />}>
-                        {a.is_proxy_signed ? 'Proxy Signed' : 'Signed'}
-                      </Badge>
-                    ) : (
+                    {a.employee_signed_at ? (() => {
+                      const apStatus = approvalStatuses[a.id];
+                      if (apStatus?.status === 'approved') {
+                        return <Badge appearance="filled" color="success" icon={<CheckmarkCircle24Regular />}>Approved</Badge>;
+                      }
+                      if (apStatus?.status === 'rejected') {
+                        return (
+                          <Badge
+                            appearance="filled"
+                            color="danger"
+                            title={apStatus.rejection_comment ?? 'Rejected by approver'}
+                          >
+                            Rejected
+                          </Badge>
+                        );
+                      }
+                      if (apStatus?.status === 'pending') {
+                        return <Badge appearance="filled" color="warning">Pending Approval</Badge>;
+                      }
+                      return (
+                        <Badge appearance="filled" color="success" icon={<CheckmarkCircle24Regular />}>
+                          {a.is_proxy_signed ? 'Proxy Signed' : 'Signed'}
+                        </Badge>
+                      );
+                    })() : (
                       <Badge appearance="outline" color="warning">Unsigned</Badge>
                     )}
                   </TableCell>
@@ -794,6 +848,15 @@ export const Actuals: React.FC = () => {
                           appearance="subtle"
                           title="Proxy Sign"
                           onClick={() => openSignDialog(a, true)}
+                        />
+                      )}
+                      {isEmployee && a.employee_signed_at && approvalStatuses[a.id]?.status === 'rejected' && !isLocked && (
+                        <Button
+                          icon={<ArrowUndo24Regular />}
+                          appearance="subtle"
+                          title="Unsign — remove signature to edit and re-submit"
+                          style={{ color: tokens.colorPaletteRedForeground1 }}
+                          onClick={() => handleUnsign(a.id)}
                         />
                       )}
                       {!a.employee_signed_at && !isLocked && (

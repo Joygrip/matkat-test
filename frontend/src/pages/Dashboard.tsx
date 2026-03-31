@@ -378,7 +378,7 @@ export function Dashboard() {
           code: '',
           tenant_id: '',
           cost_center_id: null,
-          pm_user_id: null,
+          pm_user_ids: [],
           is_active: true,
           created_at: '',
           updated_at: '',

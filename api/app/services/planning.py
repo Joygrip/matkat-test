@@ -74,26 +74,23 @@ class DemandService:
         return period
     
     def _check_pm_authorized(self, project: Project) -> None:
-        """Raise 403 if the current user is a PM but not the assigned PM for this project.
+        """Raise 403 if the current user is a PM but not an assigned PM for this project.
 
-        Only enforced when the project has an assigned PM (pm_user_id is not None).
-        If no PM is assigned yet, any PM-role user may manage demand.
-
-        Project.pm_user_id stores the DB User.id; CurrentUser carries object_id
-        (Entra OID). We resolve the assigned PM's object_id from DB and compare.
+        Only enforced when the project has assigned PMs.
+        If no PMs are assigned, any PM-role user may manage demand.
         """
         if self.current_user.role != UserRole.PM:
             return
-        if project.pm_user_id is None:
-            return  # No PM assigned — any PM can manage demand
+        if not project.pm_users:
+            return  # No PMs assigned — any PM can manage demand
 
-        assigned_pm = self.db.query(User).filter(User.id == project.pm_user_id).first()
-        if not assigned_pm or assigned_pm.object_id != self.current_user.object_id:
+        assigned_oids = {u.object_id for u in project.pm_users}
+        if self.current_user.object_id not in assigned_oids:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "code": "PM_NOT_AUTHORIZED",
-                    "message": "Only the assigned project manager can manage demand for this project",
+                    "message": "Only an assigned project manager can manage demand for this project",
                 },
             )
 

@@ -1,12 +1,12 @@
 """Actuals service - time entry and signing."""
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, func
 
 from api.app.models.actuals import ActualLine
-from api.app.models.approvals import ApprovalInstance
+from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalStatus, StepStatus
 from api.app.models.core import Period, Project, Resource, PeriodStatus, User, UserRole
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
@@ -553,6 +553,9 @@ class ActualsService:
                 }
             )
         
+        # Check period is open
+        self._check_period_open(actual.year, actual.month)
+
         if not reason or not reason.strip():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -587,20 +590,121 @@ class ActualsService:
         return actual
 
     def _ensure_approval_instance(self, actual: ActualLine) -> None:
-        """Create an approval instance if one does not already exist."""
+        """Create an approval instance if one does not already exist (or if the last one was rejected)."""
         existing = self.db.query(ApprovalInstance).filter(
             and_(
                 ApprovalInstance.tenant_id == self.current_user.tenant_id,
                 ApprovalInstance.subject_type == "actuals",
                 ApprovalInstance.subject_id == actual.id,
             )
-        ).first()
-        if existing:
+        ).order_by(ApprovalInstance.created_at.desc()).first()
+        # Skip creation only when there is an active (pending or approved) instance.
+        # If the prior instance was rejected, fall through to create a fresh one.
+        if existing and existing.status in (ApprovalStatus.PENDING, ApprovalStatus.APPROVED):
             return
 
         from api.app.services.approvals import ApprovalsService
 
         ApprovalsService(self.db, self.current_user).create_approval_for_actuals(actual)
+
+    def unsign(self, actual_id: str) -> ActualLine:
+        """Clear an employee's signature so they can edit and re-submit a rejected actual."""
+        actual = self.get_by_id(actual_id)
+        if not actual:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "Actual line not found"}
+            )
+
+        self._check_employee_owns_resource(actual.resource_id)
+        self._check_period_open(actual.year, actual.month)
+
+        if not actual.employee_signed_at:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "VALIDATION_ERROR", "message": "Actuals are not signed"}
+            )
+
+        # Only allow unsign when the approval was rejected
+        instance = self.db.query(ApprovalInstance).filter(
+            and_(
+                ApprovalInstance.tenant_id == self.current_user.tenant_id,
+                ApprovalInstance.subject_type == "actuals",
+                ApprovalInstance.subject_id == actual.id,
+            )
+        ).order_by(ApprovalInstance.created_at.desc()).first()
+
+        if instance and instance.status != ApprovalStatus.REJECTED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "VALIDATION_ERROR",
+                    "message": "Can only unsign actuals with a rejected approval",
+                }
+            )
+
+        actual.employee_signed_at = None
+        actual.employee_signed_by = None
+        actual.is_proxy_signed = False
+        actual.proxy_sign_reason = None
+
+        self.db.commit()
+        self.db.refresh(actual)
+
+        log_audit(
+            self.db, self.current_user,
+            action="unsign",
+            entity_type="ActualLine",
+            entity_id=actual.id,
+            new_values={"employee_signed_at": None},
+        )
+
+        return actual
+
+    def get_my_approval_statuses(
+        self, year: Optional[int] = None, month: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Return approval status keyed by actual_line_id for the current user's actuals."""
+        actuals = self.get_my_actuals(year, month)
+        if not actuals:
+            return {}
+
+        actual_ids = [a.id for a in actuals]
+
+        instances = self.db.query(ApprovalInstance).filter(
+            and_(
+                ApprovalInstance.tenant_id == self.current_user.tenant_id,
+                ApprovalInstance.subject_type == "actuals",
+                ApprovalInstance.subject_id.in_(actual_ids),
+            )
+        ).order_by(ApprovalInstance.created_at.desc()).all()
+
+        # Latest instance per actual_id
+        latest: Dict[str, ApprovalInstance] = {}
+        for inst in instances:
+            if inst.subject_id not in latest:
+                latest[inst.subject_id] = inst
+
+        result: Dict[str, Any] = {}
+        for actual_id, inst in latest.items():
+            rejection_comment: Optional[str] = None
+            if inst.status == ApprovalStatus.REJECTED:
+                rejected_step = self.db.query(ApprovalStep).filter(
+                    and_(
+                        ApprovalStep.instance_id == inst.id,
+                        ApprovalStep.status == StepStatus.REJECTED,
+                    )
+                ).first()
+                if rejected_step and rejected_step.comment:
+                    rejection_comment = rejected_step.comment
+
+            result[actual_id] = {
+                "approval_id": inst.id,
+                "status": inst.status.value,
+                "rejection_comment": rejection_comment,
+            }
+
+        return result
     
     def get_resource_monthly_total(self, resource_id: str, year: int, month: int) -> int:
         """Get total FTE for a resource in a given month."""

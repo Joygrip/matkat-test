@@ -102,7 +102,6 @@ def test_full_approval_workflow(client, db):
         tenant_id=tenant_id,
         name="Test Project",
         code="TP",
-        pm_user_id=None,
     )
     db.add(project)
     db.commit()
@@ -223,7 +222,6 @@ def test_skip_director_when_ro_equals_director(client, db):
         tenant_id=tenant_id,
         name="Test Project 2",
         code="TP2",
-        pm_user_id=None,
     )
     db.add(project)
     

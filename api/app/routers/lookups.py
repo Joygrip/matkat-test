@@ -6,8 +6,9 @@ from sqlalchemy import and_, or_
 
 from api.app.db.engine import get_db
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
+from sqlalchemy import exists as sa_exists
 from api.app.models.core import (
-    CostCenter, Project, Resource, Placeholder, User, UserRole
+    CostCenter, Project, ProjectPM, Resource, Placeholder, User, UserRole
 )
 
 _SCOPED_ROLES = (UserRole.MANAGER,)
@@ -17,6 +18,22 @@ from api.app.schemas.admin import (
 )
 
 router = APIRouter(prefix="/lookups", tags=["Lookups"])
+
+
+def _enrich_project(project: Project) -> dict:
+    return {
+        "id": project.id,
+        "tenant_id": project.tenant_id,
+        "code": project.code,
+        "name": project.name,
+        "pm_user_ids": [u.id for u in project.pm_users],
+        "cost_center_id": project.cost_center_id,
+        "start_date": project.start_date,
+        "end_date": project.end_date,
+        "is_active": project.is_active,
+        "created_at": project.created_at,
+        "updated_at": project.updated_at,
+    }
 
 
 def _enrich_placeholder(placeholder: Placeholder) -> dict:
@@ -62,9 +79,10 @@ async def list_projects(
     List all projects for the tenant (active and inactive).
     Accessible to all roles (read-only).
     """
-    return db.query(Project).filter(
+    projects = db.query(Project).filter(
         Project.tenant_id == current_user.tenant_id
     ).order_by(Project.name).all()
+    return [_enrich_project(p) for p in projects]
 
 
 @router.get("/resources", response_model=list[ResourceResponse])
@@ -117,7 +135,7 @@ async def list_projects_scoped(
 ):
     """
     Projects scoped to the current user:
-    - PM: only projects where pm_user_id matches this user OR pm_user_id is NULL
+    - PM: only projects where this user is an assigned PM OR project has no PMs
     - Admin/Finance: all projects (same as /lookups/projects)
     """
     query = db.query(Project).filter(Project.tenant_id == current_user.tenant_id)
@@ -130,9 +148,18 @@ async def list_projects_scoped(
         ).first()
         if pm_user:
             query = query.filter(
-                or_(Project.pm_user_id == pm_user.id, Project.pm_user_id.is_(None))
+                or_(
+                    sa_exists().where(
+                        and_(
+                            ProjectPM.project_id == Project.id,
+                            ProjectPM.user_id == pm_user.id,
+                        )
+                    ),
+                    ~sa_exists().where(ProjectPM.project_id == Project.id),
+                )
             )
-    return query.order_by(Project.name).all()
+    projects = query.order_by(Project.name).all()
+    return [_enrich_project(p) for p in projects]
 
 
 @router.get("/resources/scoped", response_model=list[ResourceResponse])

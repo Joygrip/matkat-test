@@ -230,20 +230,23 @@ class ConflictDetectionService:
         )
         project_map = {p.id: p for p in projects}
 
-        pm_user_ids = {p.pm_user_id for p in projects if p.pm_user_id}
-        pm_users = self._load_users(pm_user_ids)
+        # Collect all PM user IDs across all projects
+        all_pm_user_ids = {u.id for p in projects for u in p.pm_users}
+        pm_users = self._load_users(all_pm_user_ids)
 
         result: dict = {}
         for resource_id, proj_ids in project_by_resource.items():
-            seen = set()
+            seen: set = set()
             pm_list = []
             for pid in proj_ids:
                 project = project_map.get(pid)
-                if project and project.pm_user_id and project.pm_user_id not in seen:
-                    user = pm_users.get(project.pm_user_id)
-                    if user:
-                        pm_list.append(user)
-                        seen.add(project.pm_user_id)
+                if project:
+                    for pm in project.pm_users:
+                        if pm.id not in seen:
+                            user = pm_users.get(pm.id)
+                            if user:
+                                pm_list.append(user)
+                                seen.add(pm.id)
             result[resource_id] = pm_list
 
         return result

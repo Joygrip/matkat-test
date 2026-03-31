@@ -50,15 +50,17 @@ def _make_resource(db, resource_id, cc_id):
 
 
 def _make_project(db, project_id, pm_user_id=None):
-    from api.app.models.core import Project
+    from api.app.models.core import Project, ProjectPM
     p = Project(
         id=project_id,
         tenant_id=TENANT,
         code=project_id,
         name=project_id,
-        pm_user_id=pm_user_id,
     )
     db.add(p)
+    db.flush()
+    if pm_user_id:
+        db.add(ProjectPM(project_id=project_id, user_id=pm_user_id, tenant_id=TENANT))
     return p
 
 

@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from api.app.models.core import (
-    User, CostCenter, Project, Resource, ResourceType, Period, Placeholder,
+    User, CostCenter, Project, ProjectPM, Resource, ResourceType, Period, Placeholder,
     UserRole, PeriodStatus,
 )
 from api.app.models.planning import DemandLine, SupplyLine
@@ -76,13 +76,22 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
     
     # Create projects
     projects = [
-        Project(tenant_id=tenant_id, code="PRJ-001", name="Project Alpha", pm_user_id=users[2].id, cost_center_id=cc_software.id),
-        Project(tenant_id=tenant_id, code="PRJ-002", name="Project Beta", pm_user_id=users[2].id, cost_center_id=cc_software.id),
-        Project(tenant_id=tenant_id, code="PRJ-003", name="Project Gamma", pm_user_id=users[3].id, cost_center_id=cc_qa.id),
-        Project(tenant_id=tenant_id, code="PRJ-004", name="Infrastructure Upgrade", pm_user_id=users[3].id, cost_center_id=cc_infra.id),
-        Project(tenant_id=tenant_id, code="PRJ-005", name="Marketing Campaign", pm_user_id=users[2].id, cost_center_id=cc_marketing.id),
+        Project(tenant_id=tenant_id, code="PRJ-001", name="Project Alpha", cost_center_id=cc_software.id),
+        Project(tenant_id=tenant_id, code="PRJ-002", name="Project Beta", cost_center_id=cc_software.id),
+        Project(tenant_id=tenant_id, code="PRJ-003", name="Project Gamma", cost_center_id=cc_qa.id),
+        Project(tenant_id=tenant_id, code="PRJ-004", name="Infrastructure Upgrade", cost_center_id=cc_infra.id),
+        Project(tenant_id=tenant_id, code="PRJ-005", name="Marketing Campaign", cost_center_id=cc_marketing.id),
     ]
     db.add_all(projects)
+    db.flush()
+    # Assign PMs
+    db.add_all([
+        ProjectPM(project_id=projects[0].id, user_id=users[2].id, tenant_id=tenant_id),
+        ProjectPM(project_id=projects[1].id, user_id=users[2].id, tenant_id=tenant_id),
+        ProjectPM(project_id=projects[2].id, user_id=users[3].id, tenant_id=tenant_id),
+        ProjectPM(project_id=projects[3].id, user_id=users[3].id, tenant_id=tenant_id),
+        ProjectPM(project_id=projects[4].id, user_id=users[2].id, tenant_id=tenant_id),
+    ])
     db.flush()
     
     # Create resources

@@ -500,6 +500,12 @@ export const Approvals: React.FC = () => {
                     </Badge>
                   )}
 
+                  {approval.is_delegated && approval.delegated_for && (
+                    <Badge appearance="tint" color="subtle" style={{ flexShrink: 0 }}>
+                      Acting for {approval.delegated_for}
+                    </Badge>
+                  )}
+
                   <Badge
                     appearance="filled"
                     color={overallStatusColor(approval.status)}
@@ -552,7 +558,7 @@ export const Approvals: React.FC = () => {
                             icon={<Checkmark24Regular />}
                             size="small"
                             onClick={() => {
-                              const ds = getDirectorStep(approval);
+                              const ds = getSeniorManagerStep(approval);
                               if (ds) openActionDialog(approval, ds, 'proxy-approve');
                             }}
                           >

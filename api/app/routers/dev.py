@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from api.app.config import get_settings
 from api.app.db.engine import get_db
 from api.app.models.core import (
-    User, CostCenter, Project, Resource, ResourceType, Period, Placeholder,
+    User, CostCenter, Project, ProjectPM, Resource, ResourceType, Period, Placeholder,
     UserRole, PeriodStatus,
 )
 from api.app.schemas.common import MessageResponse
@@ -66,18 +66,21 @@ def seed_database_for_tenant(db: Session, tenant_id: str) -> str:
             tenant_id=tenant_id,
             code="PRJ-001",
             name="Project Alpha",
-            pm_user_id=users[2].id,
             cost_center_id=cc_software.id,
         ),
         Project(
             tenant_id=tenant_id,
             code="PRJ-002",
             name="Project Beta",
-            pm_user_id=users[2].id,
             cost_center_id=cc_software.id,
         ),
     ]
     db.add_all(projects)
+    db.flush()
+    db.add_all([
+        ProjectPM(project_id=projects[0].id, user_id=users[2].id, tenant_id=tenant_id),
+        ProjectPM(project_id=projects[1].id, user_id=users[2].id, tenant_id=tenant_id),
+    ])
     # Create resources
     resources = [
         Resource(

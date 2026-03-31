@@ -74,6 +74,24 @@ async def get_my_resource(
     return {"resource_id": resource_id}
 
 
+@router.get("/my/approval-statuses")
+async def get_my_approval_statuses(
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None, ge=1, le=12),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Get approval status for the current user's signed actuals.
+
+    Returns a mapping of actual_line_id -> { approval_id, status, rejection_comment }.
+
+    Accessible to: All authenticated users (own data only)
+    """
+    service = ActualsService(db, current_user)
+    return {"statuses": service.get_my_approval_statuses(year, month)}
+
+
 @router.get("", response_model=list[ActualLineResponse])
 async def list_actuals(
     year: Optional[int] = Query(None),
@@ -196,6 +214,26 @@ async def sign_actual(
     """
     service = ActualsService(db, current_user)
     line = service.sign(actual_id)
+    return _to_response(line)
+
+
+@router.delete("/{actual_id}/sign", response_model=ActualLineResponse)
+async def unsign_actual(
+    actual_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(
+        UserRole.ADMIN, UserRole.EMPLOYEE
+    )),
+):
+    """
+    Remove an employee's signature from a rejected actual, allowing re-editing and re-submission.
+
+    Only permitted when the associated approval was rejected and the period is still open.
+
+    Accessible to: Admin, Employee (own)
+    """
+    service = ActualsService(db, current_user)
+    line = service.unsign(actual_id)
     return _to_response(line)
 
 

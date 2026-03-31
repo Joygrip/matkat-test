@@ -2,6 +2,7 @@
  * Admin API client methods.
  */
 import { apiClient } from './client';
+import type { UserRole } from '../types';
 
 // Types
 export interface CostCenter {
@@ -21,7 +22,7 @@ export interface Project {
   tenant_id: string;
   code: string;
   name: string;
-  pm_user_id: string | null;
+  pm_user_ids: string[];
   cost_center_id: string | null;
   start_date: string | null;
   end_date: string | null;
@@ -89,6 +90,20 @@ export interface AdminUser {
   role: string;
 }
 
+export interface AdminUserDetail {
+  id: string;
+  tenant_id: string;
+  object_id: string;
+  email: string;
+  display_name: string;
+  role: UserRole;
+  is_active: boolean;
+  cost_center_id: string | null;
+  cost_center_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // API methods
 export const adminApi = {
   // Cost Centers
@@ -106,7 +121,7 @@ export const adminApi = {
 
   // Projects
   listProjects: () => apiClient.get<Project[]>('/admin/projects'),
-  createProject: (data: { code: string; name: string; pm_user_id?: string; cost_center_id?: string }) =>
+  createProject: (data: { code: string; name: string; pm_user_ids?: string[]; cost_center_id?: string }) =>
     apiClient.post<Project>('/admin/projects', data),
   updateProject: (id: string, data: Partial<Project>) =>
     apiClient.patch<Project>(`/admin/projects/${id}`, data),
@@ -163,6 +178,22 @@ export const adminApi = {
     apiClient.delete<void>(`/admin/reporting/overrides/${id}`),
   syncReportingCache: () =>
     apiClient.post<{ rows_written: number; message: string }>('/admin/reporting/sync-cache', {}),
+
+  // User management (role assignment)
+  listAdminUsers: () =>
+    apiClient.get<AdminUserDetail[]>('/admin/users'),
+  updateAdminUser: (id: string, data: { role?: UserRole; is_active?: boolean }) =>
+    apiClient.patch<AdminUserDetail>(`/admin/users/${id}`, data),
+
+  // Approval Delegates
+  listDelegates: () =>
+    apiClient.get<ApprovalDelegate[]>('/admin/delegates'),
+  createDelegate: (data: { delegator_id: string; delegate_id: string; note?: string }) =>
+    apiClient.post<ApprovalDelegate>('/admin/delegates', data),
+  patchDelegate: (id: string, data: { is_active?: boolean; note?: string }) =>
+    apiClient.patch<ApprovalDelegate>(`/admin/delegates/${id}`, data),
+  deleteDelegate: (id: string) =>
+    apiClient.delete<void>(`/admin/delegates/${id}`),
 };
 
 // Types for reporting
@@ -171,6 +202,19 @@ export interface ManagerOverride {
   tenant_id: string;
   employee_object_id: string;
   manager_object_id: string;
+  is_active: boolean;
+  note: string | null;
+  created_at: string;
+  created_by: string;
+}
+
+export interface ApprovalDelegate {
+  id: string;
+  tenant_id: string;
+  delegator_id: string;
+  delegate_id: string;
+  delegator_name: string | null;
+  delegate_name: string | null;
   is_active: boolean;
   note: string | null;
   created_at: string;

@@ -46,6 +46,12 @@ export interface ResourceMonthlyTotal {
   lines: ActualLine[];
 }
 
+export interface ActualApprovalStatus {
+  approval_id: string;
+  status: 'pending' | 'approved' | 'rejected';
+  rejection_comment?: string | null;
+}
+
 export const actualsApi = {
   async getActualLines(periodId?: string, year?: number, month?: number): Promise<ActualLine[]> {
     const params = new URLSearchParams();
@@ -90,5 +96,18 @@ export const actualsApi = {
   
   async proxySignActuals(actualId: string, reason: string): Promise<ActualLine> {
     return apiClient.post<ActualLine>(`/actuals/${actualId}/proxy-sign`, { reason });
+  },
+
+  async unsignActual(actualId: string): Promise<ActualLine> {
+    return apiClient.delete<ActualLine>(`/actuals/${actualId}/sign`);
+  },
+
+  async getMyApprovalStatuses(year?: number, month?: number): Promise<Record<string, ActualApprovalStatus>> {
+    const params = new URLSearchParams();
+    if (year) params.append('year', String(year));
+    if (month) params.append('month', String(month));
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const response = await apiClient.get<{ statuses: Record<string, ActualApprovalStatus> }>(`/actuals/my/approval-statuses${query}`);
+    return response.statuses;
   },
 };

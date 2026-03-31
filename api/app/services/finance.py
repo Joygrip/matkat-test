@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from api.app.auth.dependencies import CurrentUser
 from api.app.models.actuals import ActualLine
-from api.app.models.core import User, Project, Resource, CostCenter
+from sqlalchemy import exists as sa_exists
+from api.app.models.core import User, Project, ProjectPM, Resource, CostCenter
 from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalStatus, StepStatus
 from api.app.models.finance import FinanceSetting
 from api.app.schemas.finance import (
@@ -308,7 +309,18 @@ class FinanceService:
                 Project.cost_center_id == cost_center_id,
             )
             if self.current_user.role == "PM":
-                projects_q = projects_q.filter(Project.pm_user_id == self.current_user.object_id)
+                pm_user = self.db.query(User).filter(
+                    User.tenant_id == self.current_user.tenant_id,
+                    User.object_id == self.current_user.object_id,
+                ).first()
+                if pm_user:
+                    projects_q = projects_q.filter(
+                        sa_exists().where(
+                            and_(ProjectPM.project_id == Project.id, ProjectPM.user_id == pm_user.id)
+                        )
+                    )
+                else:
+                    projects_q = projects_q.filter(False)
             projects = projects_q.all()
             project_map = {p.id: p.name for p in projects}
             project_ids = list(project_map.keys())
@@ -414,15 +426,23 @@ class FinanceService:
 
         # Project mode
         if self.current_user.role == "PM":
-            proj = (
-                self.db.query(Project)
-                .filter(
-                    Project.tenant_id == self.current_user.tenant_id,
-                    Project.id == project_id,
-                    Project.pm_user_id == self.current_user.object_id,
+            pm_user = self.db.query(User).filter(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            ).first()
+            proj = None
+            if pm_user:
+                proj = (
+                    self.db.query(Project)
+                    .filter(
+                        Project.tenant_id == self.current_user.tenant_id,
+                        Project.id == project_id,
+                        sa_exists().where(
+                            and_(ProjectPM.project_id == Project.id, ProjectPM.user_id == pm_user.id)
+                        ),
+                    )
+                    .first()
                 )
-                .first()
-            )
             if proj is None:
                 raise HTTPException(status_code=403, detail="Access denied to this project.")
         else:
@@ -597,15 +617,19 @@ class FinanceService:
         # 4. PM role restriction — only their own projects
         pm_project_ids: Optional[set] = None
         if self.current_user.role == "PM":
-            pm_rows = (
-                self.db.query(Project.id)
-                .filter(
-                    Project.tenant_id == self.current_user.tenant_id,
-                    Project.pm_user_id == self.current_user.object_id,
+            pm_user = self.db.query(User).filter(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            ).first()
+            if pm_user:
+                pm_rows = (
+                    self.db.query(ProjectPM.project_id)
+                    .filter(ProjectPM.user_id == pm_user.id)
+                    .all()
                 )
-                .all()
-            )
-            pm_project_ids = {row.id for row in pm_rows}
+                pm_project_ids = {row.project_id for row in pm_rows}
+            else:
+                pm_project_ids = set()
 
         # 5. Build project name lookup
         project_name_map = {

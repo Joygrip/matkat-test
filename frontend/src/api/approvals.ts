@@ -29,6 +29,9 @@ export interface ApprovalInstance {
   project_name?: string | null;
   project_id?: string | null;
   period_label?: string | null;
+  // Delegation info: set when this item is visible via a delegate grant
+  is_delegated?: boolean;
+  delegated_for?: string | null;
 }
 
 export const approvalsApi = {

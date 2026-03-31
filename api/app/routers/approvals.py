@@ -39,6 +39,9 @@ class ApprovalInstanceResponse(BaseModel):
     project_name: Optional[str] = None
     project_id: Optional[str] = None
     period_label: Optional[str] = None
+    # Delegation: present when this inbox item reached the user via a delegate grant
+    is_delegated: bool = False
+    delegated_for: Optional[str] = None
 
 
 class ActionRequest(BaseModel):
@@ -110,7 +113,18 @@ async def get_inbox(
     """
     service = ApprovalsService(db, current_user)
     instances = service.get_inbox()
-    return [_to_response(i, **_enrich_for_actuals(db, i)) for i in instances]
+    user = service._get_user()
+    results = []
+    for i in instances:
+        enrichment = _enrich_for_actuals(db, i)
+        if user:
+            current_step = service._get_current_step(i)
+            if current_step:
+                is_delegated, delegated_for = service._get_delegation_info(user, current_step)
+                enrichment["is_delegated"] = is_delegated
+                enrichment["delegated_for"] = delegated_for
+        results.append(_to_response(i, **enrichment))
+    return results
 
 
 @router.get("/{instance_id}", response_model=ApprovalInstanceResponse)

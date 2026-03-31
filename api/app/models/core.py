@@ -107,22 +107,37 @@ class CostCenter(Base):
 class Project(Base):
     """Project entity."""
     __tablename__ = "projects"
-    
+
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     code: Mapped[str] = mapped_column(String(50), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    pm_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     cost_center_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("cost_centers.id"), nullable=True)
     start_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     end_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
+    # Many-to-many: multiple PMs per project
+    pm_users: Mapped[list["User"]] = relationship(
+        "User",
+        secondary="project_pms",
+        lazy="select",
+    )
+
     __table_args__ = (
         Index("ix_projects_tenant_code", "tenant_id", "code", unique=True),
     )
+
+
+class ProjectPM(Base):
+    """Association table: multiple PMs per project."""
+    __tablename__ = "project_pms"
+
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
 
 
 class ResourceType(str, enum.Enum):
@@ -299,6 +314,37 @@ class ManagerOverride(Base):
         Index(
             "ix_mo_tenant_employee_manager",
             "tenant_id", "employee_object_id", "manager_object_id",
+            unique=True,
+        ),
+    )
+
+
+class ApprovalDelegate(Base):
+    """
+    Grants another user (delegate_id) the authority to action approval steps
+    on behalf of the original approver (delegator_id) during absences.
+    Managed by Admin, Finance, or the delegating Manager themselves.
+    """
+    __tablename__ = "approval_delegates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    # The manager whose approvals are being delegated (User.id)
+    delegator_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    # The user who will act on those approvals (User.id)
+    delegate_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)  # object_id of creator
+
+    delegator: Mapped["User"] = relationship(foreign_keys=[delegator_id])
+    delegate: Mapped["User"] = relationship(foreign_keys=[delegate_id])
+
+    __table_args__ = (
+        Index(
+            "ix_ad_tenant_delegator_delegate",
+            "tenant_id", "delegator_id", "delegate_id",
             unique=True,
         ),
     )

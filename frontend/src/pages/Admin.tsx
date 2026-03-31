@@ -55,8 +55,11 @@ import {
   Holiday,
   Setting,
   ManagerOverride,
+  ApprovalDelegate,
   AdminUser,
+  AdminUserDetail,
 } from '../api/admin';
+import type { UserRole } from '../types';
 import { useToast } from '../hooks/useToast';
 import { useAuth } from '../auth/AuthProvider';
 import { AdminToolbar } from '../components/admin/AdminToolbar';
@@ -148,7 +151,9 @@ type TabValue =
   | 'placeholders'
   | 'holidays'
   | 'settings'
-  | 'manager-overrides';
+  | 'manager-overrides'
+  | 'delegates'
+  | 'users';
 
 export function Admin() {
   const styles = useStyles();
@@ -159,6 +164,7 @@ export function Admin() {
 
   const canManageMasterData = user?.role === 'Admin' || user?.role === 'Finance';
   const canManageSettings = user?.role === 'Admin';
+  const canManageDelegates = user?.role === 'Admin' || user?.role === 'Finance' || user?.role === 'Manager';
 
   // Data
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
@@ -168,7 +174,9 @@ export function Admin() {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [settings, setSettings] = useState<Setting[]>([]);
   const [managerOverrides, setManagerOverrides] = useState<ManagerOverride[]>([]);
+  const [delegates, setDelegates] = useState<ApprovalDelegate[]>([]);
   const [pmUsers, setPmUsers] = useState<AdminUser[]>([]);
+  const [adminUsers, setAdminUsers] = useState<AdminUserDetail[]>([]);
 
   // Filter state
   const [searchText, setSearchText] = useState('');
@@ -228,6 +236,16 @@ export function Admin() {
           break;
         case 'manager-overrides':
           if (canManageSettings) setManagerOverrides(await adminApi.listManagerOverrides());
+          break;
+        case 'delegates':
+          if (canManageDelegates) {
+            const [dels, mgrs] = await Promise.all([adminApi.listDelegates(), adminApi.listUsers()]);
+            setDelegates(dels);
+            setPmUsers(mgrs);
+          }
+          break;
+        case 'users':
+          if (canManageSettings) setAdminUsers(await adminApi.listAdminUsers());
           break;
       }
     } catch (error) {
@@ -289,7 +307,7 @@ export function Admin() {
           if (editItem) {
             await adminApi.updateProject((editItem as Project).id, formData as Partial<Project>);
           } else {
-            await adminApi.createProject(formData as { code: string; name: string; pm_user_id?: string });
+            await adminApi.createProject(formData as { code: string; name: string; pm_user_ids?: string[] });
           }
           break;
         case 'resources':
@@ -350,6 +368,30 @@ export function Admin() {
             await adminApi.createManagerOverride(formData as { employee_object_id: string; manager_object_id: string; note?: string });
           }
           break;
+        case 'delegates':
+          if (editItem) {
+            await adminApi.patchDelegate(
+              (editItem as ApprovalDelegate).id,
+              { is_active: formData.is_active as boolean, note: formData.note as string | undefined },
+            );
+          } else {
+            let delegatorId = formData.delegator_id as string;
+            if (user?.role === 'Manager') {
+              // Manager always delegates their own approvals — find own db User.id by email
+              const me = pmUsers.find((u) => u.email?.toLowerCase() === user.email?.toLowerCase());
+              delegatorId = me?.id ?? '';
+            }
+            if (!delegatorId || !(formData.delegate_id as string)) {
+              showApiError(new Error('Delegator and delegate are required'), 'Validation');
+              return;
+            }
+            await adminApi.createDelegate({
+              delegator_id: delegatorId,
+              delegate_id: formData.delegate_id as string,
+              note: formData.note as string | undefined,
+            });
+          }
+          break;
       }
 
       showSuccess('Saved', `${selectedTab} saved successfully`);
@@ -388,6 +430,9 @@ export function Admin() {
           break;
         case 'manager-overrides':
           await adminApi.deleteManagerOverride((item as ManagerOverride).id);
+          break;
+        case 'delegates':
+          await adminApi.deleteDelegate((item as ApprovalDelegate).id);
           break;
       }
       showSuccess('Deleted', 'Item deleted successfully');
@@ -438,14 +483,23 @@ export function Admin() {
     return matchSearch && matchCC;
   });
 
+  const filteredAdminUsers = adminUsers.filter((u) => {
+    const q = searchText.toLowerCase();
+    const matchSearch = !q || u.display_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
+    const matchRole = !filterStatus || u.role === filterStatus;
+    return matchSearch && matchRole;
+  });
+
   const clearFilters = () => {
     setSearchText('');
     setFilterCostCenter('');
     setFilterStatus('');
   };
 
-  const pmNameById = (id: string | null) =>
-    id ? (pmUsers.find((u) => u.id === id)?.display_name ?? id) : '—';
+  const pmNamesForProject = (ids: string[]) =>
+    ids.length === 0
+      ? '—'
+      : ids.map((id) => pmUsers.find((u) => u.id === id)?.display_name ?? id).join(', ');
 
   // ── Table renderers ──────────────────────────────────────────────────────
 
@@ -544,7 +598,7 @@ export function Admin() {
                   <TableRow key={project.id}>
                     <TableCell>{project.code}</TableCell>
                     <TableCell>{project.name}</TableCell>
-                    <TableCell>{pmNameById(project.pm_user_id)}</TableCell>
+                    <TableCell>{pmNamesForProject(project.pm_user_ids)}</TableCell>
                     <TableCell>
                       {canManageMasterData ? (
                         <div className={styles.statusToggle}>
@@ -820,6 +874,136 @@ export function Admin() {
             </Table>
           </>
         );
+
+      case 'delegates':
+        return (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHeaderCell>Delegator (approvals owner)</TableHeaderCell>
+                <TableHeaderCell>Delegate (acts on their behalf)</TableHeaderCell>
+                <TableHeaderCell>Active</TableHeaderCell>
+                <TableHeaderCell>Note</TableHeaderCell>
+                <TableHeaderCell>Actions</TableHeaderCell>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {delegates.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5}>
+                    <Text className={styles.emptyHint}>No approval delegates configured.</Text>
+                  </TableCell>
+                </TableRow>
+              )}
+              {delegates.map((d) => (
+                <TableRow key={d.id}>
+                  <TableCell>{d.delegator_name || d.delegator_id}</TableCell>
+                  <TableCell>{d.delegate_name || d.delegate_id}</TableCell>
+                  <TableCell>
+                    <Badge appearance="filled" color={d.is_active ? 'success' : 'danger'}>
+                      {d.is_active ? 'Active' : 'Inactive'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{d.note || '—'}</TableCell>
+                  <TableCell>
+                    <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(d)} />
+                    <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(d)} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        );
+
+      case 'users':
+        return (
+          <>
+            <AdminToolbar
+              searchValue={searchText}
+              onSearchChange={setSearchText}
+              searchPlaceholder="Search by name or email…"
+              filterValue={filterStatus}
+              onFilterChange={setFilterStatus}
+              filterOptions={[
+                { value: 'Admin', label: 'Admin' },
+                { value: 'Finance', label: 'Finance' },
+                { value: 'PM', label: 'PM' },
+                { value: 'Manager', label: 'Manager' },
+                { value: 'Employee', label: 'Employee' },
+              ]}
+              filterPlaceholder="All roles"
+              onClear={clearFilters}
+            />
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHeaderCell>Name</TableHeaderCell>
+                  <TableHeaderCell>Email</TableHeaderCell>
+                  <TableHeaderCell>Role</TableHeaderCell>
+                  <TableHeaderCell>Cost Center</TableHeaderCell>
+                  <TableHeaderCell>Active</TableHeaderCell>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredAdminUsers.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5}>
+                      <Text className={styles.emptyHint}>No users match the current filter.</Text>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {filteredAdminUsers.map((u) => (
+                  <TableRow key={u.id}>
+                    <TableCell>{u.display_name}</TableCell>
+                    <TableCell>{u.email}</TableCell>
+                    <TableCell>
+                      <select
+                        className={styles.nativeSelect}
+                        value={u.role}
+                        disabled={u.object_id === user?.object_id}
+                        onChange={async (e) => {
+                          const newRole = e.target.value as UserRole;
+                          if (newRole === 'Admin' && !confirm('Assign Admin role? This gives full system access.')) return;
+                          try {
+                            const updated = await adminApi.updateAdminUser(u.id, { role: newRole });
+                            setAdminUsers((prev) => prev.map((x) => (x.id === u.id ? updated : x)));
+                            showSuccess('Role updated');
+                          } catch (err) {
+                            showApiError(err as Error, 'Failed to update role');
+                          }
+                        }}
+                      >
+                        {(['Admin', 'Finance', 'PM', 'Manager', 'Employee'] as UserRole[]).map((r) => (
+                          <option key={r} value={r}>{r}</option>
+                        ))}
+                      </select>
+                    </TableCell>
+                    <TableCell>{u.cost_center_name || '—'}</TableCell>
+                    <TableCell>
+                      <select
+                        className={styles.nativeSelect}
+                        value={u.is_active ? 'active' : 'inactive'}
+                        disabled={u.object_id === user?.object_id}
+                        onChange={async (e) => {
+                          try {
+                            const updated = await adminApi.updateAdminUser(u.id, { is_active: e.target.value === 'active' });
+                            setAdminUsers((prev) => prev.map((x) => (x.id === u.id ? updated : x)));
+                            showSuccess('Status updated');
+                          } catch (err) {
+                            showApiError(err as Error, 'Failed to update status');
+                          }
+                        }}
+                      >
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                      </select>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
+        );
     }
   };
 
@@ -865,13 +1049,16 @@ export function Admin() {
               />
             </div>
             <div className={styles.dialogField}>
-              <Label>Project Manager</Label>
+              <Label>Project Managers (hold Ctrl/Cmd to select multiple)</Label>
               <select
                 className={styles.nativeSelect}
-                value={String(formData.pm_user_id || '')}
-                onChange={(e) => setFormData({ ...formData, pm_user_id: e.target.value || null })}
+                multiple
+                value={(formData.pm_user_ids as string[]) ?? []}
+                onChange={(e) => {
+                  const selected = Array.from(e.target.selectedOptions, (o) => o.value);
+                  setFormData({ ...formData, pm_user_ids: selected });
+                }}
               >
-                <option value="">— No PM assigned —</option>
                 {pmUsers.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.display_name} ({u.email})
@@ -1082,6 +1269,61 @@ export function Admin() {
             </div>
           </>
         );
+
+      case 'delegates':
+        return (
+          <>
+            {!editItem ? (
+              <>
+                {user?.role !== 'Manager' && (
+                  <div className={styles.dialogField}>
+                    <Label required>Delegator (whose approvals to delegate)</Label>
+                    <Select
+                      value={String(formData.delegator_id || '')}
+                      onChange={(_, d) => setFormData({ ...formData, delegator_id: d.value })}
+                    >
+                      <option value="">— select manager —</option>
+                      {pmUsers.filter((u) => u.role === 'Manager' || u.role === 'Admin').map((u) => (
+                        <option key={u.id} value={u.id}>{u.display_name}</option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
+                {user?.role === 'Manager' && (
+                  <div className={styles.dialogField}>
+                    <Label>Delegator</Label>
+                    <Input value={user.display_name} readOnly />
+                  </div>
+                )}
+                <div className={styles.dialogField}>
+                  <Label required>Delegate (who will approve on their behalf)</Label>
+                  <Select
+                    value={String(formData.delegate_id || '')}
+                    onChange={(_, d) => setFormData({ ...formData, delegate_id: d.value })}
+                  >
+                    <option value="">— select delegate —</option>
+                    {pmUsers.map((u) => (
+                      <option key={u.id} value={u.id}>{u.display_name} ({u.role})</option>
+                    ))}
+                  </Select>
+                </div>
+              </>
+            ) : (
+              <Checkbox
+                label="Active"
+                checked={formData.is_active !== false}
+                onChange={(_, d) => setFormData({ ...formData, is_active: d.checked })}
+              />
+            )}
+            <div className={styles.dialogField}>
+              <Label>Note</Label>
+              <Input
+                value={String(formData.note || '')}
+                onChange={(_, d) => setFormData({ ...formData, note: d.value })}
+              />
+            </div>
+          </>
+        );
     }
   };
 
@@ -1169,6 +1411,8 @@ export function Admin() {
     'holidays': 'Holidays',
     'settings': 'Settings',
     'manager-overrides': 'Manager Overrides',
+    'delegates': 'Approval Delegates',
+    'users': 'Users',
   };
 
   const detailDialogTitle =
@@ -1195,6 +1439,12 @@ export function Admin() {
           {canManageSettings && (
             <Tab value="manager-overrides" icon={<PeopleTeamRegular />}>Manager Overrides</Tab>
           )}
+          {canManageDelegates && (
+            <Tab value="delegates" icon={<PeopleTeamRegular />}>Approval Delegates</Tab>
+          )}
+          {canManageSettings && (
+            <Tab value="users" icon={<PeopleTeamRegular />}>Users</Tab>
+          )}
         </TabList>
 
         <div className={styles.tabContent}>
@@ -1212,8 +1462,9 @@ export function Admin() {
                 </p>
               )}
             </div>
-            {(canManageMasterData ||
-              ((selectedTab === 'settings' || selectedTab === 'manager-overrides') && canManageSettings)) && (
+            {selectedTab !== 'users' && (canManageMasterData ||
+              ((selectedTab === 'settings' || selectedTab === 'manager-overrides') && canManageSettings) ||
+              (selectedTab === 'delegates' && canManageDelegates)) && (
               <Button appearance="primary" icon={<AddRegular />} onClick={openCreateDialog}>
                 Add {tabLabels[selectedTab].replace(/s$/, '')}
               </Button>

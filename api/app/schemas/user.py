@@ -51,6 +51,30 @@ class MeResponse(BaseModel):
     display_name: str
     role: str
     permissions: list[str]
-    
+
     class Config:
         from_attributes = True
+
+
+class UserAdminResponse(BaseModel):
+    """User record for admin user management (includes cost_center_name)."""
+    id: str
+    tenant_id: str
+    object_id: str
+    email: str
+    display_name: str
+    role: UserRole
+    is_active: bool
+    cost_center_id: Optional[str] = None
+    cost_center_name: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UserAdminUpdate(BaseModel):
+    """Fields an admin may update for another user."""
+    role: Optional[UserRole] = None
+    is_active: Optional[bool] = None

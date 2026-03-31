@@ -11,7 +11,7 @@ from api.app.models.approvals import (
     ApprovalStatus, StepStatus,
 )
 from api.app.models.actuals import ActualLine
-from api.app.models.core import User, Resource, ManagerOverride
+from api.app.models.core import User, Resource, ManagerOverride, ApprovalDelegate
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
 
@@ -398,8 +398,37 @@ class ApprovalsService:
         return None
 
     def _can_user_action_step(self, user: User, step: ApprovalStep) -> bool:
-        """Check if the user can act on the given step."""
-        if step.approver_id:
-            return step.approver_id == user.id
-        # Step with no approver_id and status PENDING is not actionable by anyone
-        return False
+        """Check if the user can act on the given step (direct or via delegation)."""
+        if not step.approver_id:
+            return False
+        if step.approver_id == user.id:
+            return True
+        # Check active delegation grant
+        return self.db.query(ApprovalDelegate).filter(
+            and_(
+                ApprovalDelegate.tenant_id == self.current_user.tenant_id,
+                ApprovalDelegate.delegator_id == step.approver_id,
+                ApprovalDelegate.delegate_id == user.id,
+                ApprovalDelegate.is_active.is_(True),
+            )
+        ).first() is not None
+
+    def _get_delegation_info(self, user: User, step: ApprovalStep) -> tuple[bool, Optional[str]]:
+        """
+        Returns (is_delegated, delegated_for_display_name).
+        True when user has access via delegation (not as the direct approver).
+        """
+        if not step.approver_id or step.approver_id == user.id:
+            return False, None
+        grant = self.db.query(ApprovalDelegate).filter(
+            and_(
+                ApprovalDelegate.tenant_id == self.current_user.tenant_id,
+                ApprovalDelegate.delegator_id == step.approver_id,
+                ApprovalDelegate.delegate_id == user.id,
+                ApprovalDelegate.is_active.is_(True),
+            )
+        ).first()
+        if grant:
+            delegator = self.db.query(User).filter(User.id == step.approver_id).first()
+            return True, (delegator.display_name if delegator else None)
+        return False, None

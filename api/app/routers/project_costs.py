@@ -7,7 +7,7 @@ from pydantic import BaseModel, field_validator
 
 from api.app.db.engine import get_db
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
-from api.app.models.core import UserRole, User, Project, Resource, ResourceType
+from api.app.models.core import UserRole, User, Project, ProjectPM, Resource, ResourceType
 from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
 
 router = APIRouter(prefix="/project-costs", tags=["Project Costs"])
@@ -148,11 +148,10 @@ def _get_pm_project_ids(db: Session, current_user: CurrentUser) -> Optional[list
     ).first()
     if not pm_user:
         return []
-    projects = db.query(Project).filter(
-        Project.tenant_id == current_user.tenant_id,
-        Project.pm_user_id == pm_user.id,
+    rows = db.query(ProjectPM.project_id).filter(
+        ProjectPM.user_id == pm_user.id,
     ).all()
-    return [p.id for p in projects]
+    return [r.project_id for r in rows]
 
 
 def _check_project_access(project_id: str, pm_project_ids: Optional[list[str]]) -> None:

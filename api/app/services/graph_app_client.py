@@ -19,7 +19,7 @@ from api.app.config import Settings
 logger = logging.getLogger(__name__)
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
-_USER_SELECT = "id,displayName,mail,userPrincipalName,accountEnabled"
+_USER_SELECT = "id,displayName,mail,userPrincipalName,accountEnabled,department"
 
 # Sentinel returned when a Graph call fails with a network / auth error.
 # Callers use `is` identity check to distinguish from a legitimate None value.

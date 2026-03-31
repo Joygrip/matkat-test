@@ -2,13 +2,13 @@
 import pytest
 from datetime import datetime
 
-from api.app.models.core import User, UserRole
+from api.app.models.core import CostCenter, User, UserRole
 
 
 @pytest.fixture
 def setup_actuals_data(client, admin_headers, finance_headers, db):
     """Set up test data for actuals tests.
-    
+
     Creates a User record for the employee and links the Resource to it,
     ensuring employee ownership checks pass.
     """
@@ -21,8 +21,20 @@ def setup_actuals_data(client, admin_headers, finance_headers, db):
         role=UserRole.EMPLOYEE,
     )
     db.add(employee_user)
+
+    # Create a User record for the RO/Manager (matching ro_headers object_id)
+    ro_user = User(
+        tenant_id="test-tenant-001",
+        object_id="ro-001",
+        email="ro@test.com",
+        display_name="Manager User",
+        role=UserRole.MANAGER,
+        is_active=True,
+    )
+    db.add(ro_user)
     db.commit()
     db.refresh(employee_user)
+    db.refresh(ro_user)
     employee_user_id = employee_user.id
 
     cc_resp = client.post(
@@ -31,6 +43,11 @@ def setup_actuals_data(client, admin_headers, finance_headers, db):
         headers=admin_headers,
     )
     cc_id = cc_resp.json()["id"]
+
+    # Assign the RO manager as ro_user_id of CC-ACT so they have cost-center scope
+    cc = db.query(CostCenter).filter(CostCenter.id == cc_id).first()
+    cc.ro_user_id = ro_user.id
+    db.commit()
     
     # Create projects
     project1_resp = client.post(

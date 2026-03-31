@@ -68,7 +68,7 @@ class ReportingService:
 
         if not subordinate_oids:
             # Fallback: resources in cost centers where this user is the RO/Director
-            return self._get_cost_center_fallback_resource_ids()
+            return self.get_cost_center_resource_ids()
 
         # Map object_ids → User.id
         users = self.db.query(User.id).filter(
@@ -94,11 +94,14 @@ class ReportingService:
 
         return [row[0] for row in resources]
 
-    def _get_cost_center_fallback_resource_ids(self) -> list[str]:
+    def get_cost_center_resource_ids(self) -> list[str]:
         """
-        Return resource IDs for all resources in cost centers managed by this user
+        Return resource IDs for all active resources in cost centers managed by this user
         (ro_user_id or director_user_id = current user's DB id).
-        Used when reporting_cache is empty (e.g. before first sync).
+
+        This is the authoritative cost-center scope used by Actuals and Supply.
+        Also used as the fallback in get_accessible_resource_ids() when the
+        reporting cache is empty.
         """
         from api.app.models.core import CostCenter
 

@@ -72,6 +72,9 @@ class CostCenter(Base):
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     code: Mapped[str] = mapped_column(String(50), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Exact Graph department name used to auto-assign User.cost_center_id during sync.
+    # Set by Finance/Admin; must match the 'department' field value in Entra exactly.
+    graph_department_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     ro_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     director_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

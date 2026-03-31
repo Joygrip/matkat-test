@@ -8,6 +8,7 @@ from pydantic import BaseModel
 class CostCenterBase(BaseModel):
     code: str
     name: str
+    graph_department_name: Optional[str] = None
     ro_user_id: Optional[str] = None
     director_user_id: Optional[str] = None
 
@@ -19,6 +20,7 @@ class CostCenterCreate(CostCenterBase):
 class CostCenterUpdate(BaseModel):
     code: Optional[str] = None
     name: Optional[str] = None
+    graph_department_name: Optional[str] = None
     ro_user_id: Optional[str] = None
     director_user_id: Optional[str] = None
     is_active: Optional[bool] = None

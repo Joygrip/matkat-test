@@ -25,7 +25,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from api.app.config import Settings
-from api.app.models.core import User
+from api.app.models.core import User, CostCenter
 from api.app.services.graph_app_client import GraphAppClient, FETCH_FAILED
 
 logger = logging.getLogger(__name__)
@@ -165,11 +165,22 @@ def _sync_user(
     # User found — refresh profile fields
     graph_email = graph_user.get("mail") or graph_user.get("userPrincipalName") or ""
     graph_name = graph_user.get("displayName") or ""
+    graph_department = graph_user.get("department") or ""
 
     if graph_email:
         user.email = graph_email
     if graph_name:
         user.display_name = graph_name
+
+    # Resolve Graph department → CostCenter.graph_department_name → User.cost_center_id
+    if graph_department:
+        cc = db.query(CostCenter).filter(
+            CostCenter.tenant_id == user.tenant_id,
+            CostCenter.graph_department_name == graph_department,
+            CostCenter.is_active.is_(True),
+        ).first()
+        if cc and user.cost_center_id != cc.id:
+            user.cost_center_id = cc.id
 
     # Deactivate if Entra says accountEnabled=false
     if graph_user.get("accountEnabled") is False and user.is_active:

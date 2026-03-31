@@ -23,11 +23,25 @@ class ActualsService:
         self.current_user = current_user
     
     def _get_scoped_resource_ids(self) -> "Optional[list[str]]":
-        """Return scoped resource IDs for RO/Director, or None for full access."""
+        """Return cost-center-scoped resource IDs for Manager, or None for full access."""
         if self.current_user.role not in _SCOPED_ROLES:
             return None
         from api.app.services.reporting import ReportingService
-        return ReportingService(self.db, self.current_user).get_accessible_resource_ids()
+        return ReportingService(self.db, self.current_user).get_cost_center_resource_ids()
+
+    def _check_manager_resource_access(self, resource_id: str) -> None:
+        """Raise 403 if the current user is a Manager but the resource is outside their cost center."""
+        if self.current_user.role != UserRole.MANAGER:
+            return
+        scoped_ids = self._get_scoped_resource_ids()
+        if scoped_ids is not None and resource_id not in scoped_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "UNAUTHORIZED_RESOURCE",
+                    "message": "You do not have access to records for this employee.",
+                },
+            )
 
     def _check_employee_owns_resource(self, resource_id: str) -> None:
         """
@@ -232,13 +246,18 @@ class ActualsService:
         return query.all()
     
     def get_by_id(self, actual_id: str) -> Optional[ActualLine]:
-        """Get an actual line by ID."""
-        return self.db.query(ActualLine).filter(
+        """Get an actual line by ID. Returns None if Manager lacks cost-center access."""
+        line = self.db.query(ActualLine).filter(
             and_(
                 ActualLine.id == actual_id,
                 ActualLine.tenant_id == self.current_user.tenant_id,
             )
         ).first()
+        if line and self.current_user.role in _SCOPED_ROLES:
+            scoped_ids = self._get_scoped_resource_ids()
+            if scoped_ids is not None and line.resource_id not in scoped_ids:
+                return None
+        return line
     
     def create(
         self,
@@ -278,6 +297,8 @@ class ActualsService:
         
         # Employees can only create actuals for their own resource
         self._check_employee_owns_resource(resource_id)
+        # Managers can only create actuals for resources in their cost center
+        self._check_manager_resource_access(resource_id)
         
         # Validate project exists
         project = self.db.query(Project).filter(
@@ -358,7 +379,9 @@ class ActualsService:
         
         # Employees can only update their own actuals
         self._check_employee_owns_resource(actual.resource_id)
-        
+        # Managers can only update actuals for resources in their cost center
+        self._check_manager_resource_access(actual.resource_id)
+
         # Check if already signed
         if actual.employee_signed_at:
             raise HTTPException(
@@ -432,7 +455,9 @@ class ActualsService:
         
         # Employees can only delete their own actuals
         self._check_employee_owns_resource(actual.resource_id)
-        
+        # Managers can only delete actuals for resources in their cost center
+        self._check_manager_resource_access(actual.resource_id)
+
         # Check if already signed
         if actual.employee_signed_at:
             raise HTTPException(

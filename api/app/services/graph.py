@@ -16,7 +16,7 @@ from api.app.config import Settings
 logger = logging.getLogger(__name__)
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
-_ME_SELECT = "id,displayName,mail,userPrincipalName"
+_ME_SELECT = "id,displayName,mail,userPrincipalName,department"
 
 
 class GraphClient:

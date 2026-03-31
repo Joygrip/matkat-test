@@ -9,6 +9,8 @@ from api.app.auth.dependencies import get_current_user, require_roles, CurrentUs
 from api.app.models.core import UserRole
 from api.app.models.notifications import NotificationPhase
 from api.app.services.notifications import NotificationsService
+from api.app.services.graph_mail import send_notification
+from api.app.config import get_settings
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
@@ -148,6 +150,37 @@ async def get_notification_logs(
         )
         for log in logs
     ]
+
+
+@router.post("/smoke-test")
+async def smoke_test_notification(
+    to_email: Optional[str] = Query(None, description="Override recipient (defaults to caller's email)"),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    """
+    Send a test email to verify Microsoft Graph mail configuration.
+
+    No database log is written — this is a connectivity probe only.
+    In stub mode returns {"status": "stub"} without hitting Graph.
+
+    Accessible to: Admin only
+    """
+    settings = get_settings()
+    recipient = to_email or current_user.email
+    if not recipient:
+        return {"status": "failed", "detail": "No recipient email available.", "mode": settings.notify_mode}
+
+    try:
+        result = send_notification("test", [recipient], {})
+    except Exception as exc:
+        return {"status": "failed", "detail": str(exc), "mode": settings.notify_mode}
+
+    if settings.notify_mode != "graph":
+        return {"status": "stub", "to": recipient, "mode": settings.notify_mode}
+
+    if result["sent"]:
+        return {"status": "sent", "to": recipient, "mode": settings.notify_mode}
+    return {"status": "failed", "to": recipient, "mode": settings.notify_mode, "detail": "See application logs for Graph error."}
 
 
 @router.get("/deadline")

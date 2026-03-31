@@ -9,7 +9,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from api.app.config import Settings
-from api.app.models.core import User, UserRole
+from api.app.models.core import User, UserRole, CostCenter
 from api.app.services.graph import GraphClient, _MANAGER_FETCH_FAILED
 
 logger = logging.getLogger(__name__)
@@ -78,10 +78,20 @@ async def sync_user_from_graph(
             if me:
                 graph_email = me.get("mail") or me.get("userPrincipalName") or ""
                 graph_name = me.get("displayName") or ""
+                graph_department = me.get("department") or ""
                 if graph_email:
                     db_user.email = graph_email
                 if graph_name:
                     db_user.display_name = graph_name
+                # Resolve Graph department → CostCenter → User.cost_center_id
+                if graph_department:
+                    cc = db.query(CostCenter).filter(
+                        CostCenter.tenant_id == tenant_id,
+                        CostCenter.graph_department_name == graph_department,
+                        CostCenter.is_active.is_(True),
+                    ).first()
+                    if cc:
+                        db_user.cost_center_id = cc.id
         except Exception as exc:
             logger.warning("Graph /me enrichment failed for %s: %s", object_id, exc)
 

@@ -374,14 +374,14 @@ class SupplyService:
         self.current_user = current_user
 
     def _get_scoped_resource_ids(self) -> Optional[list[str]]:
-        """Return scoped resource IDs for RO/Director, or None for full access."""
+        """Return cost-center-scoped resource IDs for Manager, or None for full access."""
         if self.current_user.role not in _SCOPED_ROLES:
             return None
         from api.app.services.reporting import ReportingService
-        return ReportingService(self.db, self.current_user).get_accessible_resource_ids()
+        return ReportingService(self.db, self.current_user).get_cost_center_resource_ids()
 
     def _check_ro_resource_authorized(self, resource_id: str) -> None:
-        """Raise 403 if the current user is a Manager but the resource is outside their scope."""
+        """Raise 403 if the current user is a Manager but the resource is outside their cost center."""
         if self.current_user.role != UserRole.MANAGER:
             return
         scoped_ids = self._get_scoped_resource_ids()

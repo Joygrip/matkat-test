@@ -276,7 +276,7 @@ export const EquipmentPanel: React.FC<Props> = ({ periodId, projectId, projects 
         <div className={styles.emptyState}>
           <DocumentTableRegular style={{ fontSize: 48 }} />
           <Body2>No equipment lines for this period.</Body2>
-          {canEdit && <Caption1>Click "Add Equipment" to record an OoP equipment cost.</Caption1>}
+          {canEdit && <Caption1>Click "Add Equipment" to record an equipment cost.</Caption1>}
         </div>
       ) : (
         <div className={styles.tableWrap}>

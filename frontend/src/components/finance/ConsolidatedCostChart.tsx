@@ -42,6 +42,7 @@ import { lookupsApi } from '../../api/lookups';
 import type { Project, CostCenter } from '../../api/admin';
 import { CostGroupedBarChart } from '../CostGroupedBarChart';
 import type { GroupedBarChartDatum } from '../GroupedBarChart';
+import { ArrowDownloadRegular } from '@fluentui/react-icons';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -50,12 +51,20 @@ const monthNames = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-const dkk = (cents: number) =>
+const dkk = (val: number) =>
   new Intl.NumberFormat('da-DK', {
     style: 'currency',
     currency: 'DKK',
     maximumFractionDigits: 0,
-  }).format(cents / 100);
+  }).format(val);
+
+const dkkDetail = (val: number) =>
+  new Intl.NumberFormat('da-DK', {
+    style: 'currency',
+    currency: 'DKK',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(val);
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
@@ -265,8 +274,8 @@ export const ConsolidatedCostChart: React.FC = () => {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
 
-  // Top-N project limit for readability
-  const [projectTopN, setProjectTopN] = useState<number>(8);
+  // Planned cost visibility toggle
+  const [showPlanned, setShowPlanned] = useState(true);
 
   // Drill-down dialog state
   const [drillDown, setDrillDown] = useState<{
@@ -279,7 +288,7 @@ export const ConsolidatedCostChart: React.FC = () => {
   } | null>(null);
   const [drillDownData, setDrillDownData] = useState<ConsolidatedCostDetail | null>(null);
   const [drillDownLoading, setDrillDownLoading] = useState(false);
-  const [detailTab, setDetailTab] = useState<'planned' | 'actual' | 'externals' | 'equipment'>('planned');
+  const [detailTab, setDetailTab] = useState<'planned' | 'actual' | 'oop' | 'equipment'>('planned');
 
   // Load aggregation data
   useEffect(() => {
@@ -323,6 +332,7 @@ export const ConsolidatedCostChart: React.FC = () => {
     setPeriodPreset('all');
     setSelectedProjectId(null);
     setSelectedCostCenterId(null);
+    setShowPlanned(true);
   };
 
   const closeDrillDown = () => {
@@ -387,7 +397,7 @@ export const ConsolidatedCostChart: React.FC = () => {
     () => ({
       planned: filteredData.reduce((s, r) => s + r.demand_cost, 0),
       actual: filteredData.reduce((s, r) => s + r.actuals_cost, 0),
-      externals: filteredData.reduce((s, r) => s + r.externals_cost, 0),
+      oop: filteredData.reduce((s, r) => s + r.externals_cost, 0),
       equipment: filteredData.reduce((s, r) => s + r.equipment_cost, 0),
     }),
     [filteredData]
@@ -411,33 +421,25 @@ export const ConsolidatedCostChart: React.FC = () => {
           const match = filteredData.find((r) => r.project_id === id && r.year === year && r.month === month);
           row[`${name}_planned`] = match?.demand_cost ?? 0;
           row[`${name}_actual`] = match?.actuals_cost ?? 0;
-          row[`${name}_externals`] = match?.externals_cost ?? 0;
-          row[`${name}_equipment`] = match?.equipment_cost ?? 0;
+          row[`${name}_oop`] = match?.externals_cost ? match.externals_cost / 100 : 0;
+          row[`${name}_equipment`] = match?.equipment_cost ? match.equipment_cost / 100 : 0;
         });
         return row;
       });
 
     const allNames = Array.from(projMap.values());
-
-    // Sort by total cost descending, then limit to Top-N
-    const sortedNames = [...allNames].sort((a, b) => {
-      const total = (n: string) => filteredData
-        .filter((r) => r.project_name === n)
-        .reduce((s, r) => s + r.demand_cost + r.actuals_cost + r.externals_cost + r.equipment_cost, 0);
-      return total(b) - total(a);
-    });
-    const names = sortedNames.slice(0, projectTopN);
+    const names = allNames; // No TopN filtering
 
     const legendMap: Record<string, string> = {};
     names.forEach((n) => {
       legendMap[`${n}_planned`] = `${n} — Planned`;
       legendMap[`${n}_actual`] = `${n} — Actual`;
-      legendMap[`${n}_externals`] = `${n} — Externals`;
+      legendMap[`${n}_oop`] = `${n} — OoP`;
       legendMap[`${n}_equipment`] = `${n} — Equipment`;
     });
 
     return { projectChartData: data, projectNames: names, projectLegendMap: legendMap };
-  }, [filteredData, projectTopN]);
+  }, [filteredData]);
 
   // ── Chart data: by cost center ────────────────────────────────────────────
 
@@ -468,8 +470,8 @@ export const ConsolidatedCostChart: React.FC = () => {
           });
           row[`${ccName}_planned`] = related.reduce((s, r) => s + r.demand_cost, 0);
           row[`${ccName}_actual`] = related.reduce((s, r) => s + r.actuals_cost, 0);
-          row[`${ccName}_externals`] = related.reduce((s, r) => s + r.externals_cost, 0);
-          row[`${ccName}_equipment`] = related.reduce((s, r) => s + r.equipment_cost, 0);
+          row[`${ccName}_oop`] = related.reduce((s, r) => s + r.externals_cost, 0) / 100;
+          row[`${ccName}_equipment`] = related.reduce((s, r) => s + r.equipment_cost, 0) / 100;
         });
         return row;
       });
@@ -479,7 +481,7 @@ export const ConsolidatedCostChart: React.FC = () => {
     names.forEach((n) => {
       legendMap[`${n}_planned`] = `${n} — Planned`;
       legendMap[`${n}_actual`] = `${n} — Actual`;
-      legendMap[`${n}_externals`] = `${n} — Externals`;
+      legendMap[`${n}_oop`] = `${n} — OoP`;
       legendMap[`${n}_equipment`] = `${n} — Equipment`;
     });
 
@@ -509,6 +511,54 @@ export const ConsolidatedCostChart: React.FC = () => {
   );
 
   const hasActiveFilters = !!activePeriodLabel || !!activeProjectLabel || !!activeCcLabel;
+
+  // ── Drill-down CSV export ─────────────────────────────────────────────────
+
+  const downloadDrillDownCsv = () => {
+    if (!drillDownData || !drillDown) return;
+    const esc = (v: string | number | null | undefined) =>
+      `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const isCc = drillDown.mode === 'cc';
+    const periodLabel = `${monthNames[drillDown.month - 1]}_${drillDown.year}`;
+    let header: string[];
+    let rows: string[][];
+
+    if (detailTab === 'planned') {
+      header = [...(isCc ? ['Project'] : []), 'Employee', 'FTE %', 'Cost (DKK)'];
+      rows = drillDownData.demand_lines.map((l) => [
+        ...(isCc ? [l.project_name ?? ''] : []),
+        l.resource_name, String(l.fte_percent), String(l.cost),
+      ]);
+    } else if (detailTab === 'actual') {
+      header = [...(isCc ? ['Project'] : []), 'Employee', 'FTE %', 'Cost (DKK)'];
+      rows = drillDownData.actual_lines.map((l) => [
+        ...(isCc ? [l.project_name ?? ''] : []),
+        l.resource_name, String(l.fte_percent), String(l.cost),
+      ]);
+    } else if (detailTab === 'oop') {
+      header = [...(isCc ? ['Project'] : []), 'OoP Resource', 'Notes', 'Hours', 'Rate (DKK)', 'Total (DKK)'];
+      rows = drillDownData.external_lines.map((l) => [
+        ...(isCc ? [l.project_name ?? ''] : []),
+        l.resource_name ?? '', l.notes ?? '',
+        String(l.hours), String(l.rate), String(l.total_cost),
+      ]);
+    } else {
+      header = [...(isCc ? ['Project'] : []), 'Description', 'Cost (DKK)'];
+      rows = drillDownData.equipment_lines.map((l) => [
+        ...(isCc ? [l.project_name ?? ''] : []),
+        l.description ?? '', String(l.cost),
+      ]);
+    }
+
+    const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${drillDown.title}_${periodLabel}_${detailTab}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -579,6 +629,17 @@ export const ConsolidatedCostChart: React.FC = () => {
               </Select>
             </div>
 
+            {/* Show Planned toggle */}
+            <div className={styles.filterGroup} style={{ justifyContent: 'flex-end' }}>
+              <Button
+                size="small"
+                appearance={showPlanned ? 'primary' : 'secondary'}
+                onClick={() => setShowPlanned((v) => !v)}
+              >
+                {showPlanned ? 'Planned: On' : 'Planned: Off'}
+              </Button>
+            </div>
+
             {/* Cost Center */}
             <div className={styles.filterGroup}>
               <span className={styles.filterLabel}>Cost Center</span>
@@ -619,15 +680,15 @@ export const ConsolidatedCostChart: React.FC = () => {
 
       {/* ── KPI strip ── */}
       <div className={styles.kpiRow}>
-        {[
-          { label: 'Total Planned Labor', value: kpis.planned },
-          { label: 'Total Actual Labor', value: kpis.actual },
-          { label: 'Total Externals', value: kpis.externals },
-          { label: 'Total Equipment', value: kpis.equipment },
-        ].map(({ label, value }) => (
+        {[ 
+          { label: 'Total Planned Labor', value: kpis.planned, divide: false },
+          { label: 'Total Actual Labor', value: kpis.actual, divide: false },
+          { label: 'Total OoP', value: kpis.oop, divide: true },
+          { label: 'Total Equipment', value: kpis.equipment, divide: true },
+        ].map(({ label, value, divide }) => (
           <div key={label} className={styles.kpiCard}>
             <div className={styles.kpiLabel}>{label}</div>
-            <div className={styles.kpiValue}>{dkk(value)}</div>
+            <div className={styles.kpiValue}>{dkk(divide ? value / 100 : value)}</div>
           </div>
         ))}
       </div>
@@ -647,22 +708,9 @@ export const ConsolidatedCostChart: React.FC = () => {
           <div className={styles.chartCard}>
             <div className={styles.chartCardHeader}>
               <span className={styles.chartCardTitle}>Costs by Project</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-                  Click a bar to drill down
-                </Body1>
-                <Select
-                  size="small"
-                  value={String(projectTopN)}
-                  onChange={(_, d) => setProjectTopN(Number(d.value))}
-                  style={{ width: 90 }}
-                >
-                  <option value="5">Top 5</option>
-                  <option value="8">Top 8</option>
-                  <option value="12">Top 12</option>
-                  <option value="20">Top 20</option>
-                </Select>
-              </div>
+              <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                Click a bar to drill down
+              </Body1>
             </div>
             <div className={styles.chartCardBody}>
               <CostGroupedBarChart
@@ -670,6 +718,7 @@ export const ConsolidatedCostChart: React.FC = () => {
                 entityNames={projectNames}
                 legendMap={projectLegendMap}
                 onBarClick={handleProjectBarClick}
+                hiddenCategories={showPlanned ? [] : ['planned']}
               />
             </div>
           </div>
@@ -689,6 +738,7 @@ export const ConsolidatedCostChart: React.FC = () => {
                   entityNames={ccNames}
                   legendMap={ccLegendMap}
                   onBarClick={handleCcBarClick}
+                  hiddenCategories={showPlanned ? [] : ['planned']}
                 />
               ) : (
                 <div className={styles.emptyState}>
@@ -719,7 +769,7 @@ export const ConsolidatedCostChart: React.FC = () => {
                     {[
                       { label: 'Planned Labor', value: drillDownData.demand_lines.reduce((s, l) => s + l.cost, 0) },
                       { label: 'Actual Labor', value: drillDownData.actual_lines.reduce((s, l) => s + l.cost, 0) },
-                      { label: 'Externals', value: drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) },
+                      { label: 'OoP', value: drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) },
                       { label: 'Equipment', value: drillDownData.equipment_lines.reduce((s, l) => s + l.cost, 0) },
                     ].map(({ label, value }) => (
                       <div key={label} className={styles.detailKpiCard}>
@@ -736,7 +786,7 @@ export const ConsolidatedCostChart: React.FC = () => {
                   >
                     <Tab value="planned">Planned Labor ({drillDownData.demand_lines.length})</Tab>
                     <Tab value="actual">Actual Labor ({drillDownData.actual_lines.length})</Tab>
-                    <Tab value="externals">Externals ({drillDownData.external_lines.length})</Tab>
+                    <Tab value="oop">OoP ({drillDownData.external_lines.length})</Tab>
                     <Tab value="equipment">Equipment ({drillDownData.equipment_lines.length})</Tab>
                   </TabList>
 
@@ -761,7 +811,7 @@ export const ConsolidatedCostChart: React.FC = () => {
                                 {drillDown?.mode === 'cc' && <TableCell>{l.project_name ?? '—'}</TableCell>}
                                 <TableCell>{l.resource_name}</TableCell>
                                 <TableCell style={{ textAlign: 'right' }}>{l.fte_percent}%</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{dkk(l.cost)}</TableCell>
+                                <TableCell style={{ textAlign: 'right' }}>{dkkDetail(l.cost)}</TableCell>
                               </TableRow>
                             ))}
                             <TableRow className={styles.totalRow}>
@@ -799,7 +849,7 @@ export const ConsolidatedCostChart: React.FC = () => {
                                 {drillDown?.mode === 'cc' && <TableCell>{l.project_name ?? '—'}</TableCell>}
                                 <TableCell>{l.resource_name}</TableCell>
                                 <TableCell style={{ textAlign: 'right' }}>{l.fte_percent}%</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{dkk(l.cost)}</TableCell>
+                                <TableCell style={{ textAlign: 'right' }}>{dkkDetail(l.cost)}</TableCell>
                               </TableRow>
                             ))}
                             <TableRow className={styles.totalRow}>
@@ -817,16 +867,16 @@ export const ConsolidatedCostChart: React.FC = () => {
                   )}
 
                   {/* Externals table */}
-                  {detailTab === 'externals' && (
+                  {detailTab === 'oop' && (
                     drillDownData.external_lines.length === 0 ? (
-                      <div className={styles.emptyState}><Body1>No external contractor lines for this period.</Body1></div>
+                      <div className={styles.emptyState}><Body1>No OoP lines for this period.</Body1></div>
                     ) : (
                       <div className={styles.tableWrap}>
                         <Table>
                           <TableHeader>
                             <TableRow>
                               {drillDown?.mode === 'cc' && <TableHeaderCell>Project</TableHeaderCell>}
-                              <TableHeaderCell>Contractor</TableHeaderCell>
+                              <TableHeaderCell>OoP Resource</TableHeaderCell>
                               <TableHeaderCell>Notes</TableHeaderCell>
                               <TableHeaderCell style={{ justifyContent: 'flex-end' }}>Hours</TableHeaderCell>
                               <TableHeaderCell style={{ justifyContent: 'flex-end' }}>Rate (DKK/hr)</TableHeaderCell>
@@ -840,8 +890,8 @@ export const ConsolidatedCostChart: React.FC = () => {
                                 <TableCell>{l.resource_name ?? '—'}</TableCell>
                                 <TableCell>{l.notes ?? '—'}</TableCell>
                                 <TableCell style={{ textAlign: 'right' }}>{l.hours}</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{dkk(l.rate)}</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{dkk(l.total_cost)}</TableCell>
+                                <TableCell style={{ textAlign: 'right' }}>{dkkDetail(l.rate)}</TableCell>
+                                <TableCell style={{ textAlign: 'right' }}>{dkk(drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100)}</TableCell>
                               </TableRow>
                             ))}
                             <TableRow className={styles.totalRow}>
@@ -877,14 +927,14 @@ export const ConsolidatedCostChart: React.FC = () => {
                               <TableRow key={i}>
                                 {drillDown?.mode === 'cc' && <TableCell>{l.project_name ?? '—'}</TableCell>}
                                 <TableCell>{l.description ?? '—'}</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{dkk(l.cost)}</TableCell>
+                                <TableCell style={{ textAlign: 'right' }}>{dkkDetail(l.cost / 100)}</TableCell>
                               </TableRow>
                             ))}
                             <TableRow className={styles.totalRow}>
                               {drillDown?.mode === 'cc' && <TableCell />}
                               <TableCell>Total</TableCell>
                               <TableCell style={{ textAlign: 'right' }}>
-                                {dkk(drillDownData.equipment_lines.reduce((s, l) => s + l.cost, 0))}
+                                {dkk(drillDownData.equipment_lines.reduce((s, l) => s + l.cost, 0) / 100)}
                               </TableCell>
                             </TableRow>
                           </TableBody>
@@ -898,6 +948,14 @@ export const ConsolidatedCostChart: React.FC = () => {
               )}
             </DialogContent>
             <DialogActions>
+              <Button
+                appearance="secondary"
+                icon={<ArrowDownloadRegular />}
+                onClick={downloadDrillDownCsv}
+                disabled={!drillDownData || drillDownLoading}
+              >
+                Download CSV
+              </Button>
               <Button onClick={closeDrillDown}>Close</Button>
             </DialogActions>
           </DialogBody>

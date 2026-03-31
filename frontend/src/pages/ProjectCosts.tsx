@@ -120,7 +120,7 @@ export const ProjectCosts: React.FC = () => {
 
   const kpiTiles = [
     {
-      label: 'Externals Total',
+      label: 'OoP Total',
       value: summary ? formatDKK(summary.externals_total) : '—',
     },
     {
@@ -162,8 +162,8 @@ export const ProjectCosts: React.FC = () => {
           selectedValue={activeTab}
           onTabSelect={(_, d) => setActiveTab(d.value as ActiveTab)}
         >
-          <Tab value="externals">Externals</Tab>
-          <Tab value="equipment">OoP Equipment</Tab>
+          <Tab value="externals">OoP</Tab>
+          <Tab value="equipment">Equipment</Tab>
         </TabList>
       </div>
 

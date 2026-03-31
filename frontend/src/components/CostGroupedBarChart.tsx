@@ -77,8 +77,8 @@ function lighten(color: string, percent: number): string {
   );
 }
 
-// 4 colour variants per entity: base (planned), +20% (actual), +40% (externals), +60% (equipment)
-const SUFFIXES = ['_planned', '_actual', '_externals', '_equipment'] as const;
+// 4 colour variants per entity: base (planned), +20% (actual), +40% (OoP), +60% (equipment)
+const SUFFIXES = ['_planned', '_actual', '_oop', '_equipment'] as const;
 const LIGHTEN_AMOUNTS = [0, 20, 40, 60] as const;
 
 // Reference gray used for cost-type shade key in legend
@@ -90,21 +90,23 @@ const dkkCompact = (v: number) =>
     currency: 'DKK',
     maximumFractionDigits: 0,
     notation: 'compact',
-  } as Intl.NumberFormatOptions).format(v / 100);
+  } as Intl.NumberFormatOptions).format(v);
 
 const dkkFull = (v: number) =>
   new Intl.NumberFormat('da-DK', {
     style: 'currency',
     currency: 'DKK',
     maximumFractionDigits: 0,
-  }).format(v / 100);
+  }).format(v);
 
 const CATEGORY_LABELS: Record<string, string> = {
   planned: 'Planned',
   actual: 'Actual',
-  externals: 'Externals',
+  oop: 'OoP',
   equipment: 'Equipment',
 };
+
+const TOOLTIP_CATEGORIES = ['planned', 'actual', 'oop', 'equipment'];
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload || !payload.length) return null;
@@ -125,14 +127,13 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       {Object.entries(rows).map(([entity, vals]) => (
         <div key={entity} style={{ marginBottom: 8 }}>
           <div style={{ fontWeight: 500, marginBottom: 2, fontSize: 13 }}>{entity}</div>
-          {SUFFIXES.map((s) => {
-            const cat = s.slice(1);
-            return vals[cat] !== undefined ? (
+          {['planned', 'actual', 'oop', 'equipment'].map((cat) =>
+            vals[cat] !== undefined ? (
               <div key={cat} style={{ color: '#555', fontSize: 12 }}>
                 {CATEGORY_LABELS[cat]}: {dkkFull(vals[cat])}
               </div>
-            ) : null;
-          })}
+            ) : null
+          )}
         </div>
       ))}
     </div>
@@ -144,11 +145,11 @@ export interface CostGroupedBarChartProps {
   entityNames: string[];
   legendMap: Record<string, string>;
   onBarClick?: (entityName: string, label: string) => void;
+  hiddenCategories?: ReadonlyArray<'planned' | 'actual' | 'externals' | 'equipment'>;
 }
 
-export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, entityNames, legendMap, onBarClick }) => {
+export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, entityNames, legendMap, onBarClick, hiddenCategories = [] }) => {
   const styles = useStyles();
-
   const colorMap: Record<string, string> = {};
   entityNames.forEach((name, i) => {
     colorMap[name] =
@@ -166,14 +167,14 @@ export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, 
           <YAxis tickFormatter={dkkCompact} width={72} />
           <Tooltip content={<CustomTooltip />} />
           {entityNames.flatMap((entity) =>
-            SUFFIXES.map((suffix, idx) => (
+            SUFFIXES.filter((suffix) => !hiddenCategories.includes(suffix.slice(1) as any)).map((suffix, idx, visibleSuffixes) => (
               <Bar
                 key={`${entity}${suffix}`}
                 dataKey={`${entity}${suffix}`}
                 stackId={entity}
                 name={legendMap[`${entity}${suffix}`] ?? `${entity} ${suffix.slice(1)}`}
-                fill={lighten(colorMap[entity], LIGHTEN_AMOUNTS[idx])}
-                radius={idx === SUFFIXES.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                fill={lighten(colorMap[entity], LIGHTEN_AMOUNTS[SUFFIXES.indexOf(suffix)])}
+                radius={idx === visibleSuffixes.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
                 barSize={24}
                 style={{ cursor: onBarClick ? 'pointer' : 'default' }}
                 onClick={(barData: any) => onBarClick?.(entity, String(barData.label))}
@@ -182,7 +183,6 @@ export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, 
           )}
         </BarChart>
       </ResponsiveContainer>
-
       {/* Legend: Section A — entity color chips */}
       <div className={styles.legendEntities}>
         {entityNames.map((entity) => (
@@ -192,14 +192,13 @@ export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, 
           </div>
         ))}
       </div>
-
-      {/* Legend: Section B — cost type shade key (always 4 items) */}
+      {/* Legend: Section B — cost type shade key (only visible categories) */}
       <div className={styles.legendTypes}>
-        {SUFFIXES.map((suffix, idx) => (
+        {SUFFIXES.filter((suffix) => !hiddenCategories.includes(suffix.slice(1) as any)).map((suffix) => (
           <div key={suffix} className={styles.legendTypeItem}>
             <span
               className={styles.legendTypeSwatch}
-              style={{ backgroundColor: lighten(LEGEND_REF_COLOR, LIGHTEN_AMOUNTS[idx]) }}
+              style={{ backgroundColor: lighten(LEGEND_REF_COLOR, LIGHTEN_AMOUNTS[SUFFIXES.indexOf(suffix)]) }}
             />
             <span>{CATEGORY_LABELS[suffix.slice(1)]}</span>
           </div>

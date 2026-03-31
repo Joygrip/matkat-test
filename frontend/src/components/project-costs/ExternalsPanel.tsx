@@ -278,7 +278,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
   const grandTotal = lines.reduce((s, l) => s + l.total_cost, 0);
 
   const downloadCsv = () => {
-    const header = ['Project', 'External Resource', 'Notes', 'Hours', 'Rate (DKK/hr)', 'Total (DKK)'];
+    const header = ['Project', 'OoP Resource', 'Notes', 'Hours', 'Rate (DKK/hr)', 'Total (DKK)'];
     const escape = (v: string | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const rows = lines.map((l) => [
       escape(l.project_name ?? l.project_id),
@@ -293,7 +293,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'project_costs_externals.csv';
+    a.download = 'project_costs_oop.csv';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -312,7 +312,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
           )}
           {canEdit && (
             <Button appearance="primary" icon={<AddRegular />} onClick={openCreate}>
-              Add External
+              Add OoP
             </Button>
           )}
         </div>
@@ -321,8 +321,8 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
       {lines.length === 0 ? (
         <div className={styles.emptyState}>
           <DocumentTableRegular style={{ fontSize: 48 }} />
-          <Body2>No external lines for this period.</Body2>
-          {canEdit && <Caption1>Click "Add External" to record an external resource cost.</Caption1>}
+          <Body2>No OoP lines for this period.</Body2>
+          {canEdit && <Caption1>Click "Add OoP" to record an OoP resource cost.</Caption1>}
         </div>
       ) : (
         <div className={styles.tableWrap}>
@@ -330,7 +330,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
             <thead>
               <tr>
                 <th className={styles.th}>Project</th>
-                <th className={styles.th}>External Resource</th>
+                <th className={styles.th}>OoP Resource</th>
                 <th className={styles.th}>Notes</th>
                 <th className={styles.thRight}>Hours</th>
                 <th className={styles.thRight}>Rate (DKK/hr)</th>
@@ -358,7 +358,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
                 </tr>
               ))}
               <tr>
-                <td className={styles.totalTd} colSpan={5}>Total Externals</td>
+                <td className={styles.totalTd} colSpan={5}>Total OoP</td>
                 <td className={styles.totalTdRight}>{formatDKK(grandTotal)}</td>
                 {canEdit && <td className={styles.totalTd} />}
               </tr>
@@ -370,7 +370,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
       <Dialog open={dialogOpen} onOpenChange={(_, d) => { if (!d.open) closeDialog(); }}>
         <DialogSurface>
           <DialogBody>
-            <DialogTitle>{editingLine ? 'Edit External Line' : 'Add External Line'}</DialogTitle>
+            <DialogTitle>{editingLine ? 'Edit OoP Line' : 'Add OoP Line'}</DialogTitle>
             <DialogContent>
               {!editingLine && (
                 <div className={styles.field}>
@@ -386,7 +386,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
                 </div>
               )}
               <div className={styles.field}>
-                <Label required>External Resource</Label>
+                <Label required>OoP Resource</Label>
                 <Select
                   value={form.resource_id}
                   onChange={(_, d) => setForm((f) => ({ ...f, resource_id: d.value }))}

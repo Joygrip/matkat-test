@@ -60,7 +60,7 @@ Desktop.ini
 scheduler/.python_packages/
 scheduler/__pycache__/
 scheduler/.vscode/
-
+fn.parameters.json
 # Logs
 logs/
 *.log

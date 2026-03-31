@@ -366,13 +366,9 @@ def test_finance_can_crud_placeholder(client, finance_headers, admin_headers, db
         headers=admin_headers,
     )
     cc_id = cc_resp.json()["id"]
-    create_resp = client.post(
-        "/admin/placeholders",
-        json={"cost_center_id": cc_id, "name": "Finance Placeholder", "skill_profile": "Skill"},
-        headers=finance_headers,
-    )
-    ph_id = create_resp.json()["id"]
-    assert create_resp.status_code == 200
+    # Cost center creation auto-creates one placeholder; fetch it instead of creating a duplicate.
+    placeholders = client.get("/admin/placeholders", headers=finance_headers).json()
+    ph_id = next(p["id"] for p in placeholders if p["cost_center_id"] == cc_id)
     # Update
     update_resp = client.patch(
         f"/admin/placeholders/{ph_id}",

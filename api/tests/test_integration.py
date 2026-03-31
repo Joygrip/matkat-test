@@ -15,6 +15,7 @@ def test_full_monthly_cycle(client, admin_headers, finance_headers, pm_headers, 
     from api.app.models.core import User, UserRole
 
     # ── 0. Create User records for Employee and RO (for ownership / approvals) ──
+    from api.app.models.core import CostCenter
     employee_user = User(
         tenant_id="test-tenant-001",
         object_id="employee-001",
@@ -22,9 +23,19 @@ def test_full_monthly_cycle(client, admin_headers, finance_headers, pm_headers, 
         display_name="Employee User",
         role=UserRole.EMPLOYEE,
     )
+    ro_user = User(
+        tenant_id="test-tenant-001",
+        object_id="ro-001",
+        email="ro@test.com",
+        display_name="Manager User",
+        role=UserRole.MANAGER,
+        is_active=True,
+    )
     db.add(employee_user)
+    db.add(ro_user)
     db.commit()
     db.refresh(employee_user)
+    db.refresh(ro_user)
     employee_user_id = employee_user.id
 
     # ── 1. Admin creates master data ──
@@ -35,6 +46,11 @@ def test_full_monthly_cycle(client, admin_headers, finance_headers, pm_headers, 
     )
     assert cc_resp.status_code == 200
     cc_id = cc_resp.json()["id"]
+
+    # Assign RO as manager of this cost center so supply-line creation passes scope check
+    cc = db.query(CostCenter).filter(CostCenter.id == cc_id).first()
+    cc.ro_user_id = ro_user.id
+    db.commit()
 
     proj_resp = client.post(
         "/admin/projects",

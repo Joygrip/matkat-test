@@ -1,12 +1,17 @@
 import pytest
-from fastapi.testclient import TestClient
-from api.app.main import app
 
-client = TestClient(app)
 
-def test_actuals_vs_plan_endpoint():
-    # This test assumes test data is loaded for year=2026, month=2
-    response = client.get("/finance/actuals-vs-plan?year=2026&month=2")
+_FINANCE_HEADERS = {
+    "X-Dev-Role": "Finance",
+    "X-Dev-Tenant": "test-tenant-001",
+    "X-Dev-User-Id": "finance-001",
+    "X-Dev-Email": "finance@test.com",
+    "X-Dev-Name": "Finance User",
+}
+
+
+def test_actuals_vs_plan_endpoint(client):
+    response = client.get("/finance/actuals-vs-plan?year=2026&month=2", headers=_FINANCE_HEADERS)
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, list)

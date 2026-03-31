@@ -3,18 +3,38 @@ import pytest
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
+from api.app.models.core import CostCenter, User, UserRole
+
 
 # ============== FIXTURES ==============
 
 @pytest.fixture
 def setup_planning_data(client, admin_headers, finance_headers, db):
     """Set up test data for planning tests."""
+    # Create Manager DB row (ro-001) so supply-line scope check passes
+    ro_user = User(
+        tenant_id="test-tenant-001",
+        object_id="ro-001",
+        email="ro@test.com",
+        display_name="Manager User",
+        role=UserRole.MANAGER,
+        is_active=True,
+    )
+    db.add(ro_user)
+    db.commit()
+    db.refresh(ro_user)
+
     cc_resp = client.post(
         "/admin/cost-centers",
         json={"code": "CC-TEST", "name": "Test Cost Center"},
         headers=admin_headers,
     )
     cc_id = cc_resp.json()["id"]
+
+    # Assign manager as ro_user_id of the cost center
+    cc = db.query(CostCenter).filter(CostCenter.id == cc_id).first()
+    cc.ro_user_id = ro_user.id
+    db.commit()
 
     project_resp = client.post(
         "/admin/projects",
@@ -34,12 +54,9 @@ def setup_planning_data(client, admin_headers, finance_headers, db):
     )
     resource_id = resource_resp.json()["id"]
 
-    placeholder_resp = client.post(
-        "/admin/placeholders",
-        json={"name": "Test Placeholder", "cost_center_id": cc_id},
-        headers=admin_headers,
-    )
-    placeholder_id = placeholder_resp.json()["id"]
+    # Cost center creation auto-creates one placeholder; fetch it instead of creating a duplicate.
+    placeholders = client.get("/admin/placeholders", headers=admin_headers).json()
+    placeholder_id = next(p["id"] for p in placeholders if p["cost_center_id"] == cc_id)
     
     # Create period for current month
     now = datetime.utcnow()

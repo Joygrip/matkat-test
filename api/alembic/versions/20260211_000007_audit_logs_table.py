@@ -1,3 +1,4 @@
+
 """add audit_logs table
 
 Revision ID: 20260211_000007

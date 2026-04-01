@@ -418,7 +418,11 @@ export const ConsolidatedCostChart: React.FC = () => {
     });
 
     const data: GroupedBarChartDatum[] = Array.from(periodMap.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([a], [b]) => {
+        const [ay, am] = a.split('-').map(Number);
+        const [by, bm] = b.split('-').map(Number);
+        return ay !== by ? ay - by : am - bm;
+      })
       .map(([, { year, month }]) => {
         const row: GroupedBarChartDatum = { label: `${monthNames[month - 1]} ${year}` };
         projMap.forEach((name, id) => {
@@ -464,7 +468,11 @@ export const ConsolidatedCostChart: React.FC = () => {
     });
 
     const data: GroupedBarChartDatum[] = Array.from(periodMap.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([a], [b]) => {
+        const [ay, am] = a.split('-').map(Number);
+        const [by, bm] = b.split('-').map(Number);
+        return ay !== by ? ay - by : am - bm;
+      })
       .map(([, { year, month }]) => {
         const row: GroupedBarChartDatum = { label: `${monthNames[month - 1]} ${year}` };
         ccSet.forEach((ccName) => {
@@ -770,17 +778,23 @@ export const ConsolidatedCostChart: React.FC = () => {
                 <>
                   {/* Detail KPI strip */}
                   <div className={styles.detailKpiRow}>
-                    {[
-                      { label: 'Planned Labor', value: drillDownData.demand_lines.reduce((s, l) => s + l.cost, 0) },
-                      { label: 'Actual Labor', value: drillDownData.actual_lines.reduce((s, l) => s + l.cost, 0) },
-                      { label: 'OoP', value: drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100 },
-                      { label: 'Equipment', value: drillDownData.equipment_lines.reduce((s, l) => s + l.cost, 0) / 100 },
-                    ].map(({ label, value }) => (
-                      <div key={label} className={styles.detailKpiCard}>
-                        <div className={styles.detailKpiLabel}>{label}</div>
-                        <div className={styles.detailKpiValue}>{dkk(value)}</div>
-                      </div>
-                    ))}
+                    {(() => {
+                      const actualTotal = drillDownData.actual_lines.reduce((s, l) => s + l.cost, 0);
+                      const oopTotal = drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100;
+                      const equipTotal = drillDownData.equipment_lines.reduce((s, l) => s + l.cost, 0) / 100;
+                      return [
+                        { label: 'Planned Labor', value: drillDownData.demand_lines.reduce((s, l) => s + l.cost, 0) },
+                        { label: 'Actual Labor', value: actualTotal },
+                        { label: 'OoP', value: oopTotal },
+                        { label: 'Equipment', value: equipTotal },
+                        { label: 'Total Cost', value: actualTotal + oopTotal + equipTotal },
+                      ].map(({ label, value }) => (
+                        <div key={label} className={styles.detailKpiCard}>
+                          <div className={styles.detailKpiLabel}>{label}</div>
+                          <div className={styles.detailKpiValue}>{dkk(value)}</div>
+                        </div>
+                      ));
+                    })()}
                   </div>
 
                   {/* Tab navigation */}

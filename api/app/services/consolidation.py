@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 
-from api.app.models.core import Period, Project, Resource, Placeholder, CostCenter
+from api.app.models.core import Period, Project, Resource, Placeholder, CostCenter, User
 from api.app.models.planning import DemandLine, SupplyLine
 from api.app.models.actuals import ActualLine
 from api.app.models.consolidation import OopLine, PublishSnapshot, PublishSnapshotLine
@@ -180,6 +180,28 @@ class ConsolidationService:
             cost_centers_list.append(cc_node)
 
         cost_centers_list.sort(key=lambda c: c["cost_center_name"] or "")
+
+        # Manager restriction: filter to their own cost center only
+        if self.current_user.role == "Manager":
+            manager_user = self.db.query(User).filter(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            ).first()
+            manager_cc_id = manager_user.cost_center_id if manager_user else None
+            if manager_cc_id:
+                cost_centers_list = [
+                    cc for cc in cost_centers_list if cc["cost_center_id"] == manager_cc_id
+                ]
+                over_allocations = [
+                    oa for oa in over_allocations if oa["cost_center_id"] == manager_cc_id
+                ]
+            else:
+                cost_centers_list = []
+                over_allocations = []
+            # Recompute summary totals from filtered list
+            total_demand = sum(cc["total_demand_fte"] for cc in cost_centers_list)
+            total_supply = sum(cc["total_supply_fte"] for cc in cost_centers_list)
+            orphans_count = sum(len(cc["placeholders"]) for cc in cost_centers_list)
 
         return {
             "period_id": period_id,

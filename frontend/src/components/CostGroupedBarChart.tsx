@@ -121,21 +121,36 @@ const CustomTooltip = ({ active, payload, label }: any) => {
     rows[entity][category] = entry.value;
   });
 
+  const grandTotal = Object.values(rows).reduce((sum, vals) => {
+    return sum + (vals['actual'] ?? 0) + (vals['oop'] ?? 0) + (vals['equipment'] ?? 0);
+  }, 0);
+
   return (
     <div style={{ background: '#fff', border: '1px solid #ccc', padding: 12, borderRadius: 8, minWidth: 220 }}>
       <div style={{ fontWeight: 600, marginBottom: 8 }}>{label}</div>
-      {Object.entries(rows).map(([entity, vals]) => (
-        <div key={entity} style={{ marginBottom: 8 }}>
-          <div style={{ fontWeight: 500, marginBottom: 2, fontSize: 13 }}>{entity}</div>
-          {['planned', 'actual', 'oop', 'equipment'].map((cat) =>
-            vals[cat] !== undefined ? (
-              <div key={cat} style={{ color: '#555', fontSize: 12 }}>
-                {CATEGORY_LABELS[cat]}: {dkkFull(vals[cat])}
-              </div>
-            ) : null
-          )}
+      {Object.entries(rows).map(([entity, vals]) => {
+        const entityTotal = (vals['actual'] ?? 0) + (vals['oop'] ?? 0) + (vals['equipment'] ?? 0);
+        return (
+          <div key={entity} style={{ marginBottom: 8 }}>
+            <div style={{ fontWeight: 500, marginBottom: 2, fontSize: 13 }}>{entity}</div>
+            {['planned', 'actual', 'oop', 'equipment'].map((cat) =>
+              vals[cat] !== undefined ? (
+                <div key={cat} style={{ color: '#555', fontSize: 12 }}>
+                  {CATEGORY_LABELS[cat]}: {dkkFull(vals[cat])}
+                </div>
+              ) : null
+            )}
+            <div style={{ color: '#222', fontSize: 12, fontWeight: 600, marginTop: 2, borderTop: '1px solid #eee', paddingTop: 2 }}>
+              Total: {dkkFull(entityTotal)}
+            </div>
+          </div>
+        );
+      })}
+      {Object.keys(rows).length > 1 && (
+        <div style={{ borderTop: '1px solid #bbb', marginTop: 4, paddingTop: 6, fontWeight: 700, fontSize: 12 }}>
+          Grand Total: {dkkFull(grandTotal)}
         </div>
-      ))}
+      )}
     </div>
   );
 };

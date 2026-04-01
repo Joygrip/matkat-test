@@ -24,7 +24,6 @@ import {
 } from '@fluentui/react-components';
 import { AddRegular, EditRegular, DeleteRegular, DocumentTableRegular, ArrowDownloadRegular } from '@fluentui/react-icons';
 import { projectCostsApi, ExternalLine } from '../../api/projectCosts';
-import type { ExternalResource } from '../../api/projectCosts';
 import { useHasRole } from '../../auth/AuthProvider';
 import { useToast } from '../../hooks/useToast';
 import type { Project } from '../../api/lookups';
@@ -148,8 +147,7 @@ const useStyles = makeStyles({
   },
 });
 
-const OTHER = '__other__';
-const emptyForm = { project_id: '', resource_id: '', notes: '', hours: '', rate: '' };
+const emptyForm = { project_id: '', notes: '', hours: '', rate: '' };
 
 export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects }) => {
   const styles = useStyles();
@@ -157,17 +155,11 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
   const canEdit = useHasRole('Admin', 'Finance', 'PM');
 
   const [lines, setLines] = useState<ExternalLine[]>([]);
-  const [externalResources, setExternalResources] = useState<ExternalResource[]>([]);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingLine, setEditingLine] = useState<ExternalLine | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm);
-
-  // Load external resources list once
-  useEffect(() => {
-    projectCostsApi.listExternalResources().then(setExternalResources).catch(() => {});
-  }, []);
 
   const load = useCallback(async () => {
     if (!periodId) return;
@@ -192,7 +184,6 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
     setForm({
       ...emptyForm,
       project_id: projectId || (projects[0]?.id ?? ''),
-      resource_id: externalResources[0]?.id ?? OTHER,
     });
     setDialogOpen(true);
   };
@@ -201,7 +192,6 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
     setEditingLine(line);
     setForm({
       project_id: line.project_id,
-      resource_id: line.resource_id ?? OTHER,
       notes: line.notes ?? '',
       hours: String(line.hours),
       rate: String(line.rate / 100),
@@ -227,18 +217,15 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
     const hours = parseInt(form.hours, 10);
     const rate = Math.round(parseFloat(form.rate) * 100);
     if (!form.project_id) return showError('Project is required');
-    if (!form.resource_id) return showError('External resource is required');
-    if (form.resource_id === OTHER && !form.notes.trim()) return showError('Name / Description is required for "Other"');
+    if (!form.notes.trim()) return showError('Name / Description is required');
     if (isNaN(hours) || hours < 1) return showError('Hours must be at least 1');
     if (isNaN(rate) || rate < 1) return showError('Rate must be a positive number');
 
-    const isOther = form.resource_id === OTHER;
     setSaving(true);
     try {
       if (editingLine) {
         await projectCostsApi.updateExternal(editingLine.id, {
-          resource_id: isOther ? undefined : (form.resource_id || undefined),
-          notes: form.notes || undefined,
+          notes: form.notes,
           hours,
           rate,
         });
@@ -247,8 +234,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
         await projectCostsApi.createExternal({
           project_id: form.project_id,
           period_id: periodId,
-          resource_id: isOther ? undefined : form.resource_id,
-          notes: form.notes || undefined,
+          notes: form.notes,
           hours,
           rate,
         });
@@ -386,39 +372,13 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
                 </div>
               )}
               <div className={styles.field}>
-                <Label required>OoP Resource</Label>
-                <Select
-                  value={form.resource_id}
-                  onChange={(_, d) => setForm((f) => ({ ...f, resource_id: d.value }))}
-                >
-                  <option value="">— select resource —</option>
-                  {externalResources.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.display_name}{r.initials ? ` (${r.initials})` : ''}
-                    </option>
-                  ))}
-                  <option value={OTHER}>Other (free text)</option>
-                </Select>
-              </div>
-              {form.resource_id === OTHER ? (
-                <div className={styles.field}>
-                  <Label required>Name / Description</Label>
-                  <Input
-                    placeholder="e.g. Freelance developer, Agency XYZ"
-                    value={form.notes}
-                    onChange={(_, d) => setForm((f) => ({ ...f, notes: d.value }))}
-                  />
-                </div>
-              ) : (
-              <div className={styles.field}>
-                <Label>Notes</Label>
+                <Label required>Name / Description</Label>
                 <Input
-                  placeholder="Optional notes"
+                  placeholder="e.g. Freelance developer, Agency XYZ"
                   value={form.notes}
                   onChange={(_, d) => setForm((f) => ({ ...f, notes: d.value }))}
                 />
               </div>
-              )}
               <div className={styles.field}>
                 <Label required>Hours</Label>
                 <Input

@@ -29,6 +29,14 @@ class FinanceService:
         self.db = db
         self.current_user = current_user
 
+    def _get_manager_cost_center_id(self) -> Optional[str]:
+        """Return the cost_center_id for the current Manager user, or None if not found."""
+        manager_user = self.db.query(User).filter(
+            User.tenant_id == self.current_user.tenant_id,
+            User.object_id == self.current_user.object_id,
+        ).first()
+        return manager_user.cost_center_id if manager_user else None
+
     def get_actuals_dashboard(
         self,
         year: Optional[int] = None,
@@ -37,6 +45,14 @@ class FinanceService:
         cost_center_id: Optional[str] = None,
         approval_status: Optional[str] = None,
     ) -> List[FinanceActualsDashboardResponse]:
+        # Manager restriction: scope to their own cost center only
+        if self.current_user.role == "Manager":
+            manager_cc_id = self._get_manager_cost_center_id()
+            if manager_cc_id:
+                cost_center_id = manager_cc_id
+            else:
+                return []
+
         query = self.db.query(ActualLine, Resource, Project, CostCenter, ApprovalInstance)
         query = query.join(Resource, ActualLine.resource_id == Resource.id)
         query = query.join(Project, ActualLine.project_id == Project.id)
@@ -98,6 +114,14 @@ class FinanceService:
         from api.app.models.actuals import ActualLine
         from api.app.models.core import CostCenter, Resource
         from sqlalchemy import func
+
+        # Manager restriction: scope to their own cost center only
+        if self.current_user.role == "Manager":
+            manager_cc_id = self._get_manager_cost_center_id()
+            if manager_cc_id:
+                cost_center_id = manager_cc_id
+            else:
+                return []
 
         from api.app.models.core import User
         resource_filters = [Resource.tenant_id == self.current_user.tenant_id]
@@ -192,6 +216,14 @@ class FinanceService:
         from api.app.models.planning import DemandLine
         from api.app.models.core import Resource
         from sqlalchemy import func
+
+        # Manager restriction: scope to their own cost center only
+        if self.current_user.role == "Manager":
+            manager_cc_id = self._get_manager_cost_center_id()
+            if manager_cc_id:
+                cost_center_id = manager_cc_id
+            else:
+                return []
 
         resource_filters = [Resource.tenant_id == self.current_user.tenant_id]
         if cost_center_id:

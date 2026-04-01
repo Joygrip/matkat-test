@@ -29,8 +29,9 @@ export function PeriodProvider({ children }: { children: ReactNode }) {
       .then((data) => {
         setPeriods(data);
         if (data.length > 0) {
-          const openPeriod = data.find((p: Period) => p.status === 'open');
-          setSelectedPeriodId(openPeriod?.id || data[0].id);
+          const openPeriods = data.filter((p: Period) => p.status === 'open');
+          const earliestOpen = openPeriods[openPeriods.length - 1];
+          setSelectedPeriodId(earliestOpen?.id || data[0].id);
         }
       })
       .catch((err) => {

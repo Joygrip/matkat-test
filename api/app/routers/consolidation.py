@@ -94,15 +94,15 @@ async def get_dashboard(
     period_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER, UserRole.PM
     )),
 ):
     """
     Get consolidation dashboard for a period.
-    
+
     Shows demand vs supply gaps, orphan demands, and over-allocations.
-    
-    Accessible to: Admin, Finance, Director, RO (view only)
+
+    Accessible to: Admin, Finance, Manager, PM (view only)
     """
     service = ConsolidationService(db, current_user)
     return service.get_dashboard(period_id)
@@ -123,6 +123,24 @@ async def publish_snapshot(
     service = ConsolidationService(db, current_user)
     snapshot = service.publish_snapshot(period_id, data.name, data.description)
     return _to_response(snapshot)
+
+
+@router.get("/resource/{period_id}/{resource_id}")
+async def get_resource_detail(
+    period_id: str,
+    resource_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER, UserRole.PM
+    )),
+):
+    """
+    Get per-assignment demand and supply breakdown for a resource in a period.
+
+    Accessible to: Admin, Finance, Manager, PM
+    """
+    service = ConsolidationService(db, current_user)
+    return service.get_resource_detail(period_id, resource_id)
 
 
 @router.get("/snapshots", response_model=list[SnapshotResponse])

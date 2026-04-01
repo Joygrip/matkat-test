@@ -4,7 +4,9 @@ import {
   tokens,
   Body1,
   Body2,
+  Caption1,
   Title3,
+  Subtitle2,
   Input,
   Badge,
   Tab,
@@ -17,13 +19,25 @@ import {
   TableCell,
   Skeleton,
   SkeletonItem,
+  Dialog,
+  DialogSurface,
+  DialogTitle,
+  DialogBody,
+  DialogContent,
+  DialogActions,
+  Button,
+  Spinner,
+  Divider,
 } from '@fluentui/react-components';
-import { SearchRegular, BuildingRegular, Warning24Regular } from '@fluentui/react-icons';
+import { SearchRegular, BuildingRegular, Warning24Regular, PersonRegular, Dismiss24Regular } from '@fluentui/react-icons';
 import type {
   ConsolidationDashboard,
   DashboardCostCenter,
+  DashboardResource,
   OverAllocation,
+  ResourceDetail,
 } from '../../api/consolidation';
+import { consolidationApi } from '../../api/consolidation';
 import { useWorkQueueSort } from '../../hooks/useWorkQueueSort';
 import { FinanceSortBar } from './FinanceSortBar';
 import { FinanceKpiStrip, KpiTile } from './FinanceKpiStrip';
@@ -33,6 +47,7 @@ import { GapBadge, GapStatusBadge, PlaceholderTypeBadge } from './FinanceBadges'
 export interface OverviewTabProps {
   dashboard: ConsolidationDashboard | null;
   loading: boolean;
+  projectId?: string;
 }
 
 type CcSortKey = 'gap' | 'name' | 'demand' | 'supply';
@@ -167,7 +182,136 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     marginTop: tokens.spacingVerticalXXS,
   },
+  clickableRow: {
+    cursor: 'pointer',
+    '&:hover': { backgroundColor: `${tokens.colorBrandBackground2} !important` },
+  },
+  assignmentSection: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: tokens.spacingVerticalS,
+  },
+  assignmentSectionTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingBottom: tokens.spacingVerticalXS,
+  },
 });
+
+function ResourceDetailModal({
+  open,
+  resourceName,
+  detail,
+  loading,
+  onClose,
+}: {
+  open: boolean;
+  resourceName: string;
+  detail: ResourceDetail | null;
+  loading: boolean;
+  onClose: () => void;
+}) {
+  const styles = useStyles();
+  return (
+    <Dialog open={open} onOpenChange={(_, d) => { if (!d.open) onClose(); }}>
+      <DialogSurface style={{ minWidth: 560, maxWidth: 720 }}>
+        <DialogBody>
+          <DialogTitle
+            action={
+              <Button appearance="subtle" icon={<Dismiss24Regular />} onClick={onClose} />
+            }
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+              <PersonRegular />
+              {resourceName}
+            </span>
+          </DialogTitle>
+          <DialogContent>
+            {loading && (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: tokens.spacingVerticalXL }}>
+                <Spinner label="Loading assignments..." />
+              </div>
+            )}
+            {!loading && detail && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL }}>
+                {/* Summary row */}
+                <div style={{ display: 'flex', gap: tokens.spacingHorizontalXL }}>
+                  <Body2>Demand: <strong>{detail.total_demand_fte}%</strong></Body2>
+                  <Body2>Supply: <strong>{detail.total_supply_fte}%</strong></Body2>
+                  <GapBadge gap={detail.gap_fte} />
+                </div>
+
+                <Divider />
+
+                {/* Demand assignments */}
+                <div className={styles.assignmentSection}>
+                  <div className={styles.assignmentSectionTitle}>
+                    <Subtitle2>Demand assignments</Subtitle2>
+                    <Badge appearance="outline" size="small">{detail.demand_lines.length}</Badge>
+                  </div>
+                  {detail.demand_lines.length === 0 ? (
+                    <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>No demand assignments.</Caption1>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHeaderCell>Project</TableHeaderCell>
+                          <TableHeaderCell style={{ width: 100 }}>FTE %</TableHeaderCell>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {detail.demand_lines.map((line, i) => (
+                          <TableRow key={i}>
+                            <TableCell>{line.project_name ?? '—'}</TableCell>
+                            <TableCell>{line.fte_percent}%</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </div>
+
+                <Divider />
+
+                {/* Supply assignments */}
+                <div className={styles.assignmentSection}>
+                  <div className={styles.assignmentSectionTitle}>
+                    <Subtitle2>Supply assignments</Subtitle2>
+                    <Badge appearance="outline" size="small">{detail.supply_lines.length}</Badge>
+                  </div>
+                  {detail.supply_lines.length === 0 ? (
+                    <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>No supply assignments.</Caption1>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHeaderCell>Project</TableHeaderCell>
+                          <TableHeaderCell style={{ width: 100 }}>FTE %</TableHeaderCell>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {detail.supply_lines.map((line, i) => (
+                          <TableRow key={i}>
+                            <TableCell>{line.project_name ?? <em style={{ color: tokens.colorNeutralForeground3 }}>General availability</em>}</TableCell>
+                            <TableCell>{line.fte_percent}%</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </div>
+              </div>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button appearance="secondary" onClick={onClose}>Close</Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+  );
+}
 
 function OverAllocTable({ overAllocs }: { overAllocs: OverAllocation[] }) {
   const styles = useStyles();
@@ -204,9 +348,11 @@ function OverAllocTable({ overAllocs }: { overAllocs: OverAllocation[] }) {
 function CcDetailPanel({
   cc,
   overAllocs,
+  onResourceClick,
 }: {
   cc: DashboardCostCenter;
   overAllocs: OverAllocation[];
+  onResourceClick: (resource: DashboardResource) => void;
 }) {
   const styles = useStyles();
   const [detailTab, setDetailTab] = useState<'resources' | 'issues'>('resources');
@@ -253,8 +399,18 @@ function CcDetailPanel({
           </TableHeader>
           <TableBody>
             {cc.resources.map(r => (
-              <TableRow key={r.resource_id}>
-                <TableCell>{r.resource_name}</TableCell>
+              <TableRow
+                key={r.resource_id}
+                className={styles.clickableRow}
+                onClick={() => onResourceClick(r)}
+                title="Click to view assignment details"
+              >
+                <TableCell>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS }}>
+                    <PersonRegular style={{ fontSize: 14, color: tokens.colorNeutralForeground3 }} />
+                    {r.resource_name}
+                  </span>
+                </TableCell>
                 <TableCell>{r.demand_fte}%</TableCell>
                 <TableCell>{r.supply_fte}%</TableCell>
                 <TableCell><GapBadge gap={r.gap_fte} /></TableCell>
@@ -376,16 +532,64 @@ function CcDetailPanel({
   );
 }
 
-export function OverviewTab({ dashboard, loading }: OverviewTabProps) {
+export function OverviewTab({ dashboard, loading, projectId }: OverviewTabProps) {
   const styles = useStyles();
   const [ccFilter, setCcFilter] = useState<IssueFilter>('none');
   const [selectedCcId, setSelectedCcId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [drillOpen, setDrillOpen] = useState(false);
+  const [drillResourceName, setDrillResourceName] = useState('');
+  const [resourceDetail, setResourceDetail] = useState<ResourceDetail | null>(null);
+  const [resourceDetailLoading, setResourceDetailLoading] = useState(false);
+
+  const handleResourceClick = async (resource: DashboardResource) => {
+    if (!dashboard) return;
+    setDrillResourceName(resource.resource_name);
+    setDrillOpen(true);
+    setResourceDetail(null);
+    setResourceDetailLoading(true);
+    try {
+      const detail = await consolidationApi.getResourceDetail(dashboard.period_id, resource.resource_id);
+      setResourceDetail(detail);
+    } finally {
+      setResourceDetailLoading(false);
+    }
+  };
   const { sort, sortDir, handleSortClick, sortItems } = useWorkQueueSort<CcSortKey>('gap');
 
-  const kpiTiles = useMemo((): KpiTile[] => {
+  // Cost centers scoped to the selected project (no ccFilter/search applied).
+  // Used for KPI and issue alert totals so they reflect the project scope,
+  // not the secondary list filter.
+  const projectFilteredCcs = useMemo(() => {
     if (!dashboard) return [];
-    const s = dashboard.summary;
+    if (!projectId) return dashboard.cost_centers;
+    return dashboard.cost_centers.filter(cc => cc.project_ids.includes(projectId));
+  }, [dashboard, projectId]);
+
+  const filteredOverAllocs = useMemo(() => {
+    if (!dashboard) return [];
+    if (!projectId) return dashboard.over_allocations;
+    const projectCcIds = new Set(projectFilteredCcs.map(cc => cc.cost_center_id ?? '__none__'));
+    return dashboard.over_allocations.filter(oa => projectCcIds.has(oa.cost_center_id ?? '__none__'));
+  }, [dashboard, projectId, projectFilteredCcs]);
+
+  const filteredSummary = useMemo(() => {
+    if (!dashboard) return null;
+    const total_cost_centers = projectFilteredCcs.length;
+    const total_demand_fte = projectFilteredCcs.reduce((s, cc) => s + cc.total_demand_fte, 0);
+    const total_supply_fte = projectFilteredCcs.reduce((s, cc) => s + cc.total_supply_fte, 0);
+    const total_gap_fte = total_supply_fte - total_demand_fte;
+    const orphans_count = projectFilteredCcs.reduce((s, cc) => s + cc.placeholders.length, 0);
+    const over_allocations_count = filteredOverAllocs.length;
+    const understaffed_count = projectFilteredCcs.reduce(
+      (s, cc) => s + cc.resources.filter(r => r.status === 'under').length, 0
+    );
+    return { total_cost_centers, total_demand_fte, total_supply_fte, total_gap_fte, orphans_count, over_allocations_count, understaffed_count };
+  }, [dashboard, projectFilteredCcs, filteredOverAllocs]);
+
+  const kpiTiles = useMemo((): KpiTile[] => {
+    if (!filteredSummary) return [];
+    const s = filteredSummary;
     const gapColor = s.total_gap_fte < 0 ? 'danger' : s.total_gap_fte > 0 ? 'success' : 'default';
     return [
       { label: 'Cost Centers', value: s.total_cost_centers },
@@ -397,22 +601,14 @@ export function OverviewTab({ dashboard, loading }: OverviewTabProps) {
         color: gapColor,
       },
     ];
-  }, [dashboard]);
-
-  const understaffedCount = useMemo(() => {
-    if (!dashboard) return 0;
-    return dashboard.cost_centers.reduce(
-      (sum, cc) => sum + cc.resources.filter(r => r.status === 'under').length,
-      0,
-    );
-  }, [dashboard]);
+  }, [filteredSummary]);
 
   const filteredCcs = useMemo(() => {
     if (!dashboard) return [];
-    let ccs = dashboard.cost_centers;
+    let ccs = projectFilteredCcs;
     if (ccFilter === 'orphans') ccs = ccs.filter(cc => cc.placeholders.length > 0);
     if (ccFilter === 'overalloc') {
-      const overIds = new Set(dashboard.over_allocations.map(oa => oa.cost_center_id ?? '__none__'));
+      const overIds = new Set(filteredOverAllocs.map(oa => oa.cost_center_id ?? '__none__'));
       ccs = ccs.filter(cc => overIds.has(cc.cost_center_id ?? '__none__'));
     }
     if (ccFilter === 'understaffed') {
@@ -423,7 +619,7 @@ export function OverviewTab({ dashboard, loading }: OverviewTabProps) {
       ccs = ccs.filter(cc => cc.cost_center_name.toLowerCase().includes(q));
     }
     return ccs;
-  }, [dashboard, ccFilter, search]);
+  }, [dashboard, ccFilter, search, projectFilteredCcs, filteredOverAllocs]);
 
   const sortedCcs = useMemo(() =>
     sortItems(filteredCcs, (cc, key) => {
@@ -483,9 +679,9 @@ export function OverviewTab({ dashboard, loading }: OverviewTabProps) {
       <FinanceKpiStrip tiles={kpiTiles} />
 
       <FinanceIssueAlerts
-        orphansCount={dashboard.summary.orphans_count}
-        overAllocsCount={dashboard.summary.over_allocations_count}
-        understaffedCount={understaffedCount}
+        orphansCount={filteredSummary?.orphans_count ?? 0}
+        overAllocsCount={filteredSummary?.over_allocations_count ?? 0}
+        understaffedCount={filteredSummary?.understaffed_count ?? 0}
         activeFilter={ccFilter}
         onFilterChange={filter => {
           setCcFilter(filter);
@@ -493,8 +689,8 @@ export function OverviewTab({ dashboard, loading }: OverviewTabProps) {
         }}
       />
 
-      {ccFilter === 'overalloc' && dashboard.over_allocations.length > 0 && (
-        <OverAllocTable overAllocs={dashboard.over_allocations} />
+      {ccFilter === 'overalloc' && filteredOverAllocs.length > 0 && (
+        <OverAllocTable overAllocs={filteredOverAllocs} />
       )}
 
       <div className={styles.workQueueLayout}>
@@ -554,7 +750,11 @@ export function OverviewTab({ dashboard, loading }: OverviewTabProps) {
         {/* Right: cost center detail */}
         <div className={styles.workQueueDetails}>
           {selectedCc ? (
-            <CcDetailPanel cc={selectedCc} overAllocs={overAllocsForSelected} />
+            <CcDetailPanel
+              cc={selectedCc}
+              overAllocs={overAllocsForSelected}
+              onResourceClick={handleResourceClick}
+            />
           ) : (
             <div className={styles.emptyPrompt} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
               <BuildingRegular style={{ fontSize: 40, color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalM }} />
@@ -563,6 +763,14 @@ export function OverviewTab({ dashboard, loading }: OverviewTabProps) {
           )}
         </div>
       </div>
+
+      <ResourceDetailModal
+        open={drillOpen}
+        resourceName={drillResourceName}
+        detail={resourceDetail}
+        loading={resourceDetailLoading}
+        onClose={() => setDrillOpen(false)}
+      />
     </>
   );
 }

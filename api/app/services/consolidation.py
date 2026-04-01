@@ -67,6 +67,7 @@ class ConsolidationService:
         placeholder_map = self._load_placeholder_map()
 
         demand_by_resource: Dict[str, int] = defaultdict(int)
+        resource_project_ids: Dict[str, set] = defaultdict(set)
         resource_demands = self.db.query(DemandLine).filter(
             and_(
                 DemandLine.tenant_id == self.current_user.tenant_id,
@@ -76,6 +77,7 @@ class ConsolidationService:
         ).all()
         for d in resource_demands:
             demand_by_resource[d.resource_id] += d.fte_percent
+            resource_project_ids[d.resource_id].add(d.project_id)
 
         supply_by_resource: Dict[str, int] = defaultdict(int)
         supplies = self.db.query(SupplyLine).filter(
@@ -107,6 +109,7 @@ class ConsolidationService:
                     "total_demand_fte": 0,
                     "total_supply_fte": 0,
                     "gap_fte": 0,
+                    "project_ids": set(),
                     "resources": [],
                     "placeholders": [],
                 }
@@ -125,6 +128,7 @@ class ConsolidationService:
             cc_node = _ensure_cc(cc_id, cc_name)
             cc_node["total_demand_fte"] += demand
             cc_node["total_supply_fte"] += supply
+            cc_node["project_ids"].update(resource_project_ids.get(res_id, set()))
 
             status = "balanced"
             if gap < 0:
@@ -161,6 +165,7 @@ class ConsolidationService:
             cc_node = _ensure_cc(cc_id, cc_name)
             cc_node["total_demand_fte"] += od.fte_percent
 
+            cc_node["project_ids"].add(od.project_id)
             cc_node["placeholders"].append({
                 "placeholder_id": od.placeholder_id,
                 "placeholder_name": ph.name if ph else "Unknown",
@@ -175,6 +180,7 @@ class ConsolidationService:
         total_supply = 0
         for cc_node in cc_tree.values():
             cc_node["gap_fte"] = cc_node["total_supply_fte"] - cc_node["total_demand_fte"]
+            cc_node["project_ids"] = list(cc_node["project_ids"])
             total_demand += cc_node["total_demand_fte"]
             total_supply += cc_node["total_supply_fte"]
             cost_centers_list.append(cc_node)
@@ -397,3 +403,91 @@ class ConsolidationService:
                 PublishSnapshot.tenant_id == self.current_user.tenant_id,
             )
         ).first()
+
+    # ------------------------------------------------------------------ resource detail
+    def get_resource_detail(self, period_id: str, resource_id: str) -> Dict[str, Any]:
+        """
+        Get per-assignment demand and supply breakdown for a single resource in a period.
+        """
+        period = self.db.query(Period).filter(
+            and_(
+                Period.id == period_id,
+                Period.tenant_id == self.current_user.tenant_id,
+            )
+        ).first()
+        if not period:
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Period not found"})
+
+        resource = self.db.query(Resource).filter(
+            and_(
+                Resource.id == resource_id,
+                Resource.tenant_id == self.current_user.tenant_id,
+            )
+        ).first()
+        if not resource:
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Resource not found"})
+
+        demand_lines = self.db.query(DemandLine).filter(
+            and_(
+                DemandLine.tenant_id == self.current_user.tenant_id,
+                DemandLine.period_id == period_id,
+                DemandLine.resource_id == resource_id,
+            )
+        ).all()
+
+        supply_lines = self.db.query(SupplyLine).filter(
+            and_(
+                SupplyLine.tenant_id == self.current_user.tenant_id,
+                SupplyLine.period_id == period_id,
+                SupplyLine.resource_id == resource_id,
+            )
+        ).all()
+
+        # Batch-load projects referenced by demand lines
+        demand_project_ids = [d.project_id for d in demand_lines if d.project_id]
+        supply_project_ids = [s.project_id for s in supply_lines if s.project_id]
+        all_project_ids = list(set(demand_project_ids + supply_project_ids))
+        if all_project_ids:
+            projects = self.db.query(Project).filter(
+                and_(
+                    Project.id.in_(all_project_ids),
+                    Project.tenant_id == self.current_user.tenant_id,
+                )
+            ).all()
+            project_map = {p.id: p for p in projects}
+        else:
+            project_map = {}
+
+        demand_result = []
+        for d in demand_lines:
+            project = project_map.get(d.project_id)
+            demand_result.append({
+                "project_id": d.project_id,
+                "project_name": project.name if project else "Unknown",
+                "fte_percent": d.fte_percent,
+            })
+        demand_result.sort(key=lambda x: x["project_name"])
+
+        supply_result = []
+        for s in supply_lines:
+            project = project_map.get(s.project_id) if s.project_id else None
+            supply_result.append({
+                "project_id": s.project_id,
+                "project_name": project.name if project else None,
+                "fte_percent": s.fte_percent,
+            })
+        supply_result.sort(key=lambda x: x["project_name"] or "")
+
+        total_demand = sum(d["fte_percent"] for d in demand_result)
+        total_supply = sum(s["fte_percent"] for s in supply_result)
+
+        return {
+            "resource_id": resource_id,
+            "resource_name": resource.display_name,
+            "period_id": period_id,
+            "demand_lines": demand_result,
+            "supply_lines": supply_result,
+            "total_demand_fte": total_demand,
+            "total_supply_fte": total_supply,
+            "gap_fte": total_supply - total_demand,
+        }

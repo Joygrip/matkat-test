@@ -251,7 +251,7 @@ const navItems: NavItem[] = [
   { path: '/demand', label: 'Demand', icon: Demand, roles: ['Admin', 'Finance', 'PM', 'Manager'], section: 'planning' },
   { path: '/supply', label: 'Supply', icon: Supply, roles: ['Admin', 'Finance', 'PM', 'Manager'], section: 'planning' },
   { path: '/actuals', label: 'Actuals', icon: Actuals, roles: ['Admin', 'Finance', 'Manager', 'Employee'], section: 'operations' },
-  { path: '/finance', label: 'Finance', icon: Consolidation, roles: ['Admin', 'Finance', 'Manager'], section: 'operations' },
+  { path: '/finance', label: 'Finance', icon: Consolidation, roles: ['Admin', 'Finance', 'Manager', 'PM'], section: 'operations' },
   { path: '/project-costs', label: 'Project Costs', icon: ProjectCostsIcon, roles: ['Admin', 'Finance', 'PM', 'Manager'], section: 'operations' },
   { path: '/approvals', label: 'Approvals', icon: Approvals, roles: ['Admin', 'Manager'], section: 'operations' },
   { path: '/admin', label: 'Admin', icon: Admin, roles: ['Admin', 'Finance'], section: 'admin' },

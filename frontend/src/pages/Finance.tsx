@@ -164,6 +164,7 @@ export const Finance: React.FC = () => {
   const canManagePeriods = user?.role === 'Finance' || user?.role === 'Admin';
   const canPublishSnapshot = user?.role === 'Finance' || user?.role === 'Admin';
   const canDownloadCsv = user?.role === 'Finance';
+  const isPM = user?.role === 'PM';
 
   // ── Period ──
   const {
@@ -187,6 +188,9 @@ export const Finance: React.FC = () => {
   const [actualsError, setActualsError] = useState<string | null>(null);
   const [actualsProjectId, setActualsProjectId] = useState<string>('');
   const [actualsApprovalStatus, setActualsApprovalStatus] = useState<string>('');
+
+  // ── Overview filters ──
+  const [overviewProjectId, setOverviewProjectId] = useState<string>('');
 
   // ── Snapshots ──
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
@@ -229,15 +233,17 @@ export const Finance: React.FC = () => {
   useEffect(() => {
     if (selectedPeriodId) {
       loadDashboard(selectedPeriodId);
-      loadSnapshots(selectedPeriodId);
-      loadActuals(selectedPeriodId);
+      if (!isPM) {
+        loadSnapshots(selectedPeriodId);
+        loadActuals(selectedPeriodId);
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPeriodId]);
 
   // ── Reload actuals when filters change ──
   useEffect(() => {
-    if (selectedPeriodId) loadActuals(selectedPeriodId);
+    if (selectedPeriodId && !isPM) loadActuals(selectedPeriodId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actualsProjectId, actualsApprovalStatus]);
 
@@ -345,7 +351,7 @@ export const Finance: React.FC = () => {
 
       {/* ── Publish dialog ── */}
       {canPublishSnapshot && (
-        <Dialog open={isPublishDialogOpen} onOpenChange={(_, data) => setIsPublishDialogOpen(data.open)}>
+        <Dialog open={isPublishDialogOpen} onOpenChange={(_: unknown, data: { open: boolean }) => setIsPublishDialogOpen(data.open)}>
           <DialogSurface>
             <DialogBody>
               <DialogTitle>Publish Snapshot</DialogTitle>
@@ -403,7 +409,7 @@ export const Finance: React.FC = () => {
           type="overlay"
           position="end"
           open={isPeriodDrawerOpen}
-          onOpenChange={(_, data) => setIsPeriodDrawerOpen(data.open)}
+          onOpenChange={(_: unknown, data: { open: boolean }) => setIsPeriodDrawerOpen(data.open)}
         >
           <DrawerHeader>
             <DrawerHeaderTitle>Period Management</DrawerHeaderTitle>
@@ -422,10 +428,10 @@ export const Finance: React.FC = () => {
             onTabSelect={(_, data) => setActiveTab(data.value as ActiveTab)}
           >
             <Tab value="overview">Overview</Tab>
-            <Tab value="actuals">Actuals</Tab>
-            <Tab value="snapshots">Snapshots</Tab>
-            {canSeeCostReport && <Tab value="costreport">Cost Report</Tab>}
-            {canSeeStats && <Tab value="costoverview">Cost Overview</Tab>}
+            {isPM ? null : <Tab value="actuals">Actuals</Tab>}
+            {isPM ? null : <Tab value="snapshots">Snapshots</Tab>}
+            {!isPM && canSeeCostReport && <Tab value="costreport">Cost Report</Tab>}
+            <Tab value="costoverview">Cost Overview</Tab>
           </TabList>
           <span className={styles.toolbarMeta}>
             {latestSnapshot
@@ -444,6 +450,23 @@ export const Finance: React.FC = () => {
               onSelect={setSelectedPeriodId}
             />
           </div>
+
+          {/* Overview-only filters */}
+          {activeTab === 'overview' && (
+            <div className={styles.filterGroup}>
+              <span className={styles.filterLabel}>Project</span>
+              <Select
+                value={overviewProjectId}
+                onChange={(_, data) => setOverviewProjectId(data.value ?? '')}
+                style={{ minWidth: 140 }}
+              >
+                <option value="">All projects</option>
+                {projects.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </Select>
+            </div>
+          )}
 
           {/* Actuals-only filters */}
           {activeTab === 'actuals' && (
@@ -481,10 +504,9 @@ export const Finance: React.FC = () => {
       {/* ── Tab content ── */}
 
       {activeTab === 'overview' && (
-        <OverviewTab dashboard={dashboard} loading={dashboardLoading} />
+        <OverviewTab dashboard={dashboard} loading={dashboardLoading} projectId={overviewProjectId} />
       )}
-
-      {activeTab === 'actuals' && (
+      {!isPM && activeTab === 'actuals' && (
         <ActualsTab
           actualsData={actualsData}
           actualsLoading={actualsLoading}
@@ -497,16 +519,14 @@ export const Finance: React.FC = () => {
           canSeeStats={canSeeStats}
         />
       )}
-
-      {activeTab === 'snapshots' && (
+      {!isPM && activeTab === 'snapshots' && (
         <SnapshotsTab
           snapshots={snapshots}
           canDownloadCsv={canDownloadCsv}
           showApiError={showApiError}
         />
       )}
-
-      {activeTab === 'costreport' && canSeeCostReport && (
+      {!isPM && activeTab === 'costreport' && canSeeCostReport && (
         <CostReportTab
           actualsData={actualsData}
           actualsLoading={actualsLoading}
@@ -517,8 +537,7 @@ export const Finance: React.FC = () => {
           showApiError={showApiError}
         />
       )}
-
-      {activeTab === 'costoverview' && canSeeStats && (
+      {activeTab === 'costoverview' && (canSeeStats || isPM) && (
         <ConsolidatedCostChart />
       )}
     </div>

@@ -27,6 +27,7 @@ export interface DashboardCostCenter {
   total_demand_fte: number;
   total_supply_fte: number;
   gap_fte: number;
+  project_ids: string[];
   resources: DashboardResource[];
   placeholders: DashboardPlaceholder[];
 }
@@ -54,6 +55,23 @@ export interface ConsolidationDashboard {
   summary: DashboardSummary;
   cost_centers: DashboardCostCenter[];
   over_allocations: OverAllocation[];
+}
+
+export interface ResourceAssignmentLine {
+  project_id: string | null;
+  project_name: string | null;
+  fte_percent: number;
+}
+
+export interface ResourceDetail {
+  resource_id: string;
+  resource_name: string;
+  period_id: string;
+  demand_lines: ResourceAssignmentLine[];
+  supply_lines: ResourceAssignmentLine[];
+  total_demand_fte: number;
+  total_supply_fte: number;
+  gap_fte: number;
 }
 
 export interface SnapshotLine {
@@ -103,6 +121,10 @@ export const consolidationApi = {
   
   async getSnapshot(snapshotId: string): Promise<SnapshotDetail> {
     return apiClient.get<SnapshotDetail>(`/consolidation/snapshots/${snapshotId}`);
+  },
+
+  async getResourceDetail(periodId: string, resourceId: string): Promise<ResourceDetail> {
+    return apiClient.get<ResourceDetail>(`/consolidation/resource/${periodId}/${resourceId}`);
   },
 
   async downloadSnapshotCsv(snapshotId: string): Promise<void> {

@@ -161,6 +161,7 @@ export const Finance: React.FC = () => {
   const { user } = useAuth();
   const canSeeStats = useHasRole('Finance', 'Manager', 'Admin');
   const canSeeCostReport = useHasRole('Finance', 'Admin');
+  const canSeeSnapshots = useHasRole('Finance', 'Admin');
   const canManagePeriods = user?.role === 'Finance' || user?.role === 'Admin';
   const canPublishSnapshot = user?.role === 'Finance' || user?.role === 'Admin';
   const canDownloadCsv = user?.role === 'Finance';
@@ -233,10 +234,8 @@ export const Finance: React.FC = () => {
   useEffect(() => {
     if (selectedPeriodId) {
       loadDashboard(selectedPeriodId);
-      if (!isPM) {
-        loadSnapshots(selectedPeriodId);
-        loadActuals(selectedPeriodId);
-      }
+      if (canSeeSnapshots) loadSnapshots(selectedPeriodId);
+      if (!isPM) loadActuals(selectedPeriodId);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPeriodId]);
@@ -429,7 +428,7 @@ export const Finance: React.FC = () => {
           >
             <Tab value="overview">Overview</Tab>
             {isPM ? null : <Tab value="actuals">Actuals</Tab>}
-            {isPM ? null : <Tab value="snapshots">Snapshots</Tab>}
+            {canSeeSnapshots && <Tab value="snapshots">Snapshots</Tab>}
             {!isPM && canSeeCostReport && <Tab value="costreport">Cost Report</Tab>}
             <Tab value="costoverview">Cost Overview</Tab>
           </TabList>
@@ -504,7 +503,12 @@ export const Finance: React.FC = () => {
       {/* ── Tab content ── */}
 
       {activeTab === 'overview' && (
-        <OverviewTab dashboard={dashboard} loading={dashboardLoading} projectId={overviewProjectId} />
+        <>
+          <MessageBar intent="info" style={{ marginBottom: 12 }}>
+            <MessageBarBody>Cost figures reflect fully approved actuals only. Pending or rejected actuals are excluded.</MessageBarBody>
+          </MessageBar>
+          <OverviewTab dashboard={dashboard} loading={dashboardLoading} projectId={overviewProjectId} />
+        </>
       )}
       {!isPM && activeTab === 'actuals' && (
         <ActualsTab
@@ -517,9 +521,10 @@ export const Finance: React.FC = () => {
           year={year}
           month={month}
           canSeeStats={canSeeStats}
+          onActualsReload={() => loadActuals(selectedPeriodId)}
         />
       )}
-      {!isPM && activeTab === 'snapshots' && (
+      {canSeeSnapshots && activeTab === 'snapshots' && (
         <SnapshotsTab
           snapshots={snapshots}
           canDownloadCsv={canDownloadCsv}
@@ -538,7 +543,12 @@ export const Finance: React.FC = () => {
         />
       )}
       {activeTab === 'costoverview' && (canSeeStats || isPM) && (
-        <ConsolidatedCostChart />
+        <>
+          <MessageBar intent="info" style={{ marginBottom: 12 }}>
+            <MessageBarBody>Cost figures reflect fully approved actuals only. Pending or rejected actuals are excluded.</MessageBarBody>
+          </MessageBar>
+          <ConsolidatedCostChart />
+        </>
       )}
     </div>
   );

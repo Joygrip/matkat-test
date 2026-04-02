@@ -17,8 +17,17 @@ import {
   TableCell,
   Skeleton,
   SkeletonItem,
+  Button,
+  Dialog,
+  DialogSurface,
+  DialogBody,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Textarea,
 } from '@fluentui/react-components';
-import { SearchRegular, MoneyRegular } from '@fluentui/react-icons';
+import { SearchRegular, MoneyRegular, CheckmarkCircle24Regular, DismissCircle24Regular } from '@fluentui/react-icons';
+import { approvalsApi } from '../../api/approvals';
 import { EmptyState } from '../EmptyState';
 import { LoadingState } from '../LoadingState';
 import { DemandVsActualsBarChart } from '../DemandVsActualsBarChart';
@@ -45,6 +54,10 @@ export interface FinanceActualRow {
   approval_status: string;
   current_approval_step?: string;
   current_approver_name?: string;
+  approval_instance_id?: string;
+  current_step_id?: string;
+  current_approver_object_id?: string;
+  can_action?: boolean;
 }
 
 interface LookupProject { id: string; name: string; }
@@ -59,6 +72,7 @@ export interface ActualsTabProps {
   year: number;
   month: number;
   canSeeStats: boolean;
+  onActualsReload?: () => void;
 }
 
 type CcSortKey = 'name' | 'fte' | 'pending';
@@ -172,8 +186,64 @@ export function ActualsTab({
   year,
   month,
   canSeeStats,
+  onActualsReload,
 }: ActualsTabProps) {
   const styles = useStyles();
+
+
+  // Inline approval action state
+  const [approvalDialogRow, setApprovalDialogRow] = useState<FinanceActualRow | null>(null);
+  const [approvalAction, setApprovalAction] = useState<'approve' | 'reject' | null>(null);
+  const [approvalComment, setApprovalComment] = useState('');
+  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+
+  const openApprovalDialog = (row: FinanceActualRow, action: 'approve' | 'reject') => {
+    setApprovalDialogRow(row);
+    setApprovalAction(action);
+    setApprovalComment('');
+    setApprovalError(null);
+  };
+
+  const closeApprovalDialog = () => {
+    setApprovalDialogRow(null);
+    setApprovalAction(null);
+    setApprovalComment('');
+    setApprovalError(null);
+  };
+
+  const handleApprovalSubmit = async () => {
+    if (!approvalDialogRow || !approvalAction) return;
+    if (!approvalDialogRow.approval_instance_id || !approvalDialogRow.current_step_id) return;
+    if (approvalAction === 'reject' && !approvalComment.trim()) {
+      setApprovalError('A comment is required when rejecting.');
+      return;
+    }
+    setApprovalSubmitting(true);
+    setApprovalError(null);
+    try {
+      if (approvalAction === 'approve') {
+        await approvalsApi.approveStep(
+          approvalDialogRow.approval_instance_id,
+          approvalDialogRow.current_step_id,
+          approvalComment.trim() || undefined,
+        );
+      } else {
+        await approvalsApi.rejectStep(
+          approvalDialogRow.approval_instance_id,
+          approvalDialogRow.current_step_id,
+          approvalComment.trim(),
+        );
+      }
+      closeApprovalDialog();
+      onActualsReload?.();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Action failed. Please try again.';
+      setApprovalError(msg);
+    } finally {
+      setApprovalSubmitting(false);
+    }
+  };
 
   // Work queue state
   const [selectedCcId, setSelectedCcId] = useState<string | null>(null);
@@ -402,30 +472,60 @@ export function ActualsTab({
                       <TableHeaderCell onClick={() => handleSort('current_approver_name')}>
                         Approver{sortIndicator('current_approver_name')}
                       </TableHeaderCell>
+                      <TableHeaderCell>Actions</TableHeaderCell>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedActuals.map(row => (
-                      <TableRow key={row.actual_id}>
-                        <TableCell>
-                          <div>
-                            <strong>{row.employee_name}</strong>
-                            <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-                              {row.employee_email}
+                    {sortedActuals.map(row => {
+                      const canAction =
+                        row.approval_status?.toUpperCase() === 'PENDING' &&
+                        row.approval_instance_id &&
+                        row.current_step_id &&
+                        row.can_action;
+                      return (
+                        <TableRow key={row.actual_id}>
+                          <TableCell>
+                            <div>
+                              <strong>{row.employee_name}</strong>
+                              <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                {row.employee_email}
+                              </div>
                             </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>{row.project_name}</TableCell>
-                        <TableCell>{row.cost_center_name}</TableCell>
-                        <TableCell>{row.year}-{String(row.month).padStart(2, '0')}</TableCell>
-                        <TableCell>
-                          <Badge appearance="filled" color="informative">{row.fte_percent}%</Badge>
-                        </TableCell>
-                        <TableCell><ApprovalBadge status={row.approval_status} /></TableCell>
-                        <TableCell>{row.current_approval_step || '—'}</TableCell>
-                        <TableCell>{row.current_approver_name || '—'}</TableCell>
-                      </TableRow>
-                    ))}
+                          </TableCell>
+                          <TableCell>{row.project_name}</TableCell>
+                          <TableCell>{row.cost_center_name}</TableCell>
+                          <TableCell>{row.year}-{String(row.month).padStart(2, '0')}</TableCell>
+                          <TableCell>
+                            <Badge appearance="filled" color="informative">{row.fte_percent}%</Badge>
+                          </TableCell>
+                          <TableCell><ApprovalBadge status={row.approval_status} /></TableCell>
+                          <TableCell>{row.current_approval_step || '—'}</TableCell>
+                          <TableCell>{row.current_approver_name || '—'}</TableCell>
+                          <TableCell>
+                            {canAction && (
+                              <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
+                                <Button
+                                  icon={<CheckmarkCircle24Regular />}
+                                  appearance="subtle"
+                                  size="small"
+                                  title="Approve"
+                                  style={{ color: tokens.colorPaletteGreenForeground1 }}
+                                  onClick={() => openApprovalDialog(row, 'approve')}
+                                />
+                                <Button
+                                  icon={<DismissCircle24Regular />}
+                                  appearance="subtle"
+                                  size="small"
+                                  title="Reject"
+                                  style={{ color: tokens.colorPaletteRedForeground1 }}
+                                  onClick={() => openApprovalDialog(row, 'reject')}
+                                />
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}
@@ -433,6 +533,53 @@ export function ActualsTab({
           </div>
         </div>
       )}
+
+      {/* Inline approval action dialog */}
+      <Dialog open={!!approvalDialogRow} onOpenChange={(_, d) => { if (!d.open) closeApprovalDialog(); }}>
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>
+              {approvalAction === 'approve' ? 'Approve Actuals' : 'Reject Actuals'}
+            </DialogTitle>
+            <DialogContent>
+              {approvalDialogRow && (
+                <Body1 style={{ display: 'block', marginBottom: tokens.spacingVerticalM }}>
+                  {approvalAction === 'approve'
+                    ? `Approve actuals for ${approvalDialogRow.employee_name} on ${approvalDialogRow.project_name}?`
+                    : `Reject actuals for ${approvalDialogRow.employee_name} on ${approvalDialogRow.project_name}?`}
+                </Body1>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS }}>
+                <label style={{ fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase300 }}>
+                  {approvalAction === 'reject' ? 'Reason (required)' : 'Comment (optional)'}
+                </label>
+                <Textarea
+                  value={approvalComment}
+                  onChange={(_, d) => setApprovalComment(d.value)}
+                  placeholder={approvalAction === 'reject' ? 'Explain why these actuals are being rejected...' : 'Add a comment...'}
+                  rows={3}
+                />
+              </div>
+              {approvalError && (
+                <MessageBar intent="error" style={{ marginTop: tokens.spacingVerticalS }}>
+                  <MessageBarBody>{approvalError}</MessageBarBody>
+                </MessageBar>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={closeApprovalDialog} disabled={approvalSubmitting}>Cancel</Button>
+              <Button
+                appearance="primary"
+                onClick={handleApprovalSubmit}
+                disabled={approvalSubmitting || (approvalAction === 'reject' && !approvalComment.trim())}
+                style={approvalAction === 'reject' ? { backgroundColor: tokens.colorPaletteRedBackground3 } : undefined}
+              >
+                {approvalSubmitting ? 'Saving...' : approvalAction === 'approve' ? 'Approve' : 'Reject'}
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
 
       {/* Chart — visible when stats enabled */}
       {canSeeStats && year > 0 && month > 0 && (

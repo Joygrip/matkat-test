@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Text,
     Index,
+    UniqueConstraint,
     Enum as SQLEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -66,6 +67,11 @@ class NotificationLog(Base):
     # Entity that triggered this notification (resource_id for ConflictAlert / MissingActuals)
     resource_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
+    # Reliability fields
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
@@ -73,4 +79,6 @@ class NotificationLog(Base):
         Index('ix_notification_run', 'tenant_id', 'phase', 'year', 'month', 'run_id'),
         # Per-entity idempotency index (used by ConflictAlert and MissingActuals phases)
         Index('ix_notification_entity', 'tenant_id', 'phase', 'year', 'month', 'resource_id', 'recipient_user_id'),
+        # DB-level unique constraint preventing duplicate sends under concurrent runs
+        UniqueConstraint('idempotency_key', name='uq_notification_idempotency_key'),
     )

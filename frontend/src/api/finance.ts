@@ -92,6 +92,7 @@ export interface ActualLineDetail {
 
 export interface ExternalLineDetail {
   resource_name: string | null;
+  description: string | null;
   notes: string | null;
   hours: number;
   rate: number;       // cents/hr

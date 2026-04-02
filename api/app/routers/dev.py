@@ -235,6 +235,33 @@ async def get_dev_config():
     }
 
 
+@router.get("/users-by-role", dependencies=[Depends(require_dev_mode)])
+async def get_users_by_role(
+    role: str = None,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    List active users by role for Dev Login panel user picker.
+    Returns object_id, display_name, role, email.
+    """
+    q = db.query(User).filter(
+        User.tenant_id == current_user.tenant_id,
+        User.is_active.is_(True),
+    )
+    if role:
+        q = q.filter(User.role == role)
+    return [
+        {
+            "object_id": u.object_id,
+            "display_name": u.display_name,
+            "role": u.role,
+            "email": u.email or "",
+        }
+        for u in q.order_by(User.display_name).all()
+    ]
+
+
 @router.get("/resources-with-users", dependencies=[Depends(require_dev_mode)])
 async def get_resources_with_users(
     db: Session = Depends(get_db),

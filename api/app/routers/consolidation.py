@@ -204,6 +204,7 @@ async def download_snapshot_csv(
         "project_id", "project_name",
         "resource_id", "resource_name",
         "placeholder_id", "placeholder_name",
+        "cost_center_id", "cost_center_name",
         "fte_percent", "hours", "cost_cents",
         "snapshot_name", "published_at", "published_by",
     ])
@@ -217,6 +218,8 @@ async def download_snapshot_csv(
             line.resource_name or "",
             line.placeholder_id or "",
             line.placeholder_name or "",
+            line.cost_center_id or "",
+            line.cost_center_name or "",
             line.fte_percent if line.fte_percent is not None else "",
             line.hours if line.hours is not None else "",
             line.cost if line.cost is not None else "",

@@ -50,23 +50,25 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
         User(tenant_id=tenant_id, object_id="emp-004", email="emp4@example.com", display_name="Diana Developer", role=UserRole.EMPLOYEE, cost_center_id=cc_software.id),
         User(tenant_id=tenant_id, object_id="emp-005", email="emp5@example.com", display_name="Eve Support", role=UserRole.EMPLOYEE, cost_center_id=cc_support.id),
         User(tenant_id=tenant_id, object_id="dev-user-001", email="dev@example.com", display_name="Dev User", role=UserRole.EMPLOYEE, cost_center_id=cc_software.id),
+        User(tenant_id=tenant_id, object_id="manager-001", email="manager@example.com", display_name="Dev Manager", role=UserRole.MANAGER, cost_center_id=cc_software.id),
     ]
 
     # Set manager relationships
-    users[9].manager_object_id = users[4].object_id   # Alice -> RO Software
-    users[10].manager_object_id = users[5].object_id   # Bob -> RO QA
-    users[11].manager_object_id = users[6].object_id   # Charlie -> RO Infrastructure
-    users[12].manager_object_id = users[4].object_id   # Diana -> RO Software
-    users[13].manager_object_id = users[6].object_id   # Eve -> RO Infrastructure
-    users[4].manager_object_id = users[7].object_id    # RO Software -> Engineering Director
-    users[5].manager_object_id = users[7].object_id    # RO QA -> Engineering Director
-    users[6].manager_object_id = users[8].object_id    # RO Infrastructure -> Operations Director
+    users[9].manager_object_id = "manager-001"          # Alice -> Dev Manager
+    users[10].manager_object_id = users[5].object_id    # Bob -> RO QA
+    users[11].manager_object_id = users[6].object_id    # Charlie -> RO Infrastructure
+    users[12].manager_object_id = "manager-001"          # Diana -> Dev Manager
+    users[13].manager_object_id = users[6].object_id    # Eve -> RO Infrastructure
+    users[4].manager_object_id = users[7].object_id     # RO Software -> Engineering Director
+    users[5].manager_object_id = users[7].object_id     # RO QA -> Engineering Director
+    users[6].manager_object_id = users[8].object_id     # RO Infrastructure -> Operations Director
+    users[15].manager_object_id = users[7].object_id    # Dev Manager -> Engineering Director
 
     db.add_all(users)
     db.flush()
 
     # Update cost center ROs and directors
-    cc_software.ro_user_id = users[4].id
+    cc_software.ro_user_id = users[15].id   # Dev Manager is RO for Software Development
     cc_software.director_user_id = users[7].id
     cc_qa.ro_user_id = users[5].id
     cc_qa.director_user_id = users[7].id
@@ -209,7 +211,7 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
         instance_id=approval1.id,
         step_order=1,
         step_name="Manager",
-        approver_id=users[4].id,
+        approver_id=users[15].id,
         status=StepStatus.PENDING,
     )
     db.add(step1_ro)
@@ -287,7 +289,7 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
         instance_id=feb_approval1.id,
         step_order=1,
         step_name="Manager",
-        approver_id=users[4].id,
+        approver_id=users[15].id,
         status=StepStatus.PENDING,
     )
     db.add(feb_step1_ro)

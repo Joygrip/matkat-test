@@ -16,6 +16,10 @@ class FinanceActualsDashboardResponse(BaseModel):
     approval_status: str
     current_approval_step: Optional[str]
     current_approver_name: Optional[str]
+    approval_instance_id: Optional[str] = None
+    current_step_id: Optional[str] = None
+    current_approver_object_id: Optional[str] = None
+    can_action: bool = False
 
 class FinanceCostCenterStatsResponse(BaseModel):
     cost_center_id: str
@@ -74,6 +78,7 @@ class ActualLineDetail(BaseModel):
 
 class ExternalLineDetail(BaseModel):
     resource_name: Optional[str]
+    description: Optional[str]
     notes: Optional[str]
     hours: int
     rate: int       # cents/hr

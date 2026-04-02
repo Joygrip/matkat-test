@@ -187,23 +187,28 @@ class ConsolidationService:
 
         cost_centers_list.sort(key=lambda c: c["cost_center_name"] or "")
 
-        # Manager restriction: filter to their own cost center only
+        # Manager restriction: filter to cost centers they manage (ro_user_id or director_user_id)
         if self.current_user.role == "Manager":
             manager_user = self.db.query(User).filter(
-                User.tenant_id == self.current_user.tenant_id,
-                User.object_id == self.current_user.object_id,
+                and_(
+                    User.tenant_id == self.current_user.tenant_id,
+                    User.object_id == self.current_user.object_id,
+                )
             ).first()
-            manager_cc_id = manager_user.cost_center_id if manager_user else None
-            if manager_cc_id:
-                cost_centers_list = [
-                    cc for cc in cost_centers_list if cc["cost_center_id"] == manager_cc_id
-                ]
-                over_allocations = [
-                    oa for oa in over_allocations if oa["cost_center_id"] == manager_cc_id
-                ]
+            if manager_user:
+                managed_cc_ids = {
+                    row[0] for row in self.db.query(CostCenter.id).filter(
+                        and_(
+                            CostCenter.tenant_id == self.current_user.tenant_id,
+                            CostCenter.is_active.is_(True),
+                            (CostCenter.ro_user_id == manager_user.id) | (CostCenter.director_user_id == manager_user.id),
+                        )
+                    ).all()
+                }
             else:
-                cost_centers_list = []
-                over_allocations = []
+                managed_cc_ids = set()
+            cost_centers_list = [cc for cc in cost_centers_list if cc["cost_center_id"] in managed_cc_ids]
+            over_allocations = [oa for oa in over_allocations if oa["cost_center_id"] in managed_cc_ids]
             # Recompute summary totals from filtered list
             total_demand = sum(cc["total_demand_fte"] for cc in cost_centers_list)
             total_supply = sum(cc["total_supply_fte"] for cc in cost_centers_list)
@@ -268,7 +273,8 @@ class ConsolidationService:
             placeholder = self.db.query(Placeholder).filter(
                 and_(Placeholder.id == d.placeholder_id, Placeholder.tenant_id == self.current_user.tenant_id)
             ).first() if d.placeholder_id else None
-            
+            cc_id, cc_name = self._resolve_cc(resource=resource, placeholder=placeholder)
+
             line = PublishSnapshotLine(
                 snapshot_id=snapshot.id,
                 line_type="demand",
@@ -278,6 +284,8 @@ class ConsolidationService:
                 resource_name=resource.display_name if resource else None,
                 placeholder_id=d.placeholder_id,
                 placeholder_name=placeholder.name if placeholder else None,
+                cost_center_id=cc_id,
+                cost_center_name=cc_name,
                 year=d.year,
                 month=d.month,
                 fte_percent=d.fte_percent,
@@ -296,23 +304,50 @@ class ConsolidationService:
             resource = self.db.query(Resource).filter(
                 and_(Resource.id == s.resource_id, Resource.tenant_id == self.current_user.tenant_id)
             ).first()
-            
+            cc_id, cc_name = self._resolve_cc(resource=resource)
+
             line = PublishSnapshotLine(
                 snapshot_id=snapshot.id,
                 line_type="supply",
                 resource_id=s.resource_id,
                 resource_name=resource.display_name if resource else None,
+                cost_center_id=cc_id,
+                cost_center_name=cc_name,
                 year=s.year,
                 month=s.month,
                 fte_percent=s.fte_percent,
             )
             self.db.add(line)
         
-        # Copy actual lines
+        # Copy actual lines — approved only
+        from api.app.models.approvals import ApprovalInstance, ApprovalStatus
+        latest_actual_subq = (
+            self.db.query(
+                ApprovalInstance.subject_id.label("actual_id"),
+                func.max(ApprovalInstance.created_at).label("max_created"),
+            )
+            .filter(
+                ApprovalInstance.subject_type == "actuals",
+                ApprovalInstance.tenant_id == self.current_user.tenant_id,
+            )
+            .group_by(ApprovalInstance.subject_id)
+            .subquery()
+        )
+        approved_actual_ids_subq = (
+            self.db.query(ApprovalInstance.subject_id)
+            .join(latest_actual_subq, and_(
+                ApprovalInstance.subject_id == latest_actual_subq.c.actual_id,
+                ApprovalInstance.created_at == latest_actual_subq.c.max_created,
+                ApprovalInstance.subject_type == "actuals",
+            ))
+            .filter(ApprovalInstance.status == ApprovalStatus.APPROVED)
+            .subquery()
+        )
         actuals = self.db.query(ActualLine).filter(
             and_(
                 ActualLine.tenant_id == self.current_user.tenant_id,
                 ActualLine.period_id == period_id,
+                ActualLine.id.in_(approved_actual_ids_subq),
             )
         ).all()
         
@@ -323,7 +358,8 @@ class ConsolidationService:
             resource = self.db.query(Resource).filter(
                 and_(Resource.id == a.resource_id, Resource.tenant_id == self.current_user.tenant_id)
             ).first()
-            
+            cc_id, cc_name = self._resolve_cc(resource=resource)
+
             line = PublishSnapshotLine(
                 snapshot_id=snapshot.id,
                 line_type="actual",
@@ -331,6 +367,8 @@ class ConsolidationService:
                 project_name=project.name if project else None,
                 resource_id=a.resource_id,
                 resource_name=resource.display_name if resource else None,
+                cost_center_id=cc_id,
+                cost_center_name=cc_name,
                 year=a.year,
                 month=a.month,
                 fte_percent=a.actual_fte_percent,
@@ -352,7 +390,8 @@ class ConsolidationService:
             resource = self.db.query(Resource).filter(
                 and_(Resource.id == o.resource_id, Resource.tenant_id == self.current_user.tenant_id)
             ).first()
-            
+            cc_id, cc_name = self._resolve_cc(resource=resource)
+
             line = PublishSnapshotLine(
                 snapshot_id=snapshot.id,
                 line_type="oop",
@@ -360,6 +399,8 @@ class ConsolidationService:
                 project_name=project.name if project else None,
                 resource_id=o.resource_id,
                 resource_name=resource.display_name if resource else None,
+                cost_center_id=cc_id,
+                cost_center_name=cc_name,
                 year=o.year,
                 month=o.month,
                 hours=o.hours,

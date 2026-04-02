@@ -97,23 +97,38 @@ export function DevLoginPanel() {
   const [selectedResourceId, setSelectedResourceId] = useState<string>('');
   const [loadingResources, setLoadingResources] = useState(false);
 
-  // Load resources when Employee role is selected
+  const [managerUsers, setManagerUsers] = useState<Array<{
+    object_id: string;
+    display_name: string;
+    role: string;
+    email: string;
+  }>>([]);
+  const [selectedManagerUserId, setSelectedManagerUserId] = useState<string>('');
+  const [loadingManagers, setLoadingManagers] = useState(false);
+
+  // Load resources or manager users based on selected role
   useEffect(() => {
     if (selectedRole === 'Employee') {
       loadResources();
+      setManagerUsers([]);
+      setSelectedManagerUserId('');
+    } else if (selectedRole === 'Manager') {
+      loadManagerUsers();
+      setResources([]);
+      setSelectedResourceId('');
     } else {
       setResources([]);
       setSelectedResourceId('');
+      setManagerUsers([]);
+      setSelectedManagerUserId('');
     }
   }, [selectedRole]);
 
   const loadResources = async () => {
     try {
       setLoadingResources(true);
-      // Try to load resources with user info - might fail if backend not running, that's ok
       const data = await apiClient.getResourcesWithUsers().catch(() => []);
       setResources(data);
-      // Auto-select first resource if available
       if (data.length > 0 && !selectedResourceId) {
         setSelectedResourceId(data[0].resource_id);
         const firstResource = data[0];
@@ -128,6 +143,24 @@ export function DevLoginPanel() {
     }
   };
 
+  const loadManagerUsers = async () => {
+    try {
+      setLoadingManagers(true);
+      const data = await apiClient.getUsersByRole('Manager').catch(() => []);
+      setManagerUsers(data);
+      if (data.length > 0) {
+        setSelectedManagerUserId(data[0].object_id);
+        setEmail(data[0].email);
+        setDisplayName(data[0].display_name);
+      }
+    } catch (err) {
+      console.error('Failed to load manager users:', err);
+      setManagerUsers([]);
+    } finally {
+      setLoadingManagers(false);
+    }
+  };
+
   const handleLogin = () => {
     // For employees, use the resource's user_object_id if available
     let userId = `${selectedRole.toLowerCase()}-001`;
@@ -137,15 +170,15 @@ export function DevLoginPanel() {
     if (selectedRole === 'Employee' && selectedResourceId) {
       const selectedResource = resources.find(r => r.resource_id === selectedResourceId);
       if (selectedResource) {
-        // Use the user's object_id (which is what the backend uses to find the user)
         userId = selectedResource.user_object_id;
         finalEmail = selectedResource.email || email;
         finalDisplayName = selectedResource.display_name || displayName;
       } else {
-        // Resource not found, show error
         alert('Please select a valid resource');
         return;
       }
+    } else if (selectedRole === 'Manager' && selectedManagerUserId) {
+      userId = selectedManagerUserId;
     }
 
     const auth: DevAuthState = {
@@ -253,6 +286,44 @@ export function DevLoginPanel() {
                   {resources.map((resource) => (
                     <Option key={resource.resource_id} value={resource.resource_id}>
                       {resource.display_name} ({resource.employee_id})
+                    </Option>
+                  ))}
+                </Dropdown>
+              )}
+            </div>
+          )}
+
+          {selectedRole === 'Manager' && (
+            <div className={styles.field}>
+              <Label htmlFor="manager-user">
+                <PeopleRegular /> Login as
+              </Label>
+              {loadingManagers ? (
+                <Body1 style={{ color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>
+                  Loading managers...
+                </Body1>
+              ) : managerUsers.length === 0 ? (
+                <Body1 style={{ color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>
+                  No manager users found. Make sure example data is seeded.
+                </Body1>
+              ) : (
+                <Dropdown
+                  id="manager-user"
+                  value={selectedManagerUserId}
+                  selectedOptions={selectedManagerUserId ? [selectedManagerUserId] : []}
+                  onOptionSelect={(_, data) => {
+                    const oid = data.optionValue as string;
+                    setSelectedManagerUserId(oid);
+                    const u = managerUsers.find(u => u.object_id === oid);
+                    if (u) {
+                      setEmail(u.email);
+                      setDisplayName(u.display_name);
+                    }
+                  }}
+                >
+                  {managerUsers.map((u) => (
+                    <Option key={u.object_id} value={u.object_id}>
+                      {u.display_name} ({u.object_id})
                     </Option>
                   ))}
                 </Dropdown>

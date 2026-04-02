@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, List
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, func
 from api.app.auth.dependencies import CurrentUser
 from api.app.models.actuals import ActualLine
 from sqlalchemy import exists as sa_exists
@@ -29,13 +29,37 @@ class FinanceService:
         self.db = db
         self.current_user = current_user
 
-    def _get_manager_cost_center_id(self) -> Optional[str]:
-        """Return the cost_center_id for the current Manager user, or None if not found."""
-        manager_user = self.db.query(User).filter(
-            User.tenant_id == self.current_user.tenant_id,
-            User.object_id == self.current_user.object_id,
-        ).first()
-        return manager_user.cost_center_id if manager_user else None
+    def _approved_actual_ids_subq(self):
+        """
+        Subquery returning ActualLine.id values whose latest ApprovalInstance
+        has status == APPROVED. Actuals with no instance (unsigned/pending/rejected)
+        are excluded — only fully approved actuals are included in cost calculations.
+        """
+        latest_subq = (
+            self.db.query(
+                ApprovalInstance.subject_id.label("actual_id"),
+                func.max(ApprovalInstance.created_at).label("max_created"),
+            )
+            .filter(
+                ApprovalInstance.subject_type == "actuals",
+                ApprovalInstance.tenant_id == self.current_user.tenant_id,
+            )
+            .group_by(ApprovalInstance.subject_id)
+            .subquery()
+        )
+        return (
+            self.db.query(ApprovalInstance.subject_id)
+            .join(
+                latest_subq,
+                and_(
+                    ApprovalInstance.subject_id == latest_subq.c.actual_id,
+                    ApprovalInstance.created_at == latest_subq.c.max_created,
+                    ApprovalInstance.subject_type == "actuals",
+                ),
+            )
+            .filter(ApprovalInstance.status == ApprovalStatus.APPROVED)
+            .subquery()
+        )
 
     def get_actuals_dashboard(
         self,
@@ -45,23 +69,45 @@ class FinanceService:
         cost_center_id: Optional[str] = None,
         approval_status: Optional[str] = None,
     ) -> List[FinanceActualsDashboardResponse]:
-        # Manager restriction: scope to their own cost center only
+        # Manager restriction: scope to accessible resources via reporting hierarchy
+        # (same logic as ActualsService — uses reporting_cache + overrides, falls back to cost center RO/Director)
+        scoped_resource_ids: Optional[list] = None
         if self.current_user.role == "Manager":
-            manager_cc_id = self._get_manager_cost_center_id()
-            if manager_cc_id:
-                cost_center_id = manager_cc_id
-            else:
+            from api.app.services.reporting import ReportingService
+            scoped_resource_ids = ReportingService(self.db, self.current_user).get_accessible_resource_ids()
+            if not scoped_resource_ids:
                 return []
+
+        # Subquery: latest approval instance per actual (handles re-submissions)
+        latest_approval_subq = (
+            self.db.query(
+                ApprovalInstance.subject_id.label("actual_id"),
+                func.max(ApprovalInstance.created_at).label("max_created_at"),
+            )
+            .filter(ApprovalInstance.subject_type == "actuals")
+            .group_by(ApprovalInstance.subject_id)
+            .subquery()
+        )
 
         query = self.db.query(ActualLine, Resource, Project, CostCenter, ApprovalInstance)
         query = query.join(Resource, ActualLine.resource_id == Resource.id)
         query = query.join(Project, ActualLine.project_id == Project.id)
         query = query.join(CostCenter, Resource.cost_center_id == CostCenter.id)
         query = query.outerjoin(
+            latest_approval_subq,
+            latest_approval_subq.c.actual_id == ActualLine.id,
+        )
+        query = query.outerjoin(
             ApprovalInstance,
-            (ApprovalInstance.subject_type == "actuals") & (ApprovalInstance.subject_id == ActualLine.id)
+            and_(
+                ApprovalInstance.subject_type == "actuals",
+                ApprovalInstance.subject_id == ActualLine.id,
+                ApprovalInstance.created_at == latest_approval_subq.c.max_created_at,
+            )
         )
         filters = [ActualLine.tenant_id == self.current_user.tenant_id]
+        if scoped_resource_ids is not None:
+            filters.append(ActualLine.resource_id.in_(scoped_resource_ids))
         if year:
             filters.append(ActualLine.year == year)
         if month:
@@ -73,20 +119,75 @@ class FinanceService:
         if approval_status:
             filters.append(ApprovalInstance.status == approval_status)
         query = query.filter(and_(*filters))
-        results = []
-        for actual, resource, project, cost_center, approval in query.all():
-            # Find current approval step if pending
-            current_step = None
-            current_approver_name = None
+
+        rows = query.all()
+
+        # Batch-load approver User.object_id to avoid N+1 queries
+        approver_ids = set()
+        for actual, resource, project, cost_center, approval in rows:
             if approval and approval.status == ApprovalStatus.PENDING:
+                for step in approval.steps:
+                    if step.status == StepStatus.PENDING and step.approver_id:
+                        approver_ids.add(step.approver_id)
+                        break
+
+        approver_object_id_map: dict = {}
+        if approver_ids:
+            approver_users = (
+                self.db.query(User.id, User.object_id, User.display_name)
+                .filter(User.id.in_(approver_ids))
+                .all()
+            )
+            for uid, oid, name in approver_users:
+                approver_object_id_map[uid] = (oid, name)
+
+        # Resolve current user's User.id for can_action check (direct approver or delegate)
+        from api.app.models.core import ApprovalDelegate
+        current_db_user = self.db.query(User).filter(
+            User.tenant_id == self.current_user.tenant_id,
+            User.object_id == self.current_user.object_id,
+        ).first()
+        current_db_user_id = current_db_user.id if current_db_user else None
+
+        # Build set of approver_ids for which current user is an active delegate
+        delegate_for: set = set()
+        if current_db_user_id and approver_ids:
+            delegate_rows = self.db.query(ApprovalDelegate.delegator_id).filter(
+                ApprovalDelegate.tenant_id == self.current_user.tenant_id,
+                ApprovalDelegate.delegate_id == current_db_user_id,
+                ApprovalDelegate.delegator_id.in_(approver_ids),
+                ApprovalDelegate.is_active.is_(True),
+            ).all()
+            delegate_for = {row.delegator_id for row in delegate_rows}
+
+        results = []
+        for actual, resource, project, cost_center, approval in rows:
+            # Find current pending approval step
+            current_step_name = None
+            current_approver_name = None
+            current_step_id = None
+            approval_instance_id = None
+            current_approver_object_id = None
+            can_action = False
+
+            if approval and approval.status == ApprovalStatus.PENDING:
+                approval_instance_id = approval.id
                 for step in sorted(approval.steps, key=lambda s: s.step_order):
                     if step.status == StepStatus.PENDING:
-                        current_step = step.step_name
-                        if step.approver_id:
-                            approver = self.db.query(User).filter(User.id == step.approver_id).first()
-                            if approver:
-                                current_approver_name = approver.display_name
+                        current_step_name = step.step_name
+                        current_step_id = step.id
+                        if step.approver_id and step.approver_id in approver_object_id_map:
+                            oid, name = approver_object_id_map[step.approver_id]
+                            current_approver_name = name
+                            current_approver_object_id = oid
+                        # can_action: current user is direct approver or active delegate
+                        if step.approver_id and current_db_user_id:
+                            can_action = (
+                                step.approver_id == current_db_user_id
+                                or step.approver_id in delegate_for
+                            )
                         break
+
             results.append(FinanceActualsDashboardResponse(
                 actual_id=actual.id,
                 employee_name=resource.display_name,
@@ -99,8 +200,12 @@ class FinanceService:
                 month=actual.month,
                 fte_percent=actual.actual_fte_percent,
                 approval_status=approval.status if approval else "N/A",
-                current_approval_step=current_step,
+                current_approval_step=current_step_name,
                 current_approver_name=current_approver_name,
+                approval_instance_id=approval_instance_id,
+                current_step_id=current_step_id,
+                current_approver_object_id=current_approver_object_id,
+                can_action=can_action,
             ))
         return results
 
@@ -115,17 +220,19 @@ class FinanceService:
         from api.app.models.core import CostCenter, Resource
         from sqlalchemy import func
 
-        # Manager restriction: scope to their own cost center only
+        # Manager restriction: scope to accessible resources via reporting hierarchy
+        scoped_resource_ids_cc: Optional[list] = None
         if self.current_user.role == "Manager":
-            manager_cc_id = self._get_manager_cost_center_id()
-            if manager_cc_id:
-                cost_center_id = manager_cc_id
-            else:
+            from api.app.services.reporting import ReportingService
+            scoped_resource_ids_cc = ReportingService(self.db, self.current_user).get_accessible_resource_ids()
+            if not scoped_resource_ids_cc:
                 return []
 
         from api.app.models.core import User
         resource_filters = [Resource.tenant_id == self.current_user.tenant_id]
-        if cost_center_id:
+        if scoped_resource_ids_cc is not None:
+            resource_filters.append(Resource.id.in_(scoped_resource_ids_cc))
+        elif cost_center_id:
             resource_filters.append(Resource.cost_center_id == cost_center_id)
 
         # Subqueries for demand, supply, actuals
@@ -161,6 +268,7 @@ class FinanceService:
             .group_by(Resource.cost_center_id)
             .subquery()
         )
+        approved_subq = self._approved_actual_ids_subq()
         actuals_subq = (
             self.db.query(
                 Resource.cost_center_id.label("cost_center_id"),
@@ -172,6 +280,7 @@ class FinanceService:
                 ActualLine.tenant_id == self.current_user.tenant_id,
                 ActualLine.year == year,
                 ActualLine.month == month,
+                ActualLine.id.in_(approved_subq),
                 *resource_filters
             )
             .group_by(Resource.cost_center_id)
@@ -217,16 +326,18 @@ class FinanceService:
         from api.app.models.core import Resource
         from sqlalchemy import func
 
-        # Manager restriction: scope to their own cost center only
+        # Manager restriction: scope to accessible resources via reporting hierarchy
+        scoped_resource_ids_emp: Optional[list] = None
         if self.current_user.role == "Manager":
-            manager_cc_id = self._get_manager_cost_center_id()
-            if manager_cc_id:
-                cost_center_id = manager_cc_id
-            else:
+            from api.app.services.reporting import ReportingService
+            scoped_resource_ids_emp = ReportingService(self.db, self.current_user).get_accessible_resource_ids()
+            if not scoped_resource_ids_emp:
                 return []
 
         resource_filters = [Resource.tenant_id == self.current_user.tenant_id]
-        if cost_center_id:
+        if scoped_resource_ids_emp is not None:
+            resource_filters.append(Resource.id.in_(scoped_resource_ids_emp))
+        elif cost_center_id:
             resource_filters.append(Resource.cost_center_id == cost_center_id)
 
         demand_filters = [
@@ -238,10 +349,12 @@ class FinanceService:
         if project_id:
             demand_filters.append(DemandLine.project_id == project_id)
 
+        approved_subq_emp = self._approved_actual_ids_subq()
         actuals_filters = [
             ActualLine.tenant_id == self.current_user.tenant_id,
             ActualLine.year == year,
             ActualLine.month == month,
+            ActualLine.id.in_(approved_subq_emp),
         ]
         if project_id:
             actuals_filters.append(ActualLine.project_id == project_id)
@@ -384,6 +497,7 @@ class FinanceService:
                     for line, resource in demand_rows
                 ]
 
+                approved_subq_cc = self._approved_actual_ids_subq()
                 actual_rows = (
                     self.db.query(ActualLine, Resource)
                     .join(Resource, ActualLine.resource_id == Resource.id)
@@ -391,6 +505,7 @@ class FinanceService:
                         ActualLine.tenant_id == self.current_user.tenant_id,
                         ActualLine.project_id.in_(project_ids),
                         ActualLine.period_id == period.id,
+                        ActualLine.id.in_(approved_subq_cc),
                     )
                     .all()
                 )
@@ -417,7 +532,8 @@ class FinanceService:
                 external_lines = [
                     ExternalLineDetail(
                         resource_name=resource.display_name if resource else None,
-                        notes=line.description,
+                        description=line.description,
+                        notes=line.notes,
                         hours=line.hours,
                         rate=line.rate,
                         total_cost=line.total_cost,
@@ -510,7 +626,8 @@ class FinanceService:
             for line, resource in demand_rows
         ]
 
-        # Actual lines
+        # Actual lines — approved only
+        approved_subq_proj = self._approved_actual_ids_subq()
         actual_rows = (
             self.db.query(ActualLine, Resource)
             .join(Resource, ActualLine.resource_id == Resource.id)
@@ -518,6 +635,7 @@ class FinanceService:
                 ActualLine.tenant_id == self.current_user.tenant_id,
                 ActualLine.project_id == project_id,
                 ActualLine.period_id == period.id,
+                ActualLine.id.in_(approved_subq_proj),
             )
             .all()
         )
@@ -544,7 +662,8 @@ class FinanceService:
         external_lines = [
             ExternalLineDetail(
                 resource_name=resource.display_name if resource else None,
-                notes=line.description,
+                description=line.description,
+                notes=line.notes,
                 hours=line.hours,
                 rate=line.rate,
                 total_cost=line.total_cost,
@@ -695,10 +814,12 @@ class FinanceService:
             year, month = period_map[line.period_id]
             agg[(line.project_id, year, month)]["demand_cost"] += int(line.fte_percent * monthly_fte_cost // 100)
 
-        # 8. Actual lines → actual labor cost
+        # 8. Actual lines → actual labor cost (approved only)
+        approved_subq_cons = self._approved_actual_ids_subq()
         actuals_q = self.db.query(ActualLine).filter(
             ActualLine.tenant_id == self.current_user.tenant_id,
             ActualLine.period_id.in_(period_ids),
+            ActualLine.id.in_(approved_subq_cons),
         )
         if project_id:
             actuals_q = actuals_q.filter(ActualLine.project_id == project_id)

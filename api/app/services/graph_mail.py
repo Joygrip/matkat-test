@@ -29,6 +29,7 @@ module-level ``send_notification`` function::
     # {"sent": [...], "failed": [...], "mode": "stub"|"graph"}
 """
 import logging
+import time
 from typing import Optional
 
 import httpx
@@ -120,10 +121,13 @@ class GraphMailService:
 
         Returns:
             True   — sent successfully (or stub mode, no-op)
-            False  — send failed (error already logged)
+            False  — send failed after all retry attempts (error already logged)
 
         In stub mode (notify_mode != "graph") the call is a no-op and returns
         True so callers can record the log entry as SENT without actual sending.
+
+        Transient failures (network errors, 429, 5xx) are retried up to 3 times
+        with 0 / 1 / 2 second delays. Non-retryable 4xx errors fail immediately.
         """
         if self._settings.notify_mode != "graph":
             logger.debug(
@@ -145,33 +149,60 @@ class GraphMailService:
 
         url = f"{_GRAPH_BASE}/users/{self._settings.notify_from_email}/sendMail"
         payload = self._build_payload(to_email, subject, body_html)
+        _RETRY_DELAYS = (0, 1, 2)  # seconds before attempt 1, 2, 3
 
-        try:
-            with httpx.Client(timeout=15) as client:
-                resp = client.post(
-                    url,
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
-                )
+        for attempt, delay in enumerate(_RETRY_DELAYS):
+            if delay:
+                time.sleep(delay)
+            try:
+                with httpx.Client(timeout=15) as client:
+                    resp = client.post(
+                        url,
+                        json=payload,
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json",
+                        },
+                    )
                 # Graph returns 202 Accepted on success (no body)
                 if resp.status_code == 202:
                     logger.info(
-                        "GraphMailService: mail sent to %s (subject: %s)", to_email, subject
+                        "GraphMailService: mail sent to %s (attempt %d)", to_email, attempt + 1
                     )
                     return True
+                # 4xx (except 429 Too Many Requests) are client errors that
+                # will not resolve by retrying — fail immediately.
+                if 400 <= resp.status_code < 500 and resp.status_code != 429:
+                    logger.warning(
+                        "GraphMailService: non-retryable %s for %s — %s",
+                        resp.status_code,
+                        to_email,
+                        resp.text[:200],
+                    )
+                    return False
                 logger.warning(
-                    "GraphMailService: sendMail returned %s for %s — %s",
+                    "GraphMailService: retryable %s for %s (attempt %d of %d)",
                     resp.status_code,
                     to_email,
-                    resp.text[:200],
+                    attempt + 1,
+                    len(_RETRY_DELAYS),
                 )
+            except (httpx.TimeoutException, httpx.ConnectError) as exc:
+                logger.warning(
+                    "GraphMailService: transient network error to %s (attempt %d of %d): %s",
+                    to_email,
+                    attempt + 1,
+                    len(_RETRY_DELAYS),
+                    exc,
+                )
+            except Exception as exc:
+                logger.warning("GraphMailService: sendMail to %s failed: %s", to_email, exc)
                 return False
-        except Exception as exc:
-            logger.warning("GraphMailService: sendMail to %s failed: %s", to_email, exc)
-            return False
+
+        logger.warning(
+            "GraphMailService: all %d attempts failed for %s", len(_RETRY_DELAYS), to_email
+        )
+        return False
 
     # ------------------------------------------------------------------
     # Helpers

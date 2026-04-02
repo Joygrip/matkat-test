@@ -87,7 +87,9 @@ class PublishSnapshotLine(Base):
     resource_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     placeholder_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     placeholder_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    
+    cost_center_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    cost_center_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     month: Mapped[int] = mapped_column(Integer, nullable=False)
     fte_percent: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

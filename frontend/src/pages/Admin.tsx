@@ -62,6 +62,8 @@ import {
 import type { UserRole } from '../types';
 import { useToast } from '../hooks/useToast';
 import { useAuth } from '../auth/AuthProvider';
+import { apiClient } from '../api/client';
+import { config } from '../config';
 import { AdminToolbar } from '../components/admin/AdminToolbar';
 import { StatusPill, projectStatus, resourceStatus } from '../components/admin/StatusPill';
 
@@ -155,6 +157,35 @@ type TabValue =
   | 'delegates'
   | 'users';
 
+function DevSeedResetButton() {
+  const { showSuccess, showApiError } = useToast();
+  const [loading, setLoading] = useState(false);
+
+  const handleReset = async () => {
+    if (!window.confirm('This will wipe ALL tenant data and re-seed with example data. Are you sure?')) return;
+    setLoading(true);
+    try {
+      const result = await apiClient.seedReset();
+      showSuccess(result.message || 'Seed reset complete. Refresh the page.');
+    } catch (err) {
+      showApiError(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Button
+      appearance="outline"
+      style={{ borderColor: tokens.colorPaletteRedBorder2, color: tokens.colorPaletteRedForeground1 }}
+      onClick={handleReset}
+      disabled={loading}
+    >
+      {loading ? 'Resetting…' : '⚠ Wipe & Re-seed Example Data'}
+    </Button>
+  );
+}
+
 export function Admin() {
   const styles = useStyles();
   const { showSuccess, showApiError } = useToast();
@@ -198,9 +229,15 @@ export function Admin() {
     setLoading(true);
     try {
       switch (selectedTab) {
-        case 'cost-centers':
-          setCostCenters(await adminApi.listCostCenters());
+        case 'cost-centers': {
+          const [ccs, mgrs] = await Promise.all([
+            adminApi.listCostCenters(),
+            canManageMasterData ? adminApi.listUsers('Manager') : Promise.resolve([]),
+          ]);
+          setCostCenters(ccs);
+          setPmUsers(mgrs);
           break;
+        }
         case 'projects': {
           const [projs, pms] = await Promise.all([
             adminApi.listProjects(),
@@ -1028,6 +1065,30 @@ export function Admin() {
                 onChange={(_, d) => setFormData({ ...formData, name: d.value })}
               />
             </div>
+            <div className={styles.dialogField}>
+              <Label>Manager / RO</Label>
+              <Select
+                value={String(formData.ro_user_id || '')}
+                onChange={(_, d) => setFormData({ ...formData, ro_user_id: d.value || null })}
+              >
+                <option value="">— none —</option>
+                {pmUsers.filter((u) => u.role === 'Manager' || u.role === 'Admin').map((u) => (
+                  <option key={u.id} value={u.id}>{u.display_name} ({u.email})</option>
+                ))}
+              </Select>
+            </div>
+            <div className={styles.dialogField}>
+              <Label>Director</Label>
+              <Select
+                value={String(formData.director_user_id || '')}
+                onChange={(_, d) => setFormData({ ...formData, director_user_id: d.value || null })}
+              >
+                <option value="">— none —</option>
+                {pmUsers.filter((u) => u.role === 'Manager' || u.role === 'Admin').map((u) => (
+                  <option key={u.id} value={u.id}>{u.display_name} ({u.email})</option>
+                ))}
+              </Select>
+            </div>
           </>
         );
 
@@ -1474,6 +1535,21 @@ export function Admin() {
           {renderTable()}
         </div>
       </Card>
+
+      {/* Dev Tools — only visible in dev auth bypass mode */}
+      {config.devAuthBypass && (
+        <Card className={styles.card}>
+          <div className={styles.header}>
+            <div>
+              <Title3>Dev Tools</Title3>
+              <p style={{ fontSize: '12px', color: tokens.colorNeutralForeground3, margin: '4px 0 0 0' }}>
+                Development-only utilities. Wipes all tenant data and re-seeds with example data including the correct approval hierarchy.
+              </p>
+            </div>
+          </div>
+          <DevSeedResetButton />
+        </Card>
+      )}
 
       {/* Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(_, data) => setDialogOpen(data.open)}>

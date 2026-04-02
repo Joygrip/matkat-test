@@ -4,7 +4,7 @@
  * Employee: Enter and sign actuals
  * RO: View and proxy sign for absent employees
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Title1,
   Body1,
@@ -45,6 +45,9 @@ import {
   CheckmarkCircle24Regular,
   ClipboardTaskRegular,
   ArrowUndo24Regular,
+  ChevronDown24Regular,
+  ChevronRight24Regular,
+  Person24Regular,
 } from '@fluentui/react-icons';
 import { actualsApi, ActualLine, ActualApprovalStatus, CreateActualLine } from '../api/actuals';
 import { lookupsApi, Project, Resource } from '../api/lookups';
@@ -234,7 +237,38 @@ export const Actuals: React.FC = () => {
   const [linesDrawerOpen, setLinesDrawerOpen] = useState(false);
   const [linesDrawerType, setLinesDrawerType] = useState<'demand' | 'supply' | 'project'>('demand');
   const [linesDrawerProjectId, setLinesDrawerProjectId] = useState<string | null>(null);
-  
+
+  // Manager team grouping: collapse/expand per employee
+  const [collapsedEmployees, setCollapsedEmployees] = useState<Set<string>>(new Set());
+
+  const teamGroups = useMemo(() => {
+    if (!isManager) return null;
+    const map = new Map<string, { resourceName: string; lines: ActualLine[]; totalFte: number; anyUnsigned: boolean; anySigned: boolean }>();
+    for (const line of actuals) {
+      const name = line.resource_name ?? resources.find(r => r.id === line.resource_id)?.display_name ?? line.resource_id;
+      if (!map.has(line.resource_id)) {
+        map.set(line.resource_id, { resourceName: name, lines: [], totalFte: 0, anyUnsigned: false, anySigned: false });
+      }
+      const group = map.get(line.resource_id)!;
+      group.lines.push(line);
+      group.totalFte += line.actual_fte_percent;
+      if (line.employee_signed_at) group.anySigned = true;
+      else group.anyUnsigned = true;
+    }
+    return Array.from(map.entries())
+      .map(([resourceId, g]) => ({ resourceId, ...g }))
+      .sort((a, b) => a.resourceName.localeCompare(b.resourceName));
+  }, [actuals, isManager, resources]);
+
+  const toggleEmployeeCollapse = (resourceId: string) => {
+    setCollapsedEmployees(prev => {
+      const next = new Set(prev);
+      if (next.has(resourceId)) next.delete(resourceId);
+      else next.add(resourceId);
+      return next;
+    });
+  };
+
   useEffect(() => {
     loadInitialData();
   }, []);
@@ -261,7 +295,7 @@ export const Actuals: React.FC = () => {
       setLoading(true);
       const [projectsData, resourcesData] = await Promise.all([
         lookupsApi.listProjects(),
-        lookupsApi.listResources(),
+        isManager ? lookupsApi.listResourcesScoped() : lookupsApi.listResources(),
       ]);
       
       setProjects(projectsData);
@@ -750,130 +784,244 @@ export const Actuals: React.FC = () => {
         </DrawerBody>
       </Drawer>
       
-      <Card className={styles.card}>
-        <CardHeader header={<Body1><strong>Actual Lines ({actuals.length})</strong></Body1>} />
-        
-        <Table className={styles.table}>
-          <TableHeader>
-            <TableRow>
-              <TableHeaderCell>Resource</TableHeaderCell>
-              <TableHeaderCell>Project</TableHeaderCell>
-              <TableHeaderCell>Period</TableHeaderCell>
-              <TableHeaderCell>Planned</TableHeaderCell>
-              <TableHeaderCell>Actual</TableHeaderCell>
-              <TableHeaderCell>Status</TableHeaderCell>
-              <TableHeaderCell>Actions</TableHeaderCell>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {actuals.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} style={{ padding: tokens.spacingVerticalXXL }}>
-                  <EmptyState
-                    icon={<ClipboardTaskRegular style={{ fontSize: 48 }} />}
-                    title="No actuals"
-                    message="No actual lines found for this period. Create one to start logging time."
-                  />
-                </TableCell>
-              </TableRow>
-            ) : (
-              actuals.map(a => (
-                <TableRow
-                  key={a.id}
-                  className={overLimitIds.includes(a.id) ? styles.overLimitRow : undefined}
-                >
-                  <TableCell>{a.resource_name ?? getResourceName(a.resource_id)}</TableCell>
-                  <TableCell>{a.project_name ?? getProjectName(a.project_id)}</TableCell>
-                  <TableCell>{a.year}-{String(a.month).padStart(2, '0')}</TableCell>
-                  <TableCell>
-                    {a.planned_fte_percent !== null && a.planned_fte_percent !== undefined 
-                      ? `${a.planned_fte_percent}%` 
-                      : <span style={{ color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>No plan</span>}
-                  </TableCell>
-                  <TableCell>
-                    <Badge appearance="filled" color="informative">{a.actual_fte_percent}%</Badge>
-                  </TableCell>
-                  <TableCell>
-                    {a.employee_signed_at ? (() => {
-                      const apStatus = approvalStatuses[a.id];
-                      if (apStatus?.status === 'approved') {
-                        return <Badge appearance="filled" color="success" icon={<CheckmarkCircle24Regular />}>Approved</Badge>;
-                      }
-                      if (apStatus?.status === 'rejected') {
-                        return (
-                          <Badge
-                            appearance="filled"
-                            color="danger"
-                            title={apStatus.rejection_comment ?? 'Rejected by approver'}
-                          >
-                            Rejected
-                          </Badge>
-                        );
-                      }
-                      if (apStatus?.status === 'pending') {
-                        return <Badge appearance="filled" color="warning">Pending Approval</Badge>;
-                      }
-                      return (
-                        <Badge appearance="filled" color="success" icon={<CheckmarkCircle24Regular />}>
-                          {a.is_proxy_signed ? 'Proxy Signed' : 'Signed'}
-                        </Badge>
-                      );
-                    })() : (
-                      <Badge appearance="outline" color="warning">Unsigned</Badge>
+      {/* Manager: grouped by employee */}
+      {isManager && teamGroups !== null ? (
+        <div>
+          {teamGroups.length === 0 ? (
+            <Card className={styles.card}>
+              <EmptyState
+                icon={<ClipboardTaskRegular style={{ fontSize: 48 }} />}
+                title="No actuals"
+                message="No actual lines found for your team this period."
+              />
+            </Card>
+          ) : (
+            teamGroups.map(group => {
+              const isCollapsed = collapsedEmployees.has(group.resourceId);
+              const allSigned = !group.anyUnsigned && group.anySigned;
+              const allUnsigned = group.anyUnsigned && !group.anySigned;
+              return (
+                <Card key={group.resourceId} className={styles.card}>
+                  {/* Employee section header */}
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleEmployeeCollapse(group.resourceId)}
+                    onKeyDown={(e) => e.key === 'Enter' && toggleEmployeeCollapse(group.resourceId)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: tokens.spacingHorizontalM,
+                      padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                    }}
+                  >
+                    {isCollapsed ? <ChevronRight24Regular /> : <ChevronDown24Regular />}
+                    <Person24Regular />
+                    <Body1 style={{ fontWeight: tokens.fontWeightSemibold, flex: 1 }}>{group.resourceName}</Body1>
+                    <Badge appearance="filled" color="informative" style={{ marginRight: tokens.spacingHorizontalS }}>
+                      {group.totalFte}% total
+                    </Badge>
+                    {allSigned && <Badge appearance="filled" color="success">All Signed</Badge>}
+                    {allUnsigned && <Badge appearance="outline" color="warning">Unsigned</Badge>}
+                    {!allSigned && !allUnsigned && <Badge appearance="filled" color="warning">Partial</Badge>}
+                    <Body1 style={{ color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200, marginLeft: tokens.spacingHorizontalS }}>
+                      {group.lines.length} line{group.lines.length !== 1 ? 's' : ''}
+                    </Body1>
+                    {!isLocked && (
+                      <Button
+                        icon={<Add24Regular />}
+                        appearance="subtle"
+                        size="small"
+                        title={`Add actual for ${group.resourceName}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setFormData(prev => ({ ...prev, resource_id: group.resourceId, project_id: '' }));
+                          setIsDialogOpen(true);
+                        }}
+                      >
+                        Add
+                      </Button>
                     )}
-                  </TableCell>
-                  <TableCell>
-                    <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
-                      {!a.employee_signed_at && !isLocked && isEmployee && (
-                        <Button
-                          icon={<ClipboardTaskRegular />}
-                          appearance="subtle"
-                          title="Edit"
-                          onClick={() => openEditDialog(a)}
-                        />
-                      )}
-                      {/* Employee can sign their own actuals */}
-                      {isEmployee && (
-                        <Button
-                          icon={<Signature24Regular />}
-                          appearance="subtle"
-                          title="Sign"
-                          onClick={() => openSignDialog(a, false)}
-                        />
-                      )}
-                      {/* Manager can proxy-sign for absent employees */}
-                      {isManager && (
-                        <Button
-                          icon={<Signature24Regular />}
-                          appearance="subtle"
-                          title="Proxy Sign"
-                          onClick={() => openSignDialog(a, true)}
-                        />
-                      )}
-                      {isEmployee && a.employee_signed_at && approvalStatuses[a.id]?.status === 'rejected' && !isLocked && (
-                        <Button
-                          icon={<ArrowUndo24Regular />}
-                          appearance="subtle"
-                          title="Unsign — remove signature to edit and re-submit"
-                          style={{ color: tokens.colorPaletteRedForeground1 }}
-                          onClick={() => handleUnsign(a.id)}
-                        />
-                      )}
-                      {!a.employee_signed_at && !isLocked && (
-                        <Button
-                          icon={<Delete24Regular />}
-                          appearance="subtle"
-                          onClick={() => handleDelete(a.id)}
-                        />
-                      )}
-                    </div>
+                  </div>
+
+                  {/* Employee rows (collapsible) */}
+                  {!isCollapsed && (
+                    <Table className={styles.table}>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHeaderCell>Project</TableHeaderCell>
+                          <TableHeaderCell>Period</TableHeaderCell>
+                          <TableHeaderCell>Planned</TableHeaderCell>
+                          <TableHeaderCell>Actual</TableHeaderCell>
+                          <TableHeaderCell>Status</TableHeaderCell>
+                          <TableHeaderCell>Actions</TableHeaderCell>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {group.lines.map(a => (
+                          <TableRow
+                            key={a.id}
+                            className={overLimitIds.includes(a.id) ? styles.overLimitRow : undefined}
+                          >
+                            <TableCell>{a.project_name ?? getProjectName(a.project_id)}</TableCell>
+                            <TableCell>{a.year}-{String(a.month).padStart(2, '0')}</TableCell>
+                            <TableCell>
+                              {a.planned_fte_percent !== null && a.planned_fte_percent !== undefined
+                                ? `${a.planned_fte_percent}%`
+                                : <span style={{ color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>No plan</span>}
+                            </TableCell>
+                            <TableCell>
+                              <Badge appearance="filled" color="informative">{a.actual_fte_percent}%</Badge>
+                            </TableCell>
+                            <TableCell>
+                              {a.employee_signed_at ? (
+                                <Badge appearance="filled" color="success" icon={<CheckmarkCircle24Regular />}>
+                                  {a.is_proxy_signed ? 'Proxy Signed' : 'Signed'}
+                                </Badge>
+                              ) : (
+                                <Badge appearance="outline" color="warning">Unsigned</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
+                                <Button
+                                  icon={<Signature24Regular />}
+                                  appearance="subtle"
+                                  size="small"
+                                  title="Proxy Sign"
+                                  disabled={!!a.employee_signed_at || isLocked}
+                                  onClick={() => openSignDialog(a, true)}
+                                />
+                                {!isLocked && (
+                                  <Button
+                                    icon={<Delete24Regular />}
+                                    appearance="subtle"
+                                    size="small"
+                                    onClick={() => handleDelete(a.id)}
+                                  />
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </Card>
+              );
+            })
+          )}
+        </div>
+      ) : !isManager ? (
+        /* Employee / Finance / Admin: flat table */
+        <Card className={styles.card}>
+          <CardHeader header={<Body1><strong>Actual Lines ({actuals.length})</strong></Body1>} />
+          <Table className={styles.table}>
+            <TableHeader>
+              <TableRow>
+                <TableHeaderCell>Resource</TableHeaderCell>
+                <TableHeaderCell>Project</TableHeaderCell>
+                <TableHeaderCell>Period</TableHeaderCell>
+                <TableHeaderCell>Planned</TableHeaderCell>
+                <TableHeaderCell>Actual</TableHeaderCell>
+                <TableHeaderCell>Status</TableHeaderCell>
+                <TableHeaderCell>Actions</TableHeaderCell>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {actuals.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} style={{ padding: tokens.spacingVerticalXXL }}>
+                    <EmptyState
+                      icon={<ClipboardTaskRegular style={{ fontSize: 48 }} />}
+                      title="No actuals"
+                      message="No actual lines found for this period. Create one to start logging time."
+                    />
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </Card>
+              ) : (
+                actuals.map(a => (
+                  <TableRow
+                    key={a.id}
+                    className={overLimitIds.includes(a.id) ? styles.overLimitRow : undefined}
+                  >
+                    <TableCell>{a.resource_name ?? getResourceName(a.resource_id)}</TableCell>
+                    <TableCell>{a.project_name ?? getProjectName(a.project_id)}</TableCell>
+                    <TableCell>{a.year}-{String(a.month).padStart(2, '0')}</TableCell>
+                    <TableCell>
+                      {a.planned_fte_percent !== null && a.planned_fte_percent !== undefined
+                        ? `${a.planned_fte_percent}%`
+                        : <span style={{ color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>No plan</span>}
+                    </TableCell>
+                    <TableCell>
+                      <Badge appearance="filled" color="informative">{a.actual_fte_percent}%</Badge>
+                    </TableCell>
+                    <TableCell>
+                      {a.employee_signed_at ? (() => {
+                        const apStatus = approvalStatuses[a.id];
+                        if (apStatus?.status === 'approved') {
+                          return <Badge appearance="filled" color="success" icon={<CheckmarkCircle24Regular />}>Approved</Badge>;
+                        }
+                        if (apStatus?.status === 'rejected') {
+                          return (
+                            <Badge
+                              appearance="filled"
+                              color="danger"
+                              title={apStatus.rejection_comment ?? 'Rejected by approver'}
+                            >
+                              Rejected
+                            </Badge>
+                          );
+                        }
+                        if (apStatus?.status === 'pending') {
+                          return <Badge appearance="filled" color="warning">Pending Approval</Badge>;
+                        }
+                        return (
+                          <Badge appearance="filled" color="success" icon={<CheckmarkCircle24Regular />}>
+                            {a.is_proxy_signed ? 'Proxy Signed' : 'Signed'}
+                          </Badge>
+                        );
+                      })() : (
+                        <Badge appearance="outline" color="warning">Unsigned</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
+                        {!isLocked && isEmployee && approvalStatuses[a.id]?.status !== 'approved' && (
+                          <Button
+                            icon={<ClipboardTaskRegular />}
+                            appearance="subtle"
+                            title="Edit"
+                            onClick={() => openEditDialog(a)}
+                          />
+                        )}
+                        {isEmployee && a.employee_signed_at && approvalStatuses[a.id]?.status === 'rejected' && !isLocked && (
+                          <Button
+                            icon={<ArrowUndo24Regular />}
+                            appearance="subtle"
+                            title="Unsign — remove signature to edit and re-submit"
+                            style={{ color: tokens.colorPaletteRedForeground1 }}
+                            onClick={() => handleUnsign(a.id)}
+                          />
+                        )}
+                        {!isLocked && approvalStatuses[a.id]?.status !== 'approved' && (
+                          <Button
+                            icon={<Delete24Regular />}
+                            appearance="subtle"
+                            onClick={() => handleDelete(a.id)}
+                          />
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </Card>
+      ) : null}
       
       {/* Sign Dialog */}
       <Dialog open={isSignDialogOpen} onOpenChange={(_e: unknown, data: { open: boolean }) => setIsSignDialogOpen(data.open)}>

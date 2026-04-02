@@ -551,7 +551,7 @@ export const ConsolidatedCostChart: React.FC = () => {
       header = [...(isCc ? ['Project'] : []), 'OoP Resource', 'Notes', 'Hours', 'Rate (DKK)', 'Total (DKK)'];
       rows = drillDownData.external_lines.map((l) => [
         ...(isCc ? [l.project_name ?? ''] : []),
-        l.resource_name ?? '', l.notes ?? '',
+        l.resource_name ?? l.description ?? '', l.notes ?? '',
         String(l.hours), String(l.rate), String(l.total_cost),
       ]);
     } else {
@@ -750,7 +750,7 @@ export const ConsolidatedCostChart: React.FC = () => {
                   entityNames={ccNames}
                   legendMap={ccLegendMap}
                   onBarClick={handleCcBarClick}
-                  hiddenCategories={showPlanned ? [] : ['planned']}
+                  hiddenCategories={showPlanned ? ['oop', 'equipment'] : ['planned', 'oop', 'equipment']}
                 />
               ) : (
                 <div className={styles.emptyState}>
@@ -905,7 +905,7 @@ export const ConsolidatedCostChart: React.FC = () => {
                             {drillDownData.external_lines.map((l, i) => (
                               <TableRow key={i}>
                                 {drillDown?.mode === 'cc' && <TableCell>{l.project_name ?? '—'}</TableCell>}
-                                <TableCell>{l.resource_name ?? '—'}</TableCell>
+                                <TableCell>{l.resource_name ?? l.description ?? '—'}</TableCell>
                                 <TableCell>{l.notes ?? '—'}</TableCell>
                                 <TableCell style={{ textAlign: 'right' }}>{l.hours}</TableCell>
                                 <TableCell style={{ textAlign: 'right' }}>{dkkDetail(l.rate / 100)}</TableCell>

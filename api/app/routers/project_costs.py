@@ -25,7 +25,8 @@ class ExternalLineCreate(BaseModel):
     project_id: str
     period_id: str
     resource_id: Optional[str] = None
-    notes: Optional[str] = None  # custom name when resource_id is None
+    description: Optional[str] = None  # name / description (required when resource_id is None)
+    notes: Optional[str] = None         # additional free-text notes
     hours: int
     rate: int  # cents per hour
 
@@ -46,6 +47,7 @@ class ExternalLineCreate(BaseModel):
 
 class ExternalLineUpdate(BaseModel):
     resource_id: Optional[str] = None
+    description: Optional[str] = None
     notes: Optional[str] = None
     hours: Optional[int] = None
     rate: Optional[int] = None
@@ -72,6 +74,7 @@ class ExternalLineResponse(BaseModel):
     period_id: str
     resource_id: Optional[str]
     resource_name: Optional[str]
+    description: Optional[str]
     notes: Optional[str]
     hours: int
     rate: int
@@ -185,7 +188,8 @@ def _ext_to_response(
         period_id=line.period_id,
         resource_id=line.resource_id,
         resource_name=resource_name,
-        notes=line.description,
+        description=line.description,
+        notes=line.notes,
         hours=line.hours,
         rate=line.rate,
         total_cost=line.total_cost,
@@ -279,7 +283,8 @@ async def create_external(
         project_id=data.project_id,
         period_id=data.period_id,
         resource_id=data.resource_id,
-        description=data.notes,
+        description=data.description,
+        notes=data.notes,
         hours=data.hours,
         rate=data.rate,
         total_cost=data.hours * data.rate,
@@ -314,8 +319,10 @@ async def update_external(
     _check_project_access(line.project_id, pm_project_ids)
     if data.resource_id is not None:
         line.resource_id = data.resource_id
+    if data.description is not None:
+        line.description = data.description
     if data.notes is not None:
-        line.description = data.notes
+        line.notes = data.notes
     if data.hours is not None:
         line.hours = data.hours
     if data.rate is not None:

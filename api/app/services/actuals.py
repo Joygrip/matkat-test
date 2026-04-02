@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, func
 
 from api.app.models.actuals import ActualLine
-from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalStatus, StepStatus
+from api.app.models.approvals import ApprovalInstance, ApprovalAction, ApprovalStep, ApprovalStatus, StepStatus
 from api.app.models.core import Period, Project, Resource, PeriodStatus, User, UserRole
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
@@ -23,11 +23,11 @@ class ActualsService:
         self.current_user = current_user
     
     def _get_scoped_resource_ids(self) -> "Optional[list[str]]":
-        """Return cost-center-scoped resource IDs for Manager, or None for full access."""
+        """Return reporting-hierarchy-scoped resource IDs for Manager, or None for full access."""
         if self.current_user.role not in _SCOPED_ROLES:
             return None
         from api.app.services.reporting import ReportingService
-        return ReportingService(self.db, self.current_user).get_cost_center_resource_ids()
+        return ReportingService(self.db, self.current_user).get_accessible_resource_ids()
 
     def _check_manager_resource_access(self, resource_id: str) -> None:
         """Raise 403 if the current user is a Manager but the resource is outside their cost center."""
@@ -351,7 +351,16 @@ class ActualsService:
         self.db.add(actual)
         self.db.commit()
         self.db.refresh(actual)
-        
+
+        # Auto-sign for employees so they don't need a separate sign step
+        if self.current_user.role == UserRole.EMPLOYEE:
+            actual.employee_signed_at = datetime.utcnow()
+            actual.employee_signed_by = self.current_user.object_id
+            actual.is_proxy_signed = False
+            self.db.commit()
+            self.db.refresh(actual)
+            self._ensure_approval_instance(actual)
+
         log_audit(
             self.db, self.current_user,
             action="create",
@@ -363,9 +372,10 @@ class ActualsService:
                 "year": year,
                 "month": month,
                 "actual_fte_percent": actual_fte_percent,
+                **({"employee_signed_at": str(actual.employee_signed_at)} if actual.employee_signed_at else {}),
             }
         )
-        
+
         return actual
     
     def update(self, actual_id: str, data: dict) -> ActualLine:
@@ -382,16 +392,24 @@ class ActualsService:
         # Managers can only update actuals for resources in their cost center
         self._check_manager_resource_access(actual.resource_id)
 
-        # Check if already signed
+        # Block edit once approved; pending approval can still be edited
         if actual.employee_signed_at:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "code": "VALIDATION_ERROR",
-                    "message": "Cannot edit signed actuals",
-                }
-            )
-        
+            instance = self.db.query(ApprovalInstance).filter(
+                and_(
+                    ApprovalInstance.tenant_id == self.current_user.tenant_id,
+                    ApprovalInstance.subject_type == "actuals",
+                    ApprovalInstance.subject_id == actual.id,
+                )
+            ).order_by(ApprovalInstance.created_at.desc()).first()
+            if instance and instance.status == ApprovalStatus.APPROVED:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "VALIDATION_ERROR",
+                        "message": "Cannot edit approved actuals",
+                    }
+                )
+
         # Check period is open
         self._check_period_open(actual.year, actual.month)
         
@@ -432,7 +450,17 @@ class ActualsService:
         
         self.db.commit()
         self.db.refresh(actual)
-        
+
+        # Auto-sign for employees on edit (re-submit after rejection+unsign)
+        if self.current_user.role == UserRole.EMPLOYEE and not actual.employee_signed_at:
+            actual.employee_signed_at = datetime.utcnow()
+            actual.employee_signed_by = self.current_user.object_id
+            actual.is_proxy_signed = False
+            self.db.commit()
+            self.db.refresh(actual)
+            self._ensure_approval_instance(actual)
+            new_values["employee_signed_at"] = str(actual.employee_signed_at)
+
         log_audit(
             self.db, self.current_user,
             action="update",
@@ -441,7 +469,7 @@ class ActualsService:
             old_values=old_values,
             new_values=new_values,
         )
-        
+
         return actual
     
     def delete(self, actual_id: str) -> None:
@@ -458,19 +486,33 @@ class ActualsService:
         # Managers can only delete actuals for resources in their cost center
         self._check_manager_resource_access(actual.resource_id)
 
-        # Check if already signed
+        # Block delete once approved; pending approval can still be deleted
         if actual.employee_signed_at:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "code": "VALIDATION_ERROR",
-                    "message": "Cannot delete signed actuals",
-                }
-            )
-        
+            instance = self.db.query(ApprovalInstance).filter(
+                and_(
+                    ApprovalInstance.tenant_id == self.current_user.tenant_id,
+                    ApprovalInstance.subject_type == "actuals",
+                    ApprovalInstance.subject_id == actual.id,
+                )
+            ).order_by(ApprovalInstance.created_at.desc()).first()
+            if instance and instance.status == ApprovalStatus.APPROVED:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "VALIDATION_ERROR",
+                        "message": "Cannot delete approved actuals",
+                    }
+                )
+            # Clean up the orphaned approval instance before deleting the actual
+            if instance:
+                self.db.query(ApprovalAction).filter(ApprovalAction.instance_id == instance.id).delete()
+                self.db.query(ApprovalStep).filter(ApprovalStep.instance_id == instance.id).delete()
+                self.db.delete(instance)
+                self.db.flush()
+
         # Check period is open
         self._check_period_open(actual.year, actual.month)
-        
+
         self.db.delete(actual)
         self.db.commit()
         

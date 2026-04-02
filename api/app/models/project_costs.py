@@ -22,7 +22,8 @@ class ProjectExternalLine(Base):
     period_id: Mapped[str] = mapped_column(String(36), ForeignKey("periods.id"), nullable=False)
 
     resource_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("resources.id"), nullable=True)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # optional notes
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # name / description
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)        # additional notes
     hours: Mapped[int] = mapped_column(Integer, nullable=False)
     rate: Mapped[int] = mapped_column(Integer, nullable=False)        # cents per hour
     total_cost: Mapped[int] = mapped_column(Integer, nullable=False)  # cents, always computed

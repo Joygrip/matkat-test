@@ -277,6 +277,10 @@ class ApiClient {
     return this.post<{ message: string }>('/dev/seed');
   }
 
+  async seedReset(): Promise<{ message: string }> {
+    return this.post<{ message: string }>('/dev/seed-reset');
+  }
+
   async getResourcesWithUsers(): Promise<Array<{
     resource_id: string;
     display_name: string;
@@ -286,6 +290,16 @@ class ApiClient {
     user_id: string;
   }>> {
     return this.get('/dev/resources-with-users');
+  }
+
+  async getUsersByRole(role?: string): Promise<Array<{
+    object_id: string;
+    display_name: string;
+    role: string;
+    email: string;
+  }>> {
+    const params = role ? `?role=${encodeURIComponent(role)}` : '';
+    return this.get(`/dev/users-by-role${params}`);
   }
 
   async getAuditLogs(limit: number = 100, offset: number = 0): Promise<AuditLogEntry[]> {

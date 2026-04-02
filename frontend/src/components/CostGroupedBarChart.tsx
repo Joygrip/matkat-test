@@ -160,7 +160,7 @@ export interface CostGroupedBarChartProps {
   entityNames: string[];
   legendMap: Record<string, string>;
   onBarClick?: (entityName: string, label: string) => void;
-  hiddenCategories?: ReadonlyArray<'planned' | 'actual' | 'externals' | 'equipment'>;
+  hiddenCategories?: ReadonlyArray<'planned' | 'actual' | 'oop' | 'equipment'>;
 }
 
 export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, entityNames, legendMap, onBarClick, hiddenCategories = [] }) => {

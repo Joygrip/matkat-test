@@ -147,7 +147,7 @@ const useStyles = makeStyles({
   },
 });
 
-const emptyForm = { project_id: '', notes: '', hours: '', rate: '' };
+const emptyForm = { project_id: '', description: '', notes: '', hours: '', rate: '' };
 
 export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects }) => {
   const styles = useStyles();
@@ -192,6 +192,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
     setEditingLine(line);
     setForm({
       project_id: line.project_id,
+      description: line.description ?? '',
       notes: line.notes ?? '',
       hours: String(line.hours),
       rate: String(line.rate / 100),
@@ -217,7 +218,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
     const hours = parseInt(form.hours, 10);
     const rate = Math.round(parseFloat(form.rate) * 100);
     if (!form.project_id) return showError('Project is required');
-    if (!form.notes.trim()) return showError('Name / Description is required');
+    if (!form.description.trim()) return showError('Name / Description is required');
     if (isNaN(hours) || hours < 1) return showError('Hours must be at least 1');
     if (isNaN(rate) || rate < 1) return showError('Rate must be a positive number');
 
@@ -225,7 +226,8 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
     try {
       if (editingLine) {
         await projectCostsApi.updateExternal(editingLine.id, {
-          notes: form.notes,
+          description: form.description,
+          notes: form.notes || undefined,
           hours,
           rate,
         });
@@ -234,7 +236,8 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
         await projectCostsApi.createExternal({
           project_id: form.project_id,
           period_id: periodId,
-          notes: form.notes,
+          description: form.description,
+          notes: form.notes || undefined,
           hours,
           rate,
         });
@@ -250,7 +253,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
   };
 
   const handleDelete = async (line: ExternalLine) => {
-    const name = line.resource_name ?? line.notes ?? 'this line';
+    const name = line.resource_name ?? line.description ?? 'this line';
     if (!confirm(`Delete line for "${name}"?`)) return;
     try {
       await projectCostsApi.deleteExternal(line.id);
@@ -268,8 +271,8 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
     const escape = (v: string | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const rows = lines.map((l) => [
       escape(l.project_name ?? l.project_id),
-      escape(l.resource_name ?? l.notes ?? ''),
-      escape(l.resource_name && l.notes ? l.notes : ''),
+      escape(l.resource_name ?? l.description ?? ''),
+      escape(l.notes ?? ''),
       l.hours,
       (l.rate / 100).toFixed(2),
       (l.total_cost / 100).toFixed(2),
@@ -328,8 +331,8 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
               {lines.map((line) => (
                 <tr key={line.id} className={styles.trHover}>
                   <td className={styles.td}>{line.project_name ?? line.project_id}</td>
-                  <td className={styles.td}>{line.resource_name ?? (line.notes ? <em>{line.notes}</em> : <span className={styles.muted}>—</span>)}</td>
-                  <td className={styles.td}>{line.resource_name && line.notes ? <span>{line.notes}</span> : <span className={styles.muted}>—</span>}</td>
+                  <td className={styles.td}>{line.resource_name ?? (line.description ? <em>{line.description}</em> : <span className={styles.muted}>—</span>)}</td>
+                  <td className={styles.td}>{line.notes ? <span>{line.notes}</span> : <span className={styles.muted}>—</span>}</td>
                   <td className={styles.tdRight}>{line.hours}</td>
                   <td className={styles.tdRight}>{formatDKK(line.rate)}</td>
                   <td className={styles.tdRight}>{formatDKK(line.total_cost)}</td>
@@ -375,6 +378,14 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
                 <Label required>Name / Description</Label>
                 <Input
                   placeholder="e.g. Freelance developer, Agency XYZ"
+                  value={form.description}
+                  onChange={(_, d) => setForm((f) => ({ ...f, description: d.value }))}
+                />
+              </div>
+              <div className={styles.field}>
+                <Label>Notes</Label>
+                <Input
+                  placeholder="Optional additional notes"
                   value={form.notes}
                   onChange={(_, d) => setForm((f) => ({ ...f, notes: d.value }))}
                 />

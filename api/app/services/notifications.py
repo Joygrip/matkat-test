@@ -16,6 +16,7 @@ from typing import Optional, List, Dict, Any
 
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
+from sqlalchemy.exc import IntegrityError
 
 from api.app.models.core import User, Holiday
 from api.app.models.notifications import NotificationLog, NotificationPhase, NotificationStatus
@@ -172,6 +173,7 @@ class NotificationsService:
         for recipient in recipients:
             if not recipient.email:
                 continue
+            ikey = self._idempotency_key(tenant_id, phase, year, month, recipient.id)
             log = NotificationLog(
                 tenant_id=tenant_id,
                 phase=phase,
@@ -182,8 +184,18 @@ class NotificationsService:
                 status=NotificationStatus.PENDING,
                 message=message_template,
                 run_id=run_id,
+                idempotency_key=ikey,
             )
-            self.db.add(log)
+            try:
+                self.db.add(log)
+                self.db.flush()  # detect duplicate key before sending mail
+            except IntegrityError:
+                self.db.rollback()
+                logger.info(
+                    "run_notifications: duplicate skipped for %s (concurrent run)",
+                    recipient.email,
+                )
+                continue
 
             if self.settings.notify_mode == "graph":
                 self._dispatch_mail(log)
@@ -191,12 +203,11 @@ class NotificationsService:
                 log.status = NotificationStatus.SENT
                 log.sent_at = datetime.utcnow()
 
+            self.db.commit()  # commit each recipient so a sent mail is never re-sent
             notifications_created.append({
                 "recipient_email": recipient.email,
                 "status": log.status.value,
             })
-
-        self.db.commit()
 
         if self.current_user:
             log_audit(
@@ -260,22 +271,51 @@ class NotificationsService:
                 if not recipient.email:
                     continue
 
-                if self._already_sent(phase, year, month, conflict.resource_id, recipient.id):
-                    skipped_count += 1
-                    continue
-
-                message = self._conflict_message(conflict, year, month)
-                log = self._create_entity_log(
-                    phase=phase,
-                    year=year,
-                    month=month,
-                    run_id=run_id,
-                    recipient_user_id=recipient.id,
-                    recipient_email=recipient.email,
-                    resource_id=conflict.resource_id,
-                    message=message,
+                existing = self._get_existing_log(
+                    phase, year, month, conflict.resource_id, recipient.id
                 )
-                self.db.add(log)
+                if existing is not None:
+                    if existing.status == NotificationStatus.SENT:
+                        skipped_count += 1
+                        continue
+                    if existing.status == NotificationStatus.PENDING:
+                        skipped_count += 1
+                        continue
+                    # FAILED: retry if under the limit
+                    if existing.retry_count >= existing.max_retries:
+                        skipped_count += 1
+                        continue
+                    existing.status = NotificationStatus.PENDING
+                    existing.retry_count += 1
+                    existing.error = None
+                    log = existing
+                else:
+                    ikey = self._idempotency_key(
+                        tenant_id, phase, year, month, recipient.id, conflict.resource_id
+                    )
+                    message = self._conflict_message(conflict, year, month)
+                    log = self._create_entity_log(
+                        phase=phase,
+                        year=year,
+                        month=month,
+                        run_id=run_id,
+                        recipient_user_id=recipient.id,
+                        recipient_email=recipient.email,
+                        resource_id=conflict.resource_id,
+                        message=message,
+                        idempotency_key=ikey,
+                    )
+                    try:
+                        self.db.add(log)
+                        self.db.flush()
+                    except IntegrityError:
+                        self.db.rollback()
+                        logger.info(
+                            "run_conflict_alerts: duplicate skipped for %s (concurrent run)",
+                            recipient.email,
+                        )
+                        skipped_count += 1
+                        continue
 
                 if self.settings.notify_mode == "graph":
                     self._dispatch_mail(log)
@@ -283,9 +323,8 @@ class NotificationsService:
                     log.status = NotificationStatus.SENT
                     log.sent_at = datetime.utcnow()
 
+                self.db.commit()
                 sent_count += 1
-
-        self.db.commit()
 
         if self.current_user:
             log_audit(
@@ -344,22 +383,51 @@ class NotificationsService:
             if not recipient.email:
                 continue
 
-            if self._already_sent(phase, year, month, item.resource_id, recipient.id):
-                skipped_count += 1
-                continue
-
-            message = self._missing_actuals_message(item.resource, year, month)
-            log = self._create_entity_log(
-                phase=phase,
-                year=year,
-                month=month,
-                run_id=run_id,
-                recipient_user_id=recipient.id,
-                recipient_email=recipient.email,
-                resource_id=item.resource_id,
-                message=message,
+            existing = self._get_existing_log(
+                phase, year, month, item.resource_id, recipient.id
             )
-            self.db.add(log)
+            if existing is not None:
+                if existing.status == NotificationStatus.SENT:
+                    skipped_count += 1
+                    continue
+                if existing.status == NotificationStatus.PENDING:
+                    skipped_count += 1
+                    continue
+                # FAILED: retry if under the limit
+                if existing.retry_count >= existing.max_retries:
+                    skipped_count += 1
+                    continue
+                existing.status = NotificationStatus.PENDING
+                existing.retry_count += 1
+                existing.error = None
+                log = existing
+            else:
+                ikey = self._idempotency_key(
+                    tenant_id, phase, year, month, recipient.id, item.resource_id
+                )
+                message = self._missing_actuals_message(item.resource, year, month)
+                log = self._create_entity_log(
+                    phase=phase,
+                    year=year,
+                    month=month,
+                    run_id=run_id,
+                    recipient_user_id=recipient.id,
+                    recipient_email=recipient.email,
+                    resource_id=item.resource_id,
+                    message=message,
+                    idempotency_key=ikey,
+                )
+                try:
+                    self.db.add(log)
+                    self.db.flush()
+                except IntegrityError:
+                    self.db.rollback()
+                    logger.info(
+                        "run_missing_actuals_alerts: duplicate skipped for %s (concurrent run)",
+                        recipient.email,
+                    )
+                    skipped_count += 1
+                    continue
 
             if self.settings.notify_mode == "graph":
                 self._dispatch_mail(log)
@@ -367,9 +435,8 @@ class NotificationsService:
                 log.status = NotificationStatus.SENT
                 log.sent_at = datetime.utcnow()
 
+            self.db.commit()
             sent_count += 1
-
-        self.db.commit()
 
         if self.current_user:
             log_audit(
@@ -404,6 +471,62 @@ class NotificationsService:
         }
 
     # ------------------------------------------------------------------
+    # Retry failed notifications
+    # ------------------------------------------------------------------
+
+    def retry_failed_notifications(
+        self,
+        phase: Optional[NotificationPhase] = None,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Retry FAILED logs that still have attempts remaining (retry_count < max_retries).
+
+        Each log is retried individually and committed immediately so a successful
+        send is persisted even if a later send in the same batch fails.
+        """
+        tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
+
+        query = self.db.query(NotificationLog).filter(
+            and_(
+                NotificationLog.tenant_id == tenant_id,
+                NotificationLog.status == NotificationStatus.FAILED,
+                NotificationLog.retry_count < NotificationLog.max_retries,
+            )
+        )
+        if phase:
+            query = query.filter(NotificationLog.phase == phase)
+        if year:
+            query = query.filter(NotificationLog.year == year)
+        if month:
+            query = query.filter(NotificationLog.month == month)
+
+        logs = query.all()
+        retried = succeeded = failed_again = 0
+
+        for log in logs:
+            log.status = NotificationStatus.PENDING
+            log.retry_count += 1
+            log.error = None
+            if self.settings.notify_mode == "graph":
+                self._dispatch_mail(log)
+            else:
+                log.status = NotificationStatus.SENT
+                log.sent_at = datetime.utcnow()
+            self.db.commit()
+            retried += 1
+            if log.status == NotificationStatus.SENT:
+                succeeded += 1
+            else:
+                failed_again += 1
+
+        logger.info(
+            "retry_failed_notifications: retried=%d succeeded=%d failed_again=%d (tenant=%s)",
+            retried, succeeded, failed_again, tenant_id,
+        )
+        return {"retried": retried, "succeeded": succeeded, "failed_again": failed_again}
+
+    # ------------------------------------------------------------------
     # Logs
     # ------------------------------------------------------------------
 
@@ -433,17 +556,17 @@ class NotificationsService:
     # Private: idempotency
     # ------------------------------------------------------------------
 
-    def _already_sent(
+    def _get_existing_log(
         self,
         phase: NotificationPhase,
         year: int,
         month: int,
         resource_id: str,
         recipient_user_id: str,
-    ) -> bool:
-        """Per-entity idempotency check for targeted alert phases."""
+    ) -> Optional[NotificationLog]:
+        """Return the existing log for this (phase, period, resource, recipient), or None."""
         tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
-        exists = self.db.query(NotificationLog).filter(
+        return self.db.query(NotificationLog).filter(
             and_(
                 NotificationLog.tenant_id == tenant_id,
                 NotificationLog.phase == phase,
@@ -451,10 +574,24 @@ class NotificationsService:
                 NotificationLog.month == month,
                 NotificationLog.resource_id == resource_id,
                 NotificationLog.recipient_user_id == recipient_user_id,
-                NotificationLog.status == NotificationStatus.SENT,
             )
         ).first()
-        return exists is not None
+
+    def _idempotency_key(
+        self,
+        tenant_id: str,
+        phase: NotificationPhase,
+        year: int,
+        month: int,
+        recipient_user_id: Optional[str],
+        resource_id: Optional[str] = None,
+    ) -> str:
+        """Build the idempotency key that uniquely identifies a logical notification."""
+        parts = [tenant_id, phase.value, str(year), str(month)]
+        if resource_id:
+            parts.append(resource_id)
+        parts.append(recipient_user_id or "")
+        return "|".join(parts)
 
     # ------------------------------------------------------------------
     # Private: mail dispatch
@@ -498,6 +635,7 @@ class NotificationsService:
         recipient_email: str,
         resource_id: str,
         message: str,
+        idempotency_key: Optional[str] = None,
     ) -> NotificationLog:
         tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
         return NotificationLog(
@@ -511,6 +649,7 @@ class NotificationsService:
             status=NotificationStatus.PENDING,
             message=message,
             run_id=run_id,
+            idempotency_key=idempotency_key,
         )
 
     # ------------------------------------------------------------------

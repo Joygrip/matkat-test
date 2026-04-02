@@ -86,6 +86,33 @@ async def get_current_user(
         except ValueError:
             role = UserRole.EMPLOYEE
 
+        # Upsert the dev user into the DB so they appear in user listings
+        # (mirrors what sync_user_from_graph does in production)
+        from sqlalchemy import and_
+        db_user = db.query(User).filter(
+            and_(
+                User.tenant_id == dev_tenant,
+                User.object_id == dev_user_id,
+            )
+        ).first()
+        if db_user:
+            db_user.email = dev_email
+            db_user.display_name = dev_name
+            db_user.role = role
+            db_user.is_active = True
+            db.commit()
+        else:
+            db_user = User(
+                tenant_id=dev_tenant,
+                object_id=dev_user_id,
+                email=dev_email,
+                display_name=dev_name,
+                role=role,
+                is_active=True,
+            )
+            db.add(db_user)
+            db.commit()
+
         return CurrentUser(
             tenant_id=dev_tenant,
             object_id=dev_user_id,

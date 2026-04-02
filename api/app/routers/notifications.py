@@ -118,6 +118,27 @@ async def preview_conflict_alerts(
     return service.get_preview_conflict_alerts(year, month)
 
 
+@router.post("/retry-failed")
+async def retry_failed_notifications(
+    phase: Optional[NotificationPhase] = None,
+    year: Optional[int] = Query(None, ge=2020, le=2100),
+    month: Optional[int] = Query(None, ge=1, le=12),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE)),
+):
+    """
+    Retry FAILED notification logs that still have retry attempts remaining
+    (retry_count < max_retries, default ceiling is 3).
+
+    Filters are optional — omitting all filters retries every eligible FAILED log
+    across all phases and periods for the tenant.
+
+    Accessible to: Admin, Finance
+    """
+    service = NotificationsService(db, current_user)
+    return service.retry_failed_notifications(phase, year, month)
+
+
 @router.get("/logs", response_model=list[NotificationLogResponse])
 async def get_notification_logs(
     phase: Optional[NotificationPhase] = None,

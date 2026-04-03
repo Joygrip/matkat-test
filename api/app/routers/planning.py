@@ -170,8 +170,8 @@ async def update_demand_line(
     Accessible to: PM, Finance
     """
     service = DemandService(db, current_user)
-    line = service.update(demand_id, data.fte_percent)
-    
+    line = service.update(demand_id, data.fte_percent, data.resource_id, data.placeholder_id)
+
     return _enrich_demand(line)
 
 
@@ -336,8 +336,8 @@ async def update_supply_line(
     Accessible to: RO, Finance
     """
     service = SupplyService(db, current_user)
-    line = service.update(supply_id, data.fte_percent)
-    
+    line = service.update(supply_id, data.fte_percent, data.resource_id, data.project_id)
+
     return _enrich_supply(line)
 
 

@@ -123,19 +123,26 @@ class FinanceService:
         rows = query.all()
 
         # Batch-load approver User.object_id to avoid N+1 queries
+        # Also collect step 2 approver IDs for proxy-approve-step1 checks
         approver_ids = set()
+        step2_approver_ids = set()
         for actual, resource, project, cost_center, approval in rows:
             if approval and approval.status == ApprovalStatus.PENDING:
-                for step in approval.steps:
-                    if step.status == StepStatus.PENDING and step.approver_id:
-                        approver_ids.add(step.approver_id)
-                        break
+                sorted_steps = sorted(approval.steps, key=lambda s: s.step_order)
+                current_pending = next((s for s in sorted_steps if s.status == StepStatus.PENDING), None)
+                if current_pending and current_pending.approver_id:
+                    approver_ids.add(current_pending.approver_id)
+                # Collect step 2 approver for proxy-approve-step1 eligibility
+                step2 = next((s for s in sorted_steps if s.step_order == 2), None)
+                if step2 and step2.approver_id:
+                    step2_approver_ids.add(step2.approver_id)
 
+        all_approver_ids = approver_ids | step2_approver_ids
         approver_object_id_map: dict = {}
-        if approver_ids:
+        if all_approver_ids:
             approver_users = (
                 self.db.query(User.id, User.object_id, User.display_name)
-                .filter(User.id.in_(approver_ids))
+                .filter(User.id.in_(all_approver_ids))
                 .all()
             )
             for uid, oid, name in approver_users:
@@ -151,11 +158,11 @@ class FinanceService:
 
         # Build set of approver_ids for which current user is an active delegate
         delegate_for: set = set()
-        if current_db_user_id and approver_ids:
+        if current_db_user_id and all_approver_ids:
             delegate_rows = self.db.query(ApprovalDelegate.delegator_id).filter(
                 ApprovalDelegate.tenant_id == self.current_user.tenant_id,
                 ApprovalDelegate.delegate_id == current_db_user_id,
-                ApprovalDelegate.delegator_id.in_(approver_ids),
+                ApprovalDelegate.delegator_id.in_(all_approver_ids),
                 ApprovalDelegate.is_active.is_(True),
             ).all()
             delegate_for = {row.delegator_id for row in delegate_rows}
@@ -169,10 +176,13 @@ class FinanceService:
             approval_instance_id = None
             current_approver_object_id = None
             can_action = False
+            can_proxy_approve_step1 = False
+            step1_id = None
 
             if approval and approval.status == ApprovalStatus.PENDING:
                 approval_instance_id = approval.id
-                for step in sorted(approval.steps, key=lambda s: s.step_order):
+                sorted_steps = sorted(approval.steps, key=lambda s: s.step_order)
+                for step in sorted_steps:
                     if step.status == StepStatus.PENDING:
                         current_step_name = step.step_name
                         current_step_id = step.id
@@ -187,6 +197,20 @@ class FinanceService:
                                 or step.approver_id in delegate_for
                             )
                         break
+
+                # can_proxy_approve_step1: current user is step 2 approver (or delegate)
+                # and step 1 is still pending
+                step1 = next((s for s in sorted_steps if s.step_order == 1), None)
+                step2 = next((s for s in sorted_steps if s.step_order == 2), None)
+                if (step1 and step1.status == StepStatus.PENDING
+                        and step2 and step2.status == StepStatus.PENDING
+                        and step2.approver_id and current_db_user_id):
+                    can_proxy_approve_step1 = (
+                        step2.approver_id == current_db_user_id
+                        or step2.approver_id in delegate_for
+                    )
+                    if can_proxy_approve_step1:
+                        step1_id = step1.id
 
             results.append(FinanceActualsDashboardResponse(
                 actual_id=actual.id,
@@ -206,6 +230,8 @@ class FinanceService:
                 current_step_id=current_step_id,
                 current_approver_object_id=current_approver_object_id,
                 can_action=can_action,
+                can_proxy_approve_step1=can_proxy_approve_step1,
+                step1_id=step1_id,
             ))
         return results
 

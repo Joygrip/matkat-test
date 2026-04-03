@@ -20,6 +20,8 @@ class FinanceActualsDashboardResponse(BaseModel):
     current_step_id: Optional[str] = None
     current_approver_object_id: Optional[str] = None
     can_action: bool = False
+    can_proxy_approve_step1: bool = False
+    step1_id: Optional[str] = None
 
 class FinanceCostCenterStatsResponse(BaseModel):
     cost_center_id: str

@@ -35,6 +35,7 @@ export interface CreateActualLine {
   month: number;
   planned_fte_percent?: number | null;
   actual_fte_percent: number;
+  proxy_sign_reason?: string;
 }
 
 export interface ResourceMonthlyTotal {
@@ -50,6 +51,8 @@ export interface ActualApprovalStatus {
   approval_id: string;
   status: 'pending' | 'approved' | 'rejected';
   rejection_comment?: string | null;
+  can_proxy_approve_step1?: boolean;
+  step1_id?: string | null;
 }
 
 export const actualsApi = {
@@ -108,6 +111,15 @@ export const actualsApi = {
     if (month) params.append('month', String(month));
     const query = params.toString() ? `?${params.toString()}` : '';
     const response = await apiClient.get<{ statuses: Record<string, ActualApprovalStatus> }>(`/actuals/my/approval-statuses${query}`);
+    return response.statuses;
+  },
+
+  async getApprovalStatuses(year?: number, month?: number): Promise<Record<string, ActualApprovalStatus>> {
+    const params = new URLSearchParams();
+    if (year) params.append('year', String(year));
+    if (month) params.append('month', String(month));
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const response = await apiClient.get<{ statuses: Record<string, ActualApprovalStatus> }>(`/actuals/approval-statuses${query}`);
     return response.statuses;
   },
 };

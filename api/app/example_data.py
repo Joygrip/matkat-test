@@ -107,6 +107,7 @@ def create_example_data(db: Session, tenant_id: str = "dev-tenant-001") -> None:
         Resource(tenant_id=tenant_id, cost_center_id=cc_qa.id, employee_id="EMP-007", display_name="Grace Tester", email="grace@example.com", is_active=True),
         Resource(tenant_id=tenant_id, cost_center_id=cc_software.id, employee_id="EXT-001", display_name="External Contractor", resource_type=ResourceType.EXTERNAL, is_active=True),
         Resource(tenant_id=tenant_id, user_id=users[14].id, cost_center_id=cc_software.id, employee_id="DEV-001", display_name="Dev User", email="dev@example.com", is_active=True),
+        Resource(tenant_id=tenant_id, user_id=users[15].id, cost_center_id=cc_software.id, employee_id="MGR-001", display_name="Dev Manager", email="manager@example.com", is_active=True),
     ]
     db.add_all(resources)
     db.flush()

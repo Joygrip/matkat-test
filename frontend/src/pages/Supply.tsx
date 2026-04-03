@@ -840,8 +840,8 @@ export const Supply: React.FC = () => {
                     max={100}
                     step={5}
                     placeholder="e.g. 100"
-                    value={String(formData.fte_percent)}
-                    onChange={e => setFormData(f => ({ ...f, fte_percent: e.target.value ? parseInt(e.target.value) : 100 }))}
+                    value={formData.fte_percent === 0 ? '' : String(formData.fte_percent)}
+                    onChange={e => setFormData(f => ({ ...f, fte_percent: e.target.value === '' ? 0 : parseInt(e.target.value) }))}
                     style={{ width: 120 }}
                   />
                 </div>

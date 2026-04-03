@@ -23,6 +23,8 @@ import {
   makeStyles,
   Input,
   Select,
+  Combobox,
+  Option,
   Dialog,
   DialogTrigger,
   DialogSurface,
@@ -211,11 +213,9 @@ export const Actuals: React.FC = () => {
   
   // Form state
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isSignDialogOpen, setIsSignDialogOpen] = useState(false);
-  const [selectedActual, setSelectedActual] = useState<ActualLine | null>(null);
-  const [proxyReason, setProxyReason] = useState('');
-  const [isProxySign, setIsProxySign] = useState(false);
-  
+  const [resourceSearch, setResourceSearch] = useState('');
+  const [dialogProxyReason, setDialogProxyReason] = useState('');
+
   const [formData, setFormData] = useState<Omit<CreateActualLine, 'year' | 'month' | 'planned_fte_percent'>>({
     period_id: '',
     resource_id: '',
@@ -273,16 +273,16 @@ export const Actuals: React.FC = () => {
     loadInitialData();
   }, []);
   
-  // Load employee's resource ID (no dropdown for employee—identity from login)
+  // Load current user's resource ID (employees: identity from login; managers: to detect self-entry)
   useEffect(() => {
-    if (isEmployee) {
+    if (isEmployee || isManager) {
       setMyResourceLoading(true);
       actualsApi.getMyResource()
         .then(data => setMyResourceId(data.resource_id))
         .catch(() => setMyResourceId(null))
         .finally(() => setMyResourceLoading(false));
     }
-  }, [isEmployee]);
+  }, [isEmployee, isManager]);
   
   useEffect(() => {
     if (selectedPeriodId) {
@@ -317,12 +317,10 @@ export const Actuals: React.FC = () => {
       setActuals(data);
       setOverLimitIds([]);
 
-      // For employees, load approval statuses concurrently
-      if (isEmployee) {
-        actualsApi.getMyApprovalStatuses(ctxPeriod?.year, ctxPeriod?.month)
-          .then(statuses => setApprovalStatuses(statuses))
-          .catch(() => { /* non-blocking */ });
-      }
+      // Load approval statuses for all roles (employees get own, managers/admins get team)
+      actualsApi.getApprovalStatuses(ctxPeriod?.year, ctxPeriod?.month)
+        .then(statuses => setApprovalStatuses(statuses))
+        .catch(() => { /* non-blocking */ });
 
       // For employees, also load demand and supply lines for their resource only
       if (isEmployee && selectedPeriodId && myResourceId) {
@@ -362,6 +360,12 @@ export const Actuals: React.FC = () => {
       showError('Missing project', 'Please select a project.');
       return;
     }
+    // Managers entering actuals for another employee must provide a reason
+    const isManagerEnteringForOther = isManager && resourceId !== myResourceId;
+    if (isManagerEnteringForOther && !dialogProxyReason.trim()) {
+      showError('Reason required', 'Please provide a reason for entering actuals on behalf of this employee.');
+      return;
+    }
     try {
       await actualsApi.createActualLine({
         period_id: selectedPeriodId,
@@ -371,11 +375,12 @@ export const Actuals: React.FC = () => {
         month: ctxPeriod.month,
         actual_fte_percent: formData.actual_fte_percent,
         // planned_fte_percent is omitted - backend will calculate it automatically
+        ...(isManagerEnteringForOther ? { proxy_sign_reason: dialogProxyReason.trim() } : {}),
       });
       showSuccess('Actual line created');
       setIsDialogOpen(false);
       loadActuals();
-      
+
       // Reset form
       setFormData({
         period_id: selectedPeriodId,
@@ -383,6 +388,8 @@ export const Actuals: React.FC = () => {
         project_id: '',
         actual_fte_percent: 50,
       });
+      setResourceSearch('');
+      setDialogProxyReason('');
     } catch (err: unknown) {
       if (err instanceof ApiError && err.code === 'ACTUALS_OVER_100') {
         const offending = err.extras?.offending_line_ids;
@@ -406,32 +413,6 @@ export const Actuals: React.FC = () => {
     }
   };
   
-  const handleSign = async () => {
-    if (!selectedActual) return;
-    
-    try {
-      if (isProxySign) {
-        if (!proxyReason.trim()) {
-          showError('Reason is required for proxy signing');
-          return;
-        }
-        await actualsApi.proxySignActuals(selectedActual.id, proxyReason);
-        showSuccess('Proxy signed successfully');
-      } else {
-        await actualsApi.signActuals(selectedActual.id);
-        showSuccess('Signed successfully');
-      }
-      
-      setIsSignDialogOpen(false);
-      setSelectedActual(null);
-      setProxyReason('');
-      setIsProxySign(false);
-      loadActuals();
-    } catch (err: unknown) {
-      showApiError(err as Error, 'Failed to sign actuals');
-    }
-  };
-  
   const handleUnsign = async (actualId: string) => {
     if (!window.confirm('Remove your signature? You will be able to edit and re-submit this actual for approval.')) return;
     try {
@@ -443,12 +424,16 @@ export const Actuals: React.FC = () => {
     }
   };
 
-  const openSignDialog = (actual: ActualLine, proxy: boolean = false) => {
-    setSelectedActual(actual);
-    setIsProxySign(proxy);
-    setIsSignDialogOpen(true);
+  const handleManagerSign = async (actualId: string) => {
+    try {
+      await actualsApi.signActuals(actualId);
+      showSuccess('Signed successfully');
+      await reloadActuals();
+    } catch (err) {
+      showApiError(err as Error, 'Failed to sign actuals');
+    }
   };
-  
+
   // New function to reload actuals after edit/save
   const reloadActuals = async () => {
     try {
@@ -458,11 +443,9 @@ export const Actuals: React.FC = () => {
         : await actualsApi.getActualLines(undefined, ctxPeriod?.year, ctxPeriod?.month);
       setActuals(data);
       setOverLimitIds([]);
-      if (isEmployee) {
-        actualsApi.getMyApprovalStatuses(ctxPeriod?.year, ctxPeriod?.month)
-          .then(statuses => setApprovalStatuses(statuses))
-          .catch(() => { /* non-blocking */ });
-      }
+      actualsApi.getApprovalStatuses(ctxPeriod?.year, ctxPeriod?.month)
+        .then(statuses => setApprovalStatuses(statuses))
+        .catch(() => { /* non-blocking */ });
     } catch (err: unknown) {
       showApiError(err as Error, 'Failed to load actuals');
     } finally {
@@ -529,13 +512,16 @@ export const Actuals: React.FC = () => {
             </MessageBar>
           )}
           {!isLocked && (
-            <Dialog 
-              open={isDialogOpen} 
+            <Dialog
+              open={isDialogOpen}
               onOpenChange={(_, data) => {
                 setIsDialogOpen(data.open);
-                // Auto-set resource for employees when dialog opens
                 if (data.open && isEmployee && myResourceId) {
                   setFormData(prev => ({ ...prev, resource_id: myResourceId }));
+                }
+                if (!data.open) {
+                  setResourceSearch('');
+                  setDialogProxyReason('');
                 }
               }}
             >
@@ -581,18 +567,40 @@ export const Actuals: React.FC = () => {
                           </>
                         )
                       ) : (
-                        <Select
-                          value={formData.resource_id}
-                          onChange={(_, data) => setFormData({ ...formData, resource_id: data.value })}
+                        <Combobox
+                          value={resourceSearch}
+                          onChange={(e) => {
+                            setResourceSearch(e.target.value);
+                            setFormData(prev => ({ ...prev, resource_id: '' }));
+                          }}
+                          selectedOptions={formData.resource_id ? [formData.resource_id] : []}
+                          onOptionSelect={(_, data) => {
+                            setFormData(prev => ({ ...prev, resource_id: data.optionValue ?? '' }));
+                            setResourceSearch(data.optionText ?? '');
+                          }}
+                          placeholder="Search resource..."
+                          freeform={false}
                         >
-                          <option value="">Select resource...</option>
-                          {resources.map(r => (
-                            <option key={r.id} value={r.id}>{r.display_name}</option>
-                          ))}
-                        </Select>
+                          {resources
+                            .filter(r => !resourceSearch || r.display_name.toLowerCase().includes(resourceSearch.toLowerCase()))
+                            .map(r => (
+                              <Option key={r.id} value={r.id}>{r.display_name}</Option>
+                            ))}
+                        </Combobox>
                       )}
                     </div>
-                    
+
+                    {isManager && formData.resource_id && formData.resource_id !== myResourceId && (
+                      <div className={styles.formField}>
+                        <label className={styles.formLabel}>Reason for entering actuals on behalf of employee (required)</label>
+                        <Textarea
+                          value={dialogProxyReason}
+                          onChange={(_, data) => setDialogProxyReason(data.value)}
+                          placeholder="e.g., Employee on extended leave"
+                        />
+                      </div>
+                    )}
+
                     <div className={styles.formField} style={{ marginTop: tokens.spacingVerticalM }}>
                       <label>Project</label>
                       <Select
@@ -633,7 +641,8 @@ export const Actuals: React.FC = () => {
                       disabled={
                         (isEmployee && !myResourceId) ||
                         (!isEmployee && !formData.resource_id) ||
-                        !formData.project_id
+                        !formData.project_id ||
+                        (isManager && !!formData.resource_id && formData.resource_id !== myResourceId && !dialogProxyReason.trim())
                       }
                     >
                       Create
@@ -823,7 +832,7 @@ export const Actuals: React.FC = () => {
                     <Badge appearance="filled" color="informative" style={{ marginRight: tokens.spacingHorizontalS }}>
                       {group.totalFte}% total
                     </Badge>
-                    {allSigned && <Badge appearance="filled" color="success">All Signed</Badge>}
+                    {allSigned && <Badge appearance="filled" color="warning">All Submitted</Badge>}
                     {allUnsigned && <Badge appearance="outline" color="warning">Unsigned</Badge>}
                     {!allSigned && !allUnsigned && <Badge appearance="filled" color="warning">Partial</Badge>}
                     <Body1 style={{ color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200, marginLeft: tokens.spacingHorizontalS }}>
@@ -838,6 +847,8 @@ export const Actuals: React.FC = () => {
                         onClick={(e) => {
                           e.stopPropagation();
                           setFormData(prev => ({ ...prev, resource_id: group.resourceId, project_id: '' }));
+                          setResourceSearch(group.resourceName);
+                          setDialogProxyReason('');
                           setIsDialogOpen(true);
                         }}
                       >
@@ -876,24 +887,30 @@ export const Actuals: React.FC = () => {
                               <Badge appearance="filled" color="informative">{a.actual_fte_percent}%</Badge>
                             </TableCell>
                             <TableCell>
-                              {a.employee_signed_at ? (
-                                <Badge appearance="filled" color="success" icon={<CheckmarkCircle24Regular />}>
-                                  {a.is_proxy_signed ? 'Proxy Signed' : 'Signed'}
-                                </Badge>
-                              ) : (
+                              {a.employee_signed_at ? (() => {
+                                const apStatus = approvalStatuses[a.id];
+                                if (apStatus?.status === 'approved') {
+                                  return <Badge appearance="filled" color="success" icon={<CheckmarkCircle24Regular />}>Approved</Badge>;
+                                }
+                                if (apStatus?.status === 'rejected') {
+                                  return <Badge appearance="filled" color="danger" title={apStatus.rejection_comment ?? 'Rejected by approver'}>Rejected</Badge>;
+                                }
+                                return <Badge appearance="filled" color="warning">Pending Approval</Badge>;
+                              })() : (
                                 <Badge appearance="outline" color="warning">Unsigned</Badge>
                               )}
                             </TableCell>
                             <TableCell>
                               <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
-                                <Button
-                                  icon={<Signature24Regular />}
-                                  appearance="subtle"
-                                  size="small"
-                                  title="Proxy Sign"
-                                  disabled={!!a.employee_signed_at || isLocked}
-                                  onClick={() => openSignDialog(a, true)}
-                                />
+                                {!isLocked && !a.employee_signed_at && group.resourceId === myResourceId && (
+                                  <Button
+                                    icon={<Signature24Regular />}
+                                    appearance="subtle"
+                                    size="small"
+                                    title="Sign"
+                                    onClick={() => handleManagerSign(a.id)}
+                                  />
+                                )}
                                 {!isLocked && (
                                   <Button
                                     icon={<Delete24Regular />}
@@ -979,9 +996,7 @@ export const Actuals: React.FC = () => {
                           return <Badge appearance="filled" color="warning">Pending Approval</Badge>;
                         }
                         return (
-                          <Badge appearance="filled" color="success" icon={<CheckmarkCircle24Regular />}>
-                            {a.is_proxy_signed ? 'Proxy Signed' : 'Signed'}
-                          </Badge>
+                          <Badge appearance="filled" color="warning">Pending Approval</Badge>
                         );
                       })() : (
                         <Badge appearance="outline" color="warning">Unsigned</Badge>
@@ -1022,44 +1037,6 @@ export const Actuals: React.FC = () => {
           </Table>
         </Card>
       ) : null}
-      
-      {/* Sign Dialog */}
-      <Dialog open={isSignDialogOpen} onOpenChange={(_e: unknown, data: { open: boolean }) => setIsSignDialogOpen(data.open)}>
-        <DialogSurface>
-          <DialogBody>
-            <DialogTitle>{isProxySign ? 'Proxy Sign Actuals' : 'Sign Actuals'}</DialogTitle>
-            <DialogContent>
-              {isProxySign ? (
-                <>
-                  <MessageBar intent="warning" style={{ marginBottom: tokens.spacingVerticalM }}>
-                    <MessageBarBody>
-                      You are signing on behalf of an absent employee. This action will be audited.
-                    </MessageBarBody>
-                  </MessageBar>
-                  <div className={styles.formField}>
-                    <label>Reason for proxy signing (required)</label>
-                    <Textarea
-                      value={proxyReason}
-                      onChange={(_, data) => setProxyReason(data.value)}
-                      placeholder="e.g., Employee on extended leave"
-                    />
-                  </div>
-                </>
-              ) : (
-                <Body1>
-                  Confirm that the actuals are accurate and ready for approval.
-                </Body1>
-              )}
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={() => setIsSignDialogOpen(false)}>Cancel</Button>
-              <Button appearance="primary" onClick={handleSign}>
-                {isProxySign ? 'Proxy Sign' : 'Sign'}
-              </Button>
-            </DialogActions>
-          </DialogBody>
-        </DialogSurface>
-      </Dialog>
       
       {/* Edit Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={(_e: unknown, data: { open: boolean }) => setIsEditDialogOpen(data.open)}>
@@ -1110,6 +1087,7 @@ export const Actuals: React.FC = () => {
           </DialogBody>
         </DialogSurface>
       </Dialog>
+
     </div>
   );
 };

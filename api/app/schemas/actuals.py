@@ -17,7 +17,8 @@ class ActualLineBase(BaseModel):
 
 class ActualLineCreate(ActualLineBase):
     """Create actual line."""
-    
+    proxy_sign_reason: Optional[str] = None
+
     @field_validator('actual_fte_percent')
     @classmethod
     def validate_fte(cls, v: int) -> int:

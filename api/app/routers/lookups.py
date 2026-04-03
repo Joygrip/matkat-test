@@ -183,9 +183,22 @@ async def list_resources_scoped(
         query = query.filter(Resource.cost_center_id == cost_center_id)
     if current_user.role in _SCOPED_ROLES:
         from api.app.services.reporting import ReportingService
-        scoped_ids = ReportingService(db, current_user).get_accessible_resource_ids()
-        if scoped_ids is not None:
-            query = query.filter(Resource.id.in_(scoped_ids))
+        scoped_ids = list(ReportingService(db, current_user).get_accessible_resource_ids())
+        # Also include the manager's own resource so they can enter their own actuals
+        mgr_user = db.query(User).filter(
+            and_(User.tenant_id == current_user.tenant_id, User.object_id == current_user.object_id)
+        ).first()
+        if mgr_user:
+            own_resource = db.query(Resource).filter(
+                and_(
+                    Resource.tenant_id == current_user.tenant_id,
+                    Resource.user_id == mgr_user.id,
+                    Resource.is_active == True,
+                )
+            ).first()
+            if own_resource and own_resource.id not in scoped_ids:
+                scoped_ids.append(own_resource.id)
+        query = query.filter(Resource.id.in_(scoped_ids))
     return query.order_by(Resource.display_name).all()
 
 

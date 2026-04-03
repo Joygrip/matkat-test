@@ -223,6 +223,47 @@ class ApprovalsService:
         
         return instance
     
+    def proxy_approve_step1_by_step2(self, instance_id: str, step1_id: str, comment: str) -> ApprovalInstance:
+        """Step 2 approver proxy-approves Step 1 on behalf of the direct manager."""
+        instance = self.get_by_id(instance_id)
+        if not instance:
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Approval not found"})
+
+        step1 = next((s for s in instance.steps if s.id == step1_id and s.step_order == 1), None)
+        if not step1:
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Step 1 not found"})
+
+        if step1.status != StepStatus.PENDING:
+            raise HTTPException(status_code=400, detail={"code": "VALIDATION_ERROR", "message": "Step 1 is not pending"})
+
+        step2 = next((s for s in instance.steps if s.step_order == 2), None)
+        if not step2:
+            raise HTTPException(status_code=403, detail={"code": "UNAUTHORIZED_ROLE", "message": "No step 2 exists for this approval"})
+
+        user = self._get_user()
+        if not user or not self._can_user_action_step(user, step2):
+            raise HTTPException(status_code=403, detail={"code": "UNAUTHORIZED_ROLE", "message": "Only the step 2 approver can proxy-approve step 1"})
+
+        step1.status = StepStatus.APPROVED
+        step1.actioned_at = datetime.now(timezone.utc)
+        step1.actioned_by = self.current_user.object_id
+        step1.comment = f"[PROXY-APPROVE by Senior Manager] {comment}"
+
+        action = ApprovalAction(
+            tenant_id=self.current_user.tenant_id,
+            instance_id=instance_id,
+            step_id=step1_id,
+            action="approve",
+            performed_by=self.current_user.object_id,
+            comment=step1.comment,
+        )
+        self.db.add(action)
+        self.db.commit()
+        self.db.refresh(instance)
+
+        log_audit(self.db, self.current_user, action="proxy_approve_step1", entity_type="ApprovalStep", entity_id=step1_id)
+        return instance
+
     def reject_step(self, instance_id: str, step_id: str, comment: Optional[str] = None) -> ApprovalInstance:
         """Reject a step."""
         instance = self.get_by_id(instance_id)

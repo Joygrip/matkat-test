@@ -45,8 +45,10 @@ class DemandLineCreate(DemandLineBase, FTEValidatorMixin):
 
 
 class DemandLineUpdate(BaseModel, FTEValidatorMixin):
-    """Update demand line - only FTE can be updated."""
+    """Update demand line - FTE and resource/placeholder can be updated."""
     fte_percent: int
+    resource_id: Optional[str] = None
+    placeholder_id: Optional[str] = None
 
 
 class DemandLineResponse(DemandLineBase):
@@ -86,8 +88,10 @@ class SupplyLineCreate(SupplyLineBase, FTEValidatorMixin):
 
 
 class SupplyLineUpdate(BaseModel, FTEValidatorMixin):
-    """Update supply line - only FTE can be updated."""
+    """Update supply line - FTE and resource/project can be updated."""
     fte_percent: int
+    resource_id: Optional[str] = None
+    project_id: Optional[str] = None
 
 
 class SupplyLineResponse(SupplyLineBase):

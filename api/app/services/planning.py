@@ -296,8 +296,8 @@ class DemandService:
         
         return demand
     
-    def update(self, demand_id: str, fte_percent: int) -> DemandLine:
-        """Update a demand line's FTE."""
+    def update(self, demand_id: str, fte_percent: int, resource_id: str | None = None, placeholder_id: str | None = None) -> DemandLine:
+        """Update a demand line's FTE and optionally swap resource/placeholder."""
         demand = self.get_by_id(demand_id)
         if not demand:
             raise HTTPException(
@@ -310,7 +310,7 @@ class DemandService:
 
         # Check period is open
         self._check_period_open(demand.year, demand.month)
-        
+
         # Validate FTE
         if fte_percent < 5 or fte_percent > 100 or fte_percent % 5 != 0:
             raise HTTPException(
@@ -320,21 +320,84 @@ class DemandService:
                     "message": "FTE must be between 5 and 100 in steps of 5",
                 }
             )
-        
-        old_fte = demand.fte_percent
+
+        # Determine effective resource/placeholder (use existing values if not provided)
+        new_resource_id = resource_id if (resource_id is not None or placeholder_id is not None) else demand.resource_id
+        new_placeholder_id = placeholder_id if (resource_id is not None or placeholder_id is not None) else demand.placeholder_id
+
+        changing_assignment = (resource_id is not None or placeholder_id is not None)
+        if changing_assignment:
+            # XOR validation
+            if new_resource_id and new_placeholder_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"code": ErrorCode.DEMAND_XOR, "message": "Cannot specify both resource_id and placeholder_id"},
+                )
+            if not new_resource_id and not new_placeholder_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"code": ErrorCode.DEMAND_XOR, "message": "Must specify either resource_id or placeholder_id"},
+                )
+
+            # 4MFC check for placeholders
+            if new_placeholder_id and is_within_4mfc(demand.year, demand.month):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": ErrorCode.PLACEHOLDER_BLOCKED_4MFC,
+                        "message": f"Placeholders are not allowed within the 4-month forward commitment window. "
+                                   f"Use named resources for {demand.year}-{demand.month:02d}.",
+                    },
+                )
+
+            # Validate resource/placeholder exists
+            if new_resource_id:
+                resource = self.db.query(Resource).filter(
+                    and_(Resource.id == new_resource_id, Resource.tenant_id == self.current_user.tenant_id)
+                ).first()
+                if not resource:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "Resource not found"})
+            if new_placeholder_id:
+                placeholder = self.db.query(Placeholder).filter(
+                    and_(Placeholder.id == new_placeholder_id, Placeholder.tenant_id == self.current_user.tenant_id)
+                ).first()
+                if not placeholder:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "Placeholder not found"})
+
+            # Duplicate check (exclude current demand line)
+            dup_query = self.db.query(DemandLine).filter(
+                and_(
+                    DemandLine.tenant_id == self.current_user.tenant_id,
+                    DemandLine.project_id == demand.project_id,
+                    DemandLine.year == demand.year,
+                    DemandLine.month == demand.month,
+                    DemandLine.id != demand_id,
+                )
+            )
+            existing = dup_query.filter(DemandLine.resource_id == new_resource_id).first() if new_resource_id else dup_query.filter(DemandLine.placeholder_id == new_placeholder_id).first()
+            if existing:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": "CONFLICT", "message": "A demand line already exists for this project/resource/month combination"},
+                )
+
+        old_values = {"fte_percent": demand.fte_percent, "resource_id": demand.resource_id, "placeholder_id": demand.placeholder_id}
         demand.fte_percent = fte_percent
+        if changing_assignment:
+            demand.resource_id = new_resource_id
+            demand.placeholder_id = new_placeholder_id
         self.db.commit()
         self.db.refresh(demand)
-        
+
         log_audit(
             self.db, self.current_user,
             action="update",
             entity_type="DemandLine",
             entity_id=demand.id,
-            old_values={"fte_percent": old_fte},
-            new_values={"fte_percent": fte_percent},
+            old_values=old_values,
+            new_values={"fte_percent": fte_percent, "resource_id": demand.resource_id, "placeholder_id": demand.placeholder_id},
         )
-        
+
         return demand
     
     def delete(self, demand_id: str) -> None:
@@ -457,7 +520,43 @@ class SupplyService:
                 return None
 
         return supply
-    
+
+    def _check_supply_100_percent_limit(
+        self,
+        resource_id: str,
+        year: int,
+        month: int,
+        new_fte: int,
+        exclude_supply_id: Optional[str] = None,
+    ) -> None:
+        """Check that total supply for a resource/month does not exceed 100%."""
+        query = self.db.query(SupplyLine).filter(
+            and_(
+                SupplyLine.tenant_id == self.current_user.tenant_id,
+                SupplyLine.resource_id == resource_id,
+                SupplyLine.year == year,
+                SupplyLine.month == month,
+            )
+        )
+        if exclude_supply_id:
+            query = query.filter(SupplyLine.id != exclude_supply_id)
+
+        existing_total = sum(line.fte_percent for line in query.all())
+        new_total = existing_total + new_fte
+
+        if new_total > 100:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": ErrorCode.SUPPLY_OVER_100,
+                    "message": f"Total supply would be {new_total}%, which exceeds the 100% limit.",
+                    "total_percent": new_total,
+                    "resource_id": resource_id,
+                    "year": year,
+                    "month": month,
+                }
+            )
+
     def create(
         self,
         resource_id: str,
@@ -532,7 +631,10 @@ class SupplyService:
                     "message": "A supply line already exists for this resource/project/month combination",
                 }
             )
-        
+
+        # Check total supply does not exceed 100%
+        self._check_supply_100_percent_limit(resource_id, year, month, fte_percent)
+
         # Create supply line
         supply = SupplyLine(
             tenant_id=self.current_user.tenant_id,
@@ -564,18 +666,18 @@ class SupplyService:
         
         return supply
     
-    def update(self, supply_id: str, fte_percent: int) -> SupplyLine:
-        """Update a supply line's FTE."""
+    def update(self, supply_id: str, fte_percent: int, resource_id: str | None = None, project_id: str | None = None) -> SupplyLine:
+        """Update a supply line's FTE and optionally change resource/project."""
         supply = self.get_by_id(supply_id)
         if not supply:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "NOT_FOUND", "message": "Supply line not found"}
             )
-        
+
         # Check period is open
         self._check_period_open(supply.year, supply.month)
-        
+
         # Validate FTE
         if fte_percent < 5 or fte_percent > 100 or fte_percent % 5 != 0:
             raise HTTPException(
@@ -585,21 +687,60 @@ class SupplyService:
                     "message": "FTE must be between 5 and 100 in steps of 5",
                 }
             )
-        
-        old_fte = supply.fte_percent
+
+        new_resource_id = resource_id if resource_id is not None else supply.resource_id
+        # project_id=None is a valid "clear project" value, so detect explicit send via sentinel
+        changing_resource = resource_id is not None
+        new_project_id = project_id if resource_id is not None else supply.project_id
+
+        if changing_resource:
+            # Validate new resource exists
+            resource = self.db.query(Resource).filter(
+                and_(Resource.id == new_resource_id, Resource.tenant_id == self.current_user.tenant_id)
+            ).first()
+            if not resource:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "Resource not found"})
+
+            # Enforce manager scope on new resource
+            self._check_ro_resource_authorized(new_resource_id)
+
+            # Duplicate check (exclude current line)
+            dup_filters = [
+                SupplyLine.tenant_id == self.current_user.tenant_id,
+                SupplyLine.resource_id == new_resource_id,
+                SupplyLine.year == supply.year,
+                SupplyLine.month == supply.month,
+                SupplyLine.id != supply_id,
+            ]
+            dup_filters.append(SupplyLine.project_id == new_project_id if new_project_id else SupplyLine.project_id.is_(None))
+            if self.db.query(SupplyLine).filter(and_(*dup_filters)).first():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": "CONFLICT", "message": "A supply line already exists for this resource/project/month combination"},
+                )
+
+        # Check total supply does not exceed 100% (use new resource, exclude current line)
+        self._check_supply_100_percent_limit(
+            new_resource_id, supply.year, supply.month, fte_percent, exclude_supply_id=supply_id
+        )
+
+        old_values = {"fte_percent": supply.fte_percent, "resource_id": supply.resource_id, "project_id": supply.project_id}
         supply.fte_percent = fte_percent
+        if changing_resource:
+            supply.resource_id = new_resource_id
+            supply.project_id = new_project_id
         self.db.commit()
         self.db.refresh(supply)
-        
+
         log_audit(
             self.db, self.current_user,
             action="update",
             entity_type="SupplyLine",
             entity_id=supply.id,
-            old_values={"fte_percent": old_fte},
-            new_values={"fte_percent": fte_percent},
+            old_values=old_values,
+            new_values={"fte_percent": fte_percent, "resource_id": supply.resource_id, "project_id": supply.project_id},
         )
-        
+
         return supply
     
     def delete(self, supply_id: str) -> None:

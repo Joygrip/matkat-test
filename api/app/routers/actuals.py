@@ -92,6 +92,25 @@ async def get_my_approval_statuses(
     return {"statuses": service.get_my_approval_statuses(year, month)}
 
 
+@router.get("/approval-statuses")
+async def get_approval_statuses(
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None, ge=1, le=12),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Get approval statuses for all actuals visible to the current user.
+
+    Employees receive their own actuals' statuses; managers and admins receive
+    statuses for all actuals within their visible scope.
+
+    Returns a mapping of actual_line_id -> { approval_id, status, rejection_comment }.
+    """
+    service = ActualsService(db, current_user)
+    return {"statuses": service.get_approval_statuses(year, month)}
+
+
 @router.get("", response_model=list[ActualLineResponse])
 async def list_actuals(
     year: Optional[int] = Query(None),
@@ -156,6 +175,7 @@ async def create_actual(
         month=data.month,
         actual_fte_percent=data.actual_fte_percent,
         planned_fte_percent=data.planned_fte_percent,
+        proxy_sign_reason=data.proxy_sign_reason,
     )
     return _to_response(line)
 
@@ -204,13 +224,13 @@ async def sign_actual(
     actual_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.EMPLOYEE
+        UserRole.ADMIN, UserRole.EMPLOYEE, UserRole.MANAGER
     )),
 ):
     """
-    Employee signs their actuals.
-    
-    Accessible to: Admin, Employee
+    Employee or Manager (own resource) signs their actuals.
+
+    Accessible to: Admin, Employee, Manager (own resource only)
     """
     service = ActualsService(db, current_user)
     line = service.sign(actual_id)

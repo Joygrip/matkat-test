@@ -26,7 +26,7 @@ import {
   DialogActions,
   Textarea,
 } from '@fluentui/react-components';
-import { SearchRegular, MoneyRegular, CheckmarkCircle24Regular, DismissCircle24Regular } from '@fluentui/react-icons';
+import { SearchRegular, MoneyRegular, CheckmarkCircle24Regular, DismissCircle24Regular, ArrowForward24Regular } from '@fluentui/react-icons';
 import { approvalsApi } from '../../api/approvals';
 import { EmptyState } from '../EmptyState';
 import { LoadingState } from '../LoadingState';
@@ -58,6 +58,8 @@ export interface FinanceActualRow {
   current_step_id?: string;
   current_approver_object_id?: string;
   can_action?: boolean;
+  can_proxy_approve_step1?: boolean;
+  step1_id?: string | null;
 }
 
 interface LookupProject { id: string; name: string; }
@@ -197,6 +199,33 @@ export function ActualsTab({
   const [approvalComment, setApprovalComment] = useState('');
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
+
+  // Proxy approve step 1 state
+  const [proxyStep1Row, setProxyStep1Row] = useState<FinanceActualRow | null>(null);
+  const [proxyStep1Comment, setProxyStep1Comment] = useState('');
+  const [proxyStep1Submitting, setProxyStep1Submitting] = useState(false);
+  const [proxyStep1Error, setProxyStep1Error] = useState<string | null>(null);
+
+  const handleProxyStep1Submit = async () => {
+    if (!proxyStep1Row?.approval_instance_id || !proxyStep1Row?.step1_id) return;
+    if (!proxyStep1Comment.trim()) { setProxyStep1Error('A reason is required.'); return; }
+    setProxyStep1Submitting(true);
+    setProxyStep1Error(null);
+    try {
+      await approvalsApi.proxyApproveStep1ByStep2(
+        proxyStep1Row.approval_instance_id,
+        proxyStep1Row.step1_id,
+        proxyStep1Comment.trim(),
+      );
+      setProxyStep1Row(null);
+      setProxyStep1Comment('');
+      onActualsReload?.();
+    } catch (err: unknown) {
+      setProxyStep1Error(err instanceof Error ? err.message : 'Action failed. Please try again.');
+    } finally {
+      setProxyStep1Submitting(false);
+    }
+  };
 
   const openApprovalDialog = (row: FinanceActualRow, action: 'approve' | 'reject') => {
     setApprovalDialogRow(row);
@@ -502,26 +531,41 @@ export function ActualsTab({
                           <TableCell>{row.current_approval_step || '—'}</TableCell>
                           <TableCell>{row.current_approver_name || '—'}</TableCell>
                           <TableCell>
-                            {canAction && (
-                              <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
+                            <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
+                              {canAction && (
+                                <>
+                                  <Button
+                                    icon={<CheckmarkCircle24Regular />}
+                                    appearance="subtle"
+                                    size="small"
+                                    title="Approve"
+                                    style={{ color: tokens.colorPaletteGreenForeground1 }}
+                                    onClick={() => openApprovalDialog(row, 'approve')}
+                                  />
+                                  <Button
+                                    icon={<DismissCircle24Regular />}
+                                    appearance="subtle"
+                                    size="small"
+                                    title="Reject"
+                                    style={{ color: tokens.colorPaletteRedForeground1 }}
+                                    onClick={() => openApprovalDialog(row, 'reject')}
+                                  />
+                                </>
+                              )}
+                              {row.can_proxy_approve_step1 && row.approval_instance_id && row.step1_id && (
                                 <Button
-                                  icon={<CheckmarkCircle24Regular />}
+                                  icon={<ArrowForward24Regular />}
                                   appearance="subtle"
                                   size="small"
-                                  title="Approve"
-                                  style={{ color: tokens.colorPaletteGreenForeground1 }}
-                                  onClick={() => openApprovalDialog(row, 'approve')}
+                                  title="Proxy approve step 1 on behalf of direct manager"
+                                  onClick={() => {
+                                    setProxyStep1Row(row);
+                                    setProxyStep1Comment('');
+                                    setProxyStep1Error(null);
+                                  }}
                                 />
-                                <Button
-                                  icon={<DismissCircle24Regular />}
-                                  appearance="subtle"
-                                  size="small"
-                                  title="Reject"
-                                  style={{ color: tokens.colorPaletteRedForeground1 }}
-                                  onClick={() => openApprovalDialog(row, 'reject')}
-                                />
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
@@ -575,6 +619,46 @@ export function ActualsTab({
                 style={approvalAction === 'reject' ? { backgroundColor: tokens.colorPaletteRedBackground3 } : undefined}
               >
                 {approvalSubmitting ? 'Saving...' : approvalAction === 'approve' ? 'Approve' : 'Reject'}
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
+      {/* Proxy Approve Step 1 dialog */}
+      <Dialog open={!!proxyStep1Row} onOpenChange={(_, d) => { if (!d.open) { setProxyStep1Row(null); setProxyStep1Comment(''); setProxyStep1Error(null); } }}>
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Proxy Approve Step 1</DialogTitle>
+            <DialogContent>
+              {proxyStep1Row && (
+                <Body1 style={{ display: 'block', marginBottom: tokens.spacingVerticalM }}>
+                  Proxy-approve the manager review step for <strong>{proxyStep1Row.employee_name}</strong> on <strong>{proxyStep1Row.project_name}</strong> on behalf of the direct manager.
+                </Body1>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS }}>
+                <label style={{ fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase300 }}>Reason (required)</label>
+                <Textarea
+                  value={proxyStep1Comment}
+                  onChange={(_, d) => setProxyStep1Comment(d.value)}
+                  placeholder="Explain why you are proxy-approving step 1..."
+                  rows={3}
+                />
+              </div>
+              {proxyStep1Error && (
+                <MessageBar intent="error" style={{ marginTop: tokens.spacingVerticalS }}>
+                  <MessageBarBody>{proxyStep1Error}</MessageBarBody>
+                </MessageBar>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => { setProxyStep1Row(null); setProxyStep1Comment(''); setProxyStep1Error(null); }} disabled={proxyStep1Submitting}>Cancel</Button>
+              <Button
+                appearance="primary"
+                onClick={handleProxyStep1Submit}
+                disabled={proxyStep1Submitting || !proxyStep1Comment.trim()}
+              >
+                {proxyStep1Submitting ? 'Saving...' : 'Proxy Approve'}
               </Button>
             </DialogActions>
           </DialogBody>

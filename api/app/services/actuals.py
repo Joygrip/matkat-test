@@ -23,11 +23,18 @@ class ActualsService:
         self.current_user = current_user
     
     def _get_scoped_resource_ids(self) -> "Optional[list[str]]":
-        """Return reporting-hierarchy-scoped resource IDs for Manager, or None for full access."""
+        """Return reporting-hierarchy-scoped resource IDs for Manager, or None for full access.
+
+        Always includes the manager's own resource so they can manage their own actuals.
+        """
         if self.current_user.role not in _SCOPED_ROLES:
             return None
         from api.app.services.reporting import ReportingService
-        return ReportingService(self.db, self.current_user).get_accessible_resource_ids()
+        ids = list(ReportingService(self.db, self.current_user).get_accessible_resource_ids())
+        own_id = self.get_my_resource_id()
+        if own_id and own_id not in ids:
+            ids.append(own_id)
+        return ids
 
     def _check_manager_resource_access(self, resource_id: str) -> None:
         """Raise 403 if the current user is a Manager but the resource is outside their cost center."""
@@ -267,6 +274,7 @@ class ActualsService:
         month: int,
         actual_fte_percent: int,
         planned_fte_percent: Optional[int] = None,
+        proxy_sign_reason: Optional[str] = None,
     ) -> ActualLine:
         """Create a new actual line."""
         # Validate period is open
@@ -297,9 +305,23 @@ class ActualsService:
         
         # Employees can only create actuals for their own resource
         self._check_employee_owns_resource(resource_id)
-        # Managers can only create actuals for resources in their cost center
+        # Managers can only create actuals for resources in their cost center (or themselves)
         self._check_manager_resource_access(resource_id)
-        
+
+        # For managers entering on behalf of another employee, reason is required
+        is_manager_own = False
+        if self.current_user.role == UserRole.MANAGER:
+            own_id = self.get_my_resource_id()
+            is_manager_own = (own_id is not None and resource_id == own_id)
+            if not is_manager_own and (not proxy_sign_reason or not proxy_sign_reason.strip()):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "VALIDATION_ERROR",
+                        "message": "Reason is required when entering actuals for another employee",
+                    }
+                )
+
         # Validate project exists
         project = self.db.query(Project).filter(
             and_(
@@ -352,11 +374,25 @@ class ActualsService:
         self.db.commit()
         self.db.refresh(actual)
 
-        # Auto-sign for employees so they don't need a separate sign step
+        # Auto-sign on create
         if self.current_user.role == UserRole.EMPLOYEE:
+            # Employee entering their own actuals
             actual.employee_signed_at = datetime.utcnow()
             actual.employee_signed_by = self.current_user.object_id
             actual.is_proxy_signed = False
+            self.db.commit()
+            self.db.refresh(actual)
+            self._ensure_approval_instance(actual)
+        elif self.current_user.role == UserRole.MANAGER:
+            actual.employee_signed_at = datetime.utcnow()
+            actual.employee_signed_by = self.current_user.object_id
+            if is_manager_own:
+                # Manager entering their own actuals - sign as self
+                actual.is_proxy_signed = False
+            else:
+                # Manager entering on behalf of an employee - proxy sign with reason
+                actual.is_proxy_signed = True
+                actual.proxy_sign_reason = proxy_sign_reason.strip()  # type: ignore[union-attr]
             self.db.commit()
             self.db.refresh(actual)
             self._ensure_approval_instance(actual)
@@ -524,16 +560,27 @@ class ActualsService:
         )
     
     def sign(self, actual_id: str) -> ActualLine:
-        """Employee signs their own actuals."""
+        """Employee or Manager (own resource) signs their own actuals."""
         actual = self.get_by_id(actual_id)
         if not actual:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "NOT_FOUND", "message": "Actual line not found"}
             )
-        
+
         # Employees can only sign their own actuals
         self._check_employee_owns_resource(actual.resource_id)
+        # Managers can only sign actuals for their own resource
+        if self.current_user.role == UserRole.MANAGER:
+            own_id = self.get_my_resource_id()
+            if own_id is None or actual.resource_id != own_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "code": "UNAUTHORIZED_RESOURCE",
+                        "message": "Managers can only sign their own actuals directly. Use proxy sign for team members.",
+                    },
+                )
         
         if actual.employee_signed_at:
             raise HTTPException(
@@ -708,10 +755,22 @@ class ActualsService:
     ) -> Dict[str, Any]:
         """Return approval status keyed by actual_line_id for the current user's actuals."""
         actuals = self.get_my_actuals(year, month)
-        if not actuals:
-            return {}
+        return self._approval_statuses_for_lines([a.id for a in actuals])
 
-        actual_ids = [a.id for a in actuals]
+    def get_approval_statuses(
+        self, year: Optional[int] = None, month: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Return approval status keyed by actual_line_id for all actuals visible to the user."""
+        if self.current_user.role == UserRole.EMPLOYEE:
+            actuals = self.get_my_actuals(year, month)
+        else:
+            actuals = self.get_all(year, month)
+        return self._approval_statuses_for_lines([a.id for a in actuals])
+
+    def _approval_statuses_for_lines(self, actual_ids: list) -> Dict[str, Any]:
+        """Return approval status keyed by actual_line_id for the given list of IDs."""
+        if not actual_ids:
+            return {}
 
         instances = self.db.query(ApprovalInstance).filter(
             and_(
@@ -727,6 +786,14 @@ class ActualsService:
             if inst.subject_id not in latest:
                 latest[inst.subject_id] = inst
 
+        # Resolve current user's DB record (needed for step-2 proxy-approve check)
+        current_user_record = self.db.query(User).filter(
+            and_(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            )
+        ).first()
+
         result: Dict[str, Any] = {}
         for actual_id, inst in latest.items():
             rejection_comment: Optional[str] = None
@@ -740,10 +807,27 @@ class ActualsService:
                 if rejected_step and rejected_step.comment:
                     rejection_comment = rejected_step.comment
 
+            # Check if current user can proxy-approve step 1 as the step 2 approver
+            can_proxy_approve_step1 = False
+            step1_id = None
+            if current_user_record and inst.status == ApprovalStatus.PENDING:
+                steps = sorted(inst.steps, key=lambda s: s.step_order)
+                inst_step1 = next((s for s in steps if s.step_order == 1), None)
+                inst_step2 = next((s for s in steps if s.step_order == 2), None)
+                if (inst_step1 and inst_step1.status == StepStatus.PENDING
+                        and inst_step2 and inst_step2.status == StepStatus.PENDING):
+                    from api.app.services.approvals import ApprovalsService
+                    svc = ApprovalsService(self.db, self.current_user)
+                    if svc._can_user_action_step(current_user_record, inst_step2):
+                        can_proxy_approve_step1 = True
+                        step1_id = inst_step1.id
+
             result[actual_id] = {
                 "approval_id": inst.id,
                 "status": inst.status.value,
                 "rejection_comment": rejection_comment,
+                "can_proxy_approve_step1": can_proxy_approve_step1,
+                "step1_id": step1_id,
             }
 
         return result

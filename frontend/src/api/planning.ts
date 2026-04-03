@@ -88,7 +88,7 @@ export const planningApi = {
   },
   
   async updateDemandLine(id: string, data: Partial<CreateDemandLine>): Promise<DemandLine> {
-    return apiClient.put<DemandLine>(`/demand-lines/${id}`, data);
+    return apiClient.patch<DemandLine>(`/demand-lines/${id}`, data);
   },
   
   async deleteDemandLine(id: string): Promise<void> {
@@ -114,7 +114,7 @@ export const planningApi = {
   },
   
   async updateSupplyLine(id: string, data: Partial<CreateSupplyLine>): Promise<SupplyLine> {
-    return apiClient.put<SupplyLine>(`/supply-lines/${id}`, data);
+    return apiClient.patch<SupplyLine>(`/supply-lines/${id}`, data);
   },
   
   async deleteSupplyLine(id: string): Promise<void> {

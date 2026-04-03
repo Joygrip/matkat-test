@@ -4,9 +4,7 @@ import {
   tokens,
   Body1,
   Body2,
-  Caption1,
   Title3,
-  Subtitle2,
   Input,
   Badge,
   Tab,
@@ -19,17 +17,8 @@ import {
   TableCell,
   Skeleton,
   SkeletonItem,
-  Dialog,
-  DialogSurface,
-  DialogTitle,
-  DialogBody,
-  DialogContent,
-  DialogActions,
-  Button,
-  Spinner,
-  Divider,
 } from '@fluentui/react-components';
-import { SearchRegular, BuildingRegular, Warning24Regular, PersonRegular, Dismiss24Regular } from '@fluentui/react-icons';
+import { SearchRegular, BuildingRegular, Warning24Regular, PersonRegular } from '@fluentui/react-icons';
 import type {
   ConsolidationDashboard,
   DashboardCostCenter,
@@ -39,15 +28,18 @@ import type {
 } from '../../api/consolidation';
 import { consolidationApi } from '../../api/consolidation';
 import { useWorkQueueSort } from '../../hooks/useWorkQueueSort';
+import { useHasRole } from '../../auth/AuthProvider';
 import { FinanceSortBar } from './FinanceSortBar';
 import { FinanceKpiStrip, KpiTile } from './FinanceKpiStrip';
 import { FinanceIssueAlerts, IssueFilter } from './FinanceIssueAlerts';
 import { GapBadge, GapStatusBadge, PlaceholderTypeBadge } from './FinanceBadges';
+import { ResourceDetailModal } from './ResourceDetailModal';
 
 export interface OverviewTabProps {
   dashboard: ConsolidationDashboard | null;
   loading: boolean;
   projectId?: string;
+  onDashboardChanged?: () => void;
 }
 
 type CcSortKey = 'gap' | 'name' | 'demand' | 'supply';
@@ -186,132 +178,7 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     '&:hover': { backgroundColor: `${tokens.colorBrandBackground2} !important` },
   },
-  assignmentSection: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: tokens.spacingVerticalS,
-  },
-  assignmentSectionTitle: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingBottom: tokens.spacingVerticalXS,
-  },
 });
-
-function ResourceDetailModal({
-  open,
-  resourceName,
-  detail,
-  loading,
-  onClose,
-}: {
-  open: boolean;
-  resourceName: string;
-  detail: ResourceDetail | null;
-  loading: boolean;
-  onClose: () => void;
-}) {
-  const styles = useStyles();
-  return (
-    <Dialog open={open} onOpenChange={(_, d) => { if (!d.open) onClose(); }}>
-      <DialogSurface style={{ minWidth: 560, maxWidth: 720 }}>
-        <DialogBody>
-          <DialogTitle
-            action={
-              <Button appearance="subtle" icon={<Dismiss24Regular />} onClick={onClose} />
-            }
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
-              <PersonRegular />
-              {resourceName}
-            </span>
-          </DialogTitle>
-          <DialogContent>
-            {loading && (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: tokens.spacingVerticalXL }}>
-                <Spinner label="Loading assignments..." />
-              </div>
-            )}
-            {!loading && detail && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL }}>
-                {/* Summary row */}
-                <div style={{ display: 'flex', gap: tokens.spacingHorizontalXL }}>
-                  <Body2>Demand: <strong>{detail.total_demand_fte}%</strong></Body2>
-                  <Body2>Supply: <strong>{detail.total_supply_fte}%</strong></Body2>
-                  <GapBadge gap={detail.gap_fte} />
-                </div>
-
-                <Divider />
-
-                {/* Demand assignments */}
-                <div className={styles.assignmentSection}>
-                  <div className={styles.assignmentSectionTitle}>
-                    <Subtitle2>Demand assignments</Subtitle2>
-                    <Badge appearance="outline" size="small">{detail.demand_lines.length}</Badge>
-                  </div>
-                  {detail.demand_lines.length === 0 ? (
-                    <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>No demand assignments.</Caption1>
-                  ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHeaderCell>Project</TableHeaderCell>
-                          <TableHeaderCell style={{ width: 100 }}>FTE %</TableHeaderCell>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {detail.demand_lines.map((line, i) => (
-                          <TableRow key={i}>
-                            <TableCell>{line.project_name ?? '—'}</TableCell>
-                            <TableCell>{line.fte_percent}%</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  )}
-                </div>
-
-                <Divider />
-
-                {/* Supply assignments */}
-                <div className={styles.assignmentSection}>
-                  <div className={styles.assignmentSectionTitle}>
-                    <Subtitle2>Supply assignments</Subtitle2>
-                    <Badge appearance="outline" size="small">{detail.supply_lines.length}</Badge>
-                  </div>
-                  {detail.supply_lines.length === 0 ? (
-                    <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>No supply assignments.</Caption1>
-                  ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHeaderCell>Project</TableHeaderCell>
-                          <TableHeaderCell style={{ width: 100 }}>FTE %</TableHeaderCell>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {detail.supply_lines.map((line, i) => (
-                          <TableRow key={i}>
-                            <TableCell>{line.project_name ?? <em style={{ color: tokens.colorNeutralForeground3 }}>General availability</em>}</TableCell>
-                            <TableCell>{line.fte_percent}%</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  )}
-                </div>
-              </div>
-            )}
-          </DialogContent>
-          <DialogActions>
-            <Button appearance="secondary" onClick={onClose}>Close</Button>
-          </DialogActions>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
-  );
-}
 
 function OverAllocTable({ overAllocs }: { overAllocs: OverAllocation[] }) {
   const styles = useStyles();
@@ -532,18 +399,23 @@ function CcDetailPanel({
   );
 }
 
-export function OverviewTab({ dashboard, loading, projectId }: OverviewTabProps) {
+export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged }: OverviewTabProps) {
   const styles = useStyles();
+  const canEditDemand = useHasRole('Finance', 'PM');
+  const canEditSupply = useHasRole('Finance', 'Manager');
+  const isPM = useHasRole('PM');
   const [ccFilter, setCcFilter] = useState<IssueFilter>('none');
   const [selectedCcId, setSelectedCcId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [drillOpen, setDrillOpen] = useState(false);
+  const [drillResourceId, setDrillResourceId] = useState<string | null>(null);
   const [drillResourceName, setDrillResourceName] = useState('');
   const [resourceDetail, setResourceDetail] = useState<ResourceDetail | null>(null);
   const [resourceDetailLoading, setResourceDetailLoading] = useState(false);
 
   const handleResourceClick = async (resource: DashboardResource) => {
     if (!dashboard) return;
+    setDrillResourceId(resource.resource_id);
     setDrillResourceName(resource.resource_name);
     setDrillOpen(true);
     setResourceDetail(null);
@@ -766,10 +638,16 @@ export function OverviewTab({ dashboard, loading, projectId }: OverviewTabProps)
 
       <ResourceDetailModal
         open={drillOpen}
+        resourceId={drillResourceId}
         resourceName={drillResourceName}
         detail={resourceDetail}
         loading={resourceDetailLoading}
+        periodId={dashboard?.period_id ?? null}
+        canEditDemand={canEditDemand}
+        canEditSupply={canEditSupply}
+        isPM={isPM}
         onClose={() => setDrillOpen(false)}
+        onDataChanged={() => onDashboardChanged?.()}
       />
     </>
   );

@@ -507,7 +507,7 @@ export const Finance: React.FC = () => {
           <MessageBar intent="info" style={{ marginBottom: 12 }}>
             <MessageBarBody>Cost figures reflect fully approved actuals only. Pending or rejected actuals are excluded.</MessageBarBody>
           </MessageBar>
-          <OverviewTab dashboard={dashboard} loading={dashboardLoading} projectId={overviewProjectId} />
+          <OverviewTab dashboard={dashboard} loading={dashboardLoading} projectId={overviewProjectId} onDashboardChanged={() => selectedPeriodId && loadDashboard(selectedPeriodId)} />
         </>
       )}
       {!isPM && activeTab === 'actuals' && (

@@ -759,11 +759,15 @@ async def create_delegate(
         me = db.query(User).filter(
             and_(User.tenant_id == current_user.tenant_id, User.object_id == current_user.object_id)
         ).first()
-        if not me or data.delegator_id != me.id:
+        if not me:
             raise HTTPException(
                 status_code=403,
                 detail={"code": "UNAUTHORIZED_ROLE", "message": "Managers can only delegate their own approvals"},
             )
+        # Always use the Manager's own DB id — ignore whatever delegator_id was sent
+        data = data.model_copy(update={"delegator_id": me.id})
+    if not data.delegator_id:
+        raise HTTPException(status_code=422, detail={"code": "MISSING_FIELD", "message": "delegator_id is required"})
 
     # Validate delegator exists in tenant
     delegator = db.query(User).filter(

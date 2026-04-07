@@ -184,13 +184,18 @@ class ApprovalsService:
                 status_code=400,
                 detail={"code": "VALIDATION_ERROR", "message": "Only the current step can be approved"},
             )
-        
+
+        # Prefix comment with delegation attribution when acting as a delegate
+        is_delegated, delegated_for_name = self._get_delegation_info(user, step)
+        if is_delegated and delegated_for_name:
+            comment = f"[DELEGATE for {delegated_for_name}] {comment or ''}".strip()
+
         # Update step
         step.status = StepStatus.APPROVED
         step.actioned_at = datetime.now(timezone.utc)
         step.actioned_by = self.current_user.object_id
         step.comment = comment
-        
+
         # Record action
         action = ApprovalAction(
             tenant_id=self.current_user.tenant_id,
@@ -299,7 +304,12 @@ class ApprovalsService:
                 status_code=400,
                 detail={"code": "VALIDATION_ERROR", "message": "Only the current step can be rejected"},
             )
-        
+
+        # Prefix comment with delegation attribution when acting as a delegate
+        is_delegated, delegated_for_name = self._get_delegation_info(user, step)
+        if is_delegated and delegated_for_name:
+            comment = f"[DELEGATE for {delegated_for_name}] {comment or ''}".strip()
+
         # Update step
         step.status = StepStatus.REJECTED
         step.actioned_at = datetime.now(timezone.utc)

@@ -188,7 +188,7 @@ export const adminApi = {
   // Approval Delegates
   listDelegates: () =>
     apiClient.get<ApprovalDelegate[]>('/admin/delegates'),
-  createDelegate: (data: { delegator_id: string; delegate_id: string; note?: string }) =>
+  createDelegate: (data: { delegator_id?: string; delegate_id: string; note?: string }) =>
     apiClient.post<ApprovalDelegate>('/admin/delegates', data),
   patchDelegate: (id: string, data: { is_active?: boolean; note?: string }) =>
     apiClient.patch<ApprovalDelegate>(`/admin/delegates/${id}`, data),

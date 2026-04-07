@@ -103,8 +103,6 @@ class ReportingService:
         Also used as the fallback in get_accessible_resource_ids() when the
         reporting cache is empty.
         """
-        from api.app.models.core import CostCenter
-
         user = self.db.query(User).filter(
             and_(
                 User.tenant_id == self.current_user.tenant_id,
@@ -113,6 +111,11 @@ class ReportingService:
         ).first()
         if not user:
             return []
+        return self._get_resource_ids_for_user(user)
+
+    def _get_resource_ids_for_user(self, user: User) -> list[str]:
+        """Return resource IDs for all active resources in cost centers managed by the given user."""
+        from api.app.models.core import CostCenter
 
         cost_centers = self.db.query(CostCenter.id).filter(
             and_(
@@ -133,6 +136,42 @@ class ReportingService:
             )
         ).all()
         return [row[0] for row in resources]
+
+    def get_delegated_resource_ids(self, user_db_id: str) -> list[str]:
+        """
+        Return resource IDs accessible via active delegation grants where user_db_id is the delegate.
+
+        For each delegator the user is actively delegated for, resolve that delegator's
+        cost-center-scoped resources and return the union.
+        """
+        from api.app.models.core import ApprovalDelegate
+
+        grants = self.db.query(ApprovalDelegate).filter(
+            and_(
+                ApprovalDelegate.tenant_id == self.current_user.tenant_id,
+                ApprovalDelegate.delegate_id == user_db_id,
+                ApprovalDelegate.is_active.is_(True),
+            )
+        ).all()
+        if not grants:
+            return []
+
+        seen: set[str] = set()
+        result: list[str] = []
+        for grant in grants:
+            delegator = self.db.query(User).filter(
+                and_(
+                    User.id == grant.delegator_id,
+                    User.tenant_id == self.current_user.tenant_id,
+                )
+            ).first()
+            if not delegator:
+                continue
+            for rid in self._get_resource_ids_for_user(delegator):
+                if rid not in seen:
+                    seen.add(rid)
+                    result.append(rid)
+        return result
 
     def assert_resource_accessible(self, resource_id: str) -> None:
         """Raise 403 if the given resource is not in the current user's reporting scope."""

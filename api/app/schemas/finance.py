@@ -22,6 +22,8 @@ class FinanceActualsDashboardResponse(BaseModel):
     can_action: bool = False
     can_proxy_approve_step1: bool = False
     step1_id: Optional[str] = None
+    is_delegated: bool = False
+    delegated_for: Optional[str] = None
 
 class FinanceCostCenterStatsResponse(BaseModel):
     cost_center_id: str

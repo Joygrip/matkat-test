@@ -180,7 +180,7 @@ export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, 
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="label" angle={0} textAnchor="middle" height={40} tick={{ fontSize: 13 }} minTickGap={8} />
           <YAxis tickFormatter={dkkCompact} width={72} />
-          <Tooltip content={<CustomTooltip />} />
+          <Tooltip content={<CustomTooltip />} wrapperStyle={{ pointerEvents: 'none' }} />
           {entityNames.flatMap((entity) =>
             SUFFIXES.filter((suffix) => !hiddenCategories.includes(suffix.slice(1) as any)).map((suffix, idx, visibleSuffixes) => (
               <Bar

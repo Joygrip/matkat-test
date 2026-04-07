@@ -98,11 +98,24 @@ class DemandService:
         """
         Return the list of resource IDs the current user may access, or None
         if the user has unscoped (full-tenant) access.
+        Includes resources accessible via active delegation grants.
         """
         if self.current_user.role not in _SCOPED_ROLES:
             return None
         from api.app.services.reporting import ReportingService
-        return ReportingService(self.db, self.current_user).get_accessible_resource_ids()
+        svc = ReportingService(self.db, self.current_user)
+        ids = list(svc.get_accessible_resource_ids())
+        user = self.db.query(User).filter(
+            and_(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            )
+        ).first()
+        if user:
+            for rid in svc.get_delegated_resource_ids(user.id):
+                if rid not in ids:
+                    ids.append(rid)
+        return ids
 
     def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None, *, period_id: Optional[str] = None) -> list[DemandLine]:
         """Get all demand lines, optionally filtered by period/year/month/project/resource."""
@@ -434,11 +447,25 @@ class SupplyService:
         self.current_user = current_user
 
     def _get_scoped_resource_ids(self) -> Optional[list[str]]:
-        """Return cost-center-scoped resource IDs for Manager, or None for full access."""
+        """Return cost-center-scoped resource IDs for Manager, or None for full access.
+        Includes resources accessible via active delegation grants.
+        """
         if self.current_user.role not in _SCOPED_ROLES:
             return None
         from api.app.services.reporting import ReportingService
-        return ReportingService(self.db, self.current_user).get_cost_center_resource_ids()
+        svc = ReportingService(self.db, self.current_user)
+        ids = list(svc.get_cost_center_resource_ids())
+        user = self.db.query(User).filter(
+            and_(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            )
+        ).first()
+        if user:
+            for rid in svc.get_delegated_resource_ids(user.id):
+                if rid not in ids:
+                    ids.append(rid)
+        return ids
 
     def _check_ro_resource_authorized(self, resource_id: str) -> None:
         """Raise 403 if the current user is a Manager but the resource is outside their cost center."""

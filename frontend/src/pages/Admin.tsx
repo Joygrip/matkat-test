@@ -2,6 +2,7 @@
  * Admin page for managing master data.
  */
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Card,
   TabList,
@@ -190,7 +191,8 @@ export function Admin() {
   const styles = useStyles();
   const { showSuccess, showApiError } = useToast();
   const { user } = useAuth();
-  const [selectedTab, setSelectedTab] = useState<TabValue>('cost-centers');
+  const [searchParams] = useSearchParams();
+  const [selectedTab, setSelectedTab] = useState<TabValue>(searchParams.get('tab') ?? 'cost-centers');
   const [loading, setLoading] = useState(true);
 
   const canManageMasterData = user?.role === 'Admin' || user?.role === 'Finance';
@@ -290,7 +292,7 @@ export function Admin() {
     } finally {
       setLoading(false);
     }
-  }, [selectedTab, canManageMasterData, canManageSettings]);
+  }, [selectedTab, canManageMasterData, canManageSettings, canManageDelegates]);
 
   useEffect(() => {
     loadData();
@@ -412,18 +414,16 @@ export function Admin() {
               { is_active: formData.is_active as boolean, note: formData.note as string | undefined },
             );
           } else {
-            let delegatorId = formData.delegator_id as string;
-            if (user?.role === 'Manager') {
-              // Manager always delegates their own approvals — find own db User.id by email
-              const me = pmUsers.find((u) => u.email?.toLowerCase() === user.email?.toLowerCase());
-              delegatorId = me?.id ?? '';
+            if (!(formData.delegate_id as string)) {
+              showApiError(new Error('Delegate is required'), 'Validation');
+              return;
             }
-            if (!delegatorId || !(formData.delegate_id as string)) {
-              showApiError(new Error('Delegator and delegate are required'), 'Validation');
+            if (user?.role !== 'Manager' && !(formData.delegator_id as string)) {
+              showApiError(new Error('Delegator is required'), 'Validation');
               return;
             }
             await adminApi.createDelegate({
-              delegator_id: delegatorId,
+              ...(user?.role !== 'Manager' && { delegator_id: formData.delegator_id as string }),
               delegate_id: formData.delegate_id as string,
               note: formData.note as string | undefined,
             });
@@ -1489,11 +1489,11 @@ export function Admin() {
     <div className={styles.container}>
       <Card className={styles.card}>
         <TabList selectedValue={selectedTab} onTabSelect={handleTabSelect}>
-          <Tab value="cost-centers" icon={<OrganizationRegular />}>Cost Centers</Tab>
-          <Tab value="projects" icon={<FolderRegular />}>Projects</Tab>
-          <Tab value="resources" icon={<PersonRegular />}>Resources</Tab>
-          <Tab value="placeholders" icon={<PersonQuestionMarkRegular />}>Placeholders</Tab>
-          <Tab value="holidays" icon={<CalendarRegular />}>Holidays</Tab>
+          {canManageMasterData && <Tab value="cost-centers" icon={<OrganizationRegular />}>Cost Centers</Tab>}
+          {canManageMasterData && <Tab value="projects" icon={<FolderRegular />}>Projects</Tab>}
+          {canManageMasterData && <Tab value="resources" icon={<PersonRegular />}>Resources</Tab>}
+          {canManageMasterData && <Tab value="placeholders" icon={<PersonQuestionMarkRegular />}>Placeholders</Tab>}
+          {canManageMasterData && <Tab value="holidays" icon={<CalendarRegular />}>Holidays</Tab>}
           {canManageSettings && (
             <Tab value="settings" icon={<SettingsRegular />}>Settings</Tab>
           )}

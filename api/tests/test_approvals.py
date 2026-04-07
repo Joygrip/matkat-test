@@ -375,6 +375,272 @@ def test_employee_cannot_access_inbox(client):
     """Test that Employee role cannot access approvals inbox."""
     headers = {"X-Dev-Role": "Employee", "X-Dev-Tenant": "test-tenant"}
 
-    
+
     response = client.get("/approvals/inbox", headers=headers)
     assert response.status_code == 403
+
+
+# ============== DELEGATION TESTS ==============
+
+def _setup_delegation_scenario(db, tenant_id: str):
+    """
+    Set up a standard delegation test scenario and return a dict of IDs.
+
+    Creates:
+    - manager_user (the RO/approver for the cost center)
+    - delegate_user (acting on behalf of manager)
+    - employee_user (submitter of actuals)
+    - cost_center (managed by manager_user as ro_user_id)
+    - resource (linked to employee_user)
+    - period (2026-04, open)
+    - project
+    - approval_delegate grant (manager -> delegate, active)
+    """
+    from api.app.models.core import (
+        User, CostCenter, Resource, Period, Project, ApprovalDelegate
+    )
+
+    manager = User(
+        id="del-manager-1",
+        tenant_id=tenant_id,
+        object_id="del-manager-oid",
+        email="manager@delegate-test.com",
+        display_name="Delegating Manager",
+        role="Manager",
+    )
+    db.add(manager)
+
+    delegate = User(
+        id="del-delegate-1",
+        tenant_id=tenant_id,
+        object_id="del-delegate-oid",
+        email="delegate@delegate-test.com",
+        display_name="Delegate User",
+        role="Manager",
+    )
+    db.add(delegate)
+
+    employee = User(
+        id="del-employee-1",
+        tenant_id=tenant_id,
+        object_id="del-employee-oid",
+        email="emp@delegate-test.com",
+        display_name="Delegate Test Employee",
+        role="Employee",
+    )
+    db.add(employee)
+
+    cc = CostCenter(
+        id="del-cc-1",
+        tenant_id=tenant_id,
+        name="Delegation CC",
+        code="DCC",
+        ro_user_id="del-manager-1",
+    )
+    db.add(cc)
+
+    resource = Resource(
+        id="del-res-1",
+        tenant_id=tenant_id,
+        display_name="Delegate Test Resource",
+        email="res@delegate-test.com",
+        user_id="del-employee-1",
+        cost_center_id="del-cc-1",
+        employee_id="DEMP001",
+    )
+    db.add(resource)
+
+    period = Period(
+        id="del-period-1",
+        tenant_id=tenant_id,
+        year=2026,
+        month=4,
+        status="open",
+    )
+    db.add(period)
+
+    project = Project(
+        id="del-proj-1",
+        tenant_id=tenant_id,
+        name="Delegation Project",
+        code="DPRJ",
+    )
+    db.add(project)
+
+    grant = ApprovalDelegate(
+        id="del-grant-1",
+        tenant_id=tenant_id,
+        delegator_id="del-manager-1",
+        delegate_id="del-delegate-1",
+        is_active=True,
+        created_by="admin-oid",
+    )
+    db.add(grant)
+
+    db.commit()
+    return {
+        "manager_oid": "del-manager-oid",
+        "delegate_oid": "del-delegate-oid",
+        "employee_oid": "del-employee-oid",
+        "resource_id": "del-res-1",
+        "project_id": "del-proj-1",
+        "grant_id": "del-grant-1",
+    }
+
+
+def _sign_actual(client, tenant_id, employee_oid, resource_id, project_id):
+    """Helper: create an actual as Employee (auto-signed on create), returning actual_id."""
+    emp_h = {"X-Dev-Role": "Employee", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": employee_oid}
+    r = client.post(
+        "/actuals",
+        json={"resource_id": resource_id, "project_id": project_id, "year": 2026, "month": 4, "actual_fte_percent": 50},
+        headers=emp_h,
+    )
+    assert r.status_code == 200, r.text
+    # Employee create auto-signs and creates approval instance; no separate sign call needed
+    return r.json()["id"]
+
+
+def test_delegate_sees_inbox_item(client, db):
+    """Delegate should see approval inbox items for their delegator's resources."""
+    tenant_id = "del-tenant"
+    ids = _setup_delegation_scenario(db, tenant_id)
+
+    _sign_actual(client, tenant_id, ids["employee_oid"], ids["resource_id"], ids["project_id"])
+
+    delegate_h = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": ids["delegate_oid"]}
+    resp = client.get("/approvals/inbox", headers=delegate_h)
+    assert resp.status_code == 200
+    inbox = resp.json()
+    assert len(inbox) == 1
+    assert inbox[0]["is_delegated"] is True
+    assert inbox[0]["delegated_for"] == "Delegating Manager"
+
+
+def test_delegate_can_approve_step(client, db):
+    """Delegate can approve a pending step for their delegator's resource."""
+    tenant_id = "del-tenant-2"
+    ids = _setup_delegation_scenario(db, tenant_id)
+
+    _sign_actual(client, tenant_id, ids["employee_oid"], ids["resource_id"], ids["project_id"])
+
+    delegate_h = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": ids["delegate_oid"]}
+    inbox = client.get("/approvals/inbox", headers=delegate_h).json()
+    approval_id = inbox[0]["id"]
+    step = next(s for s in inbox[0]["steps"] if s["step_name"] == "Manager")
+
+    resp = client.post(
+        f"/approvals/{approval_id}/steps/{step['id']}/approve",
+        json={"comment": "Approved as delegate"},
+        headers=delegate_h,
+    )
+    assert resp.status_code == 200
+    result = resp.json()
+    approved_step = next(s for s in result["steps"] if s["step_name"] == "Manager")
+    assert approved_step["status"] == "approved"
+
+
+def test_delegate_attribution_in_comment(client, db):
+    """When a delegate approves, the comment should be prefixed with [DELEGATE for ...]."""
+    from api.app.models.approvals import ApprovalAction
+
+    tenant_id = "del-tenant-3"
+    ids = _setup_delegation_scenario(db, tenant_id)
+
+    _sign_actual(client, tenant_id, ids["employee_oid"], ids["resource_id"], ids["project_id"])
+
+    delegate_h = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": ids["delegate_oid"]}
+    inbox = client.get("/approvals/inbox", headers=delegate_h).json()
+    approval_id = inbox[0]["id"]
+    step = next(s for s in inbox[0]["steps"] if s["step_name"] == "Manager")
+
+    client.post(
+        f"/approvals/{approval_id}/steps/{step['id']}/approve",
+        json={"comment": "All good"},
+        headers=delegate_h,
+    )
+
+    # Verify the audit action has the delegation prefix
+    from api.app.models.approvals import ApprovalAction
+    from sqlalchemy import and_
+    session = db
+    action = session.query(ApprovalAction).filter(
+        and_(
+            ApprovalAction.instance_id == approval_id,
+            ApprovalAction.action == "approve",
+        )
+    ).first()
+    assert action is not None
+    assert "[DELEGATE for Delegating Manager]" in (action.comment or "")
+
+
+def test_non_delegate_cannot_approve(client, db):
+    """A user without a delegation grant should get 403 when trying to approve."""
+    tenant_id = "del-tenant-4"
+    ids = _setup_delegation_scenario(db, tenant_id)
+
+    _sign_actual(client, tenant_id, ids["employee_oid"], ids["resource_id"], ids["project_id"])
+
+    # Fetch the inbox as the manager (direct approver) to get the step ID
+    manager_h = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": ids["manager_oid"]}
+    inbox = client.get("/approvals/inbox", headers=manager_h).json()
+    approval_id = inbox[0]["id"]
+    step = next(s for s in inbox[0]["steps"] if s["step_name"] == "Manager")
+
+    # A completely unrelated manager tries to approve
+    outsider_h = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": "unrelated-manager-oid"}
+    resp = client.post(
+        f"/approvals/{approval_id}/steps/{step['id']}/approve",
+        json={"comment": "Sneaky"},
+        headers=outsider_h,
+    )
+    assert resp.status_code == 403
+
+
+def test_inactive_delegate_cannot_approve(client, db):
+    """A delegate with is_active=False should not be able to approve."""
+    from api.app.models.core import ApprovalDelegate
+
+    tenant_id = "del-tenant-5"
+    ids = _setup_delegation_scenario(db, tenant_id)
+
+    # Deactivate the grant
+    grant = db.query(ApprovalDelegate).filter(ApprovalDelegate.id == ids["grant_id"]).first()
+    grant.is_active = False
+    db.commit()
+
+    _sign_actual(client, tenant_id, ids["employee_oid"], ids["resource_id"], ids["project_id"])
+
+    # Delegate should not see the inbox item
+    delegate_h = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": ids["delegate_oid"]}
+    inbox = client.get("/approvals/inbox", headers=delegate_h).json()
+    assert inbox == []
+
+
+def test_delegate_sees_actuals_for_delegators_resources(client, db):
+    """Delegate should be able to list actuals for their delegator's cost center resources."""
+    tenant_id = "del-tenant-6"
+    ids = _setup_delegation_scenario(db, tenant_id)
+
+    # Create an actual (unsigned)
+    manager_h = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": ids["manager_oid"]}
+    r = client.post(
+        "/actuals",
+        json={
+            "resource_id": ids["resource_id"],
+            "project_id": ids["project_id"],
+            "year": 2026,
+            "month": 4,
+            "actual_fte_percent": 50,
+            "proxy_sign_reason": "Manager entry on behalf of employee",
+        },
+        headers=manager_h,
+    )
+    assert r.status_code == 200
+
+    # Delegate should see the actual in the list
+    delegate_h = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": ids["delegate_oid"]}
+    resp = client.get("/actuals", headers=delegate_h)
+    assert resp.status_code == 200
+    actuals = resp.json()
+    assert any(a["resource_id"] == ids["resource_id"] for a in actuals)

@@ -12,7 +12,6 @@ import { Dashboard } from './pages/Dashboard';
 import { Demand } from './pages/Demand';
 import { Supply } from './pages/Supply';
 import { Actuals } from './pages/Actuals';
-import { Approvals } from './pages/Approvals';
 import { Admin } from './pages/Admin';
 import { Finance } from './pages/Finance';
 import { AuditLogs } from './pages/AuditLogs';
@@ -82,7 +81,6 @@ function App() {
           <Route path="/supply" element={<Supply />} />
           <Route path="/actuals" element={<Actuals />} />
           <Route path="/finance" element={<Finance />} />
-          <Route path="/approvals" element={<Approvals />} />
           {/* Redirects for old routes */}
           <Route path="/finance-dashboard" element={<Navigate to="/finance" replace />} />
           <Route path="/consolidation" element={<Navigate to="/finance" replace />} />

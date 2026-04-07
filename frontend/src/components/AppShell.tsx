@@ -26,8 +26,6 @@ import {
   PeopleFilled,
   ClipboardTaskRegular,
   ClipboardTaskFilled,
-  CheckmarkCircleRegular,
-  CheckmarkCircleFilled,
   ChartMultipleRegular,
   ChartMultipleFilled,
   SettingsRegular,
@@ -38,6 +36,7 @@ import {
   MoneyHandFilled,
   SignOutRegular,
   PersonRegular,
+  PeopleTeamRegular,
   bundleIcon,
 } from '@fluentui/react-icons';
 import { useAuth } from '../auth/AuthProvider';
@@ -48,7 +47,6 @@ const Home = bundleIcon(HomeFilled, HomeRegular);
 const Demand = bundleIcon(CalendarFilled, CalendarRegular);
 const Supply = bundleIcon(PeopleFilled, PeopleRegular);
 const Actuals = bundleIcon(ClipboardTaskFilled, ClipboardTaskRegular);
-const Approvals = bundleIcon(CheckmarkCircleFilled, CheckmarkCircleRegular);
 const Consolidation = bundleIcon(ChartMultipleFilled, ChartMultipleRegular);
 const Admin = bundleIcon(SettingsFilled, SettingsRegular);
 const AuditLogsIcon = bundleIcon(DocumentBulletListFilled, DocumentBulletListRegular);
@@ -253,7 +251,7 @@ const navItems: NavItem[] = [
   { path: '/actuals', label: 'Actuals', icon: Actuals, roles: ['Admin', 'Finance', 'Manager', 'Employee'], section: 'operations' },
   { path: '/finance', label: 'Finance', icon: Consolidation, roles: ['Admin', 'Finance', 'Manager', 'PM'], section: 'operations' },
   { path: '/project-costs', label: 'Project Costs', icon: ProjectCostsIcon, roles: ['Admin', 'Finance', 'PM', 'Manager'], section: 'operations' },
-  { path: '/approvals', label: 'Approvals', icon: Approvals, roles: ['Admin', 'Manager'], section: 'operations' },
+  { path: '/admin?tab=delegates', label: 'My Delegates', icon: PeopleTeamRegular, roles: ['Manager'], section: 'operations' },
   { path: '/admin', label: 'Admin', icon: Admin, roles: ['Admin', 'Finance'], section: 'admin' },
   { path: '/audit-logs', label: 'Audit logs', icon: AuditLogsIcon, roles: ['Admin', 'Finance'], section: 'admin' },
 ];
@@ -271,7 +269,6 @@ const pageTitles: Record<string, string> = {
   '/supply': 'Supply Planning',
   '/actuals': 'Actuals Entry',
   '/finance': 'Finance',
-  '/approvals': 'Approvals',
   '/project-costs': 'Project Costs',
   '/admin': 'Administration',
   '/audit-logs': 'Audit logs',

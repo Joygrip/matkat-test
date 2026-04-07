@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 
-from api.app.models.core import Period, Project, Resource, Placeholder, CostCenter, User
+from api.app.models.core import Period, Project, Resource, Placeholder, CostCenter, User, ApprovalDelegate
 from api.app.models.planning import DemandLine, SupplyLine
 from api.app.models.actuals import ActualLine
 from api.app.models.consolidation import OopLine, PublishSnapshot, PublishSnapshotLine
@@ -188,6 +188,7 @@ class ConsolidationService:
         cost_centers_list.sort(key=lambda c: c["cost_center_name"] or "")
 
         # Manager restriction: filter to cost centers they manage (ro_user_id or director_user_id)
+        # Also include cost centers of any delegators who have granted this manager delegation
         if self.current_user.role == "Manager":
             manager_user = self.db.query(User).filter(
                 and_(
@@ -205,6 +206,25 @@ class ConsolidationService:
                         )
                     ).all()
                 }
+                # Add cost centers managed by delegators who granted this manager delegation
+                delegation_grants = self.db.query(ApprovalDelegate).filter(
+                    and_(
+                        ApprovalDelegate.tenant_id == self.current_user.tenant_id,
+                        ApprovalDelegate.delegate_id == manager_user.id,
+                        ApprovalDelegate.is_active.is_(True),
+                    )
+                ).all()
+                for grant in delegation_grants:
+                    delegated_cc_ids = {
+                        row[0] for row in self.db.query(CostCenter.id).filter(
+                            and_(
+                                CostCenter.tenant_id == self.current_user.tenant_id,
+                                CostCenter.is_active.is_(True),
+                                (CostCenter.ro_user_id == grant.delegator_id) | (CostCenter.director_user_id == grant.delegator_id),
+                            )
+                        ).all()
+                    }
+                    managed_cc_ids |= delegated_cc_ids
             else:
                 managed_cc_ids = set()
             cost_centers_list = [cc for cc in cost_centers_list if cc["cost_center_id"] in managed_cc_ids]

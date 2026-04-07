@@ -206,7 +206,7 @@ class SettingsResponse(SettingsBase):
 
 # Approval Delegate schemas
 class ApprovalDelegateCreate(BaseModel):
-    delegator_id: str
+    delegator_id: Optional[str] = None  # omit when caller is Manager — backend fills from token
     delegate_id: str
     note: Optional[str] = None
 

@@ -203,7 +203,7 @@ const useStyles = makeStyles({
 
   // Drill-down dialog
   dialogSurface: {
-    maxWidth: '90vw',
+    maxWidth: '860px',
     width: '90vw',
     height: '80vh',
   },
@@ -218,12 +218,12 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column' as const,
     gap: tokens.spacingVerticalM,
+    paddingTop: tokens.spacingVerticalS,
   },
   detailKpiRow: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
-    gap: tokens.spacingHorizontalM,
-    marginBottom: tokens.spacingVerticalM,
+    gridTemplateColumns: 'repeat(5, 1fr)',
+    gap: tokens.spacingHorizontalS,
   },
   detailKpiCard: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
@@ -239,7 +239,7 @@ const useStyles = makeStyles({
     letterSpacing: '0.5px',
   },
   detailKpiValue: {
-    fontSize: tokens.fontSizeBase500,
+    fontSize: tokens.fontSizeBase400,
     fontWeight: tokens.fontWeightBold,
     color: tokens.colorNeutralForeground1,
   },
@@ -247,10 +247,17 @@ const useStyles = makeStyles({
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
     overflow: 'hidden',
+    width: '100%',
+  },
+  tableHeaderRow: {
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+    fontWeight: tokens.fontWeightSemibold,
   },
   totalRow: {
     fontWeight: tokens.fontWeightBold,
-    backgroundColor: tokens.colorBrandBackground2,
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderTop: `2px solid ${tokens.colorNeutralStroke2}`,
   },
 });
 
@@ -920,29 +927,29 @@ export const ConsolidatedCostChart: React.FC = () => {
                       <div className={styles.emptyState}><Body1>No planned labor lines for this period.</Body1></div>
                     ) : (
                       <div className={styles.tableWrap}>
-                        <Table>
+                        <Table size="small">
                           <TableHeader>
-                            <TableRow>
-                              {drillDown?.mode === 'cc' && <TableHeaderCell>Project</TableHeaderCell>}
-                              <TableHeaderCell>Employee</TableHeaderCell>
-                              <TableHeaderCell style={{ justifyContent: 'flex-end' }}>FTE %</TableHeaderCell>
-                              <TableHeaderCell style={{ justifyContent: 'flex-end' }}>Cost (DKK)</TableHeaderCell>
+                            <TableRow className={styles.tableHeaderRow}>
+                              {drillDown?.mode === 'cc' && <TableHeaderCell style={{ flex: '0 0 180px' }}>Project</TableHeaderCell>}
+                              <TableHeaderCell style={{ flex: '1 1 auto' }}>Employee</TableHeaderCell>
+                              <TableHeaderCell style={{ flex: '0 0 80px', justifyContent: 'flex-end' }}>FTE %</TableHeaderCell>
+                              <TableHeaderCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>Cost (DKK)</TableHeaderCell>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {drillDownData.demand_lines.map((l, i) => (
                               <TableRow key={i}>
-                                {drillDown?.mode === 'cc' && <TableCell>{l.project_name ?? '—'}</TableCell>}
-                                <TableCell>{l.resource_name}</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{l.fte_percent}%</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{dkkDetail(l.cost)}</TableCell>
+                                {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 180px' }}>{l.project_name ?? '—'}</TableCell>}
+                                <TableCell style={{ flex: '1 1 auto' }}>{l.resource_name}</TableCell>
+                                <TableCell style={{ flex: '0 0 80px', justifyContent: 'flex-end' }}>{l.fte_percent}%</TableCell>
+                                <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>{dkkDetail(l.cost)}</TableCell>
                               </TableRow>
                             ))}
                             <TableRow className={styles.totalRow}>
-                              {drillDown?.mode === 'cc' && <TableCell />}
-                              <TableCell>Total</TableCell>
-                              <TableCell />
-                              <TableCell style={{ textAlign: 'right' }}>
+                              {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 180px' }} />}
+                              <TableCell style={{ flex: '1 1 auto' }}>Total</TableCell>
+                              <TableCell style={{ flex: '0 0 80px' }} />
+                              <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>
                                 {dkk(drillDownData.demand_lines.reduce((s, l) => s + l.cost, 0))}
                               </TableCell>
                             </TableRow>
@@ -958,29 +965,29 @@ export const ConsolidatedCostChart: React.FC = () => {
                       <div className={styles.emptyState}><Body1>No actual labor lines for this period.</Body1></div>
                     ) : (
                       <div className={styles.tableWrap}>
-                        <Table>
+                        <Table size="small">
                           <TableHeader>
-                            <TableRow>
-                              {drillDown?.mode === 'cc' && <TableHeaderCell>Project</TableHeaderCell>}
-                              <TableHeaderCell>Employee</TableHeaderCell>
-                              <TableHeaderCell style={{ justifyContent: 'flex-end' }}>FTE %</TableHeaderCell>
-                              <TableHeaderCell style={{ justifyContent: 'flex-end' }}>Cost (DKK)</TableHeaderCell>
+                            <TableRow className={styles.tableHeaderRow}>
+                              {drillDown?.mode === 'cc' && <TableHeaderCell style={{ flex: '0 0 180px' }}>Project</TableHeaderCell>}
+                              <TableHeaderCell style={{ flex: '1 1 auto' }}>Employee</TableHeaderCell>
+                              <TableHeaderCell style={{ flex: '0 0 80px', justifyContent: 'flex-end' }}>FTE %</TableHeaderCell>
+                              <TableHeaderCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>Cost (DKK)</TableHeaderCell>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {drillDownData.actual_lines.map((l, i) => (
                               <TableRow key={i}>
-                                {drillDown?.mode === 'cc' && <TableCell>{l.project_name ?? '—'}</TableCell>}
-                                <TableCell>{l.resource_name}</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{l.fte_percent}%</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{dkkDetail(l.cost)}</TableCell>
+                                {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 180px' }}>{l.project_name ?? '—'}</TableCell>}
+                                <TableCell style={{ flex: '1 1 auto' }}>{l.resource_name}</TableCell>
+                                <TableCell style={{ flex: '0 0 80px', justifyContent: 'flex-end' }}>{l.fte_percent}%</TableCell>
+                                <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>{dkkDetail(l.cost)}</TableCell>
                               </TableRow>
                             ))}
                             <TableRow className={styles.totalRow}>
-                              {drillDown?.mode === 'cc' && <TableCell />}
-                              <TableCell>Total</TableCell>
-                              <TableCell />
-                              <TableCell style={{ textAlign: 'right' }}>
+                              {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 180px' }} />}
+                              <TableCell style={{ flex: '1 1 auto' }}>Total</TableCell>
+                              <TableCell style={{ flex: '0 0 80px' }} />
+                              <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>
                                 {dkk(drillDownData.actual_lines.reduce((s, l) => s + l.cost, 0))}
                               </TableCell>
                             </TableRow>
@@ -996,33 +1003,33 @@ export const ConsolidatedCostChart: React.FC = () => {
                       <div className={styles.emptyState}><Body1>No OoP lines for this period.</Body1></div>
                     ) : (
                       <div className={styles.tableWrap}>
-                        <Table>
+                        <Table size="small">
                           <TableHeader>
-                            <TableRow>
-                              {drillDown?.mode === 'cc' && <TableHeaderCell>Project</TableHeaderCell>}
-                              <TableHeaderCell>OoP Resource</TableHeaderCell>
-                              <TableHeaderCell>Notes</TableHeaderCell>
-                              <TableHeaderCell style={{ justifyContent: 'flex-end' }}>Hours</TableHeaderCell>
-                              <TableHeaderCell style={{ justifyContent: 'flex-end' }}>Rate (DKK/hr)</TableHeaderCell>
-                              <TableHeaderCell style={{ justifyContent: 'flex-end' }}>Total (DKK)</TableHeaderCell>
+                            <TableRow className={styles.tableHeaderRow}>
+                              {drillDown?.mode === 'cc' && <TableHeaderCell style={{ flex: '0 0 160px' }}>Project</TableHeaderCell>}
+                              <TableHeaderCell style={{ flex: '1 1 auto' }}>OoP Resource</TableHeaderCell>
+                              <TableHeaderCell style={{ flex: '1 1 auto' }}>Notes</TableHeaderCell>
+                              <TableHeaderCell style={{ flex: '0 0 70px', justifyContent: 'flex-end' }}>Hours</TableHeaderCell>
+                              <TableHeaderCell style={{ flex: '0 0 130px', justifyContent: 'flex-end' }}>Rate (DKK/hr)</TableHeaderCell>
+                              <TableHeaderCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>Total (DKK)</TableHeaderCell>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {drillDownData.external_lines.map((l, i) => (
                               <TableRow key={i}>
-                                {drillDown?.mode === 'cc' && <TableCell>{l.project_name ?? '—'}</TableCell>}
-                                <TableCell>{l.resource_name ?? l.description ?? '—'}</TableCell>
-                                <TableCell>{l.notes ?? '—'}</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{l.hours}</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{dkkDetail(l.rate / 100)}</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{dkk(l.total_cost / 100)}</TableCell>
+                                {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 160px' }}>{l.project_name ?? '—'}</TableCell>}
+                                <TableCell style={{ flex: '1 1 auto' }}>{l.resource_name ?? l.description ?? '—'}</TableCell>
+                                <TableCell style={{ flex: '1 1 auto' }}>{l.notes ?? '—'}</TableCell>
+                                <TableCell style={{ flex: '0 0 70px', justifyContent: 'flex-end' }}>{l.hours}</TableCell>
+                                <TableCell style={{ flex: '0 0 130px', justifyContent: 'flex-end' }}>{dkkDetail(l.rate / 100)}</TableCell>
+                                <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>{dkk(l.total_cost / 100)}</TableCell>
                               </TableRow>
                             ))}
                             <TableRow className={styles.totalRow}>
-                              {drillDown?.mode === 'cc' && <TableCell />}
-                              <TableCell>Total</TableCell>
-                              <TableCell /><TableCell /><TableCell />
-                              <TableCell style={{ textAlign: 'right' }}>
+                              {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 160px' }} />}
+                              <TableCell style={{ flex: '1 1 auto' }}>Total</TableCell>
+                              <TableCell style={{ flex: '1 1 auto' }} /><TableCell style={{ flex: '0 0 70px' }} /><TableCell style={{ flex: '0 0 130px' }} />
+                              <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>
                                 {dkk(drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100)}
                               </TableCell>
                             </TableRow>
@@ -1038,26 +1045,26 @@ export const ConsolidatedCostChart: React.FC = () => {
                       <div className={styles.emptyState}><Body1>No equipment lines for this period.</Body1></div>
                     ) : (
                       <div className={styles.tableWrap}>
-                        <Table>
+                        <Table size="small">
                           <TableHeader>
-                            <TableRow>
-                              {drillDown?.mode === 'cc' && <TableHeaderCell>Project</TableHeaderCell>}
-                              <TableHeaderCell>Description</TableHeaderCell>
-                              <TableHeaderCell style={{ justifyContent: 'flex-end' }}>Cost (DKK)</TableHeaderCell>
+                            <TableRow className={styles.tableHeaderRow}>
+                              {drillDown?.mode === 'cc' && <TableHeaderCell style={{ flex: '0 0 180px' }}>Project</TableHeaderCell>}
+                              <TableHeaderCell style={{ flex: '1 1 auto' }}>Description</TableHeaderCell>
+                              <TableHeaderCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>Cost (DKK)</TableHeaderCell>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {drillDownData.equipment_lines.map((l, i) => (
                               <TableRow key={i}>
-                                {drillDown?.mode === 'cc' && <TableCell>{l.project_name ?? '—'}</TableCell>}
-                                <TableCell>{l.description ?? '—'}</TableCell>
-                                <TableCell style={{ textAlign: 'right' }}>{dkkDetail(l.cost / 100)}</TableCell>
+                                {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 180px' }}>{l.project_name ?? '—'}</TableCell>}
+                                <TableCell style={{ flex: '1 1 auto' }}>{l.description ?? '—'}</TableCell>
+                                <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>{dkkDetail(l.cost / 100)}</TableCell>
                               </TableRow>
                             ))}
                             <TableRow className={styles.totalRow}>
-                              {drillDown?.mode === 'cc' && <TableCell />}
-                              <TableCell>Total</TableCell>
-                              <TableCell style={{ textAlign: 'right' }}>
+                              {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 180px' }} />}
+                              <TableCell style={{ flex: '1 1 auto' }}>Total</TableCell>
+                              <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>
                                 {dkk(drillDownData.equipment_lines.reduce((s, l) => s + l.cost, 0) / 100)}
                               </TableCell>
                             </TableRow>

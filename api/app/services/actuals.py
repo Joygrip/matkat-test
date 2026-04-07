@@ -26,14 +26,27 @@ class ActualsService:
         """Return reporting-hierarchy-scoped resource IDs for Manager, or None for full access.
 
         Always includes the manager's own resource so they can manage their own actuals.
+        Also includes resources accessible via active delegation grants.
         """
         if self.current_user.role not in _SCOPED_ROLES:
             return None
         from api.app.services.reporting import ReportingService
-        ids = list(ReportingService(self.db, self.current_user).get_accessible_resource_ids())
+        svc = ReportingService(self.db, self.current_user)
+        ids = list(svc.get_accessible_resource_ids())
         own_id = self.get_my_resource_id()
         if own_id and own_id not in ids:
             ids.append(own_id)
+        # Union with resources accessible via active delegation grants
+        user = self.db.query(User).filter(
+            and_(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            )
+        ).first()
+        if user:
+            for rid in svc.get_delegated_resource_ids(user.id):
+                if rid not in ids:
+                    ids.append(rid)
         return ids
 
     def _check_manager_resource_access(self, resource_id: str) -> None:

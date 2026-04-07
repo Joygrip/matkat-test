@@ -60,6 +60,8 @@ export interface FinanceActualRow {
   can_action?: boolean;
   can_proxy_approve_step1?: boolean;
   step1_id?: string | null;
+  is_delegated?: boolean;
+  delegated_for?: string | null;
 }
 
 interface LookupProject { id: string; name: string; }
@@ -518,6 +520,13 @@ export function ActualsTab({
                           <TableCell>
                             <div>
                               <strong>{row.employee_name}</strong>
+                              {row.is_delegated && row.delegated_for && (
+                                <div style={{ marginTop: tokens.spacingVerticalXXS }}>
+                                  <Badge appearance="filled" color="warning" style={{ fontSize: tokens.fontSizeBase100, fontWeight: 600 }}>
+                                    Delegate for {row.delegated_for}
+                                  </Badge>
+                                </div>
+                              )}
                               <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
                                 {row.employee_email}
                               </div>

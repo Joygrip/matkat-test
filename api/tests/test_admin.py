@@ -424,3 +424,151 @@ def test_employee_cannot_create_cost_center(client, employee_headers, db):
         headers=employee_headers,
     )
     assert response.status_code == 403
+
+
+# ============== APPROVAL DELEGATE TESTS ==============
+
+def _create_two_managers(db, tenant_id: str):
+    """Create two manager User records for delegate CRUD tests."""
+    from api.app.models.core import User
+    mgr1 = User(
+        id="adm-mgr-1", tenant_id=tenant_id, object_id="adm-mgr-oid-1",
+        email="mgr1@adm.test", display_name="Manager One", role="Manager",
+    )
+    mgr2 = User(
+        id="adm-mgr-2", tenant_id=tenant_id, object_id="adm-mgr-oid-2",
+        email="mgr2@adm.test", display_name="Manager Two", role="Manager",
+    )
+    db.add(mgr1)
+    db.add(mgr2)
+    db.commit()
+    return mgr1, mgr2
+
+
+def test_admin_can_list_all_delegates(client, admin_headers, db):
+    """Admin can list all approval delegates across all managers."""
+    response = client.get("/admin/delegates", headers=admin_headers)
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
+def test_finance_can_create_delegate(client, finance_headers, db):
+    """Finance user can create a delegation grant for any manager."""
+    tenant_id = "test-tenant-001"
+    mgr1, mgr2 = _create_two_managers(db, tenant_id)
+
+    response = client.post(
+        "/admin/delegates",
+        json={"delegator_id": mgr1.id, "delegate_id": mgr2.id, "note": "Finance test"},
+        headers=finance_headers,
+    )
+    assert response.status_code in (200, 201)
+    data = response.json()
+    assert data["delegator_id"] == mgr1.id
+    assert data["delegate_id"] == mgr2.id
+    assert data["is_active"] is True
+
+
+def test_manager_can_create_own_delegate(client, db):
+    """Manager can create a delegate grant where they are the delegator."""
+    tenant_id = "test-tenant-001"
+    from api.app.models.core import User
+    # The manager's object_id must match X-Dev-User-Id
+    mgr = User(
+        id="self-mgr-1", tenant_id=tenant_id, object_id="adm-mgr-oid-1",
+        email="selfmgr@adm.test", display_name="Self Manager", role="Manager",
+    )
+    other = User(
+        id="self-mgr-2", tenant_id=tenant_id, object_id="adm-mgr-oid-2",
+        email="other@adm.test", display_name="Other Manager", role="Manager",
+    )
+    db.add(mgr)
+    db.add(other)
+    db.commit()
+
+    manager_headers = {
+        "X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id,
+        "X-Dev-User-Id": "adm-mgr-oid-1",
+    }
+    response = client.post(
+        "/admin/delegates",
+        json={"delegator_id": "self-mgr-1", "delegate_id": "self-mgr-2"},
+        headers=manager_headers,
+    )
+    assert response.status_code in (200, 201)
+    assert response.json()["delegator_id"] == "self-mgr-1"
+
+
+def test_manager_cannot_create_delegate_for_other_manager(client, db):
+    """Manager cannot create a delegation grant where a different manager is the delegator."""
+    tenant_id = "test-tenant-001"
+    from api.app.models.core import User
+    mgr1 = User(
+        id="other-mgr-1", tenant_id=tenant_id, object_id="other-mgr-oid-1",
+        email="mgr1@other.test", display_name="Manager A", role="Manager",
+    )
+    mgr2 = User(
+        id="other-mgr-2", tenant_id=tenant_id, object_id="other-mgr-oid-2",
+        email="mgr2@other.test", display_name="Manager B", role="Manager",
+    )
+    db.add(mgr1)
+    db.add(mgr2)
+    db.commit()
+
+    # Logged in as mgr2, trying to delegate mgr1's authority
+    manager_headers = {
+        "X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id,
+        "X-Dev-User-Id": "other-mgr-oid-2",
+    }
+    response = client.post(
+        "/admin/delegates",
+        json={"delegator_id": "other-mgr-1", "delegate_id": "other-mgr-2"},
+        headers=manager_headers,
+    )
+    assert response.status_code == 403
+
+
+def test_admin_can_deactivate_delegate(client, admin_headers, db):
+    """Admin can deactivate (is_active=False) a delegation grant."""
+    from api.app.models.core import ApprovalDelegate
+    tenant_id = "test-tenant-001"
+    mgr1, mgr2 = _create_two_managers(db, tenant_id)
+
+    grant = ApprovalDelegate(
+        id="adm-grant-1", tenant_id=tenant_id,
+        delegator_id=mgr1.id, delegate_id=mgr2.id,
+        is_active=True, created_by="admin-oid",
+    )
+    db.add(grant)
+    db.commit()
+
+    response = client.patch(
+        "/admin/delegates/adm-grant-1",
+        json={"is_active": False},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["is_active"] is False
+
+
+def test_admin_can_delete_delegate(client, admin_headers, db):
+    """Admin can delete a delegation grant."""
+    from api.app.models.core import ApprovalDelegate
+    tenant_id = "test-tenant-001"
+    mgr1, mgr2 = _create_two_managers(db, tenant_id)
+
+    grant = ApprovalDelegate(
+        id="adm-grant-2", tenant_id=tenant_id,
+        delegator_id=mgr1.id, delegate_id=mgr2.id,
+        is_active=True, created_by="admin-oid",
+    )
+    db.add(grant)
+    db.commit()
+
+    response = client.delete("/admin/delegates/adm-grant-2", headers=admin_headers)
+    assert response.status_code in (200, 204)
+
+    # Should be gone
+    get_resp = client.get("/admin/delegates", headers=admin_headers)
+    ids = [d["id"] for d in get_resp.json()]
+    assert "adm-grant-2" not in ids

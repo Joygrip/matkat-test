@@ -206,11 +206,11 @@ async def list_resources_scoped(
 async def list_users(
     role: Optional[str] = Query(None, description="Filter by role (e.g. PM, Finance, Admin)"),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER)),
 ):
     """
     List active users, optionally filtered by role.
-    Accessible to Admin and Finance (used for PM assignment dropdowns).
+    Accessible to Admin, Finance, and Manager (Manager uses this for delegate picker).
     """
     query = db.query(User).filter(
         and_(

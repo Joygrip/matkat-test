@@ -71,10 +71,21 @@ class FinanceService:
     ) -> List[FinanceActualsDashboardResponse]:
         # Manager restriction: scope to accessible resources via reporting hierarchy
         # (same logic as ActualsService — uses reporting_cache + overrides, falls back to cost center RO/Director)
+        # Also includes resources accessible via active delegation grants.
         scoped_resource_ids: Optional[list] = None
         if self.current_user.role == "Manager":
             from api.app.services.reporting import ReportingService
-            scoped_resource_ids = ReportingService(self.db, self.current_user).get_accessible_resource_ids()
+            _rs = ReportingService(self.db, self.current_user)
+            _ids = list(_rs.get_accessible_resource_ids())
+            _cur_user = self.db.query(User).filter(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            ).first()
+            if _cur_user:
+                for _rid in _rs.get_delegated_resource_ids(_cur_user.id):
+                    if _rid not in _ids:
+                        _ids.append(_rid)
+            scoped_resource_ids = _ids
             if not scoped_resource_ids:
                 return []
 
@@ -156,16 +167,19 @@ class FinanceService:
         ).first()
         current_db_user_id = current_db_user.id if current_db_user else None
 
-        # Build set of approver_ids for which current user is an active delegate
-        delegate_for: set = set()
+        # Build map of approver_ids for which current user is an active delegate
+        # Maps delegator_id -> delegator_display_name for audit attribution
+        delegate_for: dict[str, str] = {}
         if current_db_user_id and all_approver_ids:
-            delegate_rows = self.db.query(ApprovalDelegate.delegator_id).filter(
+            delegate_rows = self.db.query(
+                ApprovalDelegate.delegator_id, User.display_name
+            ).join(User, User.id == ApprovalDelegate.delegator_id).filter(
                 ApprovalDelegate.tenant_id == self.current_user.tenant_id,
                 ApprovalDelegate.delegate_id == current_db_user_id,
                 ApprovalDelegate.delegator_id.in_(all_approver_ids),
                 ApprovalDelegate.is_active.is_(True),
             ).all()
-            delegate_for = {row.delegator_id for row in delegate_rows}
+            delegate_for = {row.delegator_id: row.display_name for row in delegate_rows}
 
         results = []
         for actual, resource, project, cost_center, approval in rows:
@@ -178,6 +192,8 @@ class FinanceService:
             can_action = False
             can_proxy_approve_step1 = False
             step1_id = None
+            is_delegated = False
+            delegated_for_name: Optional[str] = None
 
             if approval and approval.status == ApprovalStatus.PENDING:
                 approval_instance_id = approval.id
@@ -192,10 +208,12 @@ class FinanceService:
                             current_approver_object_id = oid
                         # can_action: current user is direct approver or active delegate
                         if step.approver_id and current_db_user_id:
-                            can_action = (
-                                step.approver_id == current_db_user_id
-                                or step.approver_id in delegate_for
-                            )
+                            is_direct = step.approver_id == current_db_user_id
+                            delegate_name = delegate_for.get(step.approver_id)
+                            can_action = is_direct or delegate_name is not None
+                            if can_action and not is_direct and delegate_name:
+                                is_delegated = True
+                                delegated_for_name = delegate_name
                         break
 
                 # can_proxy_approve_step1: current user is step 2 approver (or delegate)
@@ -231,6 +249,8 @@ class FinanceService:
                 current_approver_object_id=current_approver_object_id,
                 can_action=can_action,
                 can_proxy_approve_step1=can_proxy_approve_step1,
+                is_delegated=is_delegated,
+                delegated_for=delegated_for_name,
                 step1_id=step1_id,
             ))
         return results
@@ -247,10 +267,21 @@ class FinanceService:
         from sqlalchemy import func
 
         # Manager restriction: scope to accessible resources via reporting hierarchy
+        # Also includes resources accessible via active delegation grants.
         scoped_resource_ids_cc: Optional[list] = None
         if self.current_user.role == "Manager":
             from api.app.services.reporting import ReportingService
-            scoped_resource_ids_cc = ReportingService(self.db, self.current_user).get_accessible_resource_ids()
+            _rs2 = ReportingService(self.db, self.current_user)
+            _ids2 = list(_rs2.get_accessible_resource_ids())
+            _cur_user2 = self.db.query(User).filter(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            ).first()
+            if _cur_user2:
+                for _rid2 in _rs2.get_delegated_resource_ids(_cur_user2.id):
+                    if _rid2 not in _ids2:
+                        _ids2.append(_rid2)
+            scoped_resource_ids_cc = _ids2
             if not scoped_resource_ids_cc:
                 return []
 

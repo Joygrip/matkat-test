@@ -324,6 +324,8 @@ export function Dashboard() {
   const [lookupsProjects, setLookupsProjects] = useState<Project[]>([]);
   const [selectedPeriodIds, setSelectedPeriodIds] = useState<string[]>([]);
   const [periodPreset, setPeriodPreset] = useState<'all' | 'first3' | 'first6' | 'custom'>('all');
+  const [customStart, setCustomStart] = useState<string>('');
+  const [customEnd, setCustomEnd] = useState<string>('');
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -418,13 +420,29 @@ export function Dashboard() {
     setSelectedPeriodIds(slice.map(p => `${p.year}-${p.month}`));
   };
 
+  const applyCustomRange = (start: string, end: string) => {
+    if (!start || !end) {
+      setSelectedPeriodIds([]);
+      return;
+    }
+    const [sy, sm] = start.split('-').map(Number);
+    const [ey, em] = end.split('-').map(Number);
+    const startVal = sy * 12 + sm;
+    const endVal = ey * 12 + em;
+    const lo = Math.min(startVal, endVal);
+    const hi = Math.max(startVal, endVal);
+    const ids = sortedPeriods
+      .filter((p) => { const v = p.year * 12 + p.month; return v >= lo && v <= hi && p.status !== 'locked'; })
+      .map((p) => `${p.year}-${p.month}`);
+    setSelectedPeriodIds(ids);
+  };
+
   // Filter handlers
   const handlePeriodChange = (periodId: string | null) => {
-    if (periodId) {
-      setSelectedPeriodIds([periodId]);
-      setPeriodPreset('custom');
-    } else {
+    if (periodId === null) {
       setSelectedPeriodIds([]);
+      setCustomStart('');
+      setCustomEnd('');
       setPeriodPreset('all');
     }
   };
@@ -530,11 +548,18 @@ export function Dashboard() {
   // Active filter labels for chips
   const activePeriodLabel = useMemo(() => {
     if (!selectedPeriodIds.length) return null;
+    if (periodPreset === 'custom' && customStart && customEnd) {
+      const startP = periodOptions.find(p => `${p.year}-${p.month}` === customStart);
+      const endP = periodOptions.find(p => `${p.year}-${p.month}` === customEnd);
+      const startLabel = startP ? `${monthNames[startP.month - 1]} ${startP.year}` : customStart;
+      const endLabel = endP ? `${monthNames[endP.month - 1]} ${endP.year}` : customEnd;
+      return customStart === customEnd ? startLabel : `${startLabel} – ${endLabel}`;
+    }
     const id = selectedPeriodIds[0];
     const match = periodOptions.find(p => `${p.year}-${p.month}` === id);
     if (!match) return id;
     return `${monthNames[match.month - 1]} ${match.year}`;
-  }, [selectedPeriodIds, periodOptions]);
+  }, [selectedPeriodIds, periodOptions, periodPreset, customStart, customEnd]);
 
   const activeProjectLabel = useMemo(() => {
     if (!selectedProjectId) return null;
@@ -663,6 +688,8 @@ export function Dashboard() {
                 handlePeriodChange(null);
                 handleProjectChange(null);
                 handleCostCenterChange(null);
+                setCustomStart('');
+                setCustomEnd('');
               }}
             >
               Clear filters
@@ -712,17 +739,44 @@ export function Dashboard() {
                   </Button>
                 </div>
                 {periodPreset === 'custom' && (
-                  <Select
-                    value={selectedPeriodIds[0] || ''}
-                    onChange={(_, data) => handlePeriodChange(data.value || null)}
-                  >
-                    <option value="">All periods</option>
-                    {periodOptions.map(p => (
-                      <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>
-                        {monthNames[p.month - 1]} {p.year}
-                      </option>
-                    ))}
-                  </Select>
+                  <div style={{ display: 'flex', gap: tokens.spacingHorizontalS, alignItems: 'flex-end' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS }}>
+                      <span className={styles.filterLabel}>From</span>
+                      <Select
+                        value={customStart}
+                        onChange={(_, data) => {
+                          const val = data.value || '';
+                          setCustomStart(val);
+                          applyCustomRange(val, customEnd);
+                        }}
+                      >
+                        <option value="">Start</option>
+                        {sortedPeriods.filter(p => p.status !== 'locked').map(p => (
+                          <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>
+                            {monthNames[p.month - 1]} {p.year}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS }}>
+                      <span className={styles.filterLabel}>To</span>
+                      <Select
+                        value={customEnd}
+                        onChange={(_, data) => {
+                          const val = data.value || '';
+                          setCustomEnd(val);
+                          applyCustomRange(customStart, val);
+                        }}
+                      >
+                        <option value="">End</option>
+                        {sortedPeriods.filter(p => p.status !== 'locked').map(p => (
+                          <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>
+                            {monthNames[p.month - 1]} {p.year}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  </div>
                 )}
               </div>
               <div className={styles.filterGroup}>

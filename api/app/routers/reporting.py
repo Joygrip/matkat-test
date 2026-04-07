@@ -65,11 +65,13 @@ async def create_override(
     current_user: CurrentUser = Depends(require_roles(*_ADMIN_ROLES)),
 ):
     """Create a manual manager → employee override."""
-    return ReportingService(db, current_user).create_override(
+    result = ReportingService(db, current_user).create_override(
         employee_object_id=body.employee_object_id,
         manager_object_id=body.manager_object_id,
         note=body.note,
     )
+    ReportingService.rebuild_cache_for_tenant(current_user.tenant_id, db)
+    return result
 
 
 @router.patch("/overrides/{override_id}", response_model=ManagerOverrideResponse)
@@ -80,11 +82,13 @@ async def patch_override(
     current_user: CurrentUser = Depends(require_roles(*_ADMIN_ROLES)),
 ):
     """Enable/disable or update the note on an override."""
-    return ReportingService(db, current_user).patch_override(
+    result = ReportingService(db, current_user).patch_override(
         override_id=override_id,
         is_active=body.is_active,
         note=body.note,
     )
+    ReportingService.rebuild_cache_for_tenant(current_user.tenant_id, db)
+    return result
 
 
 @router.delete("/overrides/{override_id}", status_code=204)
@@ -95,3 +99,4 @@ async def delete_override(
 ):
     """Permanently delete an override."""
     ReportingService(db, current_user).delete_override(override_id)
+    ReportingService.rebuild_cache_for_tenant(current_user.tenant_id, db)

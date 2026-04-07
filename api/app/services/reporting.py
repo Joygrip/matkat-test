@@ -174,6 +174,21 @@ class ReportingService:
             if manager_oid:
                 subordinates_of.setdefault(manager_oid, []).append(oid)
 
+        # Also include active ManagerOverride edges so transitive chains through
+        # override-defined relationships are captured in the cache.
+        override_edges = db.query(
+            ManagerOverride.employee_object_id,
+            ManagerOverride.manager_object_id,
+        ).filter(
+            and_(
+                ManagerOverride.tenant_id == tenant_id,
+                ManagerOverride.is_active.is_(True),
+            )
+        ).all()
+
+        for employee_oid, manager_oid in override_edges:
+            subordinates_of.setdefault(manager_oid, []).append(employee_oid)
+
         # For each manager that has at least one direct report, BFS outward
         rows: list[dict] = []
         seen_pairs: set[tuple[str, str]] = set()  # (employee_oid, manager_oid)

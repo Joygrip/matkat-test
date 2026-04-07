@@ -12,10 +12,8 @@ class FTEValidatorMixin:
     @field_validator('fte_percent')
     @classmethod
     def validate_fte(cls, v: int) -> int:
-        if v < 5 or v > 100:
-            raise ValueError(f'{ErrorCode.FTE_INVALID}: FTE must be between 5 and 100')
-        if v % 5 != 0:
-            raise ValueError(f'{ErrorCode.FTE_INVALID}: FTE must be in steps of 5')
+        if v < 1 or v > 100:
+            raise ValueError(f'{ErrorCode.FTE_INVALID}: FTE must be between 1 and 100')
         return v
 
 

@@ -308,7 +308,6 @@ export function ResourceDetailModal({
   // For PM: set of project IDs they own (used to gate per-line edit buttons)
   const editableProjectIds = isPM ? new Set(projects.map(p => p.id)) : null;
 
-  const fteOptions = [5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100];
 
   return (
     <Dialog open={open} onOpenChange={(_ev: DialogOpenChangeEvent, data: DialogOpenChangeData) => { if (!data.open) onClose(); }}>
@@ -395,13 +394,14 @@ export function ResourceDetailModal({
                                           </Select>
                                         </TableCell>
                                         <TableCell>
-                                          <Select
-                                            value={String(demandForm.fte_percent)}
-                                            onChange={(e) => setDemandForm(f => ({ ...f, fte_percent: parseInt(e.target.value) }))}
-                                            style={{ width: '80px' }}
-                                          >
-                                            {fteOptions.map(v => <option key={v} value={v}>{v}%</option>)}
-                                          </Select>
+                                          <input
+                                            type="number"
+                                            min={1}
+                                            max={100}
+                                            value={demandForm.fte_percent}
+                                            onChange={(e) => setDemandForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(1, parseInt(e.target.value) || 1)) }))}
+                                            style={{ width: '70px' }}
+                                          />
                                         </TableCell>
                                         <TableCell>
                                           <div className={styles.actionCell}>
@@ -450,13 +450,14 @@ export function ResourceDetailModal({
                                   </Select>
                                 </TableCell>
                                 <TableCell>
-                                  <Select
-                                    value={String(demandForm.fte_percent)}
-                                    onChange={(e) => setDemandForm(f => ({ ...f, fte_percent: parseInt(e.target.value) }))}
-                                    style={{ width: '80px' }}
-                                  >
-                                    {fteOptions.map(v => <option key={v} value={v}>{v}%</option>)}
-                                  </Select>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={100}
+                                    value={demandForm.fte_percent}
+                                    onChange={(e) => setDemandForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(1, parseInt(e.target.value) || 1)) }))}
+                                    style={{ width: '70px' }}
+                                  />
                                 </TableCell>
                                 <TableCell>
                                   <div className={styles.actionCell}>
@@ -529,13 +530,14 @@ export function ResourceDetailModal({
                                           </Select>
                                         </TableCell>
                                         <TableCell>
-                                          <Select
-                                            value={String(supplyForm.fte_percent)}
-                                            onChange={(e) => setSupplyForm(f => ({ ...f, fte_percent: parseInt(e.target.value) }))}
-                                            style={{ width: '80px' }}
-                                          >
-                                            {fteOptions.map(v => <option key={v} value={v}>{v}%</option>)}
-                                          </Select>
+                                          <input
+                                            type="number"
+                                            min={1}
+                                            max={100}
+                                            value={supplyForm.fte_percent}
+                                            onChange={(e) => setSupplyForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(1, parseInt(e.target.value) || 1)) }))}
+                                            style={{ width: '70px' }}
+                                          />
                                         </TableCell>
                                         <TableCell>
                                           <div className={styles.actionCell}>
@@ -586,13 +588,14 @@ export function ResourceDetailModal({
                                   </Select>
                                 </TableCell>
                                 <TableCell>
-                                  <Select
-                                    value={String(supplyForm.fte_percent)}
-                                    onChange={(e) => setSupplyForm(f => ({ ...f, fte_percent: parseInt(e.target.value) }))}
-                                    style={{ width: '80px' }}
-                                  >
-                                    {fteOptions.map(v => <option key={v} value={v}>{v}%</option>)}
-                                  </Select>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={100}
+                                    value={supplyForm.fte_percent}
+                                    onChange={(e) => setSupplyForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(1, parseInt(e.target.value) || 1)) }))}
+                                    style={{ width: '70px' }}
+                                  />
                                 </TableCell>
                                 <TableCell>
                                   <div className={styles.actionCell}>

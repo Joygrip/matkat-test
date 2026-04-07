@@ -3,6 +3,7 @@ import { makeStyles, tokens, Skeleton, SkeletonItem } from '@fluentui/react-comp
 export interface KpiTile {
   label: string;
   value: string | number;
+  subtitle?: string;
   color?: 'default' | 'danger' | 'success' | 'warning';
   onClick?: () => void;
   active?: boolean;
@@ -58,6 +59,13 @@ const useStyles = makeStyles({
   valueDanger: { color: tokens.colorPaletteRedForeground1 },
   valueSuccess: { color: tokens.colorPaletteGreenForeground1 },
   valueWarning: { color: tokens.colorPaletteDarkOrangeForeground1 },
+  subtitle: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    fontWeight: tokens.fontWeightRegular,
+    marginTop: tokens.spacingVerticalXXS,
+    letterSpacing: '0.2px',
+  },
 });
 
 export function FinanceKpiStrip({ tiles, loading }: FinanceKpiStripProps) {
@@ -100,6 +108,7 @@ export function FinanceKpiStrip({ tiles, loading }: FinanceKpiStripProps) {
           >
             <div className={styles.label}>{tile.label}</div>
             <div className={valueClass}>{tile.value}</div>
+            {tile.subtitle && <div className={styles.subtitle}>{tile.subtitle}</div>}
           </div>
         );
       })}

@@ -293,11 +293,12 @@ export function ActualsTab({
   const approvedCount = actualsData.filter(d => d.approval_status?.toUpperCase() === 'APPROVED').length;
 
   const kpiTiles = useMemo((): KpiTile[] => [
-    { label: 'Lines', value: totalLines },
-    { label: 'Total FTE', value: `${totalFte}%` },
+    { label: 'Lines', value: totalLines, subtitle: 'total actuals' },
+    { label: 'Total FTE', value: `${totalFte}%`, subtitle: `across ${totalLines} line${totalLines !== 1 ? 's' : ''}` },
     {
       label: 'Pending',
       value: pendingCount,
+      subtitle: pendingCount > 0 ? 'awaiting approval' : 'all clear',
       color: pendingCount > 0 ? 'warning' : 'default',
       onClick: () => setScoreboardFilter(f => f === 'pending' ? 'none' : 'pending'),
       active: scoreboardFilter === 'pending',
@@ -305,6 +306,7 @@ export function ActualsTab({
     {
       label: 'Approved',
       value: approvedCount,
+      subtitle: approvedCount > 0 ? 'approved entries' : 'none yet',
       color: approvedCount > 0 ? 'success' : 'default',
       onClick: () => setScoreboardFilter(f => f === 'approved' ? 'none' : 'approved'),
       active: scoreboardFilter === 'approved',

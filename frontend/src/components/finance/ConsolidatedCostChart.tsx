@@ -275,6 +275,12 @@ export const ConsolidatedCostChart: React.FC = () => {
   const [periodPreset, setPeriodPreset] = useState<'all' | 'first3' | 'first6' | 'custom'>(
     () => selectedPeriod ? 'custom' : 'all'
   );
+  const [customStart, setCustomStart] = useState<string>(
+    () => selectedPeriod ? `${selectedPeriod.year}-${selectedPeriod.month}` : ''
+  );
+  const [customEnd, setCustomEnd] = useState<string>(
+    () => selectedPeriod ? `${selectedPeriod.year}-${selectedPeriod.month}` : ''
+  );
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
 
@@ -321,12 +327,28 @@ export const ConsolidatedCostChart: React.FC = () => {
     setSelectedPeriodIds(open.map((p) => `${p.year}-${p.month}`));
   };
 
-  const handlePeriodChange = (periodId: string | null) => {
-    if (periodId) {
-      setSelectedPeriodIds([periodId]);
-      setPeriodPreset('custom');
-    } else {
+  const applyCustomRange = (start: string, end: string) => {
+    if (!start || !end) {
       setSelectedPeriodIds([]);
+      return;
+    }
+    const [sy, sm] = start.split('-').map(Number);
+    const [ey, em] = end.split('-').map(Number);
+    const startVal = sy * 12 + sm;
+    const endVal = ey * 12 + em;
+    const lo = Math.min(startVal, endVal);
+    const hi = Math.max(startVal, endVal);
+    const ids = sortedPeriods
+      .filter((p) => { const v = p.year * 12 + p.month; return v >= lo && v <= hi && p.status !== 'locked'; })
+      .map((p) => `${p.year}-${p.month}`);
+    setSelectedPeriodIds(ids);
+  };
+
+  const handlePeriodChange = (periodId: string | null) => {
+    if (periodId === null) {
+      setSelectedPeriodIds([]);
+      setCustomStart('');
+      setCustomEnd('');
       setPeriodPreset('all');
     }
   };
@@ -334,6 +356,8 @@ export const ConsolidatedCostChart: React.FC = () => {
   const clearAllFilters = () => {
     setSelectedPeriodIds([]);
     setPeriodPreset('all');
+    setCustomStart('');
+    setCustomEnd('');
     setSelectedProjectId(null);
     setSelectedCostCenterId(null);
     setShowPlanned(true);
@@ -504,10 +528,17 @@ export const ConsolidatedCostChart: React.FC = () => {
 
   const activePeriodLabel = useMemo(() => {
     if (!selectedPeriodIds.length) return null;
+    if (periodPreset === 'custom' && customStart && customEnd) {
+      const startP = periods.find((p) => `${p.year}-${p.month}` === customStart);
+      const endP = periods.find((p) => `${p.year}-${p.month}` === customEnd);
+      const startLabel = startP ? `${monthNames[startP.month - 1]} ${startP.year}` : customStart;
+      const endLabel = endP ? `${monthNames[endP.month - 1]} ${endP.year}` : customEnd;
+      return customStart === customEnd ? startLabel : `${startLabel} – ${endLabel}`;
+    }
     const id = selectedPeriodIds[0];
     const match = periods.find((p) => `${p.year}-${p.month}` === id);
     return match ? `${monthNames[match.month - 1]} ${match.year}` : id;
-  }, [selectedPeriodIds, periods]);
+  }, [selectedPeriodIds, periods, periodPreset, customStart, customEnd]);
 
   const activeProjectLabel = useMemo(
     () => (selectedProjectId ? (projectOptions.find((p) => p.id === selectedProjectId)?.name ?? selectedProjectId) : null),
@@ -572,6 +603,54 @@ export const ConsolidatedCostChart: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const downloadAllRealCostCsv = () => {
+    if (!drillDownData || !drillDown) return;
+    const esc = (v: string | number | null | undefined) =>
+      `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const periodLabel = `${monthNames[drillDown.month - 1]}_${drillDown.year}`;
+    const header = ['Type', 'Project', 'Resource/Description', 'Notes', 'Hours', 'Rate (DKK)', 'FTE %', 'Cost (DKK)'];
+    const rows: string[][] = [
+      ...drillDownData.actual_lines.map((l) => [
+        'Actual Labor',
+        l.project_name ?? '',
+        l.resource_name ?? '',
+        '',
+        '',
+        '',
+        String(l.fte_percent),
+        String(l.cost),
+      ]),
+      ...drillDownData.external_lines.map((l) => [
+        'OoP',
+        l.project_name ?? '',
+        l.resource_name ?? l.description ?? '',
+        l.notes ?? '',
+        String(l.hours),
+        String(l.rate / 100),
+        '',
+        String(l.total_cost / 100),
+      ]),
+      ...drillDownData.equipment_lines.map((l) => [
+        'Equipment',
+        l.project_name ?? '',
+        l.description ?? '',
+        '',
+        '',
+        '',
+        '',
+        String(l.cost / 100),
+      ]),
+    ];
+    const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${drillDown.title}_${periodLabel}_all_real_cost.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -612,17 +691,44 @@ export const ConsolidatedCostChart: React.FC = () => {
                 >Custom</Button>
               </div>
               {periodPreset === 'custom' && (
-                <Select
-                  value={selectedPeriodIds[0] ?? ''}
-                  onChange={(_, data) => handlePeriodChange(data.value || null)}
-                >
-                  <option value="">All periods</option>
-                  {sortedPeriods.map((p) => (
-                    <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>
-                      {monthNames[p.month - 1]} {p.year}
-                    </option>
-                  ))}
-                </Select>
+                <div style={{ display: 'flex', gap: tokens.spacingHorizontalS, alignItems: 'flex-end' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS }}>
+                    <span className={styles.filterLabel}>From</span>
+                    <Select
+                      value={customStart}
+                      onChange={(_, data) => {
+                        const val = data.value || '';
+                        setCustomStart(val);
+                        applyCustomRange(val, customEnd);
+                      }}
+                    >
+                      <option value="">Start</option>
+                      {sortedPeriods.filter((p) => p.status !== 'locked').map((p) => (
+                        <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>
+                          {monthNames[p.month - 1]} {p.year}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS }}>
+                    <span className={styles.filterLabel}>To</span>
+                    <Select
+                      value={customEnd}
+                      onChange={(_, data) => {
+                        const val = data.value || '';
+                        setCustomEnd(val);
+                        applyCustomRange(customStart, val);
+                      }}
+                    >
+                      <option value="">End</option>
+                      {sortedPeriods.filter((p) => p.status !== 'locked').map((p) => (
+                        <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>
+                          {monthNames[p.month - 1]} {p.year}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
               )}
             </div>
 
@@ -973,6 +1079,14 @@ export const ConsolidatedCostChart: React.FC = () => {
                 disabled={!drillDownData || drillDownLoading}
               >
                 Download CSV
+              </Button>
+              <Button
+                appearance="secondary"
+                icon={<ArrowDownloadRegular />}
+                onClick={downloadAllRealCostCsv}
+                disabled={!drillDownData || drillDownLoading}
+              >
+                Download All Real Cost CSV
               </Button>
               <Button onClick={closeDrillDown}>Close</Button>
             </DialogActions>

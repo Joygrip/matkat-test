@@ -154,6 +154,8 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalM,
   },
   summaryCard: {
+    display: 'flex',
+    flexDirection: 'column' as const,
     padding: tokens.spacingHorizontalL,
     borderRadius: tokens.borderRadiusLarge,
     backgroundColor: tokens.colorNeutralBackground1,
@@ -177,16 +179,29 @@ const useStyles = makeStyles({
     },
   },
   summaryValue: {
+    display: 'block',
     fontSize: tokens.fontSizeHero700,
     fontWeight: tokens.fontWeightBold,
-    lineHeight: '1',
+    lineHeight: '1.1',
     marginBottom: tokens.spacingVerticalXS,
   },
   summaryLabel: {
-    fontSize: tokens.fontSizeBase300,
+    display: 'block',
+    fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
     fontWeight: tokens.fontWeightSemibold,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.5px',
     marginBottom: tokens.spacingVerticalXS,
+  },
+  summarySubtitle: {
+    display: 'block',
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    fontWeight: tokens.fontWeightRegular,
+    marginTop: tokens.spacingVerticalXS,
+    paddingTop: tokens.spacingVerticalXS,
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
   },
 });
 
@@ -684,13 +699,13 @@ export const Actuals: React.FC = () => {
                 }}
                 onKeyDown={(e) => { if (e.key === 'Enter') { setLinesDrawerType('demand'); setLinesDrawerProjectId(null); setLinesDrawerOpen(true); } }}
               >
-                <Body1 className={styles.summaryLabel}>Total Demand</Body1>
-                <Body1 className={styles.summaryValue} style={{ color: tokens.colorPaletteBlueForeground2 }}>
+                <div className={styles.summaryLabel}>Total Demand</div>
+                <div className={styles.summaryValue} style={{ color: tokens.colorPaletteBlueForeground2 }}>
                   {demandLines.reduce((sum, d) => sum + (d.fte_percent || 0), 0)}%
-                </Body1>
-                <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                </div>
+                <div className={styles.summarySubtitle}>
                   {demandLines.length} demand line{demandLines.length !== 1 ? 's' : ''} across {new Set(demandLines.map(d => d.project_id)).size} project{new Set(demandLines.map(d => d.project_id)).size !== 1 ? 's' : ''}
-                </Body1>
+                </div>
               </div>
               <div
                 className={styles.summaryCard}
@@ -703,13 +718,13 @@ export const Actuals: React.FC = () => {
                 }}
                 onKeyDown={(e) => e.key === 'Enter' && (setLinesDrawerType('supply'), setLinesDrawerProjectId(null), setLinesDrawerOpen(true))}
               >
-                <Body1 className={styles.summaryLabel}>Total Supply</Body1>
-                <Body1 className={styles.summaryValue} style={{ color: tokens.colorPaletteGreenForeground1 }}>
+                <div className={styles.summaryLabel}>Total Supply</div>
+                <div className={styles.summaryValue} style={{ color: tokens.colorPaletteGreenForeground1 }}>
                   {supplyLines.reduce((sum, s) => sum + (s.fte_percent || 0), 0)}%
-                </Body1>
-                <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                </div>
+                <div className={styles.summarySubtitle}>
                   {supplyLines.length} supply line{supplyLines.length !== 1 ? 's' : ''}
-                </Body1>
+                </div>
               </div>
             </div>
           </div>
@@ -735,7 +750,7 @@ export const Actuals: React.FC = () => {
               <TableHeader>
                 <TableRow>
                   <TableHeaderCell>Project</TableHeaderCell>
-                  <TableHeaderCell>Resource / Placeholder</TableHeaderCell>
+                  <TableHeaderCell>Resource</TableHeaderCell>
                   <TableHeaderCell>FTE %</TableHeaderCell>
                 </TableRow>
               </TableHeader>
@@ -775,7 +790,7 @@ export const Actuals: React.FC = () => {
               <TableHeader>
                 <TableRow>
                   <TableHeaderCell>Project</TableHeaderCell>
-                  <TableHeaderCell>Resource / Placeholder</TableHeaderCell>
+                  <TableHeaderCell>Resource</TableHeaderCell>
                   <TableHeaderCell>FTE %</TableHeaderCell>
                 </TableRow>
               </TableHeader>

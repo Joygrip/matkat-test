@@ -19,9 +19,7 @@ export interface ExternalLine {
   resource_name: string | null;
   description: string | null; // name / description (shown as OoP Resource when no resource_name)
   notes: string | null;        // additional free-text notes
-  hours: number;
-  rate: number;       // cents per hour
-  total_cost: number; // cents
+  cost: number; // cents
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -34,16 +32,14 @@ export interface ExternalLineCreate {
   resource_id?: string;
   description?: string; // name / description when no resource_id
   notes?: string;        // additional free-text notes
-  hours: number;
-  rate: number; // cents per hour
+  cost: number; // cents
 }
 
 export interface ExternalLineUpdate {
   resource_id?: string;
   description?: string;
   notes?: string;
-  hours?: number;
-  rate?: number;
+  cost?: number;
 }
 
 export interface EquipmentLine {

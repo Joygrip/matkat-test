@@ -42,8 +42,6 @@ import {
   FolderRegular,
   PersonRegular,
   PersonQuestionMarkRegular,
-  CalendarRegular,
-  SettingsRegular,
   PeopleTeamRegular,
   ChevronRightRegular,
 } from '@fluentui/react-icons';
@@ -53,8 +51,6 @@ import {
   Project,
   Resource,
   Placeholder,
-  Holiday,
-  Setting,
   ManagerOverride,
   ApprovalDelegate,
   AdminUser,
@@ -152,8 +148,6 @@ type TabValue =
   | 'projects'
   | 'resources'
   | 'placeholders'
-  | 'holidays'
-  | 'settings'
   | 'manager-overrides'
   | 'delegates'
   | 'users';
@@ -204,8 +198,6 @@ export function Admin() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
   const [placeholders, setPlaceholders] = useState<Placeholder[]>([]);
-  const [holidays, setHolidays] = useState<Holiday[]>([]);
-  const [settings, setSettings] = useState<Setting[]>([]);
   const [managerOverrides, setManagerOverrides] = useState<ManagerOverride[]>([]);
   const [delegates, setDelegates] = useState<ApprovalDelegate[]>([]);
   const [pmUsers, setPmUsers] = useState<AdminUser[]>([]);
@@ -267,12 +259,6 @@ export function Admin() {
           setCostCenters(ccData2);
           break;
         }
-        case 'holidays':
-          setHolidays(await adminApi.listHolidays());
-          break;
-        case 'settings':
-          if (canManageSettings) setSettings(await adminApi.listSettings());
-          break;
         case 'manager-overrides':
           if (canManageSettings) setManagerOverrides(await adminApi.listManagerOverrides());
           break;
@@ -379,20 +365,6 @@ export function Admin() {
             });
           }
           break;
-        case 'holidays':
-          await adminApi.createHoliday(formData as { date: string; name: string });
-          break;
-        case 'settings':
-          if (!canManageSettings) {
-            showApiError(new Error('Only Admin can manage settings'), 'Permission denied');
-            return;
-          }
-          if (editItem) {
-            await adminApi.updateSetting((editItem as Setting).key, formData as { value: string });
-          } else {
-            await adminApi.createSetting(formData as { key: string; value: string });
-          }
-          break;
         case 'manager-overrides':
           if (!canManageSettings) {
             showApiError(new Error('Only Admin can manage overrides'), 'Permission denied');
@@ -454,16 +426,6 @@ export function Admin() {
           break;
         case 'placeholders':
           await adminApi.deletePlaceholder((item as Placeholder).id);
-          break;
-        case 'holidays':
-          await adminApi.deleteHoliday((item as Holiday).id);
-          break;
-        case 'settings':
-          if (!canManageSettings) {
-            showApiError(new Error('Only Admin can manage settings'), 'Permission denied');
-            return;
-          }
-          await adminApi.deleteSetting((item as Setting).key);
           break;
         case 'manager-overrides':
           await adminApi.deleteManagerOverride((item as ManagerOverride).id);
@@ -798,65 +760,6 @@ export function Admin() {
               </TableBody>
             </Table>
           </>
-        );
-
-      case 'holidays':
-        return (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell>Date</TableHeaderCell>
-                <TableHeaderCell>Name</TableHeaderCell>
-                <TableHeaderCell>Company-Wide</TableHeaderCell>
-                <TableHeaderCell>Actions</TableHeaderCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {holidays.map((holiday) => (
-                <TableRow key={holiday.id}>
-                  <TableCell>{new Date(holiday.date).toLocaleDateString()}</TableCell>
-                  <TableCell>{holiday.name}</TableCell>
-                  <TableCell>{holiday.is_company_wide ? 'Yes' : 'No'}</TableCell>
-                  <TableCell>
-                    {canManageMasterData && (
-                      <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(holiday)} />
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        );
-
-      case 'settings':
-        return (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell>Key</TableHeaderCell>
-                <TableHeaderCell>Value</TableHeaderCell>
-                <TableHeaderCell>Description</TableHeaderCell>
-                <TableHeaderCell>Actions</TableHeaderCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {settings.map((setting) => (
-                <TableRow key={setting.id}>
-                  <TableCell>{setting.key}</TableCell>
-                  <TableCell>{setting.value}</TableCell>
-                  <TableCell>{setting.description || '—'}</TableCell>
-                  <TableCell>
-                    {canManageSettings && (
-                      <>
-                        <Button icon={<EditRegular />} appearance="subtle" onClick={() => openEditDialog(setting)} />
-                        <Button icon={<DeleteRegular />} appearance="subtle" onClick={() => handleDelete(setting)} />
-                      </>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
         );
 
       case 'manager-overrides':
@@ -1237,61 +1140,6 @@ export function Admin() {
           </>
         );
 
-      case 'holidays':
-        return (
-          <>
-            <div className={styles.dialogField}>
-              <Label required>Date</Label>
-              <Input
-                type="date"
-                value={String(formData.date || '').split('T')[0]}
-                onChange={(_, d) => setFormData({ ...formData, date: d.value })}
-              />
-            </div>
-            <div className={styles.dialogField}>
-              <Label required>Name</Label>
-              <Input
-                value={String(formData.name || '')}
-                onChange={(_, d) => setFormData({ ...formData, name: d.value })}
-              />
-            </div>
-            <Checkbox
-              label="Company-Wide"
-              checked={formData.is_company_wide !== false}
-              onChange={(_, d) => setFormData({ ...formData, is_company_wide: d.checked })}
-            />
-          </>
-        );
-
-      case 'settings':
-        return (
-          <>
-            {!editItem && (
-              <div className={styles.dialogField}>
-                <Label required>Key</Label>
-                <Input
-                  value={String(formData.key || '')}
-                  onChange={(_, d) => setFormData({ ...formData, key: d.value })}
-                />
-              </div>
-            )}
-            <div className={styles.dialogField}>
-              <Label required>Value</Label>
-              <Input
-                value={String(formData.value || '')}
-                onChange={(_, d) => setFormData({ ...formData, value: d.value })}
-              />
-            </div>
-            <div className={styles.dialogField}>
-              <Label>Description</Label>
-              <Input
-                value={String(formData.description || '')}
-                onChange={(_, d) => setFormData({ ...formData, description: d.value })}
-              />
-            </div>
-          </>
-        );
-
       case 'manager-overrides':
         return (
           <>
@@ -1469,8 +1317,6 @@ export function Admin() {
     'projects': 'Projects',
     'resources': 'Resources',
     'placeholders': 'Placeholders',
-    'holidays': 'Holidays',
-    'settings': 'Settings',
     'manager-overrides': 'Manager Overrides',
     'delegates': 'Approval Delegates',
     'users': 'Users',
@@ -1493,10 +1339,6 @@ export function Admin() {
           {canManageMasterData && <Tab value="projects" icon={<FolderRegular />}>Projects</Tab>}
           {canManageMasterData && <Tab value="resources" icon={<PersonRegular />}>Resources</Tab>}
           {canManageMasterData && <Tab value="placeholders" icon={<PersonQuestionMarkRegular />}>Placeholders</Tab>}
-          {canManageMasterData && <Tab value="holidays" icon={<CalendarRegular />}>Holidays</Tab>}
-          {canManageSettings && (
-            <Tab value="settings" icon={<SettingsRegular />}>Settings</Tab>
-          )}
           {canManageSettings && (
             <Tab value="manager-overrides" icon={<PeopleTeamRegular />}>Manager Overrides</Tab>
           )}
@@ -1524,7 +1366,7 @@ export function Admin() {
               )}
             </div>
             {selectedTab !== 'users' && (canManageMasterData ||
-              ((selectedTab === 'settings' || selectedTab === 'manager-overrides') && canManageSettings) ||
+              (selectedTab === 'manager-overrides' && canManageSettings) ||
               (selectedTab === 'delegates' && canManageDelegates)) && (
               <Button appearance="primary" icon={<AddRegular />} onClick={openCreateDialog}>
                 Add {tabLabels[selectedTab].replace(/s$/, '')}

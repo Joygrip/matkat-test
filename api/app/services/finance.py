@@ -789,16 +789,19 @@ class FinanceService:
         from api.app.models.planning import DemandLine
         from api.app.models.actuals import ActualLine
         from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
-        from api.app.models.core import Period, Project
+        from api.app.models.core import Period, Project, PeriodStatus
 
         # 1. Resolve monthly FTE cost setting
         setting = self.get_setting("monthly_fte_cost")
         monthly_fte_cost = int(setting.setting_value)
 
-        # 2. Load all periods for this tenant (open and locked)
+        # 2. Load only open (unlocked) periods for this tenant
         all_periods = (
             self.db.query(Period)
-            .filter(Period.tenant_id == self.current_user.tenant_id)
+            .filter(
+                Period.tenant_id == self.current_user.tenant_id,
+                Period.status == PeriodStatus.OPEN,
+            )
             .all()
         )
         period_ids = [p.id for p in all_periods]

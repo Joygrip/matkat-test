@@ -27,21 +27,13 @@ class ExternalLineCreate(BaseModel):
     resource_id: Optional[str] = None
     description: Optional[str] = None  # name / description (required when resource_id is None)
     notes: Optional[str] = None         # additional free-text notes
-    hours: int
-    rate: int  # cents per hour
+    cost: int  # cents
 
-    @field_validator("hours")
+    @field_validator("cost")
     @classmethod
-    def hours_positive(cls, v: int) -> int:
+    def cost_positive(cls, v: int) -> int:
         if v < 1:
-            raise ValueError("hours must be at least 1")
-        return v
-
-    @field_validator("rate")
-    @classmethod
-    def rate_positive(cls, v: int) -> int:
-        if v < 1:
-            raise ValueError("rate must be at least 1 cent")
+            raise ValueError("cost must be at least 1 cent")
         return v
 
 
@@ -49,21 +41,13 @@ class ExternalLineUpdate(BaseModel):
     resource_id: Optional[str] = None
     description: Optional[str] = None
     notes: Optional[str] = None
-    hours: Optional[int] = None
-    rate: Optional[int] = None
+    cost: Optional[int] = None
 
-    @field_validator("hours")
+    @field_validator("cost")
     @classmethod
-    def hours_positive(cls, v: Optional[int]) -> Optional[int]:
+    def cost_positive(cls, v: Optional[int]) -> Optional[int]:
         if v is not None and v < 1:
-            raise ValueError("hours must be at least 1")
-        return v
-
-    @field_validator("rate")
-    @classmethod
-    def rate_positive(cls, v: Optional[int]) -> Optional[int]:
-        if v is not None and v < 1:
-            raise ValueError("rate must be at least 1 cent")
+            raise ValueError("cost must be at least 1 cent")
         return v
 
 
@@ -76,9 +60,7 @@ class ExternalLineResponse(BaseModel):
     resource_name: Optional[str]
     description: Optional[str]
     notes: Optional[str]
-    hours: int
-    rate: int
-    total_cost: int
+    cost: int
     created_by: str
     created_at: str
     updated_at: str
@@ -190,9 +172,7 @@ def _ext_to_response(
         resource_name=resource_name,
         description=line.description,
         notes=line.notes,
-        hours=line.hours,
-        rate=line.rate,
-        total_cost=line.total_cost,
+        cost=line.cost,
         created_by=line.created_by,
         created_at=str(line.created_at),
         updated_at=str(line.updated_at),
@@ -285,9 +265,7 @@ async def create_external(
         resource_id=data.resource_id,
         description=data.description,
         notes=data.notes,
-        hours=data.hours,
-        rate=data.rate,
-        total_cost=data.hours * data.rate,
+        cost=data.cost,
         created_by=current_user.object_id,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
@@ -323,11 +301,8 @@ async def update_external(
         line.description = data.description
     if data.notes is not None:
         line.notes = data.notes
-    if data.hours is not None:
-        line.hours = data.hours
-    if data.rate is not None:
-        line.rate = data.rate
-    line.total_cost = line.hours * line.rate
+    if data.cost is not None:
+        line.cost = data.cost
     line.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(line)
@@ -495,7 +470,7 @@ async def get_summary(
 
     ext_by_project: dict[str, int] = {}
     for ln in ext_q.all():
-        ext_by_project[ln.project_id] = ext_by_project.get(ln.project_id, 0) + ln.total_cost
+        ext_by_project[ln.project_id] = ext_by_project.get(ln.project_id, 0) + ln.cost
 
     equip_by_project: dict[str, int] = {}
     for ln in equip_q.all():

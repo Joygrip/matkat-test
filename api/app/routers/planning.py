@@ -131,7 +131,7 @@ async def get_demand_line(
 async def create_demand_line(
     data: DemandLineCreate,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.PM, UserRole.FINANCE)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.PM, UserRole.FINANCE)),
 ):
     """
     Create a new demand line.
@@ -162,7 +162,7 @@ async def update_demand_line(
     demand_id: str,
     data: DemandLineUpdate,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.PM, UserRole.FINANCE)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.PM, UserRole.FINANCE)),
 ):
     """
     Update a demand line's FTE.
@@ -179,7 +179,7 @@ async def update_demand_line(
 async def delete_demand_line(
     demand_id: str,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.PM, UserRole.FINANCE)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.PM, UserRole.FINANCE)),
 ):
     """
     Delete a demand line.

@@ -6,12 +6,6 @@ import {
   Input,
   Label,
   Spinner,
-  Table,
-  TableHeader,
-  TableRow,
-  TableHeaderCell,
-  TableBody,
-  TableCell,
   Dialog,
   DialogSurface,
   DialogBody,
@@ -125,10 +119,6 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalXXS,
     marginBottom: tokens.spacingVerticalM,
   },
-  computedTotal: {
-    marginTop: tokens.spacingVerticalXS,
-    color: tokens.colorNeutralForeground2,
-  },
   loading: {
     display: 'flex',
     justifyContent: 'center',
@@ -147,7 +137,7 @@ const useStyles = makeStyles({
   },
 });
 
-const emptyForm = { project_id: '', description: '', notes: '', hours: '', rate: '' };
+const emptyForm = { project_id: '', description: '', notes: '', cost: '' };
 
 export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects }) => {
   const styles = useStyles();
@@ -194,8 +184,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
       project_id: line.project_id,
       description: line.description ?? '',
       notes: line.notes ?? '',
-      hours: String(line.hours),
-      rate: String(line.rate / 100),
+      cost: String(line.cost / 100),
     });
     setDialogOpen(true);
   };
@@ -205,22 +194,11 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
     setEditingLine(null);
   };
 
-  const computedTotal = () => {
-    const h = parseFloat(form.hours);
-    const r = parseFloat(form.rate);
-    if (!isNaN(h) && !isNaN(r) && h > 0 && r > 0) {
-      return formatDKK(Math.round(h * r * 100));
-    }
-    return null;
-  };
-
   const handleSave = async () => {
-    const hours = parseInt(form.hours, 10);
-    const rate = Math.round(parseFloat(form.rate) * 100);
+    const cost = Math.round(parseFloat(form.cost) * 100);
     if (!form.project_id) return showError('Project is required');
     if (!form.description.trim()) return showError('Name / Description is required');
-    if (isNaN(hours) || hours < 1) return showError('Hours must be at least 1');
-    if (isNaN(rate) || rate < 1) return showError('Rate must be a positive number');
+    if (isNaN(cost) || cost < 1) return showError('Cost must be a positive number');
 
     setSaving(true);
     try {
@@ -228,8 +206,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
         await projectCostsApi.updateExternal(editingLine.id, {
           description: form.description,
           notes: form.notes || undefined,
-          hours,
-          rate,
+          cost,
         });
         showSuccess('External line updated');
       } else {
@@ -238,8 +215,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
           period_id: periodId,
           description: form.description,
           notes: form.notes || undefined,
-          hours,
-          rate,
+          cost,
         });
         showSuccess('External line added');
       }
@@ -264,18 +240,16 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
     }
   };
 
-  const grandTotal = lines.reduce((s, l) => s + l.total_cost, 0);
+  const grandTotal = lines.reduce((s, l) => s + l.cost, 0);
 
   const downloadCsv = () => {
-    const header = ['Project', 'OoP Resource', 'Notes', 'Hours', 'Rate (DKK/hr)', 'Total (DKK)'];
+    const header = ['Project', 'OoP Resource', 'Notes', 'Cost (DKK)'];
     const escape = (v: string | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const rows = lines.map((l) => [
       escape(l.project_name ?? l.project_id),
       escape(l.resource_name ?? l.description ?? ''),
       escape(l.notes ?? ''),
-      l.hours,
-      (l.rate / 100).toFixed(2),
-      (l.total_cost / 100).toFixed(2),
+      (l.cost / 100).toFixed(2),
     ]);
     const csv = [header, ...rows].map((r) => r.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -321,9 +295,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
                 <th className={styles.th}>Project</th>
                 <th className={styles.th}>OoP Resource</th>
                 <th className={styles.th}>Notes</th>
-                <th className={styles.thRight}>Hours</th>
-                <th className={styles.thRight}>Rate (DKK/hr)</th>
-                <th className={styles.thRight}>Total</th>
+                <th className={styles.thRight}>Cost</th>
                 {canEdit && <th className={styles.thRight} />}
               </tr>
             </thead>
@@ -333,9 +305,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
                   <td className={styles.td}>{line.project_name ?? line.project_id}</td>
                   <td className={styles.td}>{line.resource_name ?? (line.description ? <em>{line.description}</em> : <span className={styles.muted}>—</span>)}</td>
                   <td className={styles.td}>{line.notes ? <span>{line.notes}</span> : <span className={styles.muted}>—</span>}</td>
-                  <td className={styles.tdRight}>{line.hours}</td>
-                  <td className={styles.tdRight}>{formatDKK(line.rate)}</td>
-                  <td className={styles.tdRight}>{formatDKK(line.total_cost)}</td>
+                  <td className={styles.tdRight}>{formatDKK(line.cost)}</td>
                   {canEdit && (
                     <td className={styles.tdActions}>
                       <div className={styles.actions}>
@@ -347,7 +317,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
                 </tr>
               ))}
               <tr>
-                <td className={styles.totalTd} colSpan={5}>Total OoP</td>
+                <td className={styles.totalTd} colSpan={3}>Total OoP</td>
                 <td className={styles.totalTdRight}>{formatDKK(grandTotal)}</td>
                 {canEdit && <td className={styles.totalTd} />}
               </tr>
@@ -391,27 +361,14 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
                 />
               </div>
               <div className={styles.field}>
-                <Label required>Hours</Label>
-                <Input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={form.hours}
-                  onChange={(_, d) => setForm((f) => ({ ...f, hours: d.value }))}
-                />
-              </div>
-              <div className={styles.field}>
-                <Label required>Rate (DKK/hr)</Label>
+                <Label required>Cost (DKK)</Label>
                 <Input
                   type="number"
                   min="0.01"
                   step="0.01"
-                  value={form.rate}
-                  onChange={(_, d) => setForm((f) => ({ ...f, rate: d.value }))}
+                  value={form.cost}
+                  onChange={(_, d) => setForm((f) => ({ ...f, cost: d.value }))}
                 />
-                {computedTotal() && (
-                  <Caption1 className={styles.computedTotal}>Total: {computedTotal()}</Caption1>
-                )}
               </div>
             </DialogContent>
             <DialogActions>

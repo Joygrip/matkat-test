@@ -27,7 +27,7 @@ async def actuals_dashboard(
     cost_center_id: Optional[str] = Query(None),
     approval_status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.MANAGER)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER)),
 ):
     """
     List all employee actuals with project, cost center, approval status, and current approval step.
@@ -43,7 +43,7 @@ async def actuals_vs_plan(
     month: int = Query(...),
     cost_center_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.MANAGER)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER)),
 ):
     """
     Get demand, supply, and actuals per cost center for a given period.

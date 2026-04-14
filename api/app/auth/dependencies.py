@@ -2,7 +2,7 @@
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, SecurityScopes
 from fastapi_azure_auth import SingleTenantAzureAuthorizationCodeBearer
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -135,7 +135,7 @@ async def get_current_user(
         )
 
     # Validate token – raises 401 automatically on failure (auto_error=True)
-    azure_user = await _get_azure_scheme()(request)
+    azure_user = await _get_azure_scheme()(request, SecurityScopes())
 
     # Extract standard claims
     claims = azure_user.claims if hasattr(azure_user, "claims") else {}

@@ -882,3 +882,15 @@ async def delete_delegate(
     log_audit(db, current_user, "delete", "ApprovalDelegate", d.id)
     db.delete(d)
     db.commit()
+    
+@router.get("/debug/graph-config")
+async def debug_graph_config(
+    current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
+):
+    settings = get_settings()
+    return {
+        "graph_client_id": settings.graph_client_id[:8] + "..." if settings.graph_client_id else "EMPTY",
+        "graph_client_secret_len": len(settings.graph_client_secret),
+        "graph_client_secret_first4": settings.graph_client_secret[:4] if settings.graph_client_secret else "EMPTY",
+        "azure_tenant_id": settings.azure_tenant_id[:8] + "..." if settings.azure_tenant_id else "EMPTY",
+    }

@@ -17,6 +17,22 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def drop_fk_and_column(conn, table_name, column_name):
+    result = conn.execute(sa.text("""
+        SELECT fk.name 
+        FROM sys.foreign_keys fk
+        INNER JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
+        INNER JOIN sys.columns c ON fkc.parent_object_id = c.object_id 
+            AND fkc.parent_column_id = c.column_id
+        WHERE fk.parent_object_id = OBJECT_ID(:table)
+        AND c.name = :column
+    """), {"table": table_name, "column": column_name})
+    for row in result:
+        op.drop_constraint(row[0], table_name, type_="foreignkey")
+    with op.batch_alter_table(table_name, schema=None) as batch_op:
+        batch_op.drop_column(column_name)
+
+
 def upgrade() -> None:
     conn = op.get_bind()
 
@@ -48,31 +64,12 @@ def upgrade() -> None:
                     {"uid": director[0], "cc_id": cc_id},
                 )
 
-    # 3) Drop FK constraint then department_id from users
-    conn = op.get_bind()
-    result = conn.execute(sa.text("""
-        SELECT fk.name 
-        FROM sys.foreign_keys fk
-        INNER JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
-        INNER JOIN sys.columns c ON fkc.parent_object_id = c.object_id 
-            AND fkc.parent_column_id = c.column_id
-        WHERE fk.parent_object_id = OBJECT_ID('users')
-        AND c.name = 'department_id'
-    """))
-    for row in result:
-        op.drop_constraint(row[0], "users", type_="foreignkey")
-    with op.batch_alter_table("users", schema=None) as batch_op:
-        batch_op.drop_column("department_id")
+    # 3) Drop department_id from users, placeholders, cost_centers (drop FKs first for SQL Server)
+    drop_fk_and_column(conn, "users", "department_id")
+    drop_fk_and_column(conn, "placeholders", "department_id")
+    drop_fk_and_column(conn, "cost_centers", "department_id")
 
-    # 4) Drop department_id from placeholders
-    with op.batch_alter_table("placeholders", schema=None) as batch_op:
-        batch_op.drop_column("department_id")
-
-    # 5) Drop department_id from cost_centers
-    with op.batch_alter_table("cost_centers", schema=None) as batch_op:
-        batch_op.drop_column("department_id")
-
-    # 6) Drop departments table
+    # 4) Drop departments table
     op.drop_table("departments")
 
 

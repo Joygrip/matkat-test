@@ -201,7 +201,7 @@ class ConsolidationService:
                     row[0] for row in self.db.query(CostCenter.id).filter(
                         and_(
                             CostCenter.tenant_id == self.current_user.tenant_id,
-                            CostCenter.is_active.is_(True),
+                            CostCenter.is_active == True,
                             (CostCenter.ro_user_id == manager_user.id) | (CostCenter.director_user_id == manager_user.id),
                         )
                     ).all()
@@ -211,7 +211,7 @@ class ConsolidationService:
                     and_(
                         ApprovalDelegate.tenant_id == self.current_user.tenant_id,
                         ApprovalDelegate.delegate_id == manager_user.id,
-                        ApprovalDelegate.is_active.is_(True),
+                        ApprovalDelegate.is_active == True,
                     )
                 ).all()
                 for grant in delegation_grants:
@@ -219,7 +219,7 @@ class ConsolidationService:
                         row[0] for row in self.db.query(CostCenter.id).filter(
                             and_(
                                 CostCenter.tenant_id == self.current_user.tenant_id,
-                                CostCenter.is_active.is_(True),
+                                CostCenter.is_active == True,
                                 (CostCenter.ro_user_id == grant.delegator_id) | (CostCenter.director_user_id == grant.delegator_id),
                             )
                         ).all()
@@ -552,3 +552,4 @@ class ConsolidationService:
             "total_supply_fte": total_supply,
             "gap_fte": total_supply - total_demand,
         }
+

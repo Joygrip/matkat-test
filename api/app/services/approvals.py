@@ -411,7 +411,7 @@ class ApprovalsService:
             and_(
                 ManagerOverride.tenant_id == tenant_id,
                 ManagerOverride.employee_object_id == user.object_id,
-                ManagerOverride.is_active.is_(True),
+                ManagerOverride.is_active == True,
             )
         ).first()
 
@@ -424,7 +424,7 @@ class ApprovalsService:
             and_(
                 User.tenant_id == tenant_id,
                 User.object_id == manager_object_id,
-                User.is_active.is_(True),
+                User.is_active == True,
             )
         ).first()
 
@@ -460,7 +460,7 @@ class ApprovalsService:
                 ApprovalDelegate.tenant_id == self.current_user.tenant_id,
                 ApprovalDelegate.delegator_id == step.approver_id,
                 ApprovalDelegate.delegate_id == user.id,
-                ApprovalDelegate.is_active.is_(True),
+                ApprovalDelegate.is_active == True,
             )
         ).first() is not None
 
@@ -476,10 +476,11 @@ class ApprovalsService:
                 ApprovalDelegate.tenant_id == self.current_user.tenant_id,
                 ApprovalDelegate.delegator_id == step.approver_id,
                 ApprovalDelegate.delegate_id == user.id,
-                ApprovalDelegate.is_active.is_(True),
+                ApprovalDelegate.is_active == True,
             )
         ).first()
         if grant:
             delegator = self.db.query(User).filter(User.id == step.approver_id).first()
             return True, (delegator.display_name if delegator else None)
         return False, None
+

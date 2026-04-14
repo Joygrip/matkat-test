@@ -177,7 +177,7 @@ class FinanceService:
                 ApprovalDelegate.tenant_id == self.current_user.tenant_id,
                 ApprovalDelegate.delegate_id == current_db_user_id,
                 ApprovalDelegate.delegator_id.in_(all_approver_ids),
-                ApprovalDelegate.is_active.is_(True),
+                ApprovalDelegate.is_active == True,
             ).all()
             delegate_for = {row.delegator_id: row.display_name for row in delegate_rows}
 
@@ -962,3 +962,4 @@ class FinanceService:
             setting_value=row.setting_value,
             updated_at=row.updated_at.isoformat() if row.updated_at else None,
         )
+

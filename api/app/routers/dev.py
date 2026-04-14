@@ -247,7 +247,7 @@ async def get_users_by_role(
     """
     q = db.query(User).filter(
         User.tenant_id == current_user.tenant_id,
-        User.is_active.is_(True),
+        User.is_active == True,
     )
     if role:
         q = q.filter(User.role == role)
@@ -289,3 +289,4 @@ async def get_resources_with_users(
             "user_id": str(user.id) if user else None,
         })
     return result
+

@@ -88,7 +88,7 @@ async def sync_user_from_graph(
                     cc = db.query(CostCenter).filter(
                         CostCenter.tenant_id == tenant_id,
                         CostCenter.graph_department_name == graph_department,
-                        CostCenter.is_active.is_(True),
+                        CostCenter.is_active == True,
                     ).first()
                     if cc:
                         db_user.cost_center_id = cc.id
@@ -110,3 +110,4 @@ async def sync_user_from_graph(
     db.commit()
     db.refresh(db_user)
     return db_user
+

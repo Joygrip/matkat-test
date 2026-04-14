@@ -177,7 +177,7 @@ def _sync_user(
         cc = db.query(CostCenter).filter(
             CostCenter.tenant_id == user.tenant_id,
             CostCenter.graph_department_name == graph_department,
-            CostCenter.is_active.is_(True),
+            CostCenter.is_active == True,
         ).first()
         if cc and user.cost_center_id != cc.id:
             user.cost_center_id = cc.id
@@ -210,3 +210,4 @@ def _sync_user(
             result.manager_changes += 1
 
         result.synced += 1
+

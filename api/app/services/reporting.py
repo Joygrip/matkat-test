@@ -50,7 +50,7 @@ class ReportingService:
             and_(
                 ManagerOverride.tenant_id == tenant_id,
                 ManagerOverride.manager_object_id == manager_oid,
-                ManagerOverride.is_active.is_(True),
+                ManagerOverride.is_active == True,
             )
         ).all()
 
@@ -88,7 +88,7 @@ class ReportingService:
                 Resource.tenant_id == self.current_user.tenant_id,
                 Resource.user_id.in_(user_ids),
                 Resource.resource_type == ResourceType.EMPLOYEE,
-                Resource.is_active.is_(True),
+                Resource.is_active == True,
             )
         ).all()
 
@@ -120,7 +120,7 @@ class ReportingService:
         cost_centers = self.db.query(CostCenter.id).filter(
             and_(
                 CostCenter.tenant_id == self.current_user.tenant_id,
-                CostCenter.is_active.is_(True),
+                CostCenter.is_active == True,
                 (CostCenter.ro_user_id == user.id) | (CostCenter.director_user_id == user.id),
             )
         ).all()
@@ -132,7 +132,7 @@ class ReportingService:
             and_(
                 Resource.tenant_id == self.current_user.tenant_id,
                 Resource.cost_center_id.in_(cc_ids),
-                Resource.is_active.is_(True),
+                Resource.is_active == True,
             )
         ).all()
         return [row[0] for row in resources]
@@ -150,7 +150,7 @@ class ReportingService:
             and_(
                 ApprovalDelegate.tenant_id == self.current_user.tenant_id,
                 ApprovalDelegate.delegate_id == user_db_id,
-                ApprovalDelegate.is_active.is_(True),
+                ApprovalDelegate.is_active == True,
             )
         ).all()
         if not grants:
@@ -201,7 +201,7 @@ class ReportingService:
         users = db.query(User.object_id, User.manager_object_id).filter(
             and_(
                 User.tenant_id == tenant_id,
-                User.is_active.is_(True),
+                User.is_active == True,
             )
         ).all()
 
@@ -221,7 +221,7 @@ class ReportingService:
         ).filter(
             and_(
                 ManagerOverride.tenant_id == tenant_id,
-                ManagerOverride.is_active.is_(True),
+                ManagerOverride.is_active == True,
             )
         ).all()
 
@@ -365,7 +365,7 @@ class ReportingService:
             and_(
                 ManagerOverride.tenant_id == self.current_user.tenant_id,
                 ManagerOverride.manager_object_id == manager_object_id,
-                ManagerOverride.is_active.is_(True),
+                ManagerOverride.is_active == True,
             )
         ).all()
 
@@ -377,3 +377,4 @@ class ReportingService:
             for o in overrides
         ]
         return result
+

@@ -91,12 +91,13 @@ class GraphAppClient:
             return FETCH_FAILED
 
     def list_all_users(self) -> list[dict]:
-        """Fetch all enabled users in the tenant from Graph with pagination.
+        """Fetch all users in the tenant from Graph with pagination.
 
         Returns list of user dicts, or empty list on error.
         """
         token = self._get_token()
         if token is FETCH_FAILED:
+            logger.warning("GraphAppClient: list_all_users — token acquisition failed")
             return []
 
         users = []
@@ -104,18 +105,23 @@ class GraphAppClient:
         params = {
             "$select": _USER_SELECT,
             "$top": 999,
-            "$filter": "accountEnabled eq true",
         }
 
         try:
-            with httpx.Client(timeout=30) as client:
+            with httpx.Client(timeout=60) as client:
                 while url:
                     resp = client.get(
                         url,
                         params=params,
                         headers={"Authorization": f"Bearer {token}"},
                     )
-                    resp.raise_for_status()
+                    if resp.status_code != 200:
+                        logger.warning(
+                            "GraphAppClient: list_all_users got status %d: %s",
+                            resp.status_code,
+                            resp.text,
+                        )
+                        return []
                     data = resp.json()
                     users.extend(data.get("value", []))
                     url = data.get("@odata.nextLink")
@@ -137,7 +143,7 @@ class GraphAppClient:
 
         s = self._settings
         if not s.graph_client_id or not s.graph_client_secret or not s.azure_tenant_id:
-            logger.debug(
+            logger.warning(
                 "GraphAppClient: skipped — GRAPH_CLIENT_ID / GRAPH_CLIENT_SECRET / "
                 "AZURE_TENANT_ID not configured."
             )
@@ -155,8 +161,15 @@ class GraphAppClient:
         try:
             with httpx.Client(timeout=10) as client:
                 resp = client.post(token_url, data=payload)
-                resp.raise_for_status()
+                if resp.status_code != 200:
+                    logger.warning(
+                        "GraphAppClient: token acquisition failed status=%d body=%s",
+                        resp.status_code,
+                        resp.text,
+                    )
+                    return FETCH_FAILED
                 self._token = resp.json()["access_token"]
+                logger.info("GraphAppClient: token acquired successfully")
                 return self._token
         except Exception as exc:
             logger.warning("GraphAppClient: token acquisition failed: %s", exc)

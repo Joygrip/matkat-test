@@ -882,7 +882,7 @@ async def delete_delegate(
     log_audit(db, current_user, "delete", "ApprovalDelegate", d.id)
     db.delete(d)
     db.commit()
-    
+
 @router.get("/debug/graph-config")
 async def debug_graph_config(
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
@@ -894,3 +894,28 @@ async def debug_graph_config(
         "graph_client_secret_first4": settings.graph_client_secret[:4] if settings.graph_client_secret else "EMPTY",
         "azure_tenant_id": settings.azure_tenant_id[:8] + "..." if settings.azure_tenant_id else "EMPTY",
     }
+@router.get("/debug/graph-test")
+async def debug_graph_test(
+    current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
+):
+    from api.app.services.graph_app_client import GraphAppClient, FETCH_FAILED
+    settings = get_settings()
+    graph = GraphAppClient(settings)
+    token = graph._get_token()
+    if token is FETCH_FAILED:
+        return {"error": "Token acquisition failed"}
+    
+    import httpx
+    try:
+        with httpx.Client(timeout=30) as client:
+            resp = client.get(
+                "https://graph.microsoft.com/v1.0/users",
+                params={"$select": "id,displayName,mail", "$top": 5},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            return {
+                "status": resp.status_code,
+                "body": resp.json()
+            }
+    except Exception as exc:
+        return {"error": str(exc)}

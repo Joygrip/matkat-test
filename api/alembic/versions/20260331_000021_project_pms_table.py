@@ -36,14 +36,30 @@ def upgrade() -> None:
         sa.text("SELECT id, tenant_id, pm_user_id FROM projects WHERE pm_user_id IS NOT NULL")
     ).fetchall()
     for row in rows:
+        # Use INSERT ... WHERE NOT EXISTS for SQL Server compatibility
         conn.execute(
-            sa.text(
-                "INSERT OR IGNORE INTO project_pms (project_id, user_id, tenant_id) VALUES (:pid, :uid, :tid)"
-            ),
+            sa.text("""
+                IF NOT EXISTS (
+                    SELECT 1 FROM project_pms WHERE project_id = :pid AND user_id = :uid
+                )
+                INSERT INTO project_pms (project_id, user_id, tenant_id) VALUES (:pid, :uid, :tid)
+            """),
             {"pid": row[0], "uid": row[2], "tid": row[1]},
         )
 
-    # Drop the old column
+    # Drop FK constraint then column
+    result = conn.execute(sa.text("""
+        SELECT fk.name 
+        FROM sys.foreign_keys fk
+        INNER JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
+        INNER JOIN sys.columns c ON fkc.parent_object_id = c.object_id 
+            AND fkc.parent_column_id = c.column_id
+        WHERE fk.parent_object_id = OBJECT_ID('projects')
+        AND c.name = 'pm_user_id'
+    """))
+    for row in result:
+        op.drop_constraint(row[0], 'projects', type_="foreignkey")
+
     with op.batch_alter_table('projects') as batch_op:
         batch_op.drop_column('pm_user_id')
 

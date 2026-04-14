@@ -82,13 +82,20 @@ def run_dev_migrations(engine) -> None:
             ) from second_exc
 
 
-engine = get_engine()
-# ensure_resources_initials_column removed — superseded by Alembic migration 12
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+_engine = None
 
+def _get_or_create_engine():
+    global _engine
+    if _engine is None:
+        _engine = get_engine()
+    return _engine
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False)
 
 def get_db() -> Generator[Session, None, None]:
     """Dependency that provides a database session."""
+    engine = _get_or_create_engine()
+    SessionLocal.configure(bind=engine)
     db = SessionLocal()
     try:
         yield db

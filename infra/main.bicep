@@ -56,17 +56,14 @@ param azureTenantAllowlist string = ''
 param corsOrigins string = ''
 
 // ── Derive Key Vault name upfront to break circular dependency ──────────────
-// appService needs KV secret URIs; keyVault needs appService principal ID.
-// We break the cycle by constructing KV URIs from known naming convention
-// rather than reading them from keyVault module outputs.
 var keyVaultName = '${projectName}-kv-${environmentName}'
 var kvBaseUri = 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets'
 
-var kvSecretUriTenantId      = '${kvBaseUri}/AzureTenantId/'
-var kvSecretUriApiClientId   = '${kvBaseUri}/ApiAppClientId/'
-var kvSecretUriApiIdUri       = '${kvBaseUri}/ApiAppIdUri/'
-var kvSecretUriDatabaseUrl   = '${kvBaseUri}/DatabaseUrl/'
-var kvSecretUriGraphClientId = '${kvBaseUri}/GraphClientId/'
+var kvSecretUriTenantId          = '${kvBaseUri}/AzureTenantId/'
+var kvSecretUriApiClientId       = '${kvBaseUri}/ApiAppClientId/'
+var kvSecretUriApiIdUri          = '${kvBaseUri}/ApiAppIdUri/'
+var kvSecretUriDatabaseUrl       = '${kvBaseUri}/DatabaseUrl/'
+var kvSecretUriGraphClientId     = '${kvBaseUri}/GraphClientId/'
 var kvSecretUriGraphClientSecret = '${kvBaseUri}/GraphClientSecret/'
 
 // ── 1. Storage Account ──────────────────────────────────────
@@ -118,7 +115,6 @@ module staticWebApp 'modules/staticwebapp.bicep' = {
 }
 
 // ── 5. App Service (backend container) ──────────────────────
-// KV secret URIs are constructed from the known naming pattern — no circular dep.
 module appService 'modules/appservice.bicep' = {
   name: 'appService'
   params: {
@@ -140,38 +136,37 @@ module appService 'modules/appservice.bicep' = {
   }
 }
 
-// ── 6. Function App (scheduler) ─────────────────────────────
-module functionApp 'modules/functions.bicep' = {
-  name: 'functionApp'
-  params: {
-    projectName: projectName
-    environmentName: environmentName
-    location: location
-    storageConnectionString: storage.outputs.storageConnectionString
-    appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
-    webAppHostname: appService.outputs.webAppHostname
-    kvSecretUriApiClientId: kvSecretUriApiClientId
-  }
-}
+// ── 6. Function App (scheduler) — deployed separately in rg-matkat-dev-fn ──
+// module functionApp 'modules/functions.bicep' = {
+//   name: 'functionApp'
+//   params: {
+//     projectName: projectName
+//     environmentName: environmentName
+//     location: location
+//     storageConnectionString: storage.outputs.storageConnectionString
+//     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+//     webAppHostname: appService.outputs.webAppHostname
+//     kvSecretUriApiClientId: kvSecretUriApiClientId
+//   }
+// }
 
-// ── 7. Key Vault (secrets + RBAC) ───────────────────────────
-// Deployed after App Service and Function App to capture their principal IDs.
-module keyVault 'modules/keyvault.bicep' = {
-  name: 'keyVault'
-  params: {
-    projectName: projectName
-    environmentName: environmentName
-    location: location
-    webAppPrincipalId: appService.outputs.webAppPrincipalId
-    funcAppPrincipalId: functionApp.outputs.funcAppPrincipalId
-  }
-}
+// ── 7. Key Vault — already deployed separately ──────────────
+// module keyVault 'modules/keyvault.bicep' = {
+//   name: 'keyVault'
+//   params: {
+//     projectName: projectName
+//     environmentName: environmentName
+//     location: location
+//     webAppPrincipalId: appService.outputs.webAppPrincipalId
+//     funcAppPrincipalId: functionApp.outputs.funcAppPrincipalId
+//   }
+// }
 
 // ── Outputs ──────────────────────────────────────────────────
 output webAppHostname string = appService.outputs.webAppHostname
-output funcAppHostname string = functionApp.outputs.funcAppHostname
+// output funcAppHostname string = functionApp.outputs.funcAppHostname
 output staticWebAppHostname string = staticWebApp.outputs.staticWebAppHostname
-output keyVaultUri string = keyVault.outputs.keyVaultUri
+// output keyVaultUri string = keyVault.outputs.keyVaultUri
 output sqlServerFqdn string = database.outputs.sqlServerFqdn
 output sqlDatabaseName string = database.outputs.sqlDatabaseName
 output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString

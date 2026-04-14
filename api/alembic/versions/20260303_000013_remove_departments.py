@@ -48,8 +48,17 @@ def upgrade() -> None:
                     {"uid": director[0], "cc_id": cc_id},
                 )
 
-    # 3) Drop department_id from users
+    # 3) Drop FK constraint then department_id from users
     with op.batch_alter_table("users", schema=None) as batch_op:
+        # Drop all FK constraints on department_id (SQL Server auto-names them)
+        conn = op.get_bind()
+        result = conn.execute(sa.text("""
+            SELECT name FROM sys.foreign_keys
+            WHERE parent_object_id = OBJECT_ID('users')
+            AND COL_NAME(parent_object_id, parent_column_id) = 'department_id'
+        """))
+        for row in result:
+            batch_op.drop_constraint(row[0], type_="foreignkey")
         batch_op.drop_column("department_id")
 
     # 4) Drop department_id from placeholders

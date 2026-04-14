@@ -28,6 +28,9 @@ def _get_azure_scheme() -> SingleTenantAzureAuthorizationCodeBearer:
             app_client_id=s.api_app_client_id,
             tenant_id=s.azure_tenant_id,
             auto_error=True,
+            scopes={
+                f"api://{s.api_app_client_id}/access_as_user": "Access as user",
+            },
         )
     return _azure_scheme
 
@@ -86,8 +89,6 @@ async def get_current_user(
         except ValueError:
             role = UserRole.EMPLOYEE
 
-        # Upsert the dev user into the DB so they appear in user listings
-        # (mirrors what sync_user_from_graph does in production)
         from sqlalchemy import and_
         db_user = db.query(User).filter(
             and_(
@@ -141,7 +142,6 @@ async def get_current_user(
     claims = azure_user.claims if hasattr(azure_user, "claims") else {}
     object_id: str = claims.get("oid") or claims.get("sub", "")
     tenant_id: str = claims.get("tid", "")
-    # 'preferred_username' is present in v2 tokens; 'upn' in v1
     email: str = (
         claims.get("preferred_username")
         or claims.get("upn")

@@ -27,11 +27,7 @@ FETCH_FAILED = "__GRAPH_APP_ERROR__"
 
 
 class GraphAppClient:
-    """Thin synchronous Graph client backed by the client credentials flow.
-
-    Synchronous (not async) because background sync runs in a regular DB session
-    context that is easier to manage without async overhead.
-    """
+    """Thin synchronous Graph client backed by the client credentials flow."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -94,15 +90,48 @@ class GraphAppClient:
             logger.warning("Graph /users/%s/manager call failed: %s", object_id, exc)
             return FETCH_FAILED
 
+    def list_all_users(self) -> list[dict]:
+        """Fetch all enabled users in the tenant from Graph with pagination.
+
+        Returns list of user dicts, or empty list on error.
+        """
+        token = self._get_token()
+        if token is FETCH_FAILED:
+            return []
+
+        users = []
+        url = f"{_GRAPH_BASE}/users"
+        params = {
+            "$select": _USER_SELECT,
+            "$top": 999,
+            "$filter": "accountEnabled eq true",
+        }
+
+        try:
+            with httpx.Client(timeout=30) as client:
+                while url:
+                    resp = client.get(
+                        url,
+                        params=params,
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    users.extend(data.get("value", []))
+                    url = data.get("@odata.nextLink")
+                    params = {}  # nextLink already contains params
+            logger.info("GraphAppClient: fetched %d users from Graph", len(users))
+            return users
+        except Exception as exc:
+            logger.warning("GraphAppClient: list_all_users failed: %s", exc)
+            return []
+
     # ------------------------------------------------------------------
     # Token acquisition
     # ------------------------------------------------------------------
 
     def _get_token(self) -> Optional[str]:
-        """Acquire (or return cached) an app-only Graph token.
-
-        Returns the token string on success, or FETCH_FAILED sentinel on error.
-        """
+        """Acquire (or return cached) an app-only Graph token."""
         if self._token:
             return self._token
 

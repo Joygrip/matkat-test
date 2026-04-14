@@ -25,7 +25,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from api.app.config import Settings
-from api.app.models.core import User, CostCenter
+from api.app.models.core import User, CostCenter, UserRole
 from api.app.services.graph_app_client import GraphAppClient, FETCH_FAILED
 
 logger = logging.getLogger(__name__)
@@ -211,3 +211,83 @@ def _sync_user(
 
         result.synced += 1
 
+def import_users_from_graph(db: Session, settings: Settings, tenant_id: str) -> dict:
+    """Import all enabled Entra users into the DB as Employee role.
+
+    Existing users (matched by object_id) are skipped — only new users are created.
+    Role and cost_center_id are NOT set automatically (admin assigns after import).
+    Cost center is auto-assigned if CostCenter.graph_department_name matches.
+
+    Returns a summary dict with created/skipped/errors counts.
+    """
+    graph = GraphAppClient(settings)
+
+    if not (settings.graph_client_id and settings.graph_client_secret and settings.azure_tenant_id):
+        return {"error": "Graph credentials not configured"}
+
+    graph_users = graph.list_all_users()
+    if not graph_users:
+        return {"error": "No users returned from Graph or Graph call failed"}
+
+    created = 0
+    skipped = 0
+    errors = 0
+
+    for gu in graph_users:
+        oid = gu.get("id")
+        if not oid:
+            errors += 1
+            continue
+        try:
+            existing = db.query(User).filter(
+                User.tenant_id == tenant_id,
+                User.object_id == oid,
+            ).first()
+
+            if existing:
+                skipped += 1
+                continue
+
+            email = gu.get("mail") or gu.get("userPrincipalName") or ""
+            display_name = gu.get("displayName") or email
+            graph_department = gu.get("department") or ""
+
+            new_user = User(
+                tenant_id=tenant_id,
+                object_id=oid,
+                email=email,
+                display_name=display_name,
+                role=UserRole.EMPLOYEE,
+                is_active=True,
+            )
+            db.add(new_user)
+            db.flush()
+
+            # Auto-assign cost center if department matches
+            if graph_department:
+                cc = db.query(CostCenter).filter(
+                    CostCenter.tenant_id == tenant_id,
+                    CostCenter.graph_department_name == graph_department,
+                    CostCenter.is_active == True,
+                ).first()
+                if cc:
+                    new_user.cost_center_id = cc.id
+
+            created += 1
+            logger.info("import_users: created user object_id=%s email=%s", oid, email)
+
+        except Exception as exc:
+            logger.error("import_users: error processing user object_id=%s: %s", oid, exc)
+            errors += 1
+
+    db.commit()
+    logger.info(
+        "import_users: done — created=%d skipped=%d errors=%d",
+        created, skipped, errors,
+    )
+    return {
+        "total_from_graph": len(graph_users),
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
+    }

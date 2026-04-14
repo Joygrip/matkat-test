@@ -640,7 +640,16 @@ async def trigger_graph_sync(
     response = result.as_dict()
     response["reporting_cache_rows"] = hierarchy_rows
     return response
-
+@router.post("/sync/import-graph-users")
+async def import_users_from_graph_endpoint(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
+):
+    """Bulk import all enabled Entra users into the DB as Employee role. Admin only."""
+    from api.app.services.background_sync import import_users_from_graph
+    settings = get_settings()
+    result = import_users_from_graph(db, settings, current_user.tenant_id)
+    return result
 
 # ============== USERS ==============
 

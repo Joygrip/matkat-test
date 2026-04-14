@@ -26,7 +26,7 @@ def upgrade() -> None:
     op.execute("UPDATE project_external_lines SET cost = total_cost")
 
     with op.batch_alter_table("project_external_lines") as batch_op:
-        batch_op.alter_column("cost", nullable=False)
+        batch_op.alter_column("cost", existing_type=sa.Integer, nullable=False)
         batch_op.drop_column("hours")
         batch_op.drop_column("rate")
         batch_op.drop_column("total_cost")
@@ -42,7 +42,7 @@ def downgrade() -> None:
     op.execute("UPDATE project_external_lines SET hours = 1, rate = cost, total_cost = cost")
 
     with op.batch_alter_table("project_external_lines") as batch_op:
-        batch_op.alter_column("hours", nullable=False)
-        batch_op.alter_column("rate", nullable=False)
-        batch_op.alter_column("total_cost", nullable=False)
+        batch_op.alter_column("hours", existing_type=sa.Integer, nullable=False)
+        batch_op.alter_column("rate", existing_type=sa.Integer, nullable=False)
+        batch_op.alter_column("total_cost", existing_type=sa.Integer, nullable=False)
         batch_op.drop_column("cost")

@@ -334,7 +334,7 @@ def import_departments_from_graph(db: Session, settings: Settings, tenant_id: st
                 tenant_id=tenant_id,
                 name=department,
                 graph_department_name=department,
-                code="",
+                code=department[:5].upper(),
                 is_active=True,
             )
             db.add(new_cc)

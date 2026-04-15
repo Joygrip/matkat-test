@@ -678,6 +678,24 @@ async def promote_managers_endpoint(
     from api.app.services.background_sync import promote_managers_from_graph
     return promote_managers_from_graph(db, get_settings(), current_user.tenant_id)
 
+@router.post("/sync/create-resources")
+async def create_resources_endpoint(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
+):
+    """Create Resource entries for all active Employee and Manager users that don't have one yet."""
+    from api.app.services.background_sync import create_resources_from_users
+    return create_resources_from_users(db, get_settings(), current_user.tenant_id)
+
+@router.post("/sync/assign-cost-center-managers")
+async def assign_cost_center_managers_endpoint(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
+):
+    """Assign RO (1st level) and Director (2nd level) managers to each cost center based on user hierarchy."""
+    from api.app.services.background_sync import assign_cost_center_managers
+    return assign_cost_center_managers(db, get_settings(), current_user.tenant_id)
+
 # ============== USERS ==============
 
 def _enrich_user(user: User) -> dict:

@@ -25,7 +25,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from api.app.config import Settings
-from api.app.models.core import User, CostCenter, UserRole, generate_uuid
+from api.app.models.core import User, CostCenter, UserRole, Resource, ResourceType, generate_uuid
 from api.app.services.graph_app_client import GraphAppClient, FETCH_FAILED
 
 logger = logging.getLogger(__name__)
@@ -364,6 +364,160 @@ def assign_users_to_departments(db: Session, settings: Settings, tenant_id: str)
     """Re-run Graph sync to assign users to cost centers via department name matching."""
     result = run_graph_sync(db, settings, tenant_id)
     return result.as_dict()
+
+
+def create_resources_from_users(db: Session, settings: Settings, tenant_id: str) -> dict:
+    """Create Resource entries for all active Employee and Manager users that don't have one yet."""
+    users: list[User] = (
+        db.query(User)
+        .filter(
+            User.tenant_id == tenant_id,
+            User.role.in_([UserRole.EMPLOYEE, UserRole.MANAGER]),
+            User.is_active == True,
+            User.cost_center_id != None,
+        )
+        .all()
+    )
+
+    created = 0
+    skipped = 0
+    errors = 0
+
+    for user in users:
+        try:
+            existing = db.query(Resource).filter(
+                Resource.user_id == user.id,
+                Resource.tenant_id == tenant_id,
+            ).first()
+
+            if existing:
+                skipped += 1
+                continue
+
+            words = (user.display_name or "").split()
+            initials = "".join(w[0].upper() for w in words if w)[:3]
+
+            new_resource = Resource(
+                id=generate_uuid(),
+                tenant_id=tenant_id,
+                user_id=user.id,
+                cost_center_id=user.cost_center_id,
+                employee_id=user.object_id[:50],
+                display_name=user.display_name,
+                initials=initials,
+                email=user.email,
+                resource_type=ResourceType.EMPLOYEE,
+                is_active=True,
+                hourly_cost=None,
+            )
+            db.add(new_resource)
+            created += 1
+            logger.info(
+                "create_resources: created resource user_id=%s display_name=%s",
+                user.id, user.display_name,
+            )
+
+        except Exception as exc:
+            logger.error(
+                "create_resources: error processing user_id=%s: %s", user.id, exc
+            )
+            errors += 1
+
+    db.commit()
+    logger.info(
+        "create_resources: done — created=%d skipped=%d errors=%d",
+        created, skipped, errors,
+    )
+    return {
+        "total_eligible_users": len(users),
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
+def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str) -> dict:
+    """Assign RO (1st level) and Director (2nd level) managers to each cost center."""
+    cost_centers: list[CostCenter] = (
+        db.query(CostCenter)
+        .filter(CostCenter.tenant_id == tenant_id, CostCenter.is_active == True)
+        .all()
+    )
+
+    users_by_object_id = {
+        u.object_id: u
+        for u in db.query(User).filter(User.tenant_id == tenant_id).all()
+    }
+
+    updated = 0
+    skipped = 0
+    errors = 0
+
+    for cc in cost_centers:
+        try:
+            cc_updated = False
+
+            employees: list[User] = (
+                db.query(User)
+                .filter(
+                    User.cost_center_id == cc.id,
+                    User.role == UserRole.EMPLOYEE,
+                    User.is_active == True,
+                )
+                .all()
+            )
+
+            # Find RO (1st level manager)
+            if cc.ro_user_id is None:
+                manager_object_ids = {
+                    e.manager_object_id for e in employees if e.manager_object_id
+                }
+                for mgr_oid in manager_object_ids:
+                    manager_user = users_by_object_id.get(mgr_oid)
+                    if manager_user:
+                        cc.ro_user_id = manager_user.id
+                        cc_updated = True
+                        logger.info(
+                            "assign_cc_managers: set ro_user_id=%s for cost_center=%s",
+                            manager_user.id, cc.id,
+                        )
+                        break
+
+            # Find Director (2nd level manager)
+            if cc.director_user_id is None and cc.ro_user_id:
+                ro_user = db.query(User).filter(User.id == cc.ro_user_id).first()
+                if ro_user and ro_user.manager_object_id:
+                    director_user = users_by_object_id.get(ro_user.manager_object_id)
+                    if director_user:
+                        cc.director_user_id = director_user.id
+                        cc_updated = True
+                        logger.info(
+                            "assign_cc_managers: set director_user_id=%s for cost_center=%s",
+                            director_user.id, cc.id,
+                        )
+
+            if cc_updated:
+                updated += 1
+            else:
+                skipped += 1
+
+        except Exception as exc:
+            logger.error(
+                "assign_cc_managers: error processing cost_center=%s: %s", cc.id, exc
+            )
+            errors += 1
+
+    db.commit()
+    logger.info(
+        "assign_cc_managers: done — updated=%d skipped=%d errors=%d",
+        updated, skipped, errors,
+    )
+    return {
+        "total_cost_centers": len(cost_centers),
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
+    }
 
 
 def promote_managers_from_graph(db: Session, settings: Settings, tenant_id: str) -> dict:

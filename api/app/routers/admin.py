@@ -919,3 +919,34 @@ async def debug_graph_test(
             }
     except Exception as exc:
         return {"error": str(exc)}
+
+@router.get("/debug/graph-filter-test")
+async def debug_graph_filter_test(
+    current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
+):
+    from api.app.services.graph_app_client import GraphAppClient, FETCH_FAILED
+    import httpx
+    settings = get_settings()
+    graph = GraphAppClient(settings)
+    token = graph._get_token()
+    if token is FETCH_FAILED:
+        return {"error": "Token acquisition failed"}
+
+    try:
+        with httpx.Client(timeout=30) as client:
+            resp = client.get(
+                "https://graph.microsoft.com/v1.0/users",
+                params={
+                    "$select": "id,displayName,mail,userPrincipalName,accountEnabled,department",
+                    "$top": 5,
+                    "$filter": "endsWith(userPrincipalName,'@ferrosanmd.com') and accountEnabled eq true",
+                    "$count": "true",
+                },
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "ConsistencyLevel": "eventual",
+                },
+            )
+            return {"status": resp.status_code, "body": resp.json()}
+    except Exception as exc:
+        return {"error": str(exc)}

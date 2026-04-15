@@ -91,9 +91,10 @@ class GraphAppClient:
             return FETCH_FAILED
 
     def list_all_users(self) -> list[dict]:
-        """Fetch all users in the tenant from Graph with pagination.
+        """Fetch all @ferrosanmd.com users from Graph with pagination.
 
-        Returns list of user dicts, or empty list on error.
+        Uses endsWith advanced filter which requires ConsistencyLevel: eventual
+        and $count=true. Returns list of user dicts, or empty list on error.
         """
         token = self._get_token()
         if token is FETCH_FAILED:
@@ -105,28 +106,39 @@ class GraphAppClient:
         params = {
             "$select": _USER_SELECT,
             "$top": 999,
+            "$filter": "endsWith(userPrincipalName,'@ferrosanmd.com') and accountEnabled eq true",
+            "$count": "true",
+        }
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "ConsistencyLevel": "eventual",
         }
 
         try:
             with httpx.Client(timeout=60) as client:
+                batch = 0
                 while url:
-                    resp = client.get(
-                        url,
-                        params=params,
-                        headers={"Authorization": f"Bearer {token}"},
-                    )
+                    resp = client.get(url, params=params, headers=headers)
                     if resp.status_code != 200:
                         logger.warning(
-                            "GraphAppClient: list_all_users got status %d: %s",
+                            "GraphAppClient: list_all_users got status %d: %.500s",
                             resp.status_code,
                             resp.text,
                         )
                         return []
                     data = resp.json()
-                    users.extend(data.get("value", []))
+                    batch_users = data.get("value", [])
+                    users.extend(batch_users)
+                    batch += 1
+                    logger.info(
+                        "GraphAppClient: list_all_users batch %d fetched %d users (running total %d)",
+                        batch,
+                        len(batch_users),
+                        len(users),
+                    )
                     url = data.get("@odata.nextLink")
-                    params = {}  # nextLink already contains params
-            logger.info("GraphAppClient: fetched %d users from Graph", len(users))
+                    params = {}  # nextLink already contains all params
+            logger.info("GraphAppClient: list_all_users complete — total %d users", len(users))
             return users
         except Exception as exc:
             logger.warning("GraphAppClient: list_all_users failed: %s", exc)

@@ -1,5 +1,5 @@
 """Audit log model."""
-from datetime import datetime, timezone
+from datetime import datetime
 from sqlalchemy import String, DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from api.app.db.base import Base
@@ -11,7 +11,7 @@ class AuditLog(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        "created_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        "created_at", DateTime, default=datetime.utcnow
     )
     user_id: Mapped[str] = mapped_column(String(36), nullable=False)
     user_email: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -22,3 +22,4 @@ class AuditLog(Base):
     new_values: Mapped[str] = mapped_column(Text, nullable=True)  # JSON string
     reason: Mapped[str] = mapped_column(Text, nullable=True)
     ip_address: Mapped[str] = mapped_column(String(64), nullable=True)
+

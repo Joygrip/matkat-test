@@ -144,6 +144,80 @@ class GraphAppClient:
             logger.warning("GraphAppClient: list_all_users failed: %s", exc)
             return []
 
+    def list_all_managers(self, object_ids: list[str]) -> set[str]:
+        """Return the set of object_ids that are managers of at least one user.
+
+        Uses the Graph Batch API (POST $batch) to fetch /users/{oid}/manager for all
+        provided object_ids in chunks of 20 (the Graph batch limit).
+
+        Returns an empty set if token acquisition fails or all batch calls fail.
+        """
+        token = self._get_token()
+        if token is FETCH_FAILED:
+            logger.warning("list_all_managers: token acquisition failed — returning empty set")
+            return set()
+
+        batch_size = 20
+        total_batches = (len(object_ids) + batch_size - 1) // batch_size
+        logger.info(
+            "list_all_managers: processing %d users in %d batches",
+            len(object_ids),
+            total_batches,
+        )
+
+        managers: set[str] = set()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        for batch_index in range(total_batches):
+            chunk = object_ids[batch_index * batch_size : (batch_index + 1) * batch_size]
+            requests_body = {
+                "requests": [
+                    {
+                        "id": str(i + 1),
+                        "method": "GET",
+                        "url": f"/users/{oid}/manager?$select=id",
+                    }
+                    for i, oid in enumerate(chunk)
+                ]
+            }
+            try:
+                with httpx.Client(timeout=30) as client:
+                    resp = client.post(
+                        f"{_GRAPH_BASE}/$batch",
+                        json=requests_body,
+                        headers=headers,
+                    )
+                    resp.raise_for_status()
+                    batch_responses = resp.json().get("responses", [])
+                    for item in batch_responses:
+                        status = item.get("status")
+                        body = item.get("body") or {}
+                        if status == 200:
+                            manager_id = body.get("id")
+                            if manager_id:
+                                managers.add(manager_id)
+                        elif status == 404:
+                            pass  # user has no manager — expected
+                        else:
+                            logger.warning(
+                                "list_all_managers: unexpected batch item status=%s body=%s",
+                                status,
+                                body,
+                            )
+            except Exception as exc:
+                logger.warning(
+                    "list_all_managers: batch %d/%d call failed: %s",
+                    batch_index + 1,
+                    total_batches,
+                    exc,
+                )
+
+        logger.info("list_all_managers: found %d unique managers", len(managers))
+        return managers
+
     # ------------------------------------------------------------------
     # Token acquisition
     # ------------------------------------------------------------------

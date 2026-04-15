@@ -25,7 +25,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from api.app.config import Settings
-from api.app.models.core import User, CostCenter, UserRole
+from api.app.models.core import User, CostCenter, UserRole, generate_uuid
 from api.app.services.graph_app_client import GraphAppClient, FETCH_FAILED
 
 logger = logging.getLogger(__name__)
@@ -288,6 +288,132 @@ def import_users_from_graph(db: Session, settings: Settings, tenant_id: str) -> 
     return {
         "total_from_graph": len(graph_users),
         "created": created,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
+def import_departments_from_graph(db: Session, settings: Settings, tenant_id: str) -> dict:
+    """Import unique Graph department values as CostCenters.
+
+    Creates a new CostCenter for each department name not already present.
+    The 'code' field is left blank for the admin to fill in manually.
+    """
+    graph = GraphAppClient(settings)
+
+    if not (settings.graph_client_id and settings.graph_client_secret and settings.azure_tenant_id):
+        return {"error": "Graph credentials not configured"}
+
+    graph_users = graph.list_all_users()
+    if not graph_users:
+        return {"error": "No users returned from Graph or Graph call failed"}
+
+    unique_departments = {
+        u.get("department")
+        for u in graph_users
+        if u.get("department")
+    }
+
+    created = 0
+    skipped = 0
+    errors = 0
+
+    for department in unique_departments:
+        try:
+            existing = db.query(CostCenter).filter(
+                CostCenter.tenant_id == tenant_id,
+                CostCenter.graph_department_name == department,
+            ).first()
+
+            if existing:
+                skipped += 1
+                continue
+
+            new_cc = CostCenter(
+                id=generate_uuid(),
+                tenant_id=tenant_id,
+                name=department,
+                graph_department_name=department,
+                code="",
+                is_active=True,
+            )
+            db.add(new_cc)
+            db.flush()
+            created += 1
+            logger.info("import_departments: created cost_center name=%s", department)
+        except Exception as exc:
+            logger.error(
+                "import_departments: error processing department=%s: %s", department, exc
+            )
+            errors += 1
+
+    db.commit()
+    logger.info(
+        "import_departments: done — created=%d skipped=%d errors=%d",
+        created, skipped, errors,
+    )
+    return {
+        "total_departments": len(unique_departments),
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
+def assign_users_to_departments(db: Session, settings: Settings, tenant_id: str) -> dict:
+    """Re-run Graph sync to assign users to cost centers via department name matching."""
+    result = run_graph_sync(db, settings, tenant_id)
+    return result.as_dict()
+
+
+def promote_managers_from_graph(db: Session, settings: Settings, tenant_id: str) -> dict:
+    """Promote users to Manager role if they manage at least one other user in Graph.
+
+    Never demotes — users with ADMIN, FINANCE, PM, or MANAGER roles are left unchanged.
+    """
+    graph = GraphAppClient(settings)
+
+    if not (settings.graph_client_id and settings.graph_client_secret and settings.azure_tenant_id):
+        return {"error": "Graph credentials not configured"}
+
+    db_users: list[User] = (
+        db.query(User)
+        .filter(User.tenant_id == tenant_id, User.is_active == True)
+        .all()
+    )
+
+    object_ids = [u.object_id for u in db_users if u.object_id]
+    managers_set = graph.list_all_managers(object_ids)
+
+    if not managers_set:
+        return {"error": "No managers found or Graph call failed"}
+
+    promoted = 0
+    skipped = 0
+    errors = 0
+
+    for user in db_users:
+        if user.object_id in managers_set:
+            if user.role == UserRole.EMPLOYEE:
+                user.role = UserRole.MANAGER
+                promoted += 1
+                logger.info(
+                    "promote_managers: promoted object_id=%s email=%s",
+                    user.object_id,
+                    user.email,
+                )
+            else:
+                skipped += 1
+
+    db.commit()
+    logger.info(
+        "promote_managers: done — promoted=%d skipped=%d errors=%d",
+        promoted, skipped, errors,
+    )
+    return {
+        "total_users_checked": len(db_users),
+        "total_managers_in_graph": len(managers_set),
+        "promoted": promoted,
         "skipped": skipped,
         "errors": errors,
     }

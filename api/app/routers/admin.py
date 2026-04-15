@@ -651,6 +651,33 @@ async def import_users_from_graph_endpoint(
     result = import_users_from_graph(db, settings, current_user.tenant_id)
     return result
 
+@router.post("/sync/import-departments")
+async def import_departments_endpoint(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
+):
+    """Import unique Graph departments as CostCenters. Code field left blank for admin to fill."""
+    from api.app.services.background_sync import import_departments_from_graph
+    return import_departments_from_graph(db, get_settings(), current_user.tenant_id)
+
+@router.post("/sync/assign-user-departments")
+async def assign_user_departments_endpoint(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
+):
+    """Re-run Graph sync to assign users to cost centers based on department name matching."""
+    from api.app.services.background_sync import assign_users_to_departments
+    return assign_users_to_departments(db, get_settings(), current_user.tenant_id)
+
+@router.post("/sync/promote-managers")
+async def promote_managers_endpoint(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
+):
+    """Promote users to Manager role if they manage at least one other user in Graph."""
+    from api.app.services.background_sync import promote_managers_from_graph
+    return promote_managers_from_graph(db, get_settings(), current_user.tenant_id)
+
 # ============== USERS ==============
 
 def _enrich_user(user: User) -> dict:

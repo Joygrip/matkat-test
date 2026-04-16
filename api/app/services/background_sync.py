@@ -366,6 +366,13 @@ def assign_users_to_departments(db: Session, settings: Settings, tenant_id: str)
     return result.as_dict()
 
 
+def _get_initials(user) -> str:
+    """Extract initials from email prefix (if @ferrosanmd.com) or first letters of display_name words."""
+    if user.email and "@ferrosanmd.com" in user.email.lower():
+        return user.email.split("@")[0].upper()[:20]
+    return "".join(word[0].upper() for word in (user.display_name or "").split() if word)[:3]
+
+
 def create_resources_from_users(db: Session, settings: Settings, tenant_id: str) -> dict:
     """Create Resource entries for all active Employee and Manager users that don't have one yet."""
     users: list[User] = (
@@ -391,11 +398,14 @@ def create_resources_from_users(db: Session, settings: Settings, tenant_id: str)
             ).first()
 
             if existing:
+                correct_initials = _get_initials(user)
+                if existing.initials != correct_initials:
+                    existing.initials = correct_initials
+                    db.flush()
                 skipped += 1
                 continue
 
-            words = (user.display_name or "").split()
-            initials = "".join(w[0].upper() for w in words if w)[:3]
+            initials = _get_initials(user)
 
             new_resource = Resource(
                 id=generate_uuid(),
@@ -436,7 +446,7 @@ def create_resources_from_users(db: Session, settings: Settings, tenant_id: str)
     }
 
 
-def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str) -> dict:
+def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str, force: bool = False) -> dict:
     """Assign RO (1st level) and Director (2nd level) managers to each cost center."""
     cost_centers: list[CostCenter] = (
         db.query(CostCenter)
@@ -468,7 +478,7 @@ def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str)
             )
 
             # Find RO (1st level manager)
-            if cc.ro_user_id is None:
+            if cc.ro_user_id is None or force:
                 manager_object_ids = {
                     e.manager_object_id for e in employees if e.manager_object_id
                 }
@@ -484,7 +494,7 @@ def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str)
                         break
 
             # Find Director (2nd level manager)
-            if cc.director_user_id is None and cc.ro_user_id:
+            if (cc.director_user_id is None or force) and cc.ro_user_id:
                 ro_user = db.query(User).filter(User.id == cc.ro_user_id).first()
                 if ro_user and ro_user.manager_object_id:
                     director_user = users_by_object_id.get(ro_user.manager_object_id)
@@ -570,4 +580,82 @@ def promote_managers_from_graph(db: Session, settings: Settings, tenant_id: str)
         "promoted": promoted,
         "skipped": skipped,
         "errors": errors,
+    }
+
+
+def run_full_sync(db: Session, settings: Settings, tenant_id: str) -> dict:
+    """Run all 6 Graph sync steps in sequence. Each step failure is caught independently."""
+    started_at = datetime.utcnow()
+    steps = {}
+    total_errors = 0
+
+    # Step 1: Import users
+    try:
+        steps["import_users"] = import_users_from_graph(db, settings, tenant_id)
+        total_errors += steps["import_users"].get("errors", 0)
+    except Exception as exc:
+        logger.error("full_sync: step import_users failed: %s", exc)
+        steps["import_users"] = {"error": str(exc)}
+        total_errors += 1
+
+    # Step 2: Sync profiles & departments (force deactivate missing)
+    original = settings.graph_sync_deactivate_missing
+    settings.graph_sync_deactivate_missing = True
+    try:
+        result = run_graph_sync(db, settings, tenant_id)
+        steps["sync_profiles"] = result.as_dict()
+        total_errors += result.errors
+    except Exception as exc:
+        logger.error("full_sync: step sync_profiles failed: %s", exc)
+        steps["sync_profiles"] = {"error": str(exc)}
+        total_errors += 1
+    finally:
+        settings.graph_sync_deactivate_missing = original
+
+    # Step 3: Import departments
+    try:
+        steps["import_departments"] = import_departments_from_graph(db, settings, tenant_id)
+        total_errors += steps["import_departments"].get("errors", 0)
+    except Exception as exc:
+        logger.error("full_sync: step import_departments failed: %s", exc)
+        steps["import_departments"] = {"error": str(exc)}
+        total_errors += 1
+
+    # Step 4: Promote managers
+    try:
+        steps["promote_managers"] = promote_managers_from_graph(db, settings, tenant_id)
+        total_errors += steps["promote_managers"].get("errors", 0)
+    except Exception as exc:
+        logger.error("full_sync: step promote_managers failed: %s", exc)
+        steps["promote_managers"] = {"error": str(exc)}
+        total_errors += 1
+
+    # Step 5: Create resources
+    try:
+        steps["create_resources"] = create_resources_from_users(db, settings, tenant_id)
+        total_errors += steps["create_resources"].get("errors", 0)
+    except Exception as exc:
+        logger.error("full_sync: step create_resources failed: %s", exc)
+        steps["create_resources"] = {"error": str(exc)}
+        total_errors += 1
+
+    # Step 6: Assign cost center managers (force=True to refresh existing assignments)
+    try:
+        steps["assign_cc_managers"] = assign_cost_center_managers(db, settings, tenant_id, force=True)
+        total_errors += steps["assign_cc_managers"].get("errors", 0)
+    except Exception as exc:
+        logger.error("full_sync: step assign_cc_managers failed: %s", exc)
+        steps["assign_cc_managers"] = {"error": str(exc)}
+        total_errors += 1
+
+    finished_at = datetime.utcnow()
+    duration = round((finished_at - started_at).total_seconds(), 1)
+    logger.info("full_sync: completed in %.1fs with %d total errors", duration, total_errors)
+
+    return {
+        "started_at": started_at.isoformat(),
+        "finished_at": finished_at.isoformat(),
+        "duration_seconds": duration,
+        "steps": steps,
+        "total_errors": total_errors,
     }

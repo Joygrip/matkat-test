@@ -696,6 +696,15 @@ async def assign_cost_center_managers_endpoint(
     from api.app.services.background_sync import assign_cost_center_managers
     return assign_cost_center_managers(db, get_settings(), current_user.tenant_id)
 
+@router.post("/sync/full")
+async def full_sync_endpoint(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
+):
+    """Run all Graph sync steps in sequence. Admin only."""
+    from api.app.services.background_sync import run_full_sync
+    return run_full_sync(db, get_settings(), current_user.tenant_id)
+
 # ============== USERS ==============
 
 def _enrich_user(user: User) -> dict:

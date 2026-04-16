@@ -44,6 +44,7 @@ import {
   PersonQuestionMarkRegular,
   PeopleTeamRegular,
   ChevronRightRegular,
+  ArrowSyncRegular,
 } from '@fluentui/react-icons';
 import {
   adminApi,
@@ -150,7 +151,8 @@ type TabValue =
   | 'placeholders'
   | 'manager-overrides'
   | 'delegates'
-  | 'users';
+  | 'users'
+  | 'sync';
 
 function DevSeedResetButton() {
   const { showSuccess, showApiError } = useToast();
@@ -178,6 +180,164 @@ function DevSeedResetButton() {
     >
       {loading ? 'Resetting…' : '⚠ Wipe & Re-seed Example Data'}
     </Button>
+  );
+}
+
+// ── Sync Panel ───────────────────────────────────────────────────────────────
+
+interface StepResult {
+  error?: string;
+  created?: number;
+  skipped?: number;
+  errors?: number;
+  synced?: number;
+  promoted?: number;
+  updated?: number;
+}
+
+interface FullSyncResult {
+  started_at: string;
+  finished_at: string;
+  duration_seconds: number;
+  steps: Record<string, StepResult>;
+  total_errors: number;
+}
+
+const STEP_LABELS: Record<string, string> = {
+  import_users: 'Import Users',
+  sync_profiles: 'Sync Profiles & Departments',
+  import_departments: 'Import Departments',
+  promote_managers: 'Promote Managers',
+  create_resources: 'Create Resources',
+  assign_cc_managers: 'Assign Cost Center Managers',
+};
+
+function getStepStats(key: string, step: StepResult): string {
+  if (step.error) return `Error: ${step.error}`;
+  switch (key) {
+    case 'import_users':      return `created: ${step.created ?? 0}, skipped: ${step.skipped ?? 0}`;
+    case 'sync_profiles':     return `synced: ${step.synced ?? 0}, errors: ${step.errors ?? 0}`;
+    case 'import_departments':return `created: ${step.created ?? 0}, skipped: ${step.skipped ?? 0}`;
+    case 'promote_managers':  return `promoted: ${step.promoted ?? 0}, skipped: ${step.skipped ?? 0}`;
+    case 'create_resources':  return `created: ${step.created ?? 0}, skipped: ${step.skipped ?? 0}`;
+    case 'assign_cc_managers':return `updated: ${step.updated ?? 0}, skipped: ${step.skipped ?? 0}`;
+    default: return JSON.stringify(step);
+  }
+}
+
+const useSyncPanelStyles = makeStyles({
+  panel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
+    maxWidth: '640px',
+  },
+  description: {
+    color: tokens.colorNeutralForeground2,
+  },
+  resultCard: {
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: tokens.spacingHorizontalM,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    marginTop: tokens.spacingVerticalS,
+  },
+  stepRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    padding: `${tokens.spacingVerticalXS} 0`,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  stepStats: {
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase200,
+  },
+  errorText: {
+    color: tokens.colorPaletteRedForeground1,
+    fontSize: tokens.fontSizeBase200,
+  },
+  successText: {
+    color: tokens.colorStatusSuccessForeground1,
+  },
+  totalRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    paddingTop: tokens.spacingVerticalS,
+  },
+});
+
+function SyncPanel() {
+  const syncStyles = useSyncPanelStyles();
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<FullSyncResult | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  const handleRunSync = async () => {
+    setLoading(true);
+    setResult(null);
+    setSyncError(null);
+    try {
+      const data = await apiClient.post<FullSyncResult>('/admin/sync/full');
+      setResult(data);
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Sync failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className={syncStyles.panel}>
+      <Text className={syncStyles.description}>
+        Synchronize users, departments, managers and resources from Microsoft Entra ID.
+        This will import new users, update profiles, promote managers and assign cost centers.
+      </Text>
+      <MessageBar intent="warning">
+        <MessageBarBody>
+          Full sync may take 1–2 minutes. Do not close this page while sync is running.
+        </MessageBarBody>
+      </MessageBar>
+      <div>
+        <Button
+          appearance="primary"
+          icon={loading ? <Spinner size="tiny" /> : <ArrowSyncRegular />}
+          disabled={loading}
+          onClick={handleRunSync}
+        >
+          {loading ? 'Syncing...' : 'Run Full Sync'}
+        </Button>
+      </div>
+      {syncError && (
+        <MessageBar intent="error">
+          <MessageBarBody>{syncError}</MessageBarBody>
+        </MessageBar>
+      )}
+      {result && (
+        <div className={syncStyles.resultCard}>
+          <Text weight="semibold">Sync completed in {result.duration_seconds}s</Text>
+          {Object.entries(result.steps).map(([key, step]) => (
+            <div key={key} className={syncStyles.stepRow}>
+              <Text weight="semibold">{STEP_LABELS[key] ?? key}</Text>
+              <Text className={step.error ? syncStyles.errorText : syncStyles.stepStats}>
+                {getStepStats(key, step)}
+              </Text>
+            </div>
+          ))}
+          <div className={syncStyles.totalRow}>
+            <Text weight="semibold">Total errors</Text>
+            <Text
+              weight="semibold"
+              className={result.total_errors > 0 ? syncStyles.errorText : syncStyles.successText}
+            >
+              {result.total_errors}
+            </Text>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -503,6 +663,7 @@ export function Admin() {
   // ── Table renderers ──────────────────────────────────────────────────────
 
   const renderTable = () => {
+    if (selectedTab === 'sync') return <SyncPanel />;
     if (loading) return <Spinner label="Loading..." />;
 
     switch (selectedTab) {
@@ -1320,6 +1481,7 @@ export function Admin() {
     'manager-overrides': 'Manager Overrides',
     'delegates': 'Approval Delegates',
     'users': 'Users',
+    'sync': 'Graph Synchronization',
   };
 
   const detailDialogTitle =
@@ -1348,6 +1510,9 @@ export function Admin() {
           {canManageSettings && (
             <Tab value="users" icon={<PeopleTeamRegular />}>Users</Tab>
           )}
+          {canManageSettings && (
+            <Tab value="sync" icon={<ArrowSyncRegular />}>Sync</Tab>
+          )}
         </TabList>
 
         <div className={styles.tabContent}>
@@ -1365,7 +1530,7 @@ export function Admin() {
                 </p>
               )}
             </div>
-            {selectedTab !== 'users' && (canManageMasterData ||
+            {selectedTab !== 'users' && selectedTab !== 'sync' && (canManageMasterData ||
               (selectedTab === 'manager-overrides' && canManageSettings) ||
               (selectedTab === 'delegates' && canManageDelegates)) && (
               <Button appearance="primary" icon={<AddRegular />} onClick={openCreateDialog}>

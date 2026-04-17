@@ -900,7 +900,7 @@ class FinanceService:
             if not _allowed(line.project_id):
                 continue
             year, month = period_map[line.period_id]
-            agg[(line.project_id, year, month)]["externals_cost"] += line.total_cost
+            agg[(line.project_id, year, month)]["externals_cost"] += line.cost
 
         # 10. Equipment lines → equipment cost
         equip_q = self.db.query(ProjectEquipmentLine).filter(
@@ -962,4 +962,5 @@ class FinanceService:
             setting_value=row.setting_value,
             updated_at=row.updated_at.isoformat() if row.updated_at else None,
         )
+
 

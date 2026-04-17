@@ -71,3 +71,4 @@ logs/
 *.tmp
 *.temp
 .cache/
+frontend/.env.production

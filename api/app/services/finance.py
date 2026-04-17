@@ -591,9 +591,9 @@ class FinanceService:
                         resource_name=resource.display_name if resource else None,
                         description=line.description,
                         notes=line.notes,
-                        hours=line.hours,
-                        rate=line.rate,
-                        total_cost=line.total_cost,
+                        hours=0,
+                        rate=0,
+                        total_cost=line.cost,
                         project_name=project_map.get(line.project_id),
                     )
                     for line, resource in ext_rows
@@ -721,9 +721,9 @@ class FinanceService:
                 resource_name=resource.display_name if resource else None,
                 description=line.description,
                 notes=line.notes,
-                hours=line.hours,
-                rate=line.rate,
-                total_cost=line.total_cost,
+                hours=0,
+                        rate=0,
+                        total_cost=line.cost,
             )
             for line, resource in ext_rows
         ]
@@ -962,5 +962,6 @@ class FinanceService:
             setting_value=row.setting_value,
             updated_at=row.updated_at.isoformat() if row.updated_at else None,
         )
+
 
 

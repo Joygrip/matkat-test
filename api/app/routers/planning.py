@@ -199,52 +199,42 @@ async def bulk_demand_lines(
 ):
     """
     Bulk create, update, and delete demand lines.
-    Accepts a list of actions. If all_or_nothing is True, rolls back all on any error.
+    Accepts a list of actions. If all_or_nothing is True, stops on first error.
     """
     service = DemandService(db, current_user)
     results = []
-    errors = []
-    try:
-        if req.all_or_nothing:
-            with db.begin_nested():
-                for action in req.actions:
-                    try:
-                        if action.action == 'create' and isinstance(action.data, BulkDemandLineCreate):
-                            obj = service.create(**action.data.model_dump())
-                            results.append(BulkDemandLineResult(action="create", id=getattr(obj, 'id', None), status="success", error=None))
-                        elif action.action == 'update' and isinstance(action.data, BulkDemandLineUpdate):
-                            obj = service.update(action.data.id, action.data.fte_percent)
-                            results.append(BulkDemandLineResult(action="update", id=action.data.id, status="success", error=None))
-                        elif action.action == 'delete' and isinstance(action.data, BulkDemandLineDelete):
-                            service.delete(action.data.id)
-                            results.append(BulkDemandLineResult(action="delete", id=action.data.id, status="success", error=None))
-                        else:
-                            raise ValueError("Unknown or invalid action/data type")
-                    except Exception as e:
-                        errors.append(str(e))
-                        raise
-                if errors:
-                    raise Exception("Bulk operation failed")
-        else:
-            for action in req.actions:
-                try:
-                    if action.action == 'create' and isinstance(action.data, BulkDemandLineCreate):
-                        obj = service.create(**action.data.model_dump())
-                        results.append(BulkDemandLineResult(action="create", id=getattr(obj, 'id', None), status="success", error=None))
-                    elif action.action == 'update' and isinstance(action.data, BulkDemandLineUpdate):
-                        obj = service.update(action.data.id, action.data.fte_percent)
-                        results.append(BulkDemandLineResult(action="update", id=action.data.id, status="success", error=None))
-                    elif action.action == 'delete' and isinstance(action.data, BulkDemandLineDelete):
-                        service.delete(action.data.id)
-                        results.append(BulkDemandLineResult(action="delete", id=action.data.id, status="success", error=None))
-                    else:
-                        raise ValueError("Unknown or invalid action/data type")
-                except Exception as e:
-                    results.append(BulkDemandLineResult(action=action.action, id=getattr(action.data, 'id', None), status="error", error=str(e)))
-    except Exception as e:
-        if req.all_or_nothing:
-            db.rollback()
-            return BulkDemandLineResponse(results=[BulkDemandLineResult(action=a.action, id=getattr(a.data, 'id', None), status="error", error=str(e)) for a in req.actions])
+    for action in req.actions:
+        try:
+            if action.action == 'create' and isinstance(action.data, BulkDemandLineCreate):
+                obj = service.create(**action.data.model_dump())
+                results.append(BulkDemandLineResult(action="create", id=getattr(obj, 'id', None), status="success", error=None))
+            elif action.action == 'update' and isinstance(action.data, BulkDemandLineUpdate):
+                obj = service.update(action.data.id, action.data.fte_percent)
+                results.append(BulkDemandLineResult(action="update", id=action.data.id, status="success", error=None))
+            elif action.action == 'delete' and isinstance(action.data, BulkDemandLineDelete):
+                service.delete(action.data.id)
+                results.append(BulkDemandLineResult(action="delete", id=action.data.id, status="success", error=None))
+            else:
+                raise ValueError("Unknown or invalid action/data type")
+        except Exception as e:
+            detail = getattr(e, 'detail', None)
+            error_msg = detail.get('message', str(e)) if isinstance(detail, dict) else str(detail or e)
+            results.append(BulkDemandLineResult(
+                action=action.action,
+                id=getattr(action.data, 'id', None),
+                status="error",
+                error=error_msg,
+            ))
+            if req.all_or_nothing:
+                remaining = req.actions[len(results):]
+                for rem in remaining:
+                    results.append(BulkDemandLineResult(
+                        action=rem.action,
+                        id=getattr(rem.data, 'id', None),
+                        status="error",
+                        error="Skipped due to earlier failure",
+                    ))
+                break
     return BulkDemandLineResponse(results=results)
 
 
@@ -365,50 +355,40 @@ async def bulk_supply_lines(
 ):
     """
     Bulk create, update, and delete supply lines.
-    Accepts a list of actions. If all_or_nothing is True, rolls back all on any error.
+    Accepts a list of actions. If all_or_nothing is True, stops on first error.
     """
     service = SupplyService(db, current_user)
     results = []
-    errors = []
-    try:
-        if req.all_or_nothing:
-            with db.begin_nested():
-                for action in req.actions:
-                    try:
-                        if action.action == 'create' and isinstance(action.data, BulkSupplyLineCreate):
-                            obj = service.create(**action.data.model_dump())
-                            results.append(BulkSupplyLineResult(action="create", id=getattr(obj, 'id', None), status="success", error=None))
-                        elif action.action == 'update' and isinstance(action.data, BulkSupplyLineUpdate):
-                            obj = service.update(action.data.id, action.data.fte_percent)
-                            results.append(BulkSupplyLineResult(action="update", id=action.data.id, status="success", error=None))
-                        elif action.action == 'delete' and isinstance(action.data, BulkSupplyLineDelete):
-                            service.delete(action.data.id)
-                            results.append(BulkSupplyLineResult(action="delete", id=action.data.id, status="success", error=None))
-                        else:
-                            raise ValueError("Unknown or invalid action/data type")
-                    except Exception as e:
-                        errors.append(str(e))
-                        raise
-                if errors:
-                    raise Exception("Bulk operation failed")
-        else:
-            for action in req.actions:
-                try:
-                    if action.action == 'create' and isinstance(action.data, BulkSupplyLineCreate):
-                        obj = service.create(**action.data.model_dump())
-                        results.append(BulkSupplyLineResult(action="create", id=getattr(obj, 'id', None), status="success", error=None))
-                    elif action.action == 'update' and isinstance(action.data, BulkSupplyLineUpdate):
-                        obj = service.update(action.data.id, action.data.fte_percent)
-                        results.append(BulkSupplyLineResult(action="update", id=action.data.id, status="success", error=None))
-                    elif action.action == 'delete' and isinstance(action.data, BulkSupplyLineDelete):
-                        service.delete(action.data.id)
-                        results.append(BulkSupplyLineResult(action="delete", id=action.data.id, status="success", error=None))
-                    else:
-                        raise ValueError("Unknown or invalid action/data type")
-                except Exception as e:
-                    results.append(BulkSupplyLineResult(action=action.action, id=getattr(action.data, 'id', None), status="error", error=str(e)))
-    except Exception as e:
-        if req.all_or_nothing:
-            db.rollback()
-            return BulkSupplyLineResponse(results=[BulkSupplyLineResult(action=a.action, id=getattr(a.data, 'id', None), status="error", error=str(e)) for a in req.actions])
+    for action in req.actions:
+        try:
+            if action.action == 'create' and isinstance(action.data, BulkSupplyLineCreate):
+                obj = service.create(**action.data.model_dump())
+                results.append(BulkSupplyLineResult(action="create", id=getattr(obj, 'id', None), status="success", error=None))
+            elif action.action == 'update' and isinstance(action.data, BulkSupplyLineUpdate):
+                obj = service.update(action.data.id, action.data.fte_percent)
+                results.append(BulkSupplyLineResult(action="update", id=action.data.id, status="success", error=None))
+            elif action.action == 'delete' and isinstance(action.data, BulkSupplyLineDelete):
+                service.delete(action.data.id)
+                results.append(BulkSupplyLineResult(action="delete", id=action.data.id, status="success", error=None))
+            else:
+                raise ValueError("Unknown or invalid action/data type")
+        except Exception as e:
+            detail = getattr(e, 'detail', None)
+            error_msg = detail.get('message', str(e)) if isinstance(detail, dict) else str(detail or e)
+            results.append(BulkSupplyLineResult(
+                action=action.action,
+                id=getattr(action.data, 'id', None),
+                status="error",
+                error=error_msg,
+            ))
+            if req.all_or_nothing:
+                remaining = req.actions[len(results):]
+                for rem in remaining:
+                    results.append(BulkSupplyLineResult(
+                        action=rem.action,
+                        id=getattr(rem.data, 'id', None),
+                        status="error",
+                        error="Skipped due to earlier failure",
+                    ))
+                break
     return BulkSupplyLineResponse(results=results)

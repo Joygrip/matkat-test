@@ -18,12 +18,10 @@ import {
   TableHeaderCell,
   TableBody,
   TableCell,
-  Badge,
   tokens,
   makeStyles,
   Select,
   Input,
-  Checkbox,
   Toolbar,
   ToolbarButton,
   TabList,
@@ -39,7 +37,7 @@ import {
   DialogContent,
   DialogActions,
 } from '@fluentui/react-components';
-import { Add24Regular, Delete24Regular, CalendarRegular, Edit24Regular, ChevronRight20Regular, ChevronDown20Regular } from '@fluentui/react-icons';
+import { Add24Regular, Delete24Regular } from '@fluentui/react-icons';
 import { planningApi, DemandLine, CreateDemandLine } from '../api/planning';
 import { usePeriod } from '../contexts/PeriodContext';
 import { lookupsApi, Project, Resource, Placeholder, CostCenter } from '../api/lookups';
@@ -47,8 +45,8 @@ import { useToast } from '../hooks/useToast';
 import { formatApiError } from '../utils/errors';
 import { useAuth } from '../auth/AuthProvider';
 import { StatusBanner } from '../components/StatusBanner';
-import { EmptyState } from '../components/EmptyState';
 import { LoadingState } from '../components/LoadingState';
+import { DemandMatrix } from '../components/DemandMatrix';
 import { ResourcePicker } from '../components/ResourcePicker';
 import { PlaceholderPicker } from '../components/PlaceholderPicker';
 import { periodsApi } from '../api/periods';
@@ -207,28 +205,6 @@ const useStyles = makeStyles({
   },
 });
 
-interface GroupedDemands {
-  costCenterId: string | undefined;
-  costCenterName: string;
-  demands: DemandLine[];
-}
-
-function groupDemandsByCostCenter(demands: DemandLine[]): GroupedDemands[] {
-  const ccMap = new Map<string, GroupedDemands>();
-
-  for (const d of demands) {
-    const ccKey = d.cost_center_id || '__none__';
-    const ccName = d.cost_center_name || 'Unassigned';
-    if (!ccMap.has(ccKey)) {
-      ccMap.set(ccKey, { costCenterId: d.cost_center_id, costCenterName: ccName, demands: [] });
-    }
-    ccMap.get(ccKey)!.demands.push(d);
-  }
-
-  const result = Array.from(ccMap.values());
-  result.sort((a, b) => a.costCenterName.localeCompare(b.costCenterName));
-  return result;
-}
 
 export const Demand: React.FC = () => {
   const styles = useStyles();
@@ -278,11 +254,6 @@ export const Demand: React.FC = () => {
   const [bulkAddPreview, setBulkAddPreview] = useState<any[]>([]);
   const [openPeriods, setOpenPeriods] = useState<Period[]>([]);
 
-  type SortColumn = 'project' | 'resource' | 'period' | 'fte';
-  const [sortBy, setSortBy] = useState<SortColumn>('project');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   
   const filteredDemands = useMemo(() => {
@@ -300,9 +271,6 @@ export const Demand: React.FC = () => {
     });
   }, [demands, selectedProjectId, selectedResourceId]);
   
-  const groupedDemands = useMemo(() => groupDemandsByCostCenter(filteredDemands), [filteredDemands]);
-  const totalColumns = (user?.role === 'Finance' || user?.role === 'PM') ? 7 : 6;
-
   const activeProjectLabel = useMemo(() => {
     if (!selectedProjectId) return null;
     const project = projects.find(p => p.id === selectedProjectId);
@@ -351,50 +319,14 @@ export const Demand: React.FC = () => {
     return ids.size;
   }, [filteredDemands]);
 
-  const sortedGroupedDemands = useMemo(() => {
-    const direction = sortDir === 'asc' ? 1 : -1;
-    const compare = (a: DemandLine, b: DemandLine) => {
-      switch (sortBy) {
-        case 'project': {
-          const aName = a.project_name || '';
-          const bName = b.project_name || '';
-          return aName.localeCompare(bName) * direction;
-        }
-        case 'resource': {
-          const aName = a.resource_name || a.placeholder_name || '';
-          const bName = b.resource_name || b.placeholder_name || '';
-          return aName.localeCompare(bName) * direction;
-        }
-        case 'period': {
-          const aKey = (a.year ?? 0) * 100 + (a.month ?? 0);
-          const bKey = (b.year ?? 0) * 100 + (b.month ?? 0);
-          return (aKey - bKey) * direction;
-        }
-        case 'fte': {
-          const aFte = a.fte_percent ?? 0;
-          const bFte = b.fte_percent ?? 0;
-          return (aFte - bFte) * direction;
-        }
-        default:
-          return 0;
-      }
-    };
-
-    return groupedDemands.map(group => ({
-      ...group,
-      demands: [...group.demands].sort(compare),
-    }));
-  }, [groupedDemands, sortBy, sortDir]);
-  
   useEffect(() => {
     loadInitialData();
   }, []);
   
   useEffect(() => {
-    if (selectedPeriodId) {
-      loadDemands(selectedPeriodId, selectedCostCenterId || undefined);
-    }
-  }, [selectedPeriodId, selectedCostCenterId]);
+    // Load all open periods; fall back to selectedPeriodId if openPeriods not ready yet
+    loadDemands(undefined, selectedCostCenterId || undefined);
+  }, [selectedPeriodId, selectedCostCenterId, openPeriods.length]);
 
   useEffect(() => {
     if (dialogCostCenterId) {
@@ -405,9 +337,15 @@ export const Demand: React.FC = () => {
   }, [dialogCostCenterId, placeholders]);
   
   useEffect(() => {
-    if (isDialogOpen && addMode === 'bulk') {
+    periodsApi.list().then((periods: Period[]) => {
+      setOpenPeriods(periods.filter(p => p.status === 'open').sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month)));
+    });
+  }, []);
+
+  useEffect(() => {
+    if (isDialogOpen && addMode === 'bulk' && openPeriods.length === 0) {
       periodsApi.list().then((periods: Period[]) => {
-        setOpenPeriods(periods.filter(p => p.status === 'open'));
+        setOpenPeriods(periods.filter(p => p.status === 'open').sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month)));
       });
     }
   }, [isDialogOpen, addMode]);
@@ -434,13 +372,19 @@ export const Demand: React.FC = () => {
   };
   
   const loadDemands = async (periodId?: string, costCenterId?: string) => {
-    const pid = periodId || selectedPeriodId;
-    if (!pid) return;
+    const ccFilter = { costCenterId: costCenterId ?? (selectedCostCenterId || undefined) };
     try {
-      const data = await planningApi.getDemandLines(pid, {
-        costCenterId: costCenterId ?? (selectedCostCenterId || undefined),
-      });
-      setDemands(data);
+      // Matrix spans all open periods — load them all so every cell stays visible after a save
+      const periodsToLoad = periodId
+        ? [periodId]
+        : openPeriods.length > 0
+          ? openPeriods.map(p => p.id)
+          : selectedPeriodId
+            ? [selectedPeriodId]
+            : [];
+      if (periodsToLoad.length === 0) return;
+      const results = await Promise.all(periodsToLoad.map(pid => planningApi.getDemandLines(pid, ccFilter)));
+      setDemands(results.flat());
     } catch (err: unknown) {
       showApiError(err as Error, 'Failed to load demand lines');
     }
@@ -491,22 +435,6 @@ export const Demand: React.FC = () => {
     }
   };
   
-  const handleEdit = (d: DemandLine) => {
-    setEditId(d.id);
-    setFormData({
-      period_id: d.period_id,
-      project_id: d.project_id,
-      fte_percent: d.fte_percent,
-      resource_id: d.resource_id,
-      placeholder_id: d.placeholder_id,
-      year: d.year,
-      month: d.month,
-    });
-    setUseResource(!!d.resource_id);
-    setDialogCostCenterId(d.cost_center_id || '');
-    setIsDialogOpen(true);
-  };
-
   const handleSaveEdit = async () => {
     if (!editId) return;
     if (!canEdit) {
@@ -556,27 +484,8 @@ export const Demand: React.FC = () => {
     }
   };
   
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this demand line?')) return;
-    try {
-      await planningApi.deleteDemandLine(id);
-      showSuccess('Demand line deleted');
-      loadDemands();
-    } catch (err: unknown) {
-      showApiError(err as Error, 'Failed to delete demand line');
-    }
-  };
-  
   const isLocked = currentPeriod?.status === 'locked';
   const canEdit = user?.role === 'Finance' || user?.role === 'PM';
-  
-  const allSelected = filteredDemands.length > 0 && selectedIds.length === filteredDemands.length;
-  const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? [] : filteredDemands.map(d => d.id));
-  };
-  const toggleSelect = (id: string) => {
-    setSelectedIds(selectedIds.includes(id) ? selectedIds.filter(x => x !== id) : [...selectedIds, id]);
-  };
   const handleBulkDelete = async () => {
     if (!window.confirm(`Delete ${selectedIds.length} demand lines?`)) return;
     try {
@@ -622,19 +531,6 @@ export const Demand: React.FC = () => {
     }
   };
 
-  // Helper: Generate periods between two dates (inclusive)
-  function generatePeriods(startYear: number, startMonth: number, endYear: number, endMonth: number) {
-    const periods = [];
-    let y = startYear, m = startMonth;
-    while (y < endYear || (y === endYear && m <= endMonth)) {
-      periods.push({ year: y, month: m });
-      m++;
-      if (m > 12) { m = 1; y++; }
-    }
-    return periods;
-  }
-
-
   const handleBulkAddPreview = () => {
     // Preview lines: projects x resources/placeholders x periods
     const preview = [];
@@ -672,23 +568,6 @@ export const Demand: React.FC = () => {
     }
   };
   
-  const handleSort = (column: SortColumn) => {
-    setSortDir(prev => (sortBy === column && prev === 'asc' ? 'desc' : 'asc'));
-    setSortBy(column);
-  };
-
-  const toggleGroupCollapsed = (groupKey: string) => {
-    setCollapsedGroups(prev => {
-      const next = new Set(prev);
-      if (next.has(groupKey)) {
-        next.delete(groupKey);
-      } else {
-        next.add(groupKey);
-      }
-      return next;
-    });
-  };
-  
   if (loading) {
     return <LoadingState message="Loading demand planning data..." />;
   }
@@ -707,7 +586,7 @@ export const Demand: React.FC = () => {
                 setIsDialogOpen(true);
               }}
             >
-              Add Demand
+              Add line (form)
             </Button>
           )}
         </div>
@@ -875,171 +754,16 @@ export const Demand: React.FC = () => {
         </Dialog>
       )}
       
-      <Card className={styles.card}>
-        <CardHeader header={<Body1><strong>Demand Lines ({filteredDemands.length})</strong></Body1>} />
-        
-        <Table className={styles.table}>
-          <TableHeader>
-            <TableRow>
-              {canEdit && (
-                <TableHeaderCell>
-                  <Checkbox checked={allSelected} onChange={toggleSelectAll} />
-                </TableHeaderCell>
-              )}
-              <TableHeaderCell>Cost Center</TableHeaderCell>
-              <TableHeaderCell>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  onClick={() => handleSort('project')}
-                >
-                  Project
-                  {sortBy === 'project' && (sortDir === 'asc' ? ' ▲' : ' ▼')}
-                </Button>
-              </TableHeaderCell>
-              <TableHeaderCell>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  onClick={() => handleSort('resource')}
-                >
-                  Resource
-                  {sortBy === 'resource' && (sortDir === 'asc' ? ' ▲' : ' ▼')}
-                </Button>
-              </TableHeaderCell>
-              <TableHeaderCell>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  onClick={() => handleSort('period')}
-                >
-                  Period
-                  {sortBy === 'period' && (sortDir === 'asc' ? ' ▲' : ' ▼')}
-                </Button>
-              </TableHeaderCell>
-              <TableHeaderCell>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  onClick={() => handleSort('fte')}
-                >
-                  FTE %
-                  {sortBy === 'fte' && (sortDir === 'asc' ? ' ▲' : ' ▼')}
-                </Button>
-              </TableHeaderCell>
-              <TableHeaderCell>Actions</TableHeaderCell>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredDemands.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={totalColumns} style={{ padding: tokens.spacingVerticalXXL }}>
-                  <EmptyState
-                    icon={<CalendarRegular style={{ fontSize: 48 }} />}
-                    title="No demand lines"
-                    message="No demand lines found for the selected filters. Create one to get started."
-                    action={
-                      !isLocked && canEdit ? (
-                        <Button
-                          appearance="primary"
-                          icon={<Add24Regular />}
-                          onClick={() => {
-                            setEditId(null);
-                            setAddMode('single');
-                            setIsDialogOpen(true);
-                          }}
-                        >
-                          Add Demand Line
-                        </Button>
-                      ) : undefined
-                    }
-                  />
-                </TableCell>
-              </TableRow>
-            ) : (
-              sortedGroupedDemands.map(cc => {
-                const groupKey = cc.costCenterId || '__none__';
-                const isCollapsed = collapsedGroups.has(groupKey);
-                const groupFte = cc.demands.reduce((sum, d) => sum + (d.fte_percent ?? 0), 0);
-                return (
-                <React.Fragment key={groupKey}>
-                  <TableRow className={styles.groupHeader}>
-                    <TableCell colSpan={totalColumns}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Button
-                            appearance="subtle"
-                            size="small"
-                            icon={isCollapsed ? <ChevronRight20Regular /> : <ChevronDown20Regular />}
-                            onClick={() => toggleGroupCollapsed(groupKey)}
-                          />
-                          <span>{cc.costCenterName}</span>
-                          <Badge appearance="outline" style={{ marginLeft: 8 }}>
-                            {cc.demands.length} lines
-                          </Badge>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Badge appearance="outline" color="informative">
-                            Total FTE: {groupFte}
-                          </Badge>
-                        </div>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                  {!isCollapsed && cc.demands.map(d => (
-                    <TableRow
-                      key={d.id}
-                      style={selectedIds.includes(d.id) ? { backgroundColor: tokens.colorBrandBackground2 } : undefined}
-                    >
-                      {canEdit && (
-                        <TableCell>
-                          <Checkbox checked={selectedIds.includes(d.id)} onChange={() => toggleSelect(d.id)} />
-                        </TableCell>
-                      )}
-                      <TableCell>{d.cost_center_name || '-'}</TableCell>
-                      <TableCell>{d.project_name || 'Unknown'}</TableCell>
-                      <TableCell>
-                        {d.resource_name ? (
-                          d.resource_name
-                        ) : d.placeholder_name ? (
-                          <>
-                            {d.placeholder_name}
-                            <Badge appearance="outline" color="warning" style={{ marginLeft: 6 }}>Placeholder</Badge>
-                          </>
-                        ) : (
-                          '-'
-                        )}
-                      </TableCell>
-                      <TableCell>{d.year}-{String(d.month).padStart(2, '0')}</TableCell>
-                      <TableCell>
-                        <Badge appearance="filled" color="informative">{d.fte_percent}%</Badge>
-                      </TableCell>
-                      <TableCell>
-                        {!isLocked && canEdit && (
-                          <>
-                            <Button
-                              icon={<Edit24Regular />}
-                              appearance="subtle"
-                              onClick={() => handleEdit(d)}
-                              title="Edit line"
-                              style={{ marginRight: 4 }}
-                            />
-                            <Button
-                              icon={<Delete24Regular />}
-                              appearance="subtle"
-                              onClick={() => handleDelete(d.id)}
-                              title="Delete line"
-                            />
-                          </>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </React.Fragment>
-              )})
-            )}
-          </TableBody>
-        </Table>
+      <Card className={styles.card} style={{ overflowX: 'auto' }}>
+        <CardHeader header={<Body1><strong>Demand Matrix ({filteredDemands.length} lines)</strong></Body1>} />
+        <DemandMatrix
+          demandLines={filteredDemands}
+          periods={openPeriods.length > 0 ? openPeriods : (currentPeriod ? [currentPeriod] : [])}
+          projects={projects}
+          costCenters={costCenters}
+          canEdit={canEdit && !isLocked}
+          onReload={() => loadDemands()}
+        />
       </Card>
 
       {/* Add / Edit Demand Drawer with Single and Bulk modes */}

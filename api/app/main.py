@@ -178,9 +178,11 @@ async def startup_event():
     if settings.dev_auth_bypass:
         print("WARNING: DEV_AUTH_BYPASS is enabled. Do not use in production!")
         # --- Dev seeding: full example data (periods 2026-01 to 2026-12, demand, supply, actuals) ---
-        from api.app.db.engine import engine, SessionLocal, run_dev_migrations
+        from api.app.db.engine import get_engine, SessionLocal, run_dev_migrations
         from api.app.example_data import create_example_data
+        engine = get_engine()
         run_dev_migrations(engine)
+        SessionLocal.configure(bind=engine)
         dev_tenant_id = "dev-tenant-001"
         with SessionLocal() as db:
             create_example_data(db, dev_tenant_id)

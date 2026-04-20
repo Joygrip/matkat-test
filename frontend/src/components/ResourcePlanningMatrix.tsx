@@ -1,9 +1,10 @@
-import React, { useState, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import {
   Button,
   Spinner,
   tokens,
   makeStyles,
+  mergeClasses,
   Select,
 } from '@fluentui/react-components';
 import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular } from '@fluentui/react-icons';
@@ -40,6 +41,33 @@ function getSupplyColor(dVal: number, sVal: number): { background: string; color
   if (diff > 0) return { background: tokens.colorPaletteGreenBackground2, color: tokens.colorPaletteGreenForeground2 };
   if (diff === 0) return { background: tokens.colorPaletteMarigoldBackground2, color: tokens.colorPaletteMarigoldForeground2 };
   return { background: ORANGE_BG, color: ORANGE_FG };
+}
+
+function buildCellKey(
+  type: 'demand' | 'supply',
+  resourceId: string | null,
+  placeholderId: string | null,
+  projectId: string | null,
+  periodId: string,
+): string {
+  return `${type}::${resourceId ?? ''}::${placeholderId ?? ''}::${projectId ?? 'general'}::${periodId}`;
+}
+
+function parseCellKey(key: string): {
+  type: 'demand' | 'supply';
+  resourceId: string | null;
+  placeholderId: string | null;
+  projectId: string;
+  periodId: string;
+} {
+  const parts = key.split('::');
+  return {
+    type: parts[0] as 'demand' | 'supply',
+    resourceId: parts[1] || null,
+    placeholderId: parts[2] || null,
+    projectId: parts[3],
+    periodId: parts[4],
+  };
 }
 
 const useStyles = makeStyles({
@@ -238,6 +266,36 @@ const useStyles = makeStyles({
     alignItems: 'center',
     flexWrap: 'wrap' as const,
   },
+  // Edit mode styles
+  cellEditable: {
+    cursor: 'crosshair',
+    ':hover': {
+      backgroundColor: tokens.colorBrandBackground2,
+      opacity: 0.8,
+    },
+  },
+  cellSelected: {
+    backgroundColor: tokens.colorBrandBackground2,
+    color: tokens.colorBrandForeground1,
+    outline: `2px solid ${tokens.colorBrandBackground}`,
+    outlineOffset: '-2px',
+  },
+  cellDimmed: {
+    opacity: 0.35,
+    pointerEvents: 'none' as const,
+  },
+  matrixContainerSelecting: {
+    userSelect: 'none' as const,
+  },
+  editToolbar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    flexWrap: 'wrap' as const,
+  },
 });
 
 interface MergedMatrixRow {
@@ -331,6 +389,25 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [ccPlaceholders, setCcPlaceholders] = useState<Record<string, Placeholder[]>>({});
   const [localDemandRows, setLocalDemandRows] = useState<Record<string, LocalRow[]>>({});
   const [localSupplyRows, setLocalSupplyRows] = useState<Record<string, LocalRow[]>>({});
+
+  // Edit mode state
+  const [editingCC, setEditingCC] = useState<string | null>(null);
+  const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
+  const [dragStart, setDragStart] = useState<{
+    cellKey: string;
+    resourceId: string | null;
+    placeholderId: string | null;
+    projectId: string | null;
+    periodId: string;
+    type: 'demand' | 'supply';
+    rowIndex: number;
+    colIndex: number;
+  } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragType, setDragType] = useState<'demand' | 'supply' | null>(null);
+  const [applyValue, setApplyValue] = useState<string>('');
+  const [applying, setApplying] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const groups = useMemo((): MatrixGroup[] => {
     const groupMap = new Map<string, { ccName: string; rowMap: Map<string, MergedMatrixRow> }>();
@@ -547,10 +624,215 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setAddSupplyForm({ resourceId: '', projectId: '' });
   }, [addSupplyForm, ccResources, projects]);
 
+  // Global mouseup to end drag
+  useEffect(() => {
+    const handleMouseUp = () => setIsDragging(false);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => window.removeEventListener('mouseup', handleMouseUp);
+  }, []);
+
+  const handleEditCC = useCallback(async (ccId: string) => {
+    const resetEditState = () => {
+      setSelectedCells(new Set());
+      setApplyValue('');
+      setEditError(null);
+      setDragStart(null);
+      setIsDragging(false);
+      setDragType(null);
+    };
+
+    if (editingCC === ccId) {
+      setEditingCC(null);
+      resetEditState();
+    } else {
+      resetEditState();
+      setEditingCC(ccId);
+      setExpandedCCs(prev => { const next = new Set(prev); next.add(ccId); return next; });
+      await loadCcData(ccId);
+    }
+  }, [editingCC, loadCcData]);
+
+  const handleCellMouseDown = useCallback((
+    e: React.MouseEvent,
+    cellKey: string,
+    type: 'demand' | 'supply',
+    rowIndex: number,
+    colIndex: number,
+    resourceId: string | null,
+    placeholderId: string | null,
+    projectId: string | null,
+    periodId: string,
+  ) => {
+    e.preventDefault();
+    setIsDragging(true);
+    setDragType(type);
+    setDragStart({ cellKey, resourceId, placeholderId, projectId, periodId, type, rowIndex, colIndex });
+    setSelectedCells(new Set([cellKey]));
+  }, []);
+
+  const handleCellMouseEnter = useCallback((
+    rowIndex: number,
+    colIndex: number,
+    allGroupRows: MergedMatrixRow[],
+  ) => {
+    if (!isDragging || !dragStart || !dragType) return;
+
+    const minRow = Math.min(dragStart.rowIndex, rowIndex);
+    const maxRow = Math.max(dragStart.rowIndex, rowIndex);
+    const minCol = Math.min(dragStart.colIndex, colIndex);
+    const maxCol = Math.max(dragStart.colIndex, colIndex);
+
+    const newSelection = new Set<string>();
+    allGroupRows.forEach((row, flatIdx) => {
+      const demandRowIdx = flatIdx * 2;
+      const supplyRowIdx = flatIdx * 2 + 1;
+
+      periods.forEach((period, pColIdx) => {
+        if (pColIdx < minCol || pColIdx > maxCol) return;
+
+        if (dragType === 'demand' && demandRowIdx >= minRow && demandRowIdx <= maxRow) {
+          newSelection.add(buildCellKey('demand', row.resourceId, row.placeholderId, row.projectId, period.id));
+        }
+        if (dragType === 'supply' && supplyRowIdx >= minRow && supplyRowIdx <= maxRow) {
+          newSelection.add(buildCellKey('supply', row.resourceId, row.placeholderId, row.projectId, period.id));
+        }
+      });
+    });
+
+    setSelectedCells(newSelection);
+  }, [isDragging, dragStart, dragType, periods]);
+
+  const handleApply = useCallback(async () => {
+    const numVal = parseInt(applyValue, 10);
+    if (selectedCells.size === 0 || isNaN(numVal)) return;
+
+    setApplying(true);
+    setEditError(null);
+
+    try {
+      const actions: Array<{ action: string; data: Record<string, unknown> }> = [];
+
+      for (const cellKey of selectedCells) {
+        const { type, resourceId, placeholderId, projectId, periodId } = parseCellKey(cellKey);
+        const period = periods.find(p => p.id === periodId);
+        if (!period) continue;
+
+        if (type === 'demand') {
+          const existingLine = demandLines.find(l =>
+            (resourceId ? l.resource_id === resourceId : l.placeholder_id === placeholderId) &&
+            (projectId === 'general' ? !l.project_id : l.project_id === projectId) &&
+            l.period_id === periodId
+          );
+          if (existingLine && numVal > 0) {
+            actions.push({ action: 'update', data: { id: existingLine.id, fte_percent: numVal } });
+          } else if (existingLine && numVal === 0) {
+            actions.push({ action: 'delete', data: { id: existingLine.id } });
+          } else if (!existingLine && numVal > 0) {
+            actions.push({ action: 'create', data: {
+              period_id: periodId,
+              project_id: projectId === 'general' ? null : projectId,
+              resource_id: resourceId || null,
+              placeholder_id: placeholderId || null,
+              fte_percent: numVal,
+              year: period.year,
+              month: period.month,
+            }});
+          }
+        } else {
+          const existingLine = supplyLines.find(l =>
+            l.resource_id === resourceId &&
+            (projectId === 'general' ? !l.project_id : l.project_id === projectId) &&
+            l.period_id === periodId
+          );
+          if (existingLine && numVal > 0) {
+            actions.push({ action: 'update', data: { id: existingLine.id, fte_percent: numVal } });
+          } else if (existingLine && numVal === 0) {
+            actions.push({ action: 'delete', data: { id: existingLine.id } });
+          } else if (!existingLine && numVal > 0) {
+            actions.push({ action: 'create', data: {
+              period_id: periodId,
+              project_id: projectId === 'general' ? null : projectId,
+              resource_id: resourceId || null,
+              fte_percent: numVal,
+              year: period.year,
+              month: period.month,
+            }});
+          }
+        }
+      }
+
+      if (actions.length > 0) {
+        if (dragType === 'demand') {
+          await planningApi.bulkDemandLines({ actions });
+        } else {
+          await planningApi.bulkSupplyLines({ actions });
+        }
+      }
+
+      onReload();
+      setSelectedCells(new Set());
+      setApplyValue('');
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Failed to apply changes');
+    } finally {
+      setApplying(false);
+    }
+  }, [selectedCells, applyValue, dragType, demandLines, supplyLines, periods, onReload]);
+
+  const handleClear = useCallback(async () => {
+    if (selectedCells.size === 0) return;
+
+    setApplying(true);
+    setEditError(null);
+
+    try {
+      const actions: Array<{ action: string; data: Record<string, unknown> }> = [];
+
+      for (const cellKey of selectedCells) {
+        const { type, resourceId, placeholderId, projectId, periodId } = parseCellKey(cellKey);
+
+        if (type === 'demand') {
+          const existingLine = demandLines.find(l =>
+            (resourceId ? l.resource_id === resourceId : l.placeholder_id === placeholderId) &&
+            (projectId === 'general' ? !l.project_id : l.project_id === projectId) &&
+            l.period_id === periodId
+          );
+          if (existingLine) {
+            actions.push({ action: 'delete', data: { id: existingLine.id } });
+          }
+        } else {
+          const existingLine = supplyLines.find(l =>
+            l.resource_id === resourceId &&
+            (projectId === 'general' ? !l.project_id : l.project_id === projectId) &&
+            l.period_id === periodId
+          );
+          if (existingLine) {
+            actions.push({ action: 'delete', data: { id: existingLine.id } });
+          }
+        }
+      }
+
+      if (actions.length > 0) {
+        if (dragType === 'demand') {
+          await planningApi.bulkDemandLines({ actions });
+        } else {
+          await planningApi.bulkSupplyLines({ actions });
+        }
+        onReload();
+      }
+
+      setSelectedCells(new Set());
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Failed to clear cells');
+    } finally {
+      setApplying(false);
+    }
+  }, [selectedCells, dragType, demandLines, supplyLines, onReload]);
+
   const totalCols = 3 + periods.length;
 
   return (
-    <div className={styles.wrapper}>
+    <div className={mergeClasses(styles.wrapper, isDragging && styles.matrixContainerSelecting)}>
       <table className={styles.table}>
         <thead>
           <tr>
@@ -577,9 +859,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         <tbody>
           {groups.map(group => {
             const isExpanded = expandedCCs.has(group.ccId);
+            const isEditingThisCC = editingCC === group.ccId;
             const allRows = group.resourceGroups.flatMap(rg => rg.rows);
 
-            // Per-period totals for summary and total rows
             const periodTotals = periods.map(p => {
               let dSum = 0, sSum = 0;
               for (const row of allRows) {
@@ -591,18 +873,31 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
             return (
               <React.Fragment key={group.ccId}>
-                {/* CC summary row (collapsed view) */}
+                {/* CC summary row */}
                 <tr
                   className={styles.summaryRow}
                   onClick={() => handleExpandCC(group.ccId)}
                 >
-                  <td className={styles.summaryFixed}>
+                  <td
+                    className={styles.summaryFixed}
+                    style={isEditingThisCC
+                      ? { borderLeft: `3px solid ${tokens.colorBrandBackground}` }
+                      : undefined}
+                  >
                     <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                       {isExpanded ? <ChevronDown20Regular /> : <ChevronRight20Regular />}
                       {group.ccName}
                     </span>
                   </td>
-                  <td className={styles.summaryProject} />
+                  <td className={styles.summaryProject}>
+                    <Button
+                      size="small"
+                      appearance={isEditingThisCC ? 'primary' : 'subtle'}
+                      onClick={e => { e.stopPropagation(); handleEditCC(group.ccId); }}
+                    >
+                      {isEditingThisCC ? 'Done' : 'Edit'}
+                    </Button>
+                  </td>
                   <td className={styles.summaryType} />
                   {periodTotals.map(({ dSum, sSum }, i) => (
                     <td key={periods[i].id} className={styles.summaryValueCell}>
@@ -626,10 +921,73 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
                 {isExpanded && (
                   <>
+                    {/* Edit toolbar */}
+                    {isEditingThisCC && (
+                      <tr>
+                        <td colSpan={totalCols} style={{ padding: 0 }}>
+                          <div className={styles.editToolbar}>
+                            <span style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                              ✏ Edit mode — click and drag to select cells
+                            </span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <span style={{ fontSize: tokens.fontSizeBase200 }}>Value:</span>
+                              <input
+                                type="number"
+                                min={0}
+                                max={200}
+                                step={5}
+                                placeholder="FTE %"
+                                value={applyValue}
+                                onChange={e => setApplyValue(e.target.value)}
+                                style={{
+                                  width: '72px',
+                                  padding: '3px 6px',
+                                  border: `1px solid ${tokens.colorNeutralStroke1}`,
+                                  borderRadius: tokens.borderRadiusSmall,
+                                  fontSize: tokens.fontSizeBase200,
+                                  outline: 'none',
+                                }}
+                              />
+                              <span style={{ fontSize: tokens.fontSizeBase200 }}>%</span>
+                            </span>
+                            <Button
+                              size="small"
+                              appearance="primary"
+                              disabled={selectedCells.size === 0 || applyValue === '' || applying}
+                              onClick={handleApply}
+                              icon={applying ? <Spinner size="extra-tiny" /> : undefined}
+                            >
+                              Apply
+                            </Button>
+                            <Button
+                              size="small"
+                              appearance="secondary"
+                              disabled={selectedCells.size === 0 || applying}
+                              onClick={handleClear}
+                            >
+                              Clear
+                            </Button>
+                            <span style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                              {selectedCells.size} cells selected
+                            </span>
+                            {editError && (
+                              <span style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorPaletteRedForeground2 }}>
+                                {editError}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+
                     {/* Resource groups → data rows (2 per MatrixRow: demand + supply) */}
                     {group.resourceGroups.map(rg => (
                       rg.rows.map((row, rowIdx) => {
                         const totalRowSpan = rg.rows.length * 2;
+                        const flatRowIndex = allRows.indexOf(row);
+                        const demandRowIndex = flatRowIndex * 2;
+                        const supplyRowIndex = flatRowIndex * 2 + 1;
+
                         return (
                           <React.Fragment key={row.key}>
                             {/* Demand row */}
@@ -663,24 +1021,46 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                 {row.isGeneral && ' *'}
                               </td>
                               <td className={styles.typeCellDemand}>Demand</td>
-                              {periods.map(period => {
+                              {periods.map((period, colIndex) => {
                                 const dLine = row.demandByPeriod.get(period.id);
                                 const sLine = row.supplyByPeriod.get(period.id);
                                 const dVal = dLine?.fte_percent ?? 0;
                                 const sVal = sLine?.fte_percent ?? 0;
-                                const cellKey = `d-${row.key}-${period.id}`;
-                                const canEdit = canEditDemand && !row.isGeneral;
+                                const existingCellKey = `d-${row.key}-${period.id}`;
+                                const dragCellKey = buildCellKey('demand', row.resourceId, row.placeholderId, row.projectId, period.id);
+                                const isSelectable = canEditDemand && !row.isGeneral;
+                                const canEdit = isSelectable && editingCC !== group.ccId;
+                                const isSelected = selectedCells.has(dragCellKey);
+                                const isDimmed = isEditingThisCC && isDragging && dragType !== 'demand';
                                 return (
-                                  <td key={period.id} className={styles.valueCell}>
+                                  <td
+                                    key={period.id}
+                                    className={mergeClasses(
+                                      styles.valueCell,
+                                      isEditingThisCC && isSelectable && styles.cellEditable,
+                                      isEditingThisCC && isSelected && styles.cellSelected,
+                                      isEditingThisCC && isDimmed && styles.cellDimmed,
+                                    )}
+                                    data-row-index={demandRowIndex}
+                                    data-col-index={colIndex}
+                                    data-cell-key={dragCellKey}
+                                    data-type="demand"
+                                    onMouseDown={isEditingThisCC && isSelectable
+                                      ? (e) => handleCellMouseDown(e, dragCellKey, 'demand', demandRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id)
+                                      : undefined}
+                                    onMouseEnter={isDragging
+                                      ? () => handleCellMouseEnter(demandRowIndex, colIndex, allRows)
+                                      : undefined}
+                                  >
                                     <CellEditor
                                       value={dVal}
                                       colorStyle={getDemandColor(dVal, sVal)}
-                                      isEditing={editingCell === cellKey}
-                                      isSaving={savingCells.has(cellKey)}
+                                      isEditing={editingCell === existingCellKey}
+                                      isSaving={savingCells.has(existingCellKey)}
                                       canEdit={canEdit}
-                                      onStartEdit={() => canEdit && setEditingCell(cellKey)}
+                                      onStartEdit={() => canEdit && setEditingCell(existingCellKey)}
                                       onCancel={() => setEditingCell(null)}
-                                      onSave={val => saveDemandCell(cellKey, dLine, row, period, val)}
+                                      onSave={val => saveDemandCell(existingCellKey, dLine, row, period, val)}
                                       styles={styles}
                                     />
                                   </td>
@@ -691,24 +1071,46 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                             <tr>
                               {/* resource and project cells spanned by rowSpan above */}
                               <td className={styles.typeCellSupply}>Supply</td>
-                              {periods.map(period => {
+                              {periods.map((period, colIndex) => {
                                 const dLine = row.demandByPeriod.get(period.id);
                                 const sLine = row.supplyByPeriod.get(period.id);
                                 const dVal = dLine?.fte_percent ?? 0;
                                 const sVal = sLine?.fte_percent ?? 0;
-                                const cellKey = `s-${row.key}-${period.id}`;
-                                const canEdit = canEditSupply && !row.isPlaceholder;
+                                const existingCellKey = `s-${row.key}-${period.id}`;
+                                const dragCellKey = buildCellKey('supply', row.resourceId, row.placeholderId, row.projectId, period.id);
+                                const isSelectable = canEditSupply && !row.isPlaceholder;
+                                const canEdit = isSelectable && editingCC !== group.ccId;
+                                const isSelected = selectedCells.has(dragCellKey);
+                                const isDimmed = isEditingThisCC && isDragging && dragType !== 'supply';
                                 return (
-                                  <td key={period.id} className={styles.valueCell}>
+                                  <td
+                                    key={period.id}
+                                    className={mergeClasses(
+                                      styles.valueCell,
+                                      isEditingThisCC && isSelectable && styles.cellEditable,
+                                      isEditingThisCC && isSelected && styles.cellSelected,
+                                      isEditingThisCC && isDimmed && styles.cellDimmed,
+                                    )}
+                                    data-row-index={supplyRowIndex}
+                                    data-col-index={colIndex}
+                                    data-cell-key={dragCellKey}
+                                    data-type="supply"
+                                    onMouseDown={isEditingThisCC && isSelectable
+                                      ? (e) => handleCellMouseDown(e, dragCellKey, 'supply', supplyRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id)
+                                      : undefined}
+                                    onMouseEnter={isDragging
+                                      ? () => handleCellMouseEnter(supplyRowIndex, colIndex, allRows)
+                                      : undefined}
+                                  >
                                     <CellEditor
                                       value={sVal}
                                       colorStyle={getSupplyColor(dVal, sVal)}
-                                      isEditing={editingCell === cellKey}
-                                      isSaving={savingCells.has(cellKey)}
+                                      isEditing={editingCell === existingCellKey}
+                                      isSaving={savingCells.has(existingCellKey)}
                                       canEdit={canEdit}
-                                      onStartEdit={() => canEdit && setEditingCell(cellKey)}
+                                      onStartEdit={() => canEdit && setEditingCell(existingCellKey)}
                                       onCancel={() => setEditingCell(null)}
-                                      onSave={val => saveSupplyCell(cellKey, sLine, row, period, val)}
+                                      onSave={val => saveSupplyCell(existingCellKey, sLine, row, period, val)}
                                       styles={styles}
                                     />
                                   </td>

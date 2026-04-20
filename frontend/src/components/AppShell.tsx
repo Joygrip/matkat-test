@@ -20,10 +20,6 @@ import {
 import {
   HomeRegular,
   HomeFilled,
-  CalendarRegular,
-  CalendarFilled,
-  PeopleRegular,
-  PeopleFilled,
   ClipboardTaskRegular,
   ClipboardTaskFilled,
   ChartMultipleRegular,
@@ -37,6 +33,7 @@ import {
   SignOutRegular,
   PersonRegular,
   PeopleTeamRegular,
+  PeopleTeamFilled,
   bundleIcon,
 } from '@fluentui/react-icons';
 import { useAuth } from '../auth/AuthProvider';
@@ -44,13 +41,13 @@ import { config } from '../config';
 import { PeriodSelector } from './PeriodSelector';
 
 const Home = bundleIcon(HomeFilled, HomeRegular);
-const Demand = bundleIcon(CalendarFilled, CalendarRegular);
-const Supply = bundleIcon(PeopleFilled, PeopleRegular);
+
 const Actuals = bundleIcon(ClipboardTaskFilled, ClipboardTaskRegular);
 const Consolidation = bundleIcon(ChartMultipleFilled, ChartMultipleRegular);
 const Admin = bundleIcon(SettingsFilled, SettingsRegular);
 const AuditLogsIcon = bundleIcon(DocumentBulletListFilled, DocumentBulletListRegular);
 const ProjectCostsIcon = bundleIcon(MoneyHandFilled, MoneyHandRegular);
+const ResourcePlanningIcon = bundleIcon(PeopleTeamFilled, PeopleTeamRegular);
 
 const useStyles = makeStyles({
   container: {
@@ -246,8 +243,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { path: '/', label: 'Dashboard', icon: Home, section: 'overview' },
-  { path: '/demand', label: 'Demand', icon: Demand, roles: ['Admin', 'Finance', 'PM', 'Manager'], section: 'planning' },
-  { path: '/supply', label: 'Supply', icon: Supply, roles: ['Admin', 'Finance', 'PM', 'Manager'], section: 'planning' },
+  { path: '/resource-planning', label: 'Resource Planning', icon: ResourcePlanningIcon, roles: ['Admin', 'Finance', 'PM', 'Manager'], section: 'planning' },
   { path: '/actuals', label: 'Actuals', icon: Actuals, roles: ['Admin', 'Finance', 'Manager', 'Employee'], section: 'operations' },
   { path: '/finance', label: 'Finance', icon: Consolidation, roles: ['Admin', 'Finance', 'Manager', 'PM'], section: 'operations' },
   { path: '/project-costs', label: 'Project Costs', icon: ProjectCostsIcon, roles: ['Admin', 'Finance', 'PM', 'Manager'], section: 'operations' },
@@ -265,6 +261,7 @@ const sectionLabels: Record<string, string> = {
 
 const pageTitles: Record<string, string> = {
   '/': 'Dashboard',
+  '/resource-planning': 'Resource Planning',
   '/demand': 'Demand Planning',
   '/supply': 'Supply Planning',
   '/actuals': 'Actuals Entry',

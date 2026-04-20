@@ -9,8 +9,7 @@ import { PeriodProvider } from './contexts/PeriodContext';
 import { AppShell } from './components/AppShell';
 import { DevLoginPanel } from './components/DevLoginPanel';
 import { Dashboard } from './pages/Dashboard';
-import { Demand } from './pages/Demand';
-import { Supply } from './pages/Supply';
+import { ResourcePlanning } from './pages/ResourcePlanning';
 import { Actuals } from './pages/Actuals';
 import { Admin } from './pages/Admin';
 import { Finance } from './pages/Finance';
@@ -77,8 +76,9 @@ function App() {
       <AppShell>
         <Routes>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/demand" element={<Demand />} />
-          <Route path="/supply" element={<Supply />} />
+          <Route path="/resource-planning" element={<ResourcePlanning />} />
+          <Route path="/demand" element={<Navigate to="/resource-planning" replace />} />
+          <Route path="/supply" element={<Navigate to="/resource-planning" replace />} />
           <Route path="/actuals" element={<Actuals />} />
           <Route path="/finance" element={<Finance />} />
           {/* Redirects for old routes */}

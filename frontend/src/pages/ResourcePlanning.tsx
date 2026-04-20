@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Title3,
   Body1,
@@ -113,6 +113,7 @@ export const ResourcePlanning: React.FC = () => {
   const { periods: contextPeriods } = usePeriod();
 
   const [openPeriods, setOpenPeriods] = useState<Period[]>([]);
+  const openPeriodsRef = useRef<Period[]>([]);
   const [demandLines, setDemandLines] = useState<DemandLine[]>([]);
   const [supplyLines, setSupplyLines] = useState<SupplyLine[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -127,6 +128,9 @@ export const ResourcePlanning: React.FC = () => {
   useEffect(() => {
     loadAll();
   }, []);
+
+  // Keep ref in sync so reloadLines always has the latest periods without stale closure
+  useEffect(() => { openPeriodsRef.current = openPeriods; }, [openPeriods]);
 
   // When contextPeriods loads, derive open periods if we haven't yet
   useEffect(() => {
@@ -174,6 +178,23 @@ export const ResourcePlanning: React.FC = () => {
       setLoading(false);
     }
   };
+
+  // Lightweight reload: only re-fetches lines, no loading spinner
+  const reloadLines = useCallback(async () => {
+    const periods = openPeriodsRef.current;
+    if (periods.length === 0) return;
+    try {
+      const periodIds = periods.map(p => p.id);
+      const [demandResults, supplyResults] = await Promise.all([
+        Promise.all(periodIds.map(pid => planningApi.getDemandLines(pid))),
+        Promise.all(periodIds.map(pid => planningApi.getSupplyLines(pid))),
+      ]);
+      setDemandLines(demandResults.flat());
+      setSupplyLines(supplyResults.flat());
+    } catch {
+      // silent — the edited cell already reflects the change optimistically
+    }
+  }, []);
 
   // Manager scoping: derive manager's CC from loaded lines
   const managerCcId = useMemo(() => {
@@ -356,7 +377,7 @@ export const ResourcePlanning: React.FC = () => {
           costCenters={costCenters}
           canEditDemand={canEditDemand}
           canEditSupply={canEditSupply}
-          onReload={loadAll}
+          onReload={reloadLines}
         />
       </Card>
     </div>

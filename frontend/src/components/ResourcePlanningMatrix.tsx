@@ -225,74 +225,6 @@ const useStyles = makeStyles({
     minWidth: '42px',
     padding: '2px 4px',
   },
-  totalRow: {
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  totalFixed: {
-    fontWeight: tokens.fontWeightSemibold,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderTop: `2px solid ${tokens.colorNeutralStroke2}`,
-    position: 'sticky' as const,
-    left: 0,
-    backgroundColor: tokens.colorNeutralBackground2,
-    zIndex: 1,
-    minWidth: RESOURCE_COL_PX,
-  },
-  totalProject: {
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderTop: `2px solid ${tokens.colorNeutralStroke2}`,
-    position: 'sticky' as const,
-    left: RESOURCE_COL_PX,
-    backgroundColor: tokens.colorNeutralBackground2,
-    zIndex: 1,
-    minWidth: PROJECT_COL_PX,
-  },
-  totalTypeDemand: {
-    backgroundColor: '#e8f0ff',
-    color: '#1a3a7a',
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase100,
-    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderTop: `2px solid ${tokens.colorNeutralStroke2}`,
-    position: 'sticky' as const,
-    left: TYPE_LEFT_PX,
-    zIndex: 1,
-    minWidth: TYPE_COL_PX,
-  },
-  totalTypeSupply: {
-    backgroundColor: '#e8f8ee',
-    color: '#0a4a1a',
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase100,
-    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    position: 'sticky' as const,
-    left: TYPE_LEFT_PX,
-    zIndex: 1,
-    minWidth: TYPE_COL_PX,
-  },
-  totalValueCell: {
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalXS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderTop: `2px solid ${tokens.colorNeutralStroke2}`,
-    textAlign: 'center' as const,
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase200,
-    width: PERIOD_COL_PX,
-    minWidth: PERIOD_COL_PX,
-  },
-  totalValueCellSupply: {
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalXS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    textAlign: 'center' as const,
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase200,
-    width: PERIOD_COL_PX,
-    minWidth: PERIOD_COL_PX,
-  },
   addLineRow: {
     backgroundColor: tokens.colorNeutralBackground1,
   },
@@ -787,40 +719,6 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                         );
                       })
                     ))}
-
-                    {/* CC Total rows (demand + supply) */}
-                    <tr className={styles.totalRow}>
-                      <td className={styles.totalFixed} rowSpan={2}>CC Total</td>
-                      <td className={styles.totalProject} rowSpan={2} />
-                      <td className={styles.totalTypeDemand}>Demand</td>
-                      {periodTotals.map(({ dSum, sSum }, i) => {
-                        const cs = getDemandColor(dSum, sSum);
-                        return (
-                          <td
-                            key={periods[i].id}
-                            className={styles.totalValueCell}
-                            style={cs ?? { color: tokens.colorNeutralForeground3 }}
-                          >
-                            {dSum > 0 ? `${dSum}%` : '—'}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                    <tr className={styles.totalRow}>
-                      <td className={styles.totalTypeSupply}>Supply</td>
-                      {periodTotals.map(({ dSum, sSum }, i) => {
-                        const cs = getSupplyColor(dSum, sSum);
-                        return (
-                          <td
-                            key={periods[i].id}
-                            className={styles.totalValueCellSupply}
-                            style={cs ?? { color: tokens.colorNeutralForeground3 }}
-                          >
-                            {sSum > 0 ? `${sSum}%` : '—'}
-                          </td>
-                        );
-                      })}
-                    </tr>
 
                     {/* Add demand line */}
                     {canEditDemand && (

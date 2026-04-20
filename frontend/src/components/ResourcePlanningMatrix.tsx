@@ -482,6 +482,13 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       }
     }
 
+    // Include all known cost centers so users can add lines to CCs with no existing lines
+    for (const cc of costCenters) {
+      if (!groupMap.has(cc.id)) {
+        groupMap.set(cc.id, { ccName: cc.name, rowMap: new Map() });
+      }
+    }
+
     const result: MatrixGroup[] = Array.from(groupMap.entries()).map(([ccId, { ccName, rowMap }]) => ({
       ccId,
       ccName,
@@ -1294,7 +1301,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                   color: tokens.colorNeutralForeground3,
                 }}
               >
-                No planning lines for the selected filters.
+                No cost centers found. Add cost centers before planning resources.
               </td>
             </tr>
           )}

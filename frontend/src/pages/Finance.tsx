@@ -56,6 +56,7 @@ import { ActualsTab, FinanceActualRow } from '../components/finance/ActualsTab';
 import { SnapshotsTab } from '../components/finance/SnapshotsTab';
 import { CostReportTab } from '../components/finance/CostReportTab';
 import { ConsolidatedCostChart } from '../components/finance/ConsolidatedCostChart';
+import { ProjectCostsMatrix } from '../components/project-costs/ProjectCostsMatrix';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -69,7 +70,7 @@ const approvalStatusOptions = [
   { value: 'N/A', label: 'N/A (Unsigned)' },
 ];
 
-type ActiveTab = 'overview' | 'actuals' | 'snapshots' | 'costreport' | 'costoverview';
+type ActiveTab = 'overview' | 'actuals' | 'snapshots' | 'costreport' | 'costoverview' | 'projectcosts';
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
@@ -162,6 +163,7 @@ export const Finance: React.FC = () => {
   const canSeeStats = useHasRole('Finance', 'Manager', 'Admin');
   const canSeeCostReport = useHasRole('Finance', 'Admin');
   const canSeeSnapshots = useHasRole('Finance', 'Admin');
+  const canSeeProjectCosts = useHasRole('Finance', 'Admin', 'PM', 'Manager');
   const canManagePeriods = user?.role === 'Finance' || user?.role === 'Admin';
   const canPublishSnapshot = user?.role === 'Finance' || user?.role === 'Admin';
   const canDownloadCsv = user?.role === 'Finance';
@@ -431,6 +433,7 @@ export const Finance: React.FC = () => {
             {canSeeSnapshots && <Tab value="snapshots">Snapshots</Tab>}
             {!isPM && canSeeCostReport && <Tab value="costreport">Cost Report</Tab>}
             <Tab value="costoverview">Cost Overview</Tab>
+            {canSeeProjectCosts && <Tab value="projectcosts">Project Costs</Tab>}
           </TabList>
           <span className={styles.toolbarMeta}>
             {latestSnapshot
@@ -541,6 +544,9 @@ export const Finance: React.FC = () => {
           showError={showError}
           showApiError={showApiError}
         />
+      )}
+      {activeTab === 'projectcosts' && canSeeProjectCosts && (
+        <ProjectCostsMatrix />
       )}
       {activeTab === 'costoverview' && (canSeeStats || isPM) && (
         <>

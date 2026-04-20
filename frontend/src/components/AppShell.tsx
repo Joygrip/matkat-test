@@ -28,8 +28,6 @@ import {
   SettingsFilled,
   DocumentBulletListRegular,
   DocumentBulletListFilled,
-  MoneyHandRegular,
-  MoneyHandFilled,
   SignOutRegular,
   PersonRegular,
   PeopleTeamRegular,
@@ -46,7 +44,6 @@ const Actuals = bundleIcon(ClipboardTaskFilled, ClipboardTaskRegular);
 const Consolidation = bundleIcon(ChartMultipleFilled, ChartMultipleRegular);
 const Admin = bundleIcon(SettingsFilled, SettingsRegular);
 const AuditLogsIcon = bundleIcon(DocumentBulletListFilled, DocumentBulletListRegular);
-const ProjectCostsIcon = bundleIcon(MoneyHandFilled, MoneyHandRegular);
 const ResourcePlanningIcon = bundleIcon(PeopleTeamFilled, PeopleTeamRegular);
 
 const useStyles = makeStyles({
@@ -246,7 +243,6 @@ const navItems: NavItem[] = [
   { path: '/resource-planning', label: 'Resource Planning', icon: ResourcePlanningIcon, roles: ['Admin', 'Finance', 'PM', 'Manager'], section: 'planning' },
   { path: '/actuals', label: 'Actuals', icon: Actuals, roles: ['Admin', 'Finance', 'Manager', 'Employee'], section: 'operations' },
   { path: '/finance', label: 'Finance', icon: Consolidation, roles: ['Admin', 'Finance', 'Manager', 'PM'], section: 'operations' },
-  { path: '/project-costs', label: 'Project Costs', icon: ProjectCostsIcon, roles: ['Admin', 'Finance', 'PM', 'Manager'], section: 'operations' },
   { path: '/admin?tab=delegates', label: 'My Delegates', icon: PeopleTeamRegular, roles: ['Manager'], section: 'operations' },
   { path: '/admin', label: 'Admin', icon: Admin, roles: ['Admin', 'Finance'], section: 'admin' },
   { path: '/audit-logs', label: 'Audit logs', icon: AuditLogsIcon, roles: ['Admin', 'Finance'], section: 'admin' },

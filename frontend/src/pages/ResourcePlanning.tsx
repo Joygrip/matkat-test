@@ -251,6 +251,23 @@ export const ResourcePlanning: React.FC = () => {
 
   const hasActiveFilters = !!(searchResource || activeProjectLabel || activeCostCenterLabel);
 
+  // When filters are active, only show CCs that have matching lines (avoid flooding the matrix
+  // with empty CC rows that are irrelevant to the search). When no filter is active, pass all
+  // cost centers so users can add lines to CCs that have never had any.
+  // Managers are always restricted to their own CC.
+  const visibleCostCenters = useMemo(() => {
+    let base = costCenters;
+    if (isManager && managerCcId) {
+      base = costCenters.filter(c => c.id === managerCcId);
+    }
+    if (!hasActiveFilters) return base;
+    const activeCcIds = new Set([
+      ...filteredDemandLines.map(d => d.cost_center_id).filter(Boolean),
+      ...filteredSupplyLines.map(s => s.cost_center_id).filter(Boolean),
+    ]);
+    return base.filter(c => activeCcIds.has(c.id));
+  }, [hasActiveFilters, costCenters, filteredDemandLines, filteredSupplyLines, isManager, managerCcId]);
+
   if (loading) {
     return <LoadingState message="Loading resource planning data..." />;
   }
@@ -374,7 +391,7 @@ export const ResourcePlanning: React.FC = () => {
           supplyLines={filteredSupplyLines}
           periods={openPeriods}
           projects={projects}
-          costCenters={costCenters}
+          costCenters={visibleCostCenters}
           canEditDemand={canEditDemand}
           canEditSupply={canEditSupply}
           onReload={reloadLines}

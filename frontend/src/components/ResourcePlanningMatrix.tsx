@@ -706,6 +706,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     const numVal = parseInt(applyValue, 10);
     if (selectedCells.size === 0 || isNaN(numVal)) return;
 
+    // Validate FTE: 0 means delete; otherwise must be 5-100 in steps of 5
+    if (numVal !== 0 && (numVal < 5 || numVal > 100 || numVal % 5 !== 0)) {
+      setEditError('Value must be 0 (to clear) or between 5 and 100 in steps of 5');
+      return;
+    }
+
     setApplying(true);
     setEditError(null);
 
@@ -762,10 +768,15 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       }
 
       if (actions.length > 0) {
+        let resp: { results?: Array<{ status: string; error?: string | null }> };
         if (dragType === 'demand') {
-          await planningApi.bulkDemandLines({ actions });
+          resp = await planningApi.bulkDemandLines({ actions });
         } else {
-          await planningApi.bulkSupplyLines({ actions });
+          resp = await planningApi.bulkSupplyLines({ actions });
+        }
+        const firstError = resp?.results?.find(r => r.status === 'error');
+        if (firstError) {
+          throw new Error(firstError.error ?? 'Bulk operation failed');
         }
       }
 
@@ -813,10 +824,15 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       }
 
       if (actions.length > 0) {
+        let resp: { results?: Array<{ status: string; error?: string | null }> };
         if (dragType === 'demand') {
-          await planningApi.bulkDemandLines({ actions });
+          resp = await planningApi.bulkDemandLines({ actions });
         } else {
-          await planningApi.bulkSupplyLines({ actions });
+          resp = await planningApi.bulkSupplyLines({ actions });
+        }
+        const firstError = resp?.results?.find(r => r.status === 'error');
+        if (firstError) {
+          throw new Error(firstError.error ?? 'Bulk operation failed');
         }
         onReload();
       }
@@ -1048,7 +1064,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                     onMouseDown={isEditingThisCC && isSelectable
                                       ? (e) => handleCellMouseDown(e, dragCellKey, 'demand', demandRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id)
                                       : undefined}
-                                    onMouseEnter={isDragging
+                                    onMouseEnter={isDragging && isEditingThisCC
                                       ? () => handleCellMouseEnter(demandRowIndex, colIndex, allRows)
                                       : undefined}
                                   >
@@ -1098,7 +1114,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                     onMouseDown={isEditingThisCC && isSelectable
                                       ? (e) => handleCellMouseDown(e, dragCellKey, 'supply', supplyRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id)
                                       : undefined}
-                                    onMouseEnter={isDragging
+                                    onMouseEnter={isDragging && isEditingThisCC
                                       ? () => handleCellMouseEnter(supplyRowIndex, colIndex, allRows)
                                       : undefined}
                                   >

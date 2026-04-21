@@ -810,22 +810,7 @@ class FinanceService:
         if not period_ids:
             return ConsolidatedCostResponse(data=[], monthly_fte_cost=monthly_fte_cost)
 
-        # 3. If cost_center_id given, resolve to project IDs
-        allowed_project_ids: Optional[set] = None
-        if cost_center_id:
-            proj_rows = (
-                self.db.query(Project.id)
-                .filter(
-                    Project.tenant_id == self.current_user.tenant_id,
-                    Project.cost_center_id == cost_center_id,
-                )
-                .all()
-            )
-            allowed_project_ids = {row.id for row in proj_rows}
-            if not allowed_project_ids:
-                return ConsolidatedCostResponse(data=[], monthly_fte_cost=monthly_fte_cost)
-
-        # 4. PM role restriction — only their own projects
+        # 3. PM role restriction — only their own projects
         pm_project_ids: Optional[set] = None
         if self.current_user.role == "PM":
             pm_user = self.db.query(User).filter(
@@ -842,96 +827,121 @@ class FinanceService:
             else:
                 pm_project_ids = set()
 
-        # 5. Build project name and cost-center lookup
+        # 4. Build project name lookup and cost center name lookup
         proj_rows = (
-            self.db.query(Project.id, Project.name, Project.cost_center_id, CostCenter.name.label("cc_name"))
-            .outerjoin(CostCenter, Project.cost_center_id == CostCenter.id)
+            self.db.query(Project.id, Project.name)
             .filter(Project.tenant_id == self.current_user.tenant_id)
             .all()
         )
         project_name_map = {row.id: row.name for row in proj_rows}
-        project_cc_map = {row.id: (row.cost_center_id, row.cc_name) for row in proj_rows}
 
-        # 6. Accumulator: (project_id, year, month) → cost buckets
+        cc_rows = (
+            self.db.query(CostCenter.id, CostCenter.name)
+            .filter(CostCenter.tenant_id == self.current_user.tenant_id)
+            .all()
+        )
+        cc_name_map = {row.id: row.name for row in cc_rows}
+
+        # 5. Accumulator: (project_id, cc_id, year, month) → cost buckets
+        #    cc_id comes from demand/actual lines via Resource.cost_center_id,
+        #    so one project can appear in multiple rows if it spans cost centers.
         agg: dict = defaultdict(lambda: {"demand_cost": 0, "actuals_cost": 0, "externals_cost": 0, "equipment_cost": 0})
 
-        def _allowed(proj_id: str) -> bool:
-            if allowed_project_ids is not None and proj_id not in allowed_project_ids:
-                return False
+        def _pm_allowed(proj_id: str) -> bool:
             if pm_project_ids is not None and proj_id not in pm_project_ids:
                 return False
             return True
 
-        # 7. Demand lines → planned labor cost
-        demand_q = self.db.query(DemandLine).filter(
-            DemandLine.tenant_id == self.current_user.tenant_id,
-            DemandLine.period_id.in_(period_ids),
-            DemandLine.resource_id.isnot(None),
+        # 6. Demand lines → planned labor cost, keyed by Resource.cost_center_id
+        demand_q = (
+            self.db.query(DemandLine, Resource.cost_center_id)
+            .join(Resource, DemandLine.resource_id == Resource.id)
+            .filter(
+                DemandLine.tenant_id == self.current_user.tenant_id,
+                DemandLine.period_id.in_(period_ids),
+                DemandLine.resource_id.isnot(None),
+            )
         )
         if project_id:
             demand_q = demand_q.filter(DemandLine.project_id == project_id)
-        for line in demand_q.all():
-            if not _allowed(line.project_id):
+        if cost_center_id:
+            demand_q = demand_q.filter(Resource.cost_center_id == cost_center_id)
+        for line, cc_id in demand_q.all():
+            if not _pm_allowed(line.project_id):
                 continue
-            year, month = period_map[line.period_id]
-            agg[(line.project_id, year, month)]["demand_cost"] += int(line.fte_percent * monthly_fte_cost // 100)
+            yr, mo = period_map[line.period_id]
+            agg[(line.project_id, cc_id, yr, mo)]["demand_cost"] += int(line.fte_percent * monthly_fte_cost // 100)
 
-        # 8. Actual lines → actual labor cost (approved only)
+        # 7. Actual lines → actual labor cost (approved only), keyed by Resource.cost_center_id
         approved_subq_cons = self._approved_actual_ids_subq()
-        actuals_q = self.db.query(ActualLine).filter(
-            ActualLine.tenant_id == self.current_user.tenant_id,
-            ActualLine.period_id.in_(period_ids),
-            ActualLine.id.in_(approved_subq_cons),
+        actuals_q = (
+            self.db.query(ActualLine, Resource.cost_center_id)
+            .join(Resource, ActualLine.resource_id == Resource.id)
+            .filter(
+                ActualLine.tenant_id == self.current_user.tenant_id,
+                ActualLine.period_id.in_(period_ids),
+                ActualLine.id.in_(approved_subq_cons),
+            )
         )
         if project_id:
             actuals_q = actuals_q.filter(ActualLine.project_id == project_id)
-        for line in actuals_q.all():
-            if not _allowed(line.project_id):
+        if cost_center_id:
+            actuals_q = actuals_q.filter(Resource.cost_center_id == cost_center_id)
+        for line, cc_id in actuals_q.all():
+            if not _pm_allowed(line.project_id):
                 continue
-            year, month = period_map[line.period_id]
-            agg[(line.project_id, year, month)]["actuals_cost"] += int(line.actual_fte_percent * monthly_fte_cost // 100)
+            yr, mo = period_map[line.period_id]
+            agg[(line.project_id, cc_id, yr, mo)]["actuals_cost"] += int(line.actual_fte_percent * monthly_fte_cost // 100)
 
-        # 9. External lines → contractor cost
-        ext_q = self.db.query(ProjectExternalLine).filter(
-            ProjectExternalLine.tenant_id == self.current_user.tenant_id,
-            ProjectExternalLine.period_id.in_(period_ids),
+        # 8. External lines → contractor cost, keyed by Resource.cost_center_id when available
+        ext_q = (
+            self.db.query(ProjectExternalLine, Resource.cost_center_id)
+            .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
+            .filter(
+                ProjectExternalLine.tenant_id == self.current_user.tenant_id,
+                ProjectExternalLine.period_id.in_(period_ids),
+            )
         )
         if project_id:
             ext_q = ext_q.filter(ProjectExternalLine.project_id == project_id)
-        for line in ext_q.all():
-            if not _allowed(line.project_id):
+        if cost_center_id:
+            ext_q = ext_q.filter(Resource.cost_center_id == cost_center_id)
+        for line, cc_id in ext_q.all():
+            if not _pm_allowed(line.project_id):
                 continue
-            year, month = period_map[line.period_id]
-            agg[(line.project_id, year, month)]["externals_cost"] += line.cost
+            yr, mo = period_map[line.period_id]
+            agg[(line.project_id, cc_id, yr, mo)]["externals_cost"] += line.cost
 
-        # 10. Equipment lines → equipment cost
-        equip_q = self.db.query(ProjectEquipmentLine).filter(
-            ProjectEquipmentLine.tenant_id == self.current_user.tenant_id,
-            ProjectEquipmentLine.period_id.in_(period_ids),
-        )
-        if project_id:
-            equip_q = equip_q.filter(ProjectEquipmentLine.project_id == project_id)
-        for line in equip_q.all():
-            if not _allowed(line.project_id):
-                continue
-            year, month = period_map[line.period_id]
-            agg[(line.project_id, year, month)]["equipment_cost"] += line.cost
+        # 9. Equipment lines → equipment cost (no resource link, cc_id=None)
+        #    Skip when filtering by cost_center_id since there is no resource to filter on.
+        if not cost_center_id:
+            equip_q = self.db.query(ProjectEquipmentLine).filter(
+                ProjectEquipmentLine.tenant_id == self.current_user.tenant_id,
+                ProjectEquipmentLine.period_id.in_(period_ids),
+            )
+            if project_id:
+                equip_q = equip_q.filter(ProjectEquipmentLine.project_id == project_id)
+            for line in equip_q.all():
+                if not _pm_allowed(line.project_id):
+                    continue
+                yr, mo = period_map[line.period_id]
+                agg[(line.project_id, None, yr, mo)]["equipment_cost"] += line.cost
 
-        # 11. Build response
+        # 10. Build response
         data = [
             ConsolidatedCostByProject(
                 project_id=proj_id,
                 project_name=project_name_map.get(proj_id, proj_id),
-                cost_center_id=project_cc_map.get(proj_id, (None, None))[0],
-                cost_center_name=project_cc_map.get(proj_id, (None, None))[1],
-                year=year,
-                month=month,
+                cost_center_id=cc_id,
+                cost_center_name=cc_name_map.get(cc_id) if cc_id else None,
+                year=yr,
+                month=mo,
                 demand_cost=costs["demand_cost"],
                 actuals_cost=costs["actuals_cost"],
                 externals_cost=costs["externals_cost"],
                 equipment_cost=costs["equipment_cost"],
             )
-            for (proj_id, year, month), costs in agg.items()
+            for (proj_id, cc_id, yr, mo), costs in agg.items()
         ]
         return ConsolidatedCostResponse(data=data, monthly_fte_cost=monthly_fte_cost)
 

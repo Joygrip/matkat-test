@@ -453,7 +453,7 @@ export function Admin() {
 
   const openCreateDialog = () => {
     setEditItem(null);
-    setFormData(selectedTab === 'projects' ? { cost_center_id: null } : {});
+    setFormData({});
     setDialogOpen(true);
   };
 
@@ -496,7 +496,6 @@ export function Admin() {
               code: formData.code as string,
               name: formData.name as string,
               pm_user_ids: (formData.pm_user_ids as string[]) || undefined,
-              cost_center_id: (formData.cost_center_id as string | null) ?? undefined,
             });
           }
           break;
@@ -746,7 +745,6 @@ export function Admin() {
                 <TableRow>
                   <TableHeaderCell>Code</TableHeaderCell>
                   <TableHeaderCell>Name</TableHeaderCell>
-                  <TableHeaderCell>Cost Center</TableHeaderCell>
                   <TableHeaderCell>Project Manager</TableHeaderCell>
                   <TableHeaderCell>Status</TableHeaderCell>
                   <TableHeaderCell>Actions</TableHeaderCell>
@@ -755,7 +753,7 @@ export function Admin() {
               <TableBody>
                 {filteredProjects.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6}>
+                    <TableCell colSpan={5}>
                       <Text className={styles.emptyHint}>No projects match the current filter.</Text>
                     </TableCell>
                   </TableRow>
@@ -764,7 +762,6 @@ export function Admin() {
                   <TableRow key={project.id}>
                     <TableCell>{project.code}</TableCell>
                     <TableCell>{project.name}</TableCell>
-                    <TableCell>{costCenters.find((cc) => cc.id === project.cost_center_id)?.name ?? '—'}</TableCell>
                     <TableCell>{pmNamesForProject(project.pm_user_ids)}</TableCell>
                     <TableCell>
                       {canManageMasterData ? (
@@ -1179,19 +1176,6 @@ export function Admin() {
                 value={String(formData.name || '')}
                 onChange={(_, d) => setFormData({ ...formData, name: d.value })}
               />
-            </div>
-            <div className={styles.dialogField}>
-              <Label>Cost Center</Label>
-              <select
-                className={styles.nativeSelect}
-                value={String(formData.cost_center_id || '')}
-                onChange={(e) => setFormData({ ...formData, cost_center_id: e.target.value || null })}
-              >
-                <option value="">None</option>
-                {costCenters.map((cc) => (
-                  <option key={cc.id} value={cc.id}>{cc.name}</option>
-                ))}
-              </select>
             </div>
             <div className={styles.dialogField}>
               <Label>Project Managers (hold Ctrl/Cmd to select multiple)</Label>

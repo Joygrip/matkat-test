@@ -187,10 +187,11 @@ class NotificationsService:
                 idempotency_key=ikey,
             )
             try:
-                self.db.add(log)
-                self.db.flush()  # detect duplicate key before sending mail
+                with self.db.begin_nested():
+                    self.db.add(log)
+                    self.db.flush()  # detect duplicate key before sending mail
             except IntegrityError:
-                self.db.rollback()
+                # Savepoint rolled back — outer transaction and session objects untouched.
                 logger.info(
                     "run_notifications: duplicate skipped for %s (concurrent run)",
                     recipient.email,
@@ -306,10 +307,11 @@ class NotificationsService:
                         idempotency_key=ikey,
                     )
                     try:
-                        self.db.add(log)
-                        self.db.flush()
+                        with self.db.begin_nested():
+                            self.db.add(log)
+                            self.db.flush()
                     except IntegrityError:
-                        self.db.rollback()
+                        # Savepoint rolled back — outer transaction and session objects untouched.
                         logger.info(
                             "run_conflict_alerts: duplicate skipped for %s (concurrent run)",
                             recipient.email,
@@ -418,10 +420,11 @@ class NotificationsService:
                     idempotency_key=ikey,
                 )
                 try:
-                    self.db.add(log)
-                    self.db.flush()
+                    with self.db.begin_nested():
+                        self.db.add(log)
+                        self.db.flush()
                 except IntegrityError:
-                    self.db.rollback()
+                    # Savepoint rolled back — outer transaction and session objects untouched.
                     logger.info(
                         "run_missing_actuals_alerts: duplicate skipped for %s (concurrent run)",
                         recipient.email,

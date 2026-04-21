@@ -1,4 +1,5 @@
 """Database engine and session management."""
+import threading
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
@@ -19,8 +20,21 @@ def get_engine():
             echo=settings.is_dev,
         )
 
-    # SQL Server / Azure SQL
-    return create_engine(url, echo=settings.is_dev)
+    # SQL Server / Azure SQL — explicit pool config for multi-user production.
+    # pool_pre_ping: validates connections before use; Azure SQL silently drops
+    #   idle connections after ~30 min, so without this callers get broken pipes.
+    # pool_recycle: recycles connections every hour to avoid stale TDS sessions.
+    # pool_size/max_overflow: supports up to 30 concurrent DB operations before
+    #   queuing; tune based on Azure SQL tier and worker count.
+    return create_engine(
+        url,
+        echo=settings.is_dev,
+        pool_size=20,
+        max_overflow=10,
+        pool_timeout=30,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+    )
 
 
 def run_dev_migrations(engine) -> None:
@@ -83,14 +97,22 @@ def run_dev_migrations(engine) -> None:
 
 
 _engine = None
+_engine_lock = threading.Lock()
+
 
 def _get_or_create_engine():
+    # Double-checked locking: avoids creating two engine instances (and two
+    # separate connection pools) when multiple workers start simultaneously.
     global _engine
     if _engine is None:
-        _engine = get_engine()
+        with _engine_lock:
+            if _engine is None:
+                _engine = get_engine()
     return _engine
 
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False)
+
 
 def get_db() -> Generator[Session, None, None]:
     """Dependency that provides a database session."""
@@ -99,5 +121,11 @@ def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        # Roll back any uncommitted work so the connection returns to the pool
+        # clean. Without this, a failed db.commit() anywhere in a route handler
+        # leaves an open transaction on Azure SQL until the connection is recycled.
+        db.rollback()
+        raise
     finally:
         db.close()

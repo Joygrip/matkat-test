@@ -154,12 +154,21 @@ class ConsolidationService:
                     "total_demand_fte": demand,
                 })
 
+        # Batch-load all projects referenced by placeholder demands in one query.
+        _ph_project_ids = {od.project_id for od in placeholder_demands if od.project_id}
+        ph_project_map: Dict[str, Project] = {}
+        if _ph_project_ids:
+            ph_project_map = {
+                p.id: p for p in self.db.query(Project).filter(
+                    Project.id.in_(_ph_project_ids),
+                    Project.tenant_id == self.current_user.tenant_id,
+                ).all()
+            }
+
         orphans_count = 0
         for od in placeholder_demands:
             ph = placeholder_map.get(od.placeholder_id)
-            project = self.db.query(Project).filter(
-                and_(Project.id == od.project_id, Project.tenant_id == self.current_user.tenant_id)
-            ).first()
+            project = ph_project_map.get(od.project_id)
 
             cc_id, cc_name = self._resolve_cc(placeholder=ph)
             cc_node = _ensure_cc(cc_id, cc_name)
@@ -282,36 +291,7 @@ class ConsolidationService:
                 DemandLine.period_id == period_id,
             )
         ).all()
-        
-        for d in demands:
-            project = self.db.query(Project).filter(
-                and_(Project.id == d.project_id, Project.tenant_id == self.current_user.tenant_id)
-            ).first()
-            resource = self.db.query(Resource).filter(
-                and_(Resource.id == d.resource_id, Resource.tenant_id == self.current_user.tenant_id)
-            ).first() if d.resource_id else None
-            placeholder = self.db.query(Placeholder).filter(
-                and_(Placeholder.id == d.placeholder_id, Placeholder.tenant_id == self.current_user.tenant_id)
-            ).first() if d.placeholder_id else None
-            cc_id, cc_name = self._resolve_cc(resource=resource, placeholder=placeholder)
 
-            line = PublishSnapshotLine(
-                snapshot_id=snapshot.id,
-                line_type="demand",
-                project_id=d.project_id,
-                project_name=project.name if project else None,
-                resource_id=d.resource_id,
-                resource_name=resource.display_name if resource else None,
-                placeholder_id=d.placeholder_id,
-                placeholder_name=placeholder.name if placeholder else None,
-                cost_center_id=cc_id,
-                cost_center_name=cc_name,
-                year=d.year,
-                month=d.month,
-                fte_percent=d.fte_percent,
-            )
-            self.db.add(line)
-        
         # Copy supply lines
         supplies = self.db.query(SupplyLine).filter(
             and_(
@@ -319,26 +299,7 @@ class ConsolidationService:
                 SupplyLine.period_id == period_id,
             )
         ).all()
-        
-        for s in supplies:
-            resource = self.db.query(Resource).filter(
-                and_(Resource.id == s.resource_id, Resource.tenant_id == self.current_user.tenant_id)
-            ).first()
-            cc_id, cc_name = self._resolve_cc(resource=resource)
 
-            line = PublishSnapshotLine(
-                snapshot_id=snapshot.id,
-                line_type="supply",
-                resource_id=s.resource_id,
-                resource_name=resource.display_name if resource else None,
-                cost_center_id=cc_id,
-                cost_center_name=cc_name,
-                year=s.year,
-                month=s.month,
-                fte_percent=s.fte_percent,
-            )
-            self.db.add(line)
-        
         # Copy actual lines — approved only
         from api.app.models.approvals import ApprovalInstance, ApprovalStatus
         latest_actual_subq = (
@@ -370,14 +331,98 @@ class ConsolidationService:
                 ActualLine.id.in_(approved_actual_ids_subq),
             )
         ).all()
-        
+
+        # Copy OoP lines
+        oops = self.db.query(OopLine).filter(
+            and_(
+                OopLine.tenant_id == self.current_user.tenant_id,
+                OopLine.period_id == period_id,
+            )
+        ).all()
+
+        # Batch-load all referenced entities in 3 queries instead of one-per-line.
+        # Avoids N+1 queries when iterating demand/supply/actual/oop lines below.
+        _project_ids = (
+            {d.project_id for d in demands if d.project_id}
+            | {a.project_id for a in actuals if a.project_id}
+            | {o.project_id for o in oops if o.project_id}
+        )
+        _resource_ids = (
+            {d.resource_id for d in demands if d.resource_id}
+            | {s.resource_id for s in supplies if s.resource_id}
+            | {a.resource_id for a in actuals if a.resource_id}
+            | {o.resource_id for o in oops if o.resource_id}
+        )
+        _placeholder_ids = {d.placeholder_id for d in demands if d.placeholder_id}
+
+        snap_project_map: Dict[str, Project] = {}
+        if _project_ids:
+            snap_project_map = {
+                p.id: p for p in self.db.query(Project).filter(
+                    Project.id.in_(_project_ids),
+                    Project.tenant_id == self.current_user.tenant_id,
+                ).all()
+            }
+        snap_resource_map: Dict[str, Resource] = {}
+        if _resource_ids:
+            snap_resource_map = {
+                r.id: r for r in self.db.query(Resource).filter(
+                    Resource.id.in_(_resource_ids),
+                    Resource.tenant_id == self.current_user.tenant_id,
+                ).all()
+            }
+        snap_placeholder_map: Dict[str, Placeholder] = {}
+        if _placeholder_ids:
+            snap_placeholder_map = {
+                p.id: p for p in self.db.query(Placeholder).filter(
+                    Placeholder.id.in_(_placeholder_ids),
+                    Placeholder.tenant_id == self.current_user.tenant_id,
+                ).all()
+            }
+
+        for d in demands:
+            project = snap_project_map.get(d.project_id)
+            resource = snap_resource_map.get(d.resource_id) if d.resource_id else None
+            placeholder = snap_placeholder_map.get(d.placeholder_id) if d.placeholder_id else None
+            cc_id, cc_name = self._resolve_cc(resource=resource, placeholder=placeholder)
+
+            line = PublishSnapshotLine(
+                snapshot_id=snapshot.id,
+                line_type="demand",
+                project_id=d.project_id,
+                project_name=project.name if project else None,
+                resource_id=d.resource_id,
+                resource_name=resource.display_name if resource else None,
+                placeholder_id=d.placeholder_id,
+                placeholder_name=placeholder.name if placeholder else None,
+                cost_center_id=cc_id,
+                cost_center_name=cc_name,
+                year=d.year,
+                month=d.month,
+                fte_percent=d.fte_percent,
+            )
+            self.db.add(line)
+
+        for s in supplies:
+            resource = snap_resource_map.get(s.resource_id) if s.resource_id else None
+            cc_id, cc_name = self._resolve_cc(resource=resource)
+
+            line = PublishSnapshotLine(
+                snapshot_id=snapshot.id,
+                line_type="supply",
+                resource_id=s.resource_id,
+                resource_name=resource.display_name if resource else None,
+                cost_center_id=cc_id,
+                cost_center_name=cc_name,
+                year=s.year,
+                month=s.month,
+                fte_percent=s.fte_percent,
+            )
+            self.db.add(line)
+
         for a in actuals:
-            project = self.db.query(Project).filter(
-                and_(Project.id == a.project_id, Project.tenant_id == self.current_user.tenant_id)
-            ).first()
-            resource = self.db.query(Resource).filter(
-                and_(Resource.id == a.resource_id, Resource.tenant_id == self.current_user.tenant_id)
-            ).first()
+            project = snap_project_map.get(a.project_id)
+            resource = snap_resource_map.get(a.resource_id) if a.resource_id else None
             cc_id, cc_name = self._resolve_cc(resource=resource)
 
             line = PublishSnapshotLine(
@@ -394,22 +439,10 @@ class ConsolidationService:
                 fte_percent=a.actual_fte_percent,
             )
             self.db.add(line)
-        
-        # Copy OoP lines
-        oops = self.db.query(OopLine).filter(
-            and_(
-                OopLine.tenant_id == self.current_user.tenant_id,
-                OopLine.period_id == period_id,
-            )
-        ).all()
-        
+
         for o in oops:
-            project = self.db.query(Project).filter(
-                and_(Project.id == o.project_id, Project.tenant_id == self.current_user.tenant_id)
-            ).first()
-            resource = self.db.query(Resource).filter(
-                and_(Resource.id == o.resource_id, Resource.tenant_id == self.current_user.tenant_id)
-            ).first()
+            project = snap_project_map.get(o.project_id)
+            resource = snap_resource_map.get(o.resource_id) if o.resource_id else None
             cc_id, cc_name = self._resolve_cc(resource=resource)
 
             line = PublishSnapshotLine(

@@ -1,5 +1,5 @@
 """Admin CRUD endpoints for master data."""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from typing import Optional
@@ -254,6 +254,46 @@ async def delete_project(
     db.commit()
     log_audit(db, current_user, "delete", "Project", project.id)
     return {"message": "Project deleted"}
+
+
+@router.post("/projects/bulk-assign-cost-center")
+async def bulk_assign_cost_center(
+    data: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(*MASTER_DATA_WRITE_ROLES)),
+):
+    """
+    Bulk-assign a cost center to multiple projects (or all unassigned projects).
+    Body: { "cost_center_id": "<id>", "project_ids": ["<id>", ...] }
+    If project_ids is omitted or empty, assigns to ALL projects with cost_center_id = null.
+    """
+    cost_center_id = data.get("cost_center_id")
+    if not cost_center_id:
+        raise HTTPException(status_code=422, detail={"code": "MISSING_FIELD", "message": "cost_center_id is required"})
+
+    cc = db.query(CostCenter).filter(
+        and_(CostCenter.id == cost_center_id, CostCenter.tenant_id == current_user.tenant_id)
+    ).first()
+    if not cc:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Cost center not found"})
+
+    project_ids = data.get("project_ids") or []
+    query = db.query(Project).filter(Project.tenant_id == current_user.tenant_id)
+    if project_ids:
+        query = query.filter(Project.id.in_(project_ids))
+    else:
+        query = query.filter(Project.cost_center_id == None)  # noqa: E711
+
+    projects = query.all()
+    updated = 0
+    for p in projects:
+        p.cost_center_id = cost_center_id
+        updated += 1
+
+    db.commit()
+    log_audit(db, current_user, "bulk_update", "Project", cost_center_id,
+              new_values={"cost_center_id": cost_center_id, "updated_count": updated})
+    return {"updated": updated, "cost_center_id": cost_center_id}
 
 
 # ============== RESOURCES ==============

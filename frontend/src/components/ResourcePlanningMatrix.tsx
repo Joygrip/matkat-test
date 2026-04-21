@@ -6,6 +6,12 @@ import {
   makeStyles,
   mergeClasses,
   Select,
+  Dialog,
+  DialogSurface,
+  DialogBody,
+  DialogTitle,
+  DialogActions,
+  DialogContent,
 } from '@fluentui/react-components';
 import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular } from '@fluentui/react-icons';
 import { planningApi, DemandLine, SupplyLine } from '../api/planning';
@@ -343,6 +349,9 @@ export interface ResourcePlanningMatrixProps {
   canEditDemand: boolean;
   canEditSupply: boolean;
   onReload: () => void;
+  userRole: string;
+  managerCcId: string | null;
+  allCostCenters: CostCenter[];
 }
 
 function parseResOrPh(val: string): { resourceId?: string; placeholderId?: string } {
@@ -375,6 +384,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   canEditDemand,
   canEditSupply,
   onReload,
+  userRole,
+  managerCcId,
+  allCostCenters,
 }) => {
   const styles = useStyles();
 
@@ -408,6 +420,23 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [applyValue, setApplyValue] = useState<string>('');
   const [applying, setApplying] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+
+  // Add Line dialog state
+  const [addLineDialogOpen, setAddLineDialogOpen] = useState(false);
+  const [dlgLineType, setDlgLineType] = useState<'demand' | 'supply'>('demand');
+  const [dlgCcId, setDlgCcId] = useState('');
+  const [dlgResourceQuery, setDlgResourceQuery] = useState('');
+  const [dlgResourceId, setDlgResourceId] = useState('');
+  const [dlgProjectId, setDlgProjectId] = useState('');
+  const [dlgSelectedPeriods, setDlgSelectedPeriods] = useState<Set<string>>(new Set());
+  const [dlgFte, setDlgFte] = useState('');
+  const [dlgSaving, setDlgSaving] = useState(false);
+  const [dlgError, setDlgError] = useState<string | null>(null);
+  const [dlgShowResourceDropdown, setDlgShowResourceDropdown] = useState(false);
+  const [dlgAllResources, setDlgAllResources] = useState<Resource[]>([]);
+  const [dlgAllPlaceholders, setDlgAllPlaceholders] = useState<Placeholder[]>([]);
+  const [dlgPeriodDragging, setDlgPeriodDragging] = useState(false);
+  const [dlgPeriodDragAdd, setDlgPeriodDragAdd] = useState(true);
 
   const groups = useMemo((): MatrixGroup[] => {
     const groupMap = new Map<string, { ccName: string; rowMap: Map<string, MergedMatrixRow> }>();
@@ -497,6 +526,26 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     result.sort((a, b) => a.ccName.localeCompare(b.ccName));
     return result;
   }, [demandLines, supplyLines, costCenters, localDemandRows, localSupplyRows]);
+
+  const isRoleManager = userRole === 'Manager';
+  const isRolePM = userRole === 'PM';
+
+  const dlgFilteredResources = useMemo(() => {
+    const query = dlgResourceQuery.toLowerCase();
+    if (isRoleManager) {
+      if (!dlgCcId) return { resources: [] as Resource[], placeholders: [] as Placeholder[] };
+      const resources = (ccResources[dlgCcId] ?? []).filter(r => !query || r.display_name.toLowerCase().includes(query));
+      const placeholders = dlgLineType === 'demand'
+        ? (ccPlaceholders[dlgCcId] ?? []).filter(ph => !query || ph.name.toLowerCase().includes(query))
+        : [];
+      return { resources, placeholders };
+    }
+    const resources = dlgAllResources.filter(r => !query || r.display_name.toLowerCase().includes(query));
+    const placeholders = dlgLineType === 'demand'
+      ? dlgAllPlaceholders.filter(ph => !query || ph.name.toLowerCase().includes(query))
+      : [];
+    return { resources, placeholders };
+  }, [isRoleManager, dlgCcId, dlgResourceQuery, dlgLineType, ccResources, ccPlaceholders, dlgAllResources, dlgAllPlaceholders]);
 
   const loadCcData = useCallback(async (ccId: string) => {
     const promises: Promise<void>[] = [];
@@ -852,9 +901,107 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     }
   }, [selectedCells, dragType, demandLines, supplyLines, onReload]);
 
+  // For Manager: load CC resources when their CC is set in the dialog
+  useEffect(() => {
+    if (isRoleManager && dlgCcId) loadCcData(dlgCcId);
+  }, [dlgCcId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // End period drag selection on global mouseup
+  useEffect(() => {
+    if (!dlgPeriodDragging) return;
+    const handleUp = () => setDlgPeriodDragging(false);
+    window.addEventListener('mouseup', handleUp);
+    return () => window.removeEventListener('mouseup', handleUp);
+  }, [dlgPeriodDragging]);
+
+  const openAddLineDialog = useCallback(() => {
+    const defaultLineType: 'demand' | 'supply' = isRolePM ? 'demand' : isRoleManager ? 'supply' : 'demand';
+    const defaultCcId = isRoleManager ? (managerCcId || costCenters[0]?.id || '') : '';
+    setDlgLineType(defaultLineType);
+    setDlgCcId(defaultCcId);
+    setDlgResourceQuery('');
+    setDlgResourceId('');
+    setDlgProjectId('');
+    setDlgSelectedPeriods(new Set());
+    setDlgFte('');
+    setDlgSaving(false);
+    setDlgError(null);
+    setDlgShowResourceDropdown(false);
+    setDlgAllResources([]);
+    setDlgAllPlaceholders([]);
+    setDlgPeriodDragging(false);
+    if (isRoleManager) {
+      if (defaultCcId) loadCcData(defaultCcId);
+    } else {
+      lookupsApi.listResources().then(setDlgAllResources).catch(() => {});
+      if (defaultLineType === 'demand') {
+        lookupsApi.listPlaceholders().then(setDlgAllPlaceholders).catch(() => {});
+      }
+    }
+    setAddLineDialogOpen(true);
+  }, [isRolePM, isRoleManager, managerCcId, costCenters, loadCcData]);
+
+  const handleDlgSave = useCallback(async () => {
+    const { resourceId, placeholderId } = parseResOrPh(dlgResourceId);
+    const fteVal = Number(dlgFte);
+
+    if (!dlgCcId) { setDlgError('Please select a cost center'); return; }
+    if (!dlgResourceId) { setDlgError('Please select a resource'); return; }
+    if (dlgSelectedPeriods.size === 0) { setDlgError('Please select at least one period'); return; }
+    if (!dlgFte || isNaN(fteVal) || fteVal <= 0) { setDlgError('Please enter a valid FTE%'); return; }
+    if (dlgLineType === 'demand' && !dlgProjectId) { setDlgError('Please select a project for demand lines'); return; }
+    if (dlgLineType === 'supply' && !resourceId) { setDlgError('Supply lines require a resource, not a placeholder'); return; }
+
+    setDlgSaving(true);
+    setDlgError(null);
+    try {
+      for (const periodId of dlgSelectedPeriods) {
+        const period = periods.find(p => p.id === periodId);
+        if (!period) continue;
+        if (dlgLineType === 'demand') {
+          await planningApi.createDemandLine({
+            period_id: periodId,
+            project_id: dlgProjectId,
+            resource_id: resourceId,
+            placeholder_id: placeholderId,
+            fte_percent: fteVal,
+            year: period.year,
+            month: period.month,
+          });
+        } else {
+          await planningApi.createSupplyLine({
+            period_id: periodId,
+            resource_id: resourceId!,
+            project_id: dlgProjectId || undefined,
+            fte_percent: fteVal,
+            year: period.year,
+            month: period.month,
+          });
+        }
+      }
+      onReload();
+      setAddLineDialogOpen(false);
+    } catch (err) {
+      setDlgError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setDlgSaving(false);
+    }
+  }, [dlgResourceId, dlgFte, dlgCcId, dlgSelectedPeriods, dlgLineType, dlgProjectId, periods, onReload]);
+
   const totalCols = 3 + periods.length;
 
   return (
+    <>
+    <div style={{ padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`, borderBottom: `1px solid ${tokens.colorNeutralStroke2}`, display: 'flex', alignItems: 'center' }}>
+      <Button
+        size="small"
+        appearance="primary"
+        icon={<Add24Regular />}
+        onClick={openAddLineDialog}
+      >
+        Add Line
+      </Button>
+    </div>
     <div className={mergeClasses(styles.wrapper, isDragging && styles.matrixContainerSelecting)}>
       <table className={styles.table}>
         <thead>
@@ -1308,6 +1455,207 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         </tbody>
       </table>
     </div>
+
+    {/* Add Line Dialog */}
+    <Dialog open={addLineDialogOpen} onOpenChange={(_, d) => { if (!d.open && !dlgSaving) setAddLineDialogOpen(false); }}>
+      <DialogSurface style={{ minWidth: 540 }}>
+        <DialogBody>
+          <DialogTitle>Add Line</DialogTitle>
+          <DialogContent>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, paddingTop: tokens.spacingVerticalS }}>
+
+              {/* Line Type — Finance/Admin only; fixed label for PM and Manager */}
+              {!isRolePM && !isRoleManager ? (
+                <div>
+                  <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>Line Type</div>
+                  <div style={{ display: 'flex', gap: tokens.spacingHorizontalL }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: tokens.fontSizeBase300 }}>
+                      <input type="radio" name="dlgLineType" value="demand" checked={dlgLineType === 'demand'}
+                        onChange={() => { setDlgLineType('demand'); setDlgResourceId(''); setDlgResourceQuery(''); setDlgCcId(''); lookupsApi.listPlaceholders().then(setDlgAllPlaceholders).catch(() => {}); }} />
+                      Demand
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: tokens.fontSizeBase300 }}>
+                      <input type="radio" name="dlgLineType" value="supply" checked={dlgLineType === 'supply'}
+                        onChange={() => { setDlgLineType('supply'); setDlgResourceId(''); setDlgResourceQuery(''); setDlgCcId(''); setDlgAllPlaceholders([]); }} />
+                      Supply
+                    </label>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                  Line Type: <strong>{dlgLineType === 'demand' ? 'Demand' : 'Supply'}</strong>
+                </div>
+              )}
+
+              {/* Cost Center — locked display for Manager; auto-detected for others after resource is picked */}
+              {isRoleManager ? (
+                <div>
+                  <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>Cost Center</div>
+                  <div style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, backgroundColor: tokens.colorNeutralBackground3, fontSize: tokens.fontSizeBase300 }}>
+                    {allCostCenters.find(c => c.id === dlgCcId)?.name || costCenters[0]?.name || '—'}
+                  </div>
+                </div>
+              ) : dlgCcId ? (
+                <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                  Cost Center: <strong>{allCostCenters.find(c => c.id === dlgCcId)?.name || dlgCcId}</strong>
+                </div>
+              ) : null}
+
+              {/* Resource typeahead */}
+              <div>
+                <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>Resource</div>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    value={dlgResourceQuery}
+                    onChange={e => { setDlgResourceQuery(e.target.value); setDlgResourceId(''); setDlgShowResourceDropdown(true); }}
+                    onFocus={() => setDlgShowResourceDropdown(true)}
+                    onBlur={() => setTimeout(() => setDlgShowResourceDropdown(false), 150)}
+                    placeholder="Type to search…"
+                    disabled={isRoleManager && !dlgCcId}
+                    style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', boxSizing: 'border-box' }}
+                  />
+                  {dlgShowResourceDropdown && (dlgFilteredResources.resources.length > 0 || dlgFilteredResources.placeholders.length > 0) && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1000, background: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, boxShadow: tokens.shadow8, maxHeight: 200, overflowY: 'auto' }}>
+                      {dlgFilteredResources.resources.length > 0 && (
+                        <>
+                          {dlgFilteredResources.placeholders.length > 0 && (
+                            <div style={{ padding: '3px 8px', fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3, fontWeight: tokens.fontWeightSemibold, backgroundColor: tokens.colorNeutralBackground2 }}>
+                              Resources
+                            </div>
+                          )}
+                          {dlgFilteredResources.resources.map(r => (
+                            <div
+                              key={r.id}
+                              onMouseDown={() => { setDlgResourceId(`r:${r.id}`); setDlgResourceQuery(r.display_name); setDlgCcId(r.cost_center_id); setDlgShowResourceDropdown(false); }}
+                              style={{ padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200 }}
+                              onMouseEnter={e => (e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3)}
+                              onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                            >
+                              <span style={{ background: tokens.colorBrandBackground2, color: tokens.colorBrandForeground1, borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
+                                {r.initials || r.display_name.slice(0, 2).toUpperCase()}
+                              </span>
+                              {r.display_name}
+                            </div>
+                          ))}
+                        </>
+                      )}
+                      {dlgFilteredResources.placeholders.length > 0 && (
+                        <>
+                          <div style={{ padding: '3px 8px', fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3, fontWeight: tokens.fontWeightSemibold, backgroundColor: tokens.colorNeutralBackground2 }}>
+                            Placeholders
+                          </div>
+                          {dlgFilteredResources.placeholders.map(ph => (
+                            <div
+                              key={ph.id}
+                              onMouseDown={() => { setDlgResourceId(`ph:${ph.id}`); setDlgResourceQuery(ph.name); setDlgCcId(ph.cost_center_id); setDlgShowResourceDropdown(false); }}
+                              style={{ padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200, fontStyle: 'italic' }}
+                              onMouseEnter={e => (e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3)}
+                              onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                            >
+                              <span style={{ background: tokens.colorNeutralBackground3, borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, flexShrink: 0 }}>?</span>
+                              {ph.name} [TBD]
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Project — required for Demand, optional for Supply */}
+              <div>
+                <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>
+                  Project{dlgLineType === 'supply' ? ' (optional)' : ''}
+                </div>
+                <select
+                  value={dlgProjectId}
+                  onChange={e => setDlgProjectId(e.target.value)}
+                  style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, minWidth: 240 }}
+                >
+                  <option value="">{dlgLineType === 'supply' ? '— General availability —' : 'Select project…'}</option>
+                  {projects.filter(p => p.is_active).map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Periods — drag to select multiple */}
+              <div>
+                <div style={{ marginBottom: 6, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>Periods</div>
+                <div style={{ display: 'flex', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' }}>
+                  {periods.map(p => (
+                    <label
+                      key={p.id}
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        const willAdd = !dlgSelectedPeriods.has(p.id);
+                        setDlgPeriodDragging(true);
+                        setDlgPeriodDragAdd(willAdd);
+                        const next = new Set(dlgSelectedPeriods);
+                        if (willAdd) next.add(p.id); else next.delete(p.id);
+                        setDlgSelectedPeriods(next);
+                      }}
+                      onMouseEnter={() => {
+                        if (!dlgPeriodDragging) return;
+                        const next = new Set(dlgSelectedPeriods);
+                        if (dlgPeriodDragAdd) next.add(p.id); else next.delete(p.id);
+                        setDlgSelectedPeriods(next);
+                      }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: tokens.fontSizeBase200, padding: '3px 8px', border: `1px solid ${dlgSelectedPeriods.has(p.id) ? tokens.colorBrandStroke1 : tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, backgroundColor: dlgSelectedPeriods.has(p.id) ? tokens.colorBrandBackground2 : 'transparent', userSelect: 'none' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={dlgSelectedPeriods.has(p.id)}
+                        readOnly
+                        style={{ margin: 0, pointerEvents: 'none' }}
+                      />
+                      {MONTH_SHORT[p.month - 1]} {p.year}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* FTE % */}
+              <div>
+                <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>FTE %</div>
+                <input
+                  type="number"
+                  value={dlgFte}
+                  onChange={e => setDlgFte(e.target.value)}
+                  min={1}
+                  max={200}
+                  step={5}
+                  placeholder="e.g. 100"
+                  style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: 100 }}
+                />
+              </div>
+
+              {dlgError && (
+                <div style={{ color: tokens.colorPaletteRedForeground2, fontSize: tokens.fontSizeBase200 }}>
+                  {dlgError}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+          <DialogActions>
+            <Button appearance="secondary" onClick={() => setAddLineDialogOpen(false)} disabled={dlgSaving}>
+              Cancel
+            </Button>
+            <Button
+              appearance="primary"
+              onClick={handleDlgSave}
+              disabled={dlgSaving}
+              icon={dlgSaving ? <Spinner size="extra-tiny" /> : undefined}
+            >
+              Save
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+    </>
   );
 };
 

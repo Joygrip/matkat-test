@@ -453,7 +453,7 @@ export function Admin() {
 
   const openCreateDialog = () => {
     setEditItem(null);
-    setFormData({});
+    setFormData(selectedTab === 'projects' ? { cost_center_id: null } : {});
     setDialogOpen(true);
   };
 
@@ -492,7 +492,12 @@ export function Admin() {
           if (editItem) {
             await adminApi.updateProject((editItem as Project).id, formData as Partial<Project>);
           } else {
-            await adminApi.createProject(formData as { code: string; name: string; pm_user_ids?: string[] });
+            await adminApi.createProject({
+              code: formData.code as string,
+              name: formData.name as string,
+              pm_user_ids: (formData.pm_user_ids as string[]) || undefined,
+              cost_center_id: (formData.cost_center_id as string | null) ?? undefined,
+            });
           }
           break;
         case 'resources':

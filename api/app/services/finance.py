@@ -494,7 +494,7 @@ class FinanceService:
         monthly_fte_cost = int(setting.setting_value)
 
         if cost_center_id:
-            # CC mode — load all projects in this cost center
+            # CC mode — filter lines by Resource.cost_center_id (not Project.cost_center_id)
             cc = (
                 self.db.query(CostCenter)
                 .filter(
@@ -506,116 +506,121 @@ class FinanceService:
             if cc is None:
                 raise HTTPException(status_code=404, detail="Cost center not found.")
 
-            projects_q = self.db.query(Project).filter(
-                Project.tenant_id == self.current_user.tenant_id,
-                Project.cost_center_id == cost_center_id,
-            )
+            # PM restriction: collect allowed project IDs up front
+            cc_pm_project_ids: Optional[list] = None
             if self.current_user.role == "PM":
                 pm_user = self.db.query(User).filter(
                     User.tenant_id == self.current_user.tenant_id,
                     User.object_id == self.current_user.object_id,
                 ).first()
                 if pm_user:
-                    projects_q = projects_q.filter(
-                        sa_exists().where(
-                            and_(ProjectPM.project_id == Project.id, ProjectPM.user_id == pm_user.id)
-                        )
-                    )
+                    cc_pm_project_ids = [
+                        r.project_id
+                        for r in self.db.query(ProjectPM.project_id)
+                        .filter(ProjectPM.user_id == pm_user.id)
+                        .all()
+                    ]
                 else:
-                    projects_q = projects_q.filter(False)
-            projects = projects_q.all()
-            project_map = {p.id: p.name for p in projects}
-            project_ids = list(project_map.keys())
+                    cc_pm_project_ids = []
 
             demand_lines: list[DemandLineDetail] = []
             actual_lines: list[ActualLineDetail] = []
             external_lines: list[ExternalLineDetail] = []
             equipment_lines: list[EquipmentLineDetail] = []
 
-            if project_ids:
-                demand_rows = (
-                    self.db.query(DemandLine, Resource)
-                    .join(Resource, DemandLine.resource_id == Resource.id)
-                    .filter(
-                        DemandLine.tenant_id == self.current_user.tenant_id,
-                        DemandLine.project_id.in_(project_ids),
-                        DemandLine.period_id == period.id,
-                        DemandLine.resource_id.isnot(None),
-                    )
-                    .all()
+            # Demand lines — join Resource, filter by Resource.cost_center_id
+            demand_q = (
+                self.db.query(DemandLine, Resource)
+                .join(Resource, DemandLine.resource_id == Resource.id)
+                .filter(
+                    DemandLine.tenant_id == self.current_user.tenant_id,
+                    DemandLine.period_id == period.id,
+                    DemandLine.resource_id.isnot(None),
+                    Resource.cost_center_id == cost_center_id,
                 )
-                demand_lines = [
-                    DemandLineDetail(
-                        resource_name=resource.display_name,
-                        fte_percent=line.fte_percent,
-                        cost=int(line.fte_percent * monthly_fte_cost // 100),
-                        project_name=project_map.get(line.project_id),
-                    )
-                    for line, resource in demand_rows
-                ]
+            )
+            if cc_pm_project_ids is not None:
+                demand_q = demand_q.filter(DemandLine.project_id.in_(cc_pm_project_ids))
+            demand_rows = demand_q.all()
 
-                approved_subq_cc = self._approved_actual_ids_subq()
-                actual_rows = (
-                    self.db.query(ActualLine, Resource)
-                    .join(Resource, ActualLine.resource_id == Resource.id)
-                    .filter(
-                        ActualLine.tenant_id == self.current_user.tenant_id,
-                        ActualLine.project_id.in_(project_ids),
-                        ActualLine.period_id == period.id,
-                        ActualLine.id.in_(approved_subq_cc),
-                    )
-                    .all()
+            # Actual lines — join Resource, filter by Resource.cost_center_id
+            approved_subq_cc = self._approved_actual_ids_subq()
+            actual_q = (
+                self.db.query(ActualLine, Resource)
+                .join(Resource, ActualLine.resource_id == Resource.id)
+                .filter(
+                    ActualLine.tenant_id == self.current_user.tenant_id,
+                    ActualLine.period_id == period.id,
+                    ActualLine.id.in_(approved_subq_cc),
+                    Resource.cost_center_id == cost_center_id,
                 )
-                actual_lines = [
-                    ActualLineDetail(
-                        resource_name=resource.display_name,
-                        fte_percent=line.actual_fte_percent,
-                        cost=int(line.actual_fte_percent * monthly_fte_cost // 100),
-                        project_name=project_map.get(line.project_id),
-                    )
-                    for line, resource in actual_rows
-                ]
+            )
+            if cc_pm_project_ids is not None:
+                actual_q = actual_q.filter(ActualLine.project_id.in_(cc_pm_project_ids))
+            actual_rows = actual_q.all()
 
-                ext_rows = (
-                    self.db.query(ProjectExternalLine, Resource)
-                    .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
-                    .filter(
-                        ProjectExternalLine.tenant_id == self.current_user.tenant_id,
-                        ProjectExternalLine.project_id.in_(project_ids),
-                        ProjectExternalLine.period_id == period.id,
-                    )
-                    .all()
+            # External lines — outerjoin Resource, filter by Resource.cost_center_id
+            ext_q = (
+                self.db.query(ProjectExternalLine, Resource)
+                .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
+                .filter(
+                    ProjectExternalLine.tenant_id == self.current_user.tenant_id,
+                    ProjectExternalLine.period_id == period.id,
+                    Resource.cost_center_id == cost_center_id,
                 )
-                external_lines = [
-                    ExternalLineDetail(
-                        resource_name=resource.display_name if resource else None,
-                        description=line.description,
-                        notes=line.notes,
-                        hours=0,
-                        rate=0,
-                        total_cost=line.cost,
-                        project_name=project_map.get(line.project_id),
-                    )
-                    for line, resource in ext_rows
-                ]
+            )
+            if cc_pm_project_ids is not None:
+                ext_q = ext_q.filter(ProjectExternalLine.project_id.in_(cc_pm_project_ids))
+            ext_rows = ext_q.all()
 
-                equip_rows = (
-                    self.db.query(ProjectEquipmentLine)
-                    .filter(
-                        ProjectEquipmentLine.tenant_id == self.current_user.tenant_id,
-                        ProjectEquipmentLine.project_id.in_(project_ids),
-                        ProjectEquipmentLine.period_id == period.id,
-                    )
+            # Equipment lines — no resource FK, cannot filter by cost center; skip in CC mode
+            # (matches get_consolidated_costs behaviour)
+
+            # Load project names from all collected project IDs
+            cc_all_project_ids = (
+                {line.project_id for line, _ in demand_rows}
+                | {line.project_id for line, _ in actual_rows}
+                | {line.project_id for line, _ in ext_rows}
+            )
+            project_map = {}
+            if cc_all_project_ids:
+                project_map = {
+                    r.id: r.name
+                    for r in self.db.query(Project.id, Project.name)
+                    .filter(Project.id.in_(list(cc_all_project_ids)))
                     .all()
+                }
+
+            demand_lines = [
+                DemandLineDetail(
+                    resource_name=resource.display_name,
+                    fte_percent=line.fte_percent,
+                    cost=int(line.fte_percent * monthly_fte_cost // 100),
+                    project_name=project_map.get(line.project_id),
                 )
-                equipment_lines = [
-                    EquipmentLineDetail(
-                        description=line.description,
-                        cost=line.cost,
-                        project_name=project_map.get(line.project_id),
-                    )
-                    for line in equip_rows
-                ]
+                for line, resource in demand_rows
+            ]
+            actual_lines = [
+                ActualLineDetail(
+                    resource_name=resource.display_name,
+                    fte_percent=line.actual_fte_percent,
+                    cost=int(line.actual_fte_percent * monthly_fte_cost // 100),
+                    project_name=project_map.get(line.project_id),
+                )
+                for line, resource in actual_rows
+            ]
+            external_lines = [
+                ExternalLineDetail(
+                    resource_name=resource.display_name if resource else None,
+                    description=line.description,
+                    notes=line.notes,
+                    hours=0,
+                    rate=0,
+                    total_cost=line.cost,
+                    project_name=project_map.get(line.project_id),
+                )
+                for line, resource in ext_rows
+            ]
 
             return ConsolidatedCostDetail(
                 cost_center_id=cc.id,

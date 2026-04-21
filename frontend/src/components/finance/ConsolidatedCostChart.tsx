@@ -917,8 +917,8 @@ export const ConsolidatedCostChart: React.FC = () => {
                   >
                     <Tab value="planned">Planned Labor ({drillDownData.demand_lines.length})</Tab>
                     <Tab value="actual">Actual Labor ({drillDownData.actual_lines.length})</Tab>
-                    <Tab value="oop">OoP ({drillDownData.external_lines.length})</Tab>
-                    <Tab value="equipment">Equipment ({drillDownData.equipment_lines.length})</Tab>
+                    {drillDown?.mode !== 'cc' && <Tab value="oop">OoP ({drillDownData.external_lines.length})</Tab>}
+                    {drillDown?.mode !== 'cc' && <Tab value="equipment">Equipment ({drillDownData.equipment_lines.length})</Tab>}
                   </TabList>
 
                   {/* Planned Labor table */}

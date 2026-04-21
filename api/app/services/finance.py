@@ -842,13 +842,15 @@ class FinanceService:
             else:
                 pm_project_ids = set()
 
-        # 5. Build project name lookup
-        project_name_map = {
-            row.id: row.name
-            for row in self.db.query(Project.id, Project.name)
+        # 5. Build project name and cost-center lookup
+        proj_rows = (
+            self.db.query(Project.id, Project.name, Project.cost_center_id, CostCenter.name.label("cc_name"))
+            .outerjoin(CostCenter, Project.cost_center_id == CostCenter.id)
             .filter(Project.tenant_id == self.current_user.tenant_id)
             .all()
-        }
+        )
+        project_name_map = {row.id: row.name for row in proj_rows}
+        project_cc_map = {row.id: (row.cost_center_id, row.cc_name) for row in proj_rows}
 
         # 6. Accumulator: (project_id, year, month) → cost buckets
         agg: dict = defaultdict(lambda: {"demand_cost": 0, "actuals_cost": 0, "externals_cost": 0, "equipment_cost": 0})
@@ -920,6 +922,8 @@ class FinanceService:
             ConsolidatedCostByProject(
                 project_id=proj_id,
                 project_name=project_name_map.get(proj_id, proj_id),
+                cost_center_id=project_cc_map.get(proj_id, (None, None))[0],
+                cost_center_name=project_cc_map.get(proj_id, (None, None))[1],
                 year=year,
                 month=month,
                 demand_cost=costs["demand_cost"],

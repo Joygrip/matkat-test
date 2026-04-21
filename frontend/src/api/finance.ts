@@ -52,6 +52,8 @@ export async function updateFinanceSetting(key: string, value: string): Promise<
 export interface ConsolidatedCostRow {
   project_id: string;
   project_name: string;
+  cost_center_id: string | null;
+  cost_center_name: string | null;
   year: number;
   month: number;
   demand_cost: number;    // cents — planned labor

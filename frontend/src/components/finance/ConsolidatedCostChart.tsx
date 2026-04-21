@@ -375,6 +375,15 @@ export const ConsolidatedCostChart: React.FC = () => {
     setDrillDownData(null);
   };
 
+  // Map CC name → CC id, built from rawData so it's available before ccChartData memo
+  const ccNameToId = useMemo(() => {
+    const m = new Map<string, string>();
+    rawData.forEach((r) => {
+      if (r.cost_center_id && r.cost_center_name) m.set(r.cost_center_name, r.cost_center_id);
+    });
+    return m;
+  }, [rawData]);
+
   // Project bar click → open detail dialog
   const handleProjectBarClick = (entityName: string, label: string) => {
     const [monthStr, yearStr] = label.split(' ');
@@ -396,12 +405,12 @@ export const ConsolidatedCostChart: React.FC = () => {
     const [monthStr, yearStr] = label.split(' ');
     const year = parseInt(yearStr, 10);
     const month = monthNames.indexOf(monthStr) + 1;
-    const cc = costCenterOptions.find((c) => c.name === entityName);
-    if (!cc) return;
-    setDrillDown({ mode: 'cc', title: entityName, year, month, costCenterId: cc.id });
+    const ccId = ccNameToId.get(entityName);
+    if (!ccId) return; // "Unassigned" has no CC id — can't drill down
+    setDrillDown({ mode: 'cc', title: entityName, year, month, costCenterId: ccId });
     setDetailTab('planned');
     setDrillDownLoading(true);
-    getConsolidatedCostDetail({ cost_center_id: cc.id, year, month })
+    getConsolidatedCostDetail({ cost_center_id: ccId, year, month })
       .then(setDrillDownData)
       .catch(() => setDrillDownData(null))
       .finally(() => setDrillDownLoading(false));
@@ -483,19 +492,11 @@ export const ConsolidatedCostChart: React.FC = () => {
   // ── Chart data: by cost center ────────────────────────────────────────────
 
   const { ccChartData, ccNames, ccLegendMap } = useMemo(() => {
-    const projToCcName = new Map<string, string>();
-    projectOptions.forEach((p) => {
-      if (p.cost_center_id) {
-        const cc = costCenterOptions.find((c) => c.id === p.cost_center_id);
-        projToCcName.set(p.id, cc?.name ?? p.cost_center_id);
-      }
-    });
-
     const periodMap = new Map<string, { year: number; month: number }>();
     const ccSet = new Set<string>();
     filteredData.forEach((r) => {
       periodMap.set(`${r.year}-${r.month}`, { year: r.year, month: r.month });
-      ccSet.add(projToCcName.get(r.project_id) ?? 'Unassigned');
+      ccSet.add(r.cost_center_name ?? 'Unassigned');
     });
 
     const data: GroupedBarChartDatum[] = Array.from(periodMap.entries())
@@ -507,10 +508,9 @@ export const ConsolidatedCostChart: React.FC = () => {
       .map(([, { year, month }]) => {
         const row: GroupedBarChartDatum = { label: `${monthNames[month - 1]} ${year}` };
         ccSet.forEach((ccName) => {
-          const related = filteredData.filter((r) => {
-            const rCc = projToCcName.get(r.project_id) ?? 'Unassigned';
-            return rCc === ccName && r.year === year && r.month === month;
-          });
+          const related = filteredData.filter((r) =>
+            (r.cost_center_name ?? 'Unassigned') === ccName && r.year === year && r.month === month
+          );
           row[`${ccName}_planned`] = related.reduce((s, r) => s + r.demand_cost, 0);
           row[`${ccName}_actual`] = related.reduce((s, r) => s + r.actuals_cost, 0);
           row[`${ccName}_oop`] = related.reduce((s, r) => s + r.externals_cost, 0) / 100;
@@ -529,7 +529,7 @@ export const ConsolidatedCostChart: React.FC = () => {
     });
 
     return { ccChartData: data, ccNames: names, ccLegendMap: legendMap };
-  }, [filteredData, projectOptions, costCenterOptions]);
+  }, [filteredData]);
 
   // ── Active filter labels (for chips) ─────────────────────────────────────
 
@@ -586,11 +586,11 @@ export const ConsolidatedCostChart: React.FC = () => {
         l.resource_name, String(l.fte_percent), String(l.cost),
       ]);
     } else if (detailTab === 'oop') {
-      header = [...(isCc ? ['Project'] : []), 'OoP Resource', 'Notes', 'Hours', 'Rate (DKK)', 'Total (DKK)'];
+      header = [...(isCc ? ['Project'] : []), 'OoP Resource', 'Notes', 'Total (DKK)'];
       rows = drillDownData.external_lines.map((l) => [
         ...(isCc ? [l.project_name ?? ''] : []),
         l.resource_name ?? l.description ?? '', l.notes ?? '',
-        String(l.hours), String(l.rate), String(l.total_cost),
+        String(l.total_cost),
       ]);
     } else {
       header = [...(isCc ? ['Project'] : []), 'Description', 'Cost (DKK)'];
@@ -1009,8 +1009,6 @@ export const ConsolidatedCostChart: React.FC = () => {
                               {drillDown?.mode === 'cc' && <TableHeaderCell style={{ flex: '0 0 160px' }}>Project</TableHeaderCell>}
                               <TableHeaderCell style={{ flex: '1 1 auto' }}>OoP Resource</TableHeaderCell>
                               <TableHeaderCell style={{ flex: '1 1 auto' }}>Notes</TableHeaderCell>
-                              <TableHeaderCell style={{ flex: '0 0 70px', justifyContent: 'flex-end' }}>Hours</TableHeaderCell>
-                              <TableHeaderCell style={{ flex: '0 0 130px', justifyContent: 'flex-end' }}>Rate (DKK/hr)</TableHeaderCell>
                               <TableHeaderCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>Total (DKK)</TableHeaderCell>
                             </TableRow>
                           </TableHeader>
@@ -1020,15 +1018,13 @@ export const ConsolidatedCostChart: React.FC = () => {
                                 {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 160px' }}>{l.project_name ?? '—'}</TableCell>}
                                 <TableCell style={{ flex: '1 1 auto' }}>{l.resource_name ?? l.description ?? '—'}</TableCell>
                                 <TableCell style={{ flex: '1 1 auto' }}>{l.notes ?? '—'}</TableCell>
-                                <TableCell style={{ flex: '0 0 70px', justifyContent: 'flex-end' }}>{l.hours}</TableCell>
-                                <TableCell style={{ flex: '0 0 130px', justifyContent: 'flex-end' }}>{dkkDetail(l.rate / 100)}</TableCell>
                                 <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>{dkk(l.total_cost / 100)}</TableCell>
                               </TableRow>
                             ))}
                             <TableRow className={styles.totalRow}>
                               {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 160px' }} />}
                               <TableCell style={{ flex: '1 1 auto' }}>Total</TableCell>
-                              <TableCell style={{ flex: '1 1 auto' }} /><TableCell style={{ flex: '0 0 70px' }} /><TableCell style={{ flex: '0 0 130px' }} />
+                              <TableCell style={{ flex: '1 1 auto' }} />
                               <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>
                                 {dkk(drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100)}
                               </TableCell>

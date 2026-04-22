@@ -466,11 +466,11 @@ export const ConsolidatedCostChart: React.FC = () => {
       .map(([, { year, month }]) => {
         const row: GroupedBarChartDatum = { label: `${monthNames[month - 1]} ${year}` };
         projMap.forEach((name, id) => {
-          const match = filteredData.find((r) => r.project_id === id && r.year === year && r.month === month);
-          row[`${name}_planned`] = match?.demand_cost ?? 0;
-          row[`${name}_actual`] = match?.actuals_cost ?? 0;
-          row[`${name}_oop`] = match?.externals_cost ? match.externals_cost / 100 : 0;
-          row[`${name}_equipment`] = match?.equipment_cost ? match.equipment_cost / 100 : 0;
+          const matches = filteredData.filter((r) => r.project_id === id && r.year === year && r.month === month);
+          row[`${name}_planned`] = matches.reduce((s, r) => s + r.demand_cost, 0);
+          row[`${name}_actual`] = matches.reduce((s, r) => s + r.actuals_cost, 0);
+          row[`${name}_oop`] = matches.reduce((s, r) => s + r.externals_cost, 0) / 100;
+          row[`${name}_equipment`] = matches.reduce((s, r) => s + r.equipment_cost, 0) / 100;
         });
         return row;
       });

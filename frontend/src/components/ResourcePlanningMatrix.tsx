@@ -340,6 +340,14 @@ interface LocalRow {
   isPlaceholder: boolean;
 }
 
+interface SelectedResource {
+  id: string;
+  name: string;
+  initials: string;
+  ccId: string;
+  type: 'resource' | 'placeholder';
+}
+
 export interface ResourcePlanningMatrixProps {
   demandLines: DemandLine[];
   supplyLines: SupplyLine[];
@@ -426,7 +434,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [dlgLineType, setDlgLineType] = useState<'demand' | 'supply'>('demand');
   const [dlgCcId, setDlgCcId] = useState('');
   const [dlgResourceQuery, setDlgResourceQuery] = useState('');
-  const [dlgResourceId, setDlgResourceId] = useState('');
+  const [dlgSelectedResources, setDlgSelectedResources] = useState<SelectedResource[]>([]);
   const [dlgProjectId, setDlgProjectId] = useState('');
   const [dlgSelectedPeriods, setDlgSelectedPeriods] = useState<Set<string>>(new Set());
   const [dlgFte, setDlgFte] = useState('');
@@ -532,15 +540,19 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
   const dlgFilteredResources = useMemo(() => {
     const query = dlgResourceQuery.toLowerCase();
+    const matchesResource = (r: Resource) =>
+      !query ||
+      r.display_name.toLowerCase().includes(query) ||
+      (r.initials ? r.initials.toLowerCase().includes(query) : false);
     if (isRoleManager) {
       if (!dlgCcId) return { resources: [] as Resource[], placeholders: [] as Placeholder[] };
-      const resources = (ccResources[dlgCcId] ?? []).filter(r => !query || r.display_name.toLowerCase().includes(query));
+      const resources = (ccResources[dlgCcId] ?? []).filter(matchesResource);
       const placeholders = dlgLineType === 'demand'
         ? (ccPlaceholders[dlgCcId] ?? []).filter(ph => !query || ph.name.toLowerCase().includes(query))
         : [];
       return { resources, placeholders };
     }
-    const resources = dlgAllResources.filter(r => !query || r.display_name.toLowerCase().includes(query));
+    const resources = dlgAllResources.filter(matchesResource);
     const placeholders = dlgLineType === 'demand'
       ? dlgAllPlaceholders.filter(ph => !query || ph.name.toLowerCase().includes(query))
       : [];
@@ -920,7 +932,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDlgLineType(defaultLineType);
     setDlgCcId(defaultCcId);
     setDlgResourceQuery('');
-    setDlgResourceId('');
+    setDlgSelectedResources([]);
     setDlgProjectId('');
     setDlgSelectedPeriods(new Set());
     setDlgFte('');
@@ -942,42 +954,49 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   }, [isRolePM, isRoleManager, managerCcId, costCenters, loadCcData]);
 
   const handleDlgSave = useCallback(async () => {
-    const { resourceId, placeholderId } = parseResOrPh(dlgResourceId);
     const fteVal = Number(dlgFte);
 
-    if (!dlgCcId) { setDlgError('Please select a cost center'); return; }
-    if (!dlgResourceId) { setDlgError('Please select a resource'); return; }
+    if (dlgSelectedResources.length === 0) { setDlgError('Please select at least one resource'); return; }
     if (dlgSelectedPeriods.size === 0) { setDlgError('Please select at least one period'); return; }
     if (!dlgFte || isNaN(fteVal) || fteVal <= 0) { setDlgError('Please enter a valid FTE%'); return; }
     if (dlgLineType === 'demand' && !dlgProjectId) { setDlgError('Please select a project for demand lines'); return; }
-    if (dlgLineType === 'supply' && !resourceId) { setDlgError('Supply lines require a resource, not a placeholder'); return; }
 
     setDlgSaving(true);
     setDlgError(null);
     try {
-      for (const periodId of dlgSelectedPeriods) {
-        const period = periods.find(p => p.id === periodId);
-        if (!period) continue;
-        if (dlgLineType === 'demand') {
-          await planningApi.createDemandLine({
-            period_id: periodId,
-            project_id: dlgProjectId,
-            resource_id: resourceId,
-            placeholder_id: placeholderId,
-            fte_percent: fteVal,
-            year: period.year,
-            month: period.month,
-          });
-        } else {
-          await planningApi.createSupplyLine({
-            period_id: periodId,
-            resource_id: resourceId!,
-            project_id: dlgProjectId || undefined,
-            fte_percent: fteVal,
-            year: period.year,
-            month: period.month,
-          });
+      const actions: Array<{ action: string; data: Record<string, unknown> }> = [];
+      for (const res of dlgSelectedResources) {
+        for (const periodId of dlgSelectedPeriods) {
+          const period = periods.find(p => p.id === periodId);
+          if (!period) continue;
+          if (dlgLineType === 'demand') {
+            actions.push({ action: 'create', data: {
+              period_id: periodId,
+              project_id: dlgProjectId,
+              resource_id: res.type === 'resource' ? res.id : undefined,
+              placeholder_id: res.type === 'placeholder' ? res.id : undefined,
+              fte_percent: fteVal,
+              year: period.year,
+              month: period.month,
+            }});
+          } else {
+            actions.push({ action: 'create', data: {
+              period_id: periodId,
+              resource_id: res.id,
+              project_id: dlgProjectId || undefined,
+              fte_percent: fteVal,
+              year: period.year,
+              month: period.month,
+            }});
+          }
         }
+      }
+      if (actions.length > 0) {
+        const resp = dlgLineType === 'demand'
+          ? await planningApi.bulkDemandLines({ actions })
+          : await planningApi.bulkSupplyLines({ actions });
+        const firstError = resp?.results?.find((r: { status: string; error?: string | null }) => r.status === 'error');
+        if (firstError) throw new Error(firstError.error ?? 'Bulk save failed');
       }
       onReload();
       setAddLineDialogOpen(false);
@@ -986,7 +1005,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     } finally {
       setDlgSaving(false);
     }
-  }, [dlgResourceId, dlgFte, dlgCcId, dlgSelectedPeriods, dlgLineType, dlgProjectId, periods, onReload]);
+  }, [dlgSelectedResources, dlgFte, dlgSelectedPeriods, dlgLineType, dlgProjectId, periods, onReload]);
 
   const totalCols = 3 + periods.length;
 
@@ -1471,12 +1490,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                   <div style={{ display: 'flex', gap: tokens.spacingHorizontalL }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: tokens.fontSizeBase300 }}>
                       <input type="radio" name="dlgLineType" value="demand" checked={dlgLineType === 'demand'}
-                        onChange={() => { setDlgLineType('demand'); setDlgResourceId(''); setDlgResourceQuery(''); setDlgCcId(''); lookupsApi.listPlaceholders().then(setDlgAllPlaceholders).catch(() => {}); }} />
+                        onChange={() => { setDlgLineType('demand'); setDlgSelectedResources([]); setDlgResourceQuery(''); setDlgCcId(''); lookupsApi.listPlaceholders().then(setDlgAllPlaceholders).catch(() => {}); }} />
                       Demand
                     </label>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: tokens.fontSizeBase300 }}>
                       <input type="radio" name="dlgLineType" value="supply" checked={dlgLineType === 'supply'}
-                        onChange={() => { setDlgLineType('supply'); setDlgResourceId(''); setDlgResourceQuery(''); setDlgCcId(''); setDlgAllPlaceholders([]); }} />
+                        onChange={() => { setDlgLineType('supply'); setDlgSelectedResources(prev => prev.filter(r => r.type === 'resource')); setDlgResourceQuery(''); setDlgCcId(''); setDlgAllPlaceholders([]); }} />
                       Supply
                     </label>
                   </div>
@@ -1487,7 +1506,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                 </div>
               )}
 
-              {/* Cost Center — locked display for Manager; auto-detected for others after resource is picked */}
+              {/* Cost Center — locked for Manager; auto-detected from selections for others */}
               {isRoleManager ? (
                 <div>
                   <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>Cost Center</div>
@@ -1495,28 +1514,57 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                     {allCostCenters.find(c => c.id === dlgCcId)?.name || costCenters[0]?.name || '—'}
                   </div>
                 </div>
-              ) : dlgCcId ? (
+              ) : dlgSelectedResources.length > 0 ? (
                 <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
-                  Cost Center: <strong>{allCostCenters.find(c => c.id === dlgCcId)?.name || dlgCcId}</strong>
+                  Cost Center: <strong>
+                    {dlgSelectedResources.every(r => r.ccId === dlgSelectedResources[0].ccId)
+                      ? (allCostCenters.find(c => c.id === dlgSelectedResources[0].ccId)?.name || dlgSelectedResources[0].ccId)
+                      : 'Multiple'}
+                  </strong>
                 </div>
               ) : null}
 
-              {/* Resource typeahead */}
+              {/* Resource typeahead — multi-select */}
               <div>
-                <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>Resource</div>
+                <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>
+                  Resource{dlgSelectedResources.length > 1 ? ` (${dlgSelectedResources.length} selected)` : ''}
+                </div>
+
+                {/* Selected chips */}
+                {dlgSelectedResources.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+                    {dlgSelectedResources.map(res => (
+                      <span
+                        key={res.id}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 6px 2px 4px', border: `1px solid ${tokens.colorBrandStroke1}`, borderRadius: tokens.borderRadiusCircular, backgroundColor: tokens.colorBrandBackground2, fontSize: tokens.fontSizeBase100 }}
+                      >
+                        <span style={{ background: tokens.colorBrandBackground, color: tokens.colorNeutralForegroundOnBrand, borderRadius: '50%', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
+                          {res.initials}
+                        </span>
+                        {res.name}
+                        <button
+                          onMouseDown={e => { e.preventDefault(); setDlgSelectedResources(prev => prev.filter(r => r.id !== res.id)); }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', fontSize: 14, lineHeight: 1, color: tokens.colorBrandForeground1 }}
+                          title="Remove"
+                        >×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 <div style={{ position: 'relative' }}>
                   <input
                     type="text"
                     value={dlgResourceQuery}
-                    onChange={e => { setDlgResourceQuery(e.target.value); setDlgResourceId(''); setDlgShowResourceDropdown(true); }}
+                    onChange={e => { setDlgResourceQuery(e.target.value); setDlgShowResourceDropdown(true); }}
                     onFocus={() => setDlgShowResourceDropdown(true)}
                     onBlur={() => setTimeout(() => setDlgShowResourceDropdown(false), 150)}
-                    placeholder="Type to search…"
+                    placeholder="Type name or initials…"
                     disabled={isRoleManager && !dlgCcId}
                     style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', boxSizing: 'border-box' }}
                   />
                   {dlgShowResourceDropdown && (dlgFilteredResources.resources.length > 0 || dlgFilteredResources.placeholders.length > 0) && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1000, background: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, boxShadow: tokens.shadow8, maxHeight: 200, overflowY: 'auto' }}>
+                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1000, background: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, boxShadow: tokens.shadow8, maxHeight: 220, overflowY: 'auto' }}>
                       {dlgFilteredResources.resources.length > 0 && (
                         <>
                           {dlgFilteredResources.placeholders.length > 0 && (
@@ -1524,20 +1572,37 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                               Resources
                             </div>
                           )}
-                          {dlgFilteredResources.resources.map(r => (
-                            <div
-                              key={r.id}
-                              onMouseDown={() => { setDlgResourceId(`r:${r.id}`); setDlgResourceQuery(r.display_name); setDlgCcId(r.cost_center_id); setDlgShowResourceDropdown(false); }}
-                              style={{ padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200 }}
-                              onMouseEnter={e => (e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3)}
-                              onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                            >
-                              <span style={{ background: tokens.colorBrandBackground2, color: tokens.colorBrandForeground1, borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
-                                {r.initials || r.display_name.slice(0, 2).toUpperCase()}
-                              </span>
-                              {r.display_name}
-                            </div>
-                          ))}
+                          {dlgFilteredResources.resources.map(r => {
+                            const alreadySelected = dlgSelectedResources.some(s => s.id === r.id);
+                            return (
+                              <div
+                                key={r.id}
+                                onMouseDown={e => {
+                                  e.preventDefault();
+                                  if (!alreadySelected) {
+                                    setDlgSelectedResources(prev => [...prev, {
+                                      id: r.id,
+                                      name: r.display_name,
+                                      initials: r.initials || r.display_name.slice(0, 2).toUpperCase(),
+                                      ccId: r.cost_center_id,
+                                      type: 'resource',
+                                    }]);
+                                    setDlgCcId(r.cost_center_id);
+                                  }
+                                  setDlgResourceQuery('');
+                                }}
+                                style={{ padding: '6px 8px', cursor: alreadySelected ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200, opacity: alreadySelected ? 0.5 : 1 }}
+                                onMouseEnter={e => { if (!alreadySelected) e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                                onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                              >
+                                <span style={{ background: tokens.colorBrandBackground2, color: tokens.colorBrandForeground1, borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
+                                  {r.initials || r.display_name.slice(0, 2).toUpperCase()}
+                                </span>
+                                {r.display_name}
+                                {alreadySelected && <span style={{ marginLeft: 'auto', fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3 }}>✓</span>}
+                              </div>
+                            );
+                          })}
                         </>
                       )}
                       {dlgFilteredResources.placeholders.length > 0 && (
@@ -1545,18 +1610,35 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                           <div style={{ padding: '3px 8px', fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3, fontWeight: tokens.fontWeightSemibold, backgroundColor: tokens.colorNeutralBackground2 }}>
                             Placeholders
                           </div>
-                          {dlgFilteredResources.placeholders.map(ph => (
-                            <div
-                              key={ph.id}
-                              onMouseDown={() => { setDlgResourceId(`ph:${ph.id}`); setDlgResourceQuery(ph.name); setDlgCcId(ph.cost_center_id); setDlgShowResourceDropdown(false); }}
-                              style={{ padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200, fontStyle: 'italic' }}
-                              onMouseEnter={e => (e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3)}
-                              onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                            >
-                              <span style={{ background: tokens.colorNeutralBackground3, borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, flexShrink: 0 }}>?</span>
-                              {ph.name} [TBD]
-                            </div>
-                          ))}
+                          {dlgFilteredResources.placeholders.map(ph => {
+                            const alreadySelected = dlgSelectedResources.some(s => s.id === ph.id);
+                            return (
+                              <div
+                                key={ph.id}
+                                onMouseDown={e => {
+                                  e.preventDefault();
+                                  if (!alreadySelected) {
+                                    setDlgSelectedResources(prev => [...prev, {
+                                      id: ph.id,
+                                      name: ph.name,
+                                      initials: '?',
+                                      ccId: ph.cost_center_id,
+                                      type: 'placeholder',
+                                    }]);
+                                    setDlgCcId(ph.cost_center_id);
+                                  }
+                                  setDlgResourceQuery('');
+                                }}
+                                style={{ padding: '6px 8px', cursor: alreadySelected ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200, fontStyle: 'italic', opacity: alreadySelected ? 0.5 : 1 }}
+                                onMouseEnter={e => { if (!alreadySelected) e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                                onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                              >
+                                <span style={{ background: tokens.colorNeutralBackground3, borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, flexShrink: 0 }}>?</span>
+                                {ph.name} [TBD]
+                                {alreadySelected && <span style={{ marginLeft: 'auto', fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3 }}>✓</span>}
+                              </div>
+                            );
+                          })}
                         </>
                       )}
                     </div>

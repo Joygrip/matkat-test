@@ -222,7 +222,7 @@ const useStyles = makeStyles({
   },
   detailKpiRow: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(5, 1fr)',
+    gridTemplateColumns: 'repeat(3, 1fr)',
     gap: tokens.spacingHorizontalS,
   },
   detailKpiCard: {
@@ -893,14 +893,10 @@ export const ConsolidatedCostChart: React.FC = () => {
                   <div className={styles.detailKpiRow}>
                     {(() => {
                       const actualTotal = drillDownData.actual_lines.reduce((s, l) => s + l.cost, 0);
-                      const oopTotal = drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100;
-                      const equipTotal = drillDownData.equipment_lines.reduce((s, l) => s + l.cost, 0) / 100;
                       return [
                         { label: 'Planned Labor', value: drillDownData.demand_lines.reduce((s, l) => s + l.cost, 0) },
                         { label: 'Actual Labor', value: actualTotal },
-                        { label: 'OoP', value: oopTotal },
-                        { label: 'Equipment', value: equipTotal },
-                        { label: 'Total Cost', value: actualTotal + oopTotal + equipTotal },
+                        { label: 'Total Cost', value: actualTotal },
                       ].map(({ label, value }) => (
                         <div key={label} className={styles.detailKpiCard}>
                           <div className={styles.detailKpiLabel}>{label}</div>

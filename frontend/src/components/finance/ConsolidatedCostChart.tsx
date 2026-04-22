@@ -222,7 +222,7 @@ const useStyles = makeStyles({
   },
   detailKpiRow: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
+    gridTemplateColumns: 'repeat(5, 1fr)',
     gap: tokens.spacingHorizontalS,
   },
   detailKpiCard: {
@@ -890,14 +890,19 @@ export const ConsolidatedCostChart: React.FC = () => {
               ) : drillDownData ? (
                 <>
                   {/* Detail KPI strip */}
-                  <div className={styles.detailKpiRow}>
+                  <div className={styles.detailKpiRow} style={drillDown?.mode === 'cc' ? { gridTemplateColumns: 'repeat(3, 1fr)' } : { gridTemplateColumns: 'repeat(5, 1fr)' }}>
                     {(() => {
                       const actualTotal = drillDownData.actual_lines.reduce((s, l) => s + l.cost, 0);
-                      return [
+                      const oopTotal = drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100;
+                      const equipTotal = drillDownData.equipment_lines.reduce((s, l) => s + l.cost, 0) / 100;
+                      const isCc = drillDown?.mode === 'cc';
+                      const cards = [
                         { label: 'Planned Labor', value: drillDownData.demand_lines.reduce((s, l) => s + l.cost, 0) },
                         { label: 'Actual Labor', value: actualTotal },
-                        { label: 'Total Cost', value: actualTotal },
-                      ].map(({ label, value }) => (
+                        ...(!isCc ? [{ label: 'OoP', value: oopTotal }, { label: 'Equipment', value: equipTotal }] : []),
+                        { label: 'Total Cost', value: isCc ? actualTotal : actualTotal + oopTotal + equipTotal },
+                      ];
+                      return cards.map(({ label, value }) => (
                         <div key={label} className={styles.detailKpiCard}>
                           <div className={styles.detailKpiLabel}>{label}</div>
                           <div className={styles.detailKpiValue}>{dkk(value)}</div>

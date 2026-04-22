@@ -30,23 +30,11 @@ const TYPE_LEFT = RESOURCE_COL_WIDTH + PROJECT_COL_WIDTH;
 const TYPE_LEFT_PX = `${TYPE_LEFT}px`;
 
 const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const ORANGE_BG = '#ffe8cc';
-const ORANGE_FG = '#a83200';
-
-function getDemandColor(dVal: number, sVal: number): { background: string; color: string } | undefined {
-  if (dVal === 0) return undefined;
-  const diff = sVal - dVal;
-  if (diff < 0) return { background: tokens.colorPaletteRedBackground2, color: tokens.colorPaletteRedForeground2 };
-  if (diff === 0) return { background: tokens.colorPaletteMarigoldBackground2, color: tokens.colorPaletteMarigoldForeground2 };
-  return undefined;
-}
-
-function getSupplyColor(dVal: number, sVal: number): { background: string; color: string } | undefined {
-  if (sVal === 0) return undefined;
-  const diff = sVal - dVal;
-  if (diff > 0) return { background: tokens.colorPaletteGreenBackground2, color: tokens.colorPaletteGreenForeground2 };
-  if (diff === 0) return { background: tokens.colorPaletteMarigoldBackground2, color: tokens.colorPaletteMarigoldForeground2 };
-  return { background: ORANGE_BG, color: ORANGE_FG };
+function getFteColor(val: number): { background: string; color: string } | undefined {
+  if (val === 0) return undefined;
+  if (val <= 49) return { background: tokens.colorPaletteGreenBackground2, color: tokens.colorPaletteGreenForeground2 };
+  if (val <= 79) return { background: tokens.colorPaletteMarigoldBackground2, color: tokens.colorPaletteMarigoldForeground2 };
+  return { background: tokens.colorPaletteRedBackground2, color: tokens.colorPaletteRedForeground2 };
 }
 
 function buildCellKey(
@@ -1093,14 +1081,14 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                       <div style={{
                         fontSize: '11px',
                         fontWeight: 600,
-                        ...(getDemandColor(dSum, sSum) ?? { color: tokens.colorNeutralForeground3 }),
+                        ...(getFteColor(dSum) ?? { color: tokens.colorNeutralForeground3 }),
                       }}>
                         D: {dSum > 0 ? `${dSum}%` : '—'}
                       </div>
                       <div style={{
                         fontSize: '11px',
                         fontWeight: 600,
-                        ...(getSupplyColor(dSum, sSum) ?? { color: tokens.colorNeutralForeground3 }),
+                        ...(getFteColor(sSum) ?? { color: tokens.colorNeutralForeground3 }),
                       }}>
                         S: {sSum > 0 ? `${sSum}%` : '—'}
                       </div>
@@ -1243,7 +1231,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                   >
                                     <CellEditor
                                       value={dVal}
-                                      colorStyle={getDemandColor(dVal, sVal)}
+                                      colorStyle={getFteColor(dVal)}
                                       isEditing={editingCell === existingCellKey}
                                       isSaving={savingCells.has(existingCellKey)}
                                       canEdit={canEdit}
@@ -1293,7 +1281,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                   >
                                     <CellEditor
                                       value={sVal}
-                                      colorStyle={getSupplyColor(dVal, sVal)}
+                                      colorStyle={getFteColor(sVal)}
                                       isEditing={editingCell === existingCellKey}
                                       isSaving={savingCells.has(existingCellKey)}
                                       canEdit={canEdit}

@@ -262,7 +262,7 @@ const pageTitles: Record<string, string> = {
   '/supply': 'Supply Planning',
   '/actuals': 'Actuals Entry',
   '/finance': 'Finance',
-  '/project-costs': 'Project Costs',
+  '/project-costs': 'OoP + Equipment',
   '/admin': 'Administration',
   '/audit-logs': 'Audit logs',
 };

@@ -137,7 +137,7 @@ export const ProjectCosts: React.FC = () => {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <Title3>Project Costs</Title3>
+        <Title3>OoP + Equipment</Title3>
       </div>
 
       <div className={styles.filterBar}>

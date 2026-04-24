@@ -30,6 +30,9 @@ const TYPE_LEFT_PX = `${PROJECT_COL_WIDTH + DESC_COL_WIDTH}px`;
 
 const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+const OOP_COLOR = '#dbeafe';
+const EQUIP_COLOR = '#dcfce7';
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function fmtDKK(cents: number): string {
@@ -167,7 +170,7 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
   typeCellOop: {
-    backgroundColor: '#e8f0ff',
+    backgroundColor: OOP_COLOR,
     color: '#1a3a7a',
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase100,
@@ -181,7 +184,7 @@ const useStyles = makeStyles({
     verticalAlign: 'middle' as const,
   },
   typeCellEquip: {
-    backgroundColor: '#e8f8ee',
+    backgroundColor: EQUIP_COLOR,
     color: '#0a4a1a',
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase100,
@@ -830,10 +833,13 @@ export const ProjectCostsMatrix: React.FC = () => {
                     const isDimmed = isDragging && dragType !== null && dragType !== line.type && dragStart?.projectId === group.projectId;
 
                     return (
-                      <tr key={line.lineKey}>
-                        <td className={styles.projectCell} />
-
-                        <td className={styles.descCell} title={line.description}>
+                      <tr key={line.lineKey} style={{ backgroundColor: line.type === 'oop' ? OOP_COLOR : EQUIP_COLOR }}>
+                        <td
+                          className={styles.descCell}
+                          colSpan={2}
+                          title={line.description}
+                          style={{ left: 0, minWidth: `${PROJECT_COL_WIDTH + DESC_COL_WIDTH}px`, maxWidth: `${PROJECT_COL_WIDTH + DESC_COL_WIDTH}px` }}
+                        >
                           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                             {line.isLocal && (
                               <span style={{ fontSize: '10px', color: tokens.colorNeutralForeground4, fontStyle: 'italic' }}>new</span>
@@ -851,7 +857,11 @@ export const ProjectCostsMatrix: React.FC = () => {
                                 appearance="subtle"
                                 icon={<DeleteRegular />}
                                 style={{ minWidth: 0, padding: '0 2px' }}
-                                onClick={() => handleDeleteLine(group.projectId, line.type, line.description, line.isLocal)}
+                                onClick={() => {
+                                  if (window.confirm(`Delete "${line.description}"? This will remove all values across all periods.`)) {
+                                    handleDeleteLine(group.projectId, line.type, line.description, line.isLocal);
+                                  }
+                                }}
                               />
                             )}
                           </span>

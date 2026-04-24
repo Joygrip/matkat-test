@@ -1,10 +1,8 @@
 /**
- * Period management panel for Finance users.
+ * Period management panel — renders inside the Finance page modal.
  */
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Card,
-  Title3,
   Body1,
   Button,
   Badge,
@@ -19,12 +17,7 @@ import {
   Label,
   makeStyles,
   tokens,
-  Table,
-  TableHeader,
-  TableRow,
-  TableHeaderCell,
-  TableBody,
-  TableCell,
+  Text,
 } from '@fluentui/react-components';
 import {
   LockClosedRegular,
@@ -36,23 +29,55 @@ import { periodsApi } from '../api/periods';
 import { useToast } from '../hooks/useToast';
 import { useAuth } from '../auth/AuthProvider';
 
+const monthNames = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
 const useStyles = makeStyles({
-  card: {
-    padding: tokens.spacingHorizontalL,
-    marginBottom: tokens.spacingVerticalL,
-  },
-  header: {
+  root: {
     display: 'flex',
-    justifyContent: 'space-between',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
+  },
+  topBar: {
+    display: 'flex',
+    justifyContent: 'flex-end',
     alignItems: 'center',
-    marginBottom: tokens.spacingVerticalL,
   },
-  actions: {
+  yearTabsRow: {
     display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
+    flexWrap: 'wrap',
+    paddingBottom: tokens.spacingVerticalM,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  status: {
-    textTransform: 'capitalize',
+  monthGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: tokens.spacingHorizontalM,
+  },
+  monthCell: {
+    borderRadius: tokens.borderRadiusMedium,
+    padding: tokens.spacingVerticalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    minHeight: '120px',
+  },
+  monthName: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase400,
+  },
+  createHint: {
+    marginTop: 'auto',
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    textAlign: 'center' as const,
+    paddingTop: tokens.spacingVerticalS,
   },
   dialogField: {
     display: 'flex',
@@ -60,42 +85,91 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalM,
   },
+  rangeRow: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalM,
+    alignItems: 'flex-end',
+  },
+  rangeField: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    flex: 1,
+  },
+  previewBox: {
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: tokens.spacingHorizontalM,
+    maxHeight: '160px',
+    overflowY: 'auto',
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  previewItem: {
+    fontSize: tokens.fontSizeBase200,
+    padding: `2px 0`,
+    color: tokens.colorNeutralForeground2,
+  },
+  previewItemExists: {
+    fontSize: tokens.fontSizeBase200,
+    padding: `2px 0`,
+    color: tokens.colorNeutralForeground3,
+    textDecoration: 'line-through',
+  },
+  nativeSelect: {
+    padding: '6px 8px',
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    fontSize: tokens.fontSizeBase300,
+    width: '100%',
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
 });
 
-const monthNames = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-
 interface PeriodPanelProps {
-  /** When 'embedded', renders without Card wrapper (for use inside Drawer) */
   variant?: 'card' | 'embedded';
 }
 
-export function PeriodPanel({ variant = 'card' }: PeriodPanelProps) {
+export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
   const styles = useStyles();
   const { showSuccess, showApiError } = useToast();
   const { user } = useAuth();
-  
+
+  const currentYear = new Date().getFullYear();
+
   const [periods, setPeriods] = useState<Period[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  
-  // Dialog state
+
+  // Year tab state
+  const [manualYears, setManualYears] = useState<Set<number>>(new Set());
+  const [activeYear, setActiveYear] = useState<number>(currentYear);
+  const [hoveredCell, setHoveredCell] = useState<string | null>(null);
+
+  // Lock dialog state
+  const [lockConfirmOpen, setLockConfirmOpen] = useState(false);
+  const [periodToLock, setPeriodToLock] = useState<Period | null>(null);
+
+  // Unlock dialog state
   const [unlockDialogOpen, setUnlockDialogOpen] = useState(false);
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState<Period | null>(null);
   const [unlockReason, setUnlockReason] = useState('');
-  const [newPeriodYear, setNewPeriodYear] = useState(new Date().getFullYear());
-  const [newPeriodMonth, setNewPeriodMonth] = useState(new Date().getMonth() + 1);
-  
+
+  // Bulk create dialog state
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkYear, setBulkYear] = useState(currentYear);
+  const [bulkFromMonth, setBulkFromMonth] = useState(1);
+  const [bulkToMonth, setBulkToMonth] = useState(12);
+  const [bulkCreating, setBulkCreating] = useState(false);
+
   const isFinanceOrAdmin = user?.role === 'Finance' || user?.role === 'Admin';
-  
+
   useEffect(() => {
     loadPeriods();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  
+
   const loadPeriods = async () => {
+    setLoading(true);
     try {
       const data = await periodsApi.list();
       setPeriods(data);
@@ -105,9 +179,60 @@ export function PeriodPanel({ variant = 'card' }: PeriodPanelProps) {
       setLoading(false);
     }
   };
-  
-  const [lockConfirmOpen, setLockConfirmOpen] = useState(false);
-  const [periodToLock, setPeriodToLock] = useState<Period | null>(null);
+
+  // ── Derived state ─────────────────────────────────────────────────────────
+
+  const availableYears = useMemo(() => {
+    const years = new Set<number>([currentYear]);
+    periods.forEach(p => years.add(p.year));
+    manualYears.forEach(y => years.add(y));
+    return [...years].sort((a, b) => a - b);
+  }, [periods, manualYears, currentYear]);
+
+  const maxAvailableYear = availableYears[availableYears.length - 1] ?? currentYear;
+
+  const existingSet = useMemo(
+    () => new Set(periods.map(p => `${p.year}-${p.month}`)),
+    [periods],
+  );
+
+  const periodMap = useMemo(() => {
+    const map = new Map<string, Period>();
+    periods.forEach(p => map.set(`${p.year}-${p.month}`, p));
+    return map;
+  }, [periods]);
+
+  // Bulk preview — only within selected year, month range
+  const bulkPreviewItems = useMemo(() => {
+    if (bulkFromMonth > bulkToMonth) return [];
+    return Array.from({ length: bulkToMonth - bulkFromMonth + 1 }, (_, i) => {
+      const month = bulkFromMonth + i;
+      return { year: bulkYear, month, exists: existingSet.has(`${bulkYear}-${month}`) };
+    });
+  }, [bulkYear, bulkFromMonth, bulkToMonth, existingSet]);
+
+  const toCreateCount = bulkPreviewItems.filter(p => !p.exists).length;
+
+  const bulkYearOptions = useMemo(() => {
+    const years = new Set(availableYears);
+    years.add(maxAvailableYear + 1);
+    return [...years].sort((a, b) => a - b);
+  }, [availableYears, maxAvailableYear]);
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
+
+  const handleAddYear = () => {
+    const nextYear = maxAvailableYear + 1;
+    setManualYears(prev => new Set([...prev, nextYear]));
+    setActiveYear(nextYear);
+  };
+
+  const openBulkDialog = (year?: number, fromMonth?: number, toMonth?: number) => {
+    setBulkYear(year ?? activeYear);
+    setBulkFromMonth(fromMonth ?? 1);
+    setBulkToMonth(toMonth ?? 12);
+    setBulkDialogOpen(true);
+  };
 
   const handleLockClick = (period: Period) => {
     setPeriodToLock(period);
@@ -130,19 +255,16 @@ export function PeriodPanel({ variant = 'card' }: PeriodPanelProps) {
     }
   };
 
-  
   const handleUnlockClick = (period: Period) => {
     setSelectedPeriod(period);
     setUnlockReason('');
     setUnlockDialogOpen(true);
   };
-  
+
   const handleUnlockConfirm = async () => {
     if (!selectedPeriod || !unlockReason.trim()) return;
-    
     setActionLoading(selectedPeriod.id);
     setUnlockDialogOpen(false);
-    
     try {
       await periodsApi.unlock(selectedPeriod.id, unlockReason);
       showSuccess('Period Unlocked', `${monthNames[selectedPeriod.month - 1]} ${selectedPeriod.year} has been unlocked.`);
@@ -154,111 +276,195 @@ export function PeriodPanel({ variant = 'card' }: PeriodPanelProps) {
       setSelectedPeriod(null);
     }
   };
-  
-  const handleCreatePeriod = async () => {
-    setCreateDialogOpen(false);
-    setActionLoading('create');
-    
-    try {
-      await periodsApi.create(newPeriodYear, newPeriodMonth);
-      showSuccess('Period Created', `${monthNames[newPeriodMonth - 1]} ${newPeriodYear} has been created.`);
+
+  const handleBulkCreate = async () => {
+    setBulkCreating(true);
+    let created = 0;
+    for (const { year, month, exists } of bulkPreviewItems) {
+      if (exists) continue;
+      try {
+        await periodsApi.create(year, month);
+        created++;
+      } catch (error) {
+        showApiError(error as Error, `Failed to create ${monthNames[month - 1]} ${year}`);
+      }
+    }
+    setBulkCreating(false);
+    setBulkDialogOpen(false);
+    if (created > 0) {
+      showSuccess('Periods Created', `${created} period${created !== 1 ? 's' : ''} created successfully.`);
       loadPeriods();
-    } catch (error) {
-      showApiError(error as Error, 'Failed to create period');
-    } finally {
-      setActionLoading(null);
     }
   };
-  
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
   if (loading) {
     return <Spinner label="Loading periods..." />;
   }
 
-  const content = (
-    <>
-        <div className={styles.header}>
-          {variant === 'card' && <Title3>Period Management</Title3>}
-          {variant === 'embedded' && <span />}
-          {isFinanceOrAdmin && (
-            <Button
-              appearance="primary"
-              icon={<AddRegular />}
-              onClick={() => setCreateDialogOpen(true)}
-              disabled={actionLoading === 'create'}
-            >
-              Create Period
-            </Button>
-          )}
+  return (
+    <div className={styles.root}>
+
+      {/* "+ Create Periods" button */}
+      {isFinanceOrAdmin && (
+        <div className={styles.topBar}>
+          <Button
+            appearance="primary"
+            icon={<AddRegular />}
+            onClick={() => openBulkDialog()}
+          >
+            + Create Periods
+          </Button>
         </div>
-        
-        {periods.length === 0 ? (
-          <Body1>No periods found. Create one to get started.</Body1>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell>Period</TableHeaderCell>
-                <TableHeaderCell>Status</TableHeaderCell>
-                <TableHeaderCell>Locked At</TableHeaderCell>
-                {isFinanceOrAdmin && <TableHeaderCell>Actions</TableHeaderCell>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {periods.map((period) => (
-                <TableRow key={period.id}>
-                  <TableCell>
-                    {monthNames[period.month - 1]} {period.year}
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      appearance="filled"
-                      color={period.status === 'locked' ? 'danger' : 'success'}
-                      className={styles.status}
-                    >
-                      {period.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {period.locked_at
-                      ? new Date(period.locked_at).toLocaleString()
-                      : '-'}
-                  </TableCell>
+      )}
+
+      {/* Year tabs */}
+      <div className={styles.yearTabsRow}>
+        {availableYears.map(year => (
+          <button
+            key={year}
+            onClick={() => setActiveYear(year)}
+            style={{
+              padding: '6px 18px',
+              borderRadius: '20px',
+              border: activeYear === year
+                ? `2px solid ${tokens.colorBrandBackground}`
+                : `1px solid ${tokens.colorNeutralStroke1}`,
+              cursor: 'pointer',
+              fontSize: tokens.fontSizeBase300,
+              fontWeight: activeYear === year
+                ? tokens.fontWeightSemibold
+                : tokens.fontWeightRegular,
+              backgroundColor: activeYear === year
+                ? tokens.colorBrandBackground
+                : tokens.colorNeutralBackground1,
+              color: activeYear === year
+                ? tokens.colorNeutralForegroundOnBrand
+                : tokens.colorNeutralForeground1,
+              lineHeight: 1.4,
+            }}
+          >
+            {year}
+          </button>
+        ))}
+        <button
+          onClick={handleAddYear}
+          style={{
+            padding: '5px 12px',
+            borderRadius: '20px',
+            border: `1px dashed ${tokens.colorNeutralStroke1}`,
+            cursor: 'pointer',
+            fontSize: tokens.fontSizeBase200,
+            fontWeight: tokens.fontWeightRegular,
+            backgroundColor: 'transparent',
+            color: tokens.colorNeutralForeground3,
+            lineHeight: 1.4,
+          }}
+        >
+          + Add Year
+        </button>
+      </div>
+
+      {/* 3-column × 4-row month grid for the active year */}
+      <div className={styles.monthGrid}>
+        {Array.from({ length: 12 }, (_, i) => i + 1).map(month => {
+          const period = periodMap.get(`${activeYear}-${month}`);
+          const isOpen = period?.status === 'open';
+          const isLocked = period?.status === 'locked';
+          const cellKey = `${activeYear}-${month}`;
+          const isHovered = hoveredCell === cellKey;
+
+          let cellStyle: React.CSSProperties;
+          if (period) {
+            if (isOpen) {
+              cellStyle = {
+                backgroundColor: tokens.colorStatusSuccessBackground1,
+                border: `1px solid ${tokens.colorStatusSuccessBorderActive}`,
+              };
+            } else {
+              cellStyle = {
+                backgroundColor: tokens.colorStatusDangerBackground1,
+                border: `1px solid ${tokens.colorStatusDangerBorderActive}`,
+              };
+            }
+          } else {
+            cellStyle = {
+              backgroundColor: isHovered ? tokens.colorNeutralBackground4 : tokens.colorNeutralBackground3,
+              border: `1px solid ${tokens.colorNeutralStroke2}`,
+              cursor: isFinanceOrAdmin ? 'pointer' : 'default',
+            };
+          }
+
+          return (
+            <div
+              key={month}
+              className={styles.monthCell}
+              style={cellStyle}
+              onMouseEnter={() => !period && setHoveredCell(cellKey)}
+              onMouseLeave={() => setHoveredCell(null)}
+              onClick={() => {
+                if (!period && isFinanceOrAdmin) {
+                  openBulkDialog(activeYear, month, month);
+                }
+              }}
+            >
+              <Text className={styles.monthName}>{monthNames[month - 1]}</Text>
+
+              {period ? (
+                <>
+                  <Badge
+                    appearance="filled"
+                    color={isLocked ? 'danger' : 'success'}
+                    size="small"
+                    style={{ alignSelf: 'flex-start' }}
+                  >
+                    {isLocked ? 'Locked' : 'Open'}
+                  </Badge>
                   {isFinanceOrAdmin && (
-                    <TableCell>
-                      <div className={styles.actions}>
-                        {period.status === 'open' ? (
-                          <Button
-                            appearance="subtle"
-                            icon={<LockClosedRegular />}
-                            onClick={() => handleLockClick(period)}
-                            disabled={actionLoading === period.id}
-                          >
-                            Lock
-                          </Button>
-                        ) : (
-                          <Button
-                            appearance="subtle"
-                            icon={<LockOpenRegular />}
-                            onClick={() => handleUnlockClick(period)}
-                            disabled={actionLoading === period.id}
-                          >
-                            Unlock
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
+                    <div style={{ marginTop: 'auto' }}>
+                      {isOpen ? (
+                        <Button
+                          size="small"
+                          appearance="subtle"
+                          icon={<LockClosedRegular />}
+                          onClick={e => { e.stopPropagation(); handleLockClick(period); }}
+                          disabled={actionLoading === period.id}
+                        >
+                          Lock
+                        </Button>
+                      ) : (
+                        <Button
+                          size="small"
+                          appearance="subtle"
+                          icon={<LockOpenRegular />}
+                          onClick={e => { e.stopPropagation(); handleUnlockClick(period); }}
+                          disabled={actionLoading === period.id}
+                        >
+                          Unlock
+                        </Button>
+                      )}
+                    </div>
                   )}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      
+                </>
+              ) : (
+                isHovered && isFinanceOrAdmin && (
+                  <span className={styles.createHint}>+ Create</span>
+                )
+              )}
+            </div>
+          );
+        })}
+      </div>
+
       {/* Lock Confirmation Dialog */}
-      <Dialog open={lockConfirmOpen} onOpenChange={(_, data) => {
-        setLockConfirmOpen(data.open);
-        if (!data.open) setPeriodToLock(null);
-      }}>
+      <Dialog
+        open={lockConfirmOpen}
+        onOpenChange={(_, data) => {
+          setLockConfirmOpen(data.open);
+          if (!data.open) setPeriodToLock(null);
+        }}
+      >
         <DialogSurface>
           <DialogBody>
             <DialogTitle>Lock Period</DialogTitle>
@@ -272,12 +478,8 @@ export function PeriodPanel({ variant = 'card' }: PeriodPanelProps) {
               </Body1>
             </DialogContent>
             <DialogActions>
-              <Button appearance="secondary" onClick={() => setLockConfirmOpen(false)}>
-                Cancel
-              </Button>
-              <Button appearance="primary" onClick={handleLockConfirm}>
-                Lock Period
-              </Button>
+              <Button appearance="secondary" onClick={() => setLockConfirmOpen(false)}>Cancel</Button>
+              <Button appearance="primary" onClick={handleLockConfirm}>Lock Period</Button>
             </DialogActions>
           </DialogBody>
         </DialogSurface>
@@ -297,9 +499,7 @@ export function PeriodPanel({ variant = 'card' }: PeriodPanelProps) {
                 . Please provide a reason.
               </Body1>
               <div className={styles.dialogField}>
-                <Label required htmlFor="unlock-reason">
-                  Reason for unlocking
-                </Label>
+                <Label required htmlFor="unlock-reason">Reason for unlocking</Label>
                 <Input
                   id="unlock-reason"
                   value={unlockReason}
@@ -309,9 +509,7 @@ export function PeriodPanel({ variant = 'card' }: PeriodPanelProps) {
               </div>
             </DialogContent>
             <DialogActions>
-              <Button appearance="secondary" onClick={() => setUnlockDialogOpen(false)}>
-                Cancel
-              </Button>
+              <Button appearance="secondary" onClick={() => setUnlockDialogOpen(false)}>Cancel</Button>
               <Button
                 appearance="primary"
                 onClick={handleUnlockConfirm}
@@ -323,50 +521,98 @@ export function PeriodPanel({ variant = 'card' }: PeriodPanelProps) {
           </DialogBody>
         </DialogSurface>
       </Dialog>
-      
-      {/* Create Period Dialog */}
-      <Dialog open={createDialogOpen} onOpenChange={(_, data) => setCreateDialogOpen(data.open)}>
-        <DialogSurface>
+
+      {/* Bulk Create Periods Dialog */}
+      <Dialog open={bulkDialogOpen} onOpenChange={(_, data) => setBulkDialogOpen(data.open)}>
+        <DialogSurface style={{ minWidth: 440 }}>
           <DialogBody>
-            <DialogTitle>Create New Period</DialogTitle>
+            <DialogTitle>Create Periods</DialogTitle>
             <DialogContent>
+
+              {/* Year selector */}
               <div className={styles.dialogField}>
-                <Label htmlFor="period-year">Year</Label>
-                <Input
-                  id="period-year"
-                  type="number"
-                  value={String(newPeriodYear)}
-                  onChange={(_, data) => setNewPeriodYear(Number(data.value))}
-                />
+                <Label htmlFor="bulk-year">Year</Label>
+                <select
+                  id="bulk-year"
+                  className={styles.nativeSelect}
+                  value={bulkYear}
+                  onChange={e => setBulkYear(Number(e.target.value))}
+                >
+                  {bulkYearOptions.map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
               </div>
-              <div className={styles.dialogField}>
-                <Label htmlFor="period-month">Month</Label>
-                <Input
-                  id="period-month"
-                  type="number"
-                  min={1}
-                  max={12}
-                  value={String(newPeriodMonth)}
-                  onChange={(_, data) => setNewPeriodMonth(Number(data.value))}
-                />
+
+              {/* From / To month dropdowns */}
+              <div className={styles.rangeRow}>
+                <div className={styles.rangeField}>
+                  <Label htmlFor="bulk-from-month">From</Label>
+                  <select
+                    id="bulk-from-month"
+                    className={styles.nativeSelect}
+                    value={bulkFromMonth}
+                    onChange={e => setBulkFromMonth(Number(e.target.value))}
+                  >
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                      <option key={m} value={m}>{monthNames[m - 1]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className={styles.rangeField}>
+                  <Label htmlFor="bulk-to-month">To</Label>
+                  <select
+                    id="bulk-to-month"
+                    className={styles.nativeSelect}
+                    value={bulkToMonth}
+                    onChange={e => setBulkToMonth(Number(e.target.value))}
+                  >
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                      <option key={m} value={m}>{monthNames[m - 1]}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
+
+              {/* Preview */}
+              <div style={{ marginTop: tokens.spacingVerticalM, marginBottom: tokens.spacingVerticalXS }}>
+                <Label>
+                  {bulkFromMonth > bulkToMonth
+                    ? 'Invalid range — "From" must be before "To"'
+                    : toCreateCount === 0
+                    ? 'All periods in this range already exist'
+                    : `${toCreateCount} period${toCreateCount !== 1 ? 's' : ''} will be created:`}
+                </Label>
+              </div>
+
+              {bulkPreviewItems.length > 0 && (
+                <div className={styles.previewBox}>
+                  {bulkPreviewItems.map(({ year, month, exists }) => (
+                    <div
+                      key={`${year}-${month}`}
+                      className={exists ? styles.previewItemExists : styles.previewItem}
+                    >
+                      {monthNames[month - 1]} {year}{exists ? ' (exists)' : ''}
+                    </div>
+                  ))}
+                </div>
+              )}
             </DialogContent>
             <DialogActions>
-              <Button appearance="secondary" onClick={() => setCreateDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button appearance="primary" onClick={handleCreatePeriod}>
-                Create Period
+              <Button appearance="secondary" onClick={() => setBulkDialogOpen(false)}>Cancel</Button>
+              <Button
+                appearance="primary"
+                onClick={handleBulkCreate}
+                disabled={toCreateCount === 0 || bulkCreating || bulkFromMonth > bulkToMonth}
+                icon={bulkCreating ? <Spinner size="tiny" /> : undefined}
+              >
+                {bulkCreating ? 'Creating…' : `Create ${toCreateCount} Period${toCreateCount !== 1 ? 's' : ''}`}
               </Button>
             </DialogActions>
           </DialogBody>
         </DialogSurface>
       </Dialog>
-    </>
-  );
 
-  if (variant === 'embedded') {
-    return content;
-  }
-  return <Card className={styles.card}>{content}</Card>;
+    </div>
+  );
 }

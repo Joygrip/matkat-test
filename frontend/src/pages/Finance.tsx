@@ -26,16 +26,13 @@ import {
   Textarea,
   Tab,
   TabList,
-  Drawer,
-  DrawerBody,
-  DrawerHeader,
-  DrawerHeaderTitle,
   tokens,
 } from '@fluentui/react-components';
 import {
   ArrowDownload24Regular,
   CalendarLtr24Regular,
   ChartMultiple24Regular,
+  Dismiss24Regular,
 } from '@fluentui/react-icons';
 import {
   consolidationApi,
@@ -206,8 +203,8 @@ export const Finance: React.FC = () => {
   const [publishName, setPublishName] = useState('');
   const [publishDescription, setPublishDescription] = useState('');
 
-  // ── Period drawer ──
-  const [isPeriodDrawerOpen, setIsPeriodDrawerOpen] = useState(false);
+  // ── Period modal ──
+  const [isPeriodModalOpen, setIsPeriodModalOpen] = useState(false);
 
   // ── Period/month for charts (passed to ActualsTab) ──
   const periodFromActuals = actualsData.length > 0
@@ -333,7 +330,7 @@ export const Finance: React.FC = () => {
             <Button
               appearance="secondary"
               icon={<CalendarLtr24Regular />}
-              onClick={() => setIsPeriodDrawerOpen(true)}
+              onClick={() => setIsPeriodModalOpen(true)}
             >
               Manage Periods
             </Button>
@@ -404,21 +401,32 @@ export const Finance: React.FC = () => {
         </Dialog>
       )}
 
-      {/* ── Period management drawer ── */}
+      {/* ── Period management modal ── */}
       {canManagePeriods && (
-        <Drawer
-          type="overlay"
-          position="end"
-          open={isPeriodDrawerOpen}
-          onOpenChange={(_: unknown, data: { open: boolean }) => setIsPeriodDrawerOpen(data.open)}
+        <Dialog
+          open={isPeriodModalOpen}
+          onOpenChange={(_: unknown, data: { open: boolean }) => setIsPeriodModalOpen(data.open)}
         >
-          <DrawerHeader>
-            <DrawerHeaderTitle>Period Management</DrawerHeaderTitle>
-          </DrawerHeader>
-          <DrawerBody>
-            <PeriodPanel variant="embedded" />
-          </DrawerBody>
-        </Drawer>
+          <DialogSurface style={{ width: '860px', maxWidth: '92vw' }}>
+            <DialogBody style={{ display: 'flex', flexDirection: 'column', maxHeight: '88vh' }}>
+              <DialogTitle
+                action={
+                  <Button
+                    appearance="subtle"
+                    aria-label="Close"
+                    icon={<Dismiss24Regular />}
+                    onClick={() => setIsPeriodModalOpen(false)}
+                  />
+                }
+              >
+                Period Management
+              </DialogTitle>
+              <DialogContent style={{ overflowY: 'auto', flex: 1 }}>
+                <PeriodPanel variant="embedded" />
+              </DialogContent>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
       )}
 
       {/* ── Sticky toolbar ── */}

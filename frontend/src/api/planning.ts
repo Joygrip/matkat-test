@@ -70,6 +70,14 @@ export interface PlanningFilters {
 
 export const planningApi = {
   // Demand Lines
+  async getAllDemandLines(): Promise<DemandLine[]> {
+    return apiClient.get<DemandLine[]>('/demand-lines/all');
+  },
+
+  async getAllSupplyLines(): Promise<SupplyLine[]> {
+    return apiClient.get<SupplyLine[]>('/supply-lines/all');
+  },
+
   async getDemandLines(periodId?: string, filters?: Omit<PlanningFilters, 'periodId'>): Promise<DemandLine[]> {
     const params = new URLSearchParams();
     if (periodId) params.set('period_id', periodId);

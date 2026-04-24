@@ -171,14 +171,13 @@ export const ResourcePlanning: React.FC = () => {
         return;
       }
 
-      const periodIds = open.map((p: Period) => p.id);
-      const [demandResults, supplyResults] = await Promise.all([
-        Promise.all(periodIds.map((pid: string) => planningApi.getDemandLines(pid))),
-        Promise.all(periodIds.map((pid: string) => planningApi.getSupplyLines(pid))),
+      const [demandData, supplyData] = await Promise.all([
+        planningApi.getAllDemandLines(),
+        planningApi.getAllSupplyLines(),
       ]);
 
-      setDemandLines(demandResults.flat());
-      setSupplyLines(supplyResults.flat());
+      setDemandLines(demandData);
+      setSupplyLines(supplyData);
     } catch (err: unknown) {
       setError(formatApiError(err, 'Failed to load resource planning data'));
     } finally {
@@ -188,16 +187,14 @@ export const ResourcePlanning: React.FC = () => {
 
   // Lightweight reload: only re-fetches lines, no loading spinner
   const reloadLines = useCallback(async () => {
-    const periods = openPeriodsRef.current;
-    if (periods.length === 0) return;
+    if (openPeriodsRef.current.length === 0) return;
     try {
-      const periodIds = periods.map(p => p.id);
-      const [demandResults, supplyResults] = await Promise.all([
-        Promise.all(periodIds.map(pid => planningApi.getDemandLines(pid))),
-        Promise.all(periodIds.map(pid => planningApi.getSupplyLines(pid))),
+      const [demandData, supplyData] = await Promise.all([
+        planningApi.getAllDemandLines(),
+        planningApi.getAllSupplyLines(),
       ]);
-      setDemandLines(demandResults.flat());
-      setSupplyLines(supplyResults.flat());
+      setDemandLines(demandData);
+      setSupplyLines(supplyData);
     } catch {
       // silent — the edited cell already reflects the change optimistically
     }

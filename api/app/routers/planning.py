@@ -81,6 +81,25 @@ def _enrich_supply(line) -> SupplyLineResponse:
 
 # ============== DEMAND LINES ==============
 
+@router.get("/demand-lines/all", response_model=list[DemandLineResponse])
+async def list_all_open_demand_lines(
+    project_id: Optional[str] = Query(None, description="Filter by project_id"),
+    cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER,
+        UserRole.EMPLOYEE,
+    )),
+):
+    """Return all demand lines across every open period in a single query."""
+    service = DemandService(db, current_user)
+    lines = service.get_all(project_id=project_id, open_periods_only=True)
+    result = [_enrich_demand(line) for line in lines]
+    if cost_center_id:
+        result = [r for r in result if r.cost_center_id == cost_center_id]
+    return result
+
+
 @router.get("/demand-lines", response_model=list[DemandLineResponse])
 async def list_demand_lines(
     period_id: Optional[str] = Query(None, description="Filter by period_id"),
@@ -239,6 +258,24 @@ async def bulk_demand_lines(
 
 
 # ============== SUPPLY LINES ==============
+
+@router.get("/supply-lines/all", response_model=list[SupplyLineResponse])
+async def list_all_open_supply_lines(
+    cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER,
+        UserRole.EMPLOYEE,
+    )),
+):
+    """Return all supply lines across every open period in a single query."""
+    service = SupplyService(db, current_user)
+    lines = service.get_all(open_periods_only=True)
+    result = [_enrich_supply(line) for line in lines]
+    if cost_center_id:
+        result = [r for r in result if r.cost_center_id == cost_center_id]
+    return result
+
 
 @router.get("/supply-lines", response_model=list[SupplyLineResponse])
 async def list_supply_lines(

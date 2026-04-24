@@ -117,11 +117,15 @@ class DemandService:
                     ids.append(rid)
         return ids
 
-    def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None, *, period_id: Optional[str] = None) -> list[DemandLine]:
+    def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None, *, period_id: Optional[str] = None, open_periods_only: bool = False) -> list[DemandLine]:
         """Get all demand lines, optionally filtered by period/year/month/project/resource."""
         query = self.db.query(DemandLine).filter(
             DemandLine.tenant_id == self.current_user.tenant_id
         )
+        if open_periods_only:
+            query = query.join(Period, DemandLine.period_id == Period.id).filter(
+                Period.status == PeriodStatus.OPEN
+            )
         if period_id:
             query = query.filter(DemandLine.period_id == period_id)
         if year:
@@ -511,11 +515,15 @@ class SupplyService:
         
         return period
     
-    def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None, *, period_id: Optional[str] = None) -> list[SupplyLine]:
+    def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None, *, period_id: Optional[str] = None, open_periods_only: bool = False) -> list[SupplyLine]:
         """Get all supply lines, optionally filtered by period/year/month/resource."""
         query = self.db.query(SupplyLine).filter(
             SupplyLine.tenant_id == self.current_user.tenant_id
         )
+        if open_periods_only:
+            query = query.join(Period, SupplyLine.period_id == Period.id).filter(
+                Period.status == PeriodStatus.OPEN
+            )
         if period_id:
             query = query.filter(SupplyLine.period_id == period_id)
         if year:

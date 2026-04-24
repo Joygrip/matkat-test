@@ -135,7 +135,7 @@ async def list_projects_scoped(
 ):
     """
     Projects scoped to the current user:
-    - PM: only projects where this user is an assigned PM OR project has no PMs
+    - PM: only projects where this user is explicitly an assigned PM
     - Admin/Finance: all projects (same as /lookups/projects)
     """
     query = db.query(Project).filter(Project.tenant_id == current_user.tenant_id)
@@ -148,16 +148,15 @@ async def list_projects_scoped(
         ).first()
         if pm_user:
             query = query.filter(
-                or_(
-                    sa_exists().where(
-                        and_(
-                            ProjectPM.project_id == Project.id,
-                            ProjectPM.user_id == pm_user.id,
-                        )
-                    ),
-                    ~sa_exists().where(ProjectPM.project_id == Project.id),
+                sa_exists().where(
+                    and_(
+                        ProjectPM.project_id == Project.id,
+                        ProjectPM.user_id == pm_user.id,
+                    )
                 )
             )
+        else:
+            query = query.filter(False)
     projects = query.order_by(Project.name).all()
     return [_enrich_project(p) for p in projects]
 

@@ -260,7 +260,6 @@ const useStyles = makeStyles({
     alignItems: 'center',
     flexWrap: 'wrap' as const,
   },
-  // Edit mode styles
   cellEditable: {
     cursor: 'crosshair',
     ':hover': {
@@ -281,14 +280,19 @@ const useStyles = makeStyles({
   matrixContainerSelecting: {
     userSelect: 'none' as const,
   },
-  editToolbar: {
+  // Floating popover (replaces pinned edit toolbar)
+  popover: {
+    position: 'fixed' as const,
+    zIndex: 1000,
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusMedium,
+    boxShadow: tokens.shadow16,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    flexWrap: 'wrap' as const,
+    flexWrap: 'nowrap' as const,
   },
 });
 
@@ -398,9 +402,14 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [localDemandRows, setLocalDemandRows] = useState<Record<string, LocalRow[]>>({});
   const [localSupplyRows, setLocalSupplyRows] = useState<Record<string, LocalRow[]>>({});
 
-  // Edit mode state
-  const [editingCC, setEditingCC] = useState<string | null>(null);
+  // Drag / bulk-edit state
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
+  const [popoverPos, setPopoverPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Refs for window event handlers (avoid stale closures)
+  const isDraggingRef = useRef(false);
+  const hasDraggedRef = useRef(false);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const [dragStart, setDragStart] = useState<{
     cellKey: string;
     resourceId: string | null;
@@ -410,6 +419,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     type: 'demand' | 'supply';
     rowIndex: number;
     colIndex: number;
+    ccId: string;
   } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragType, setDragType] = useState<'demand' | 'supply' | null>(null);
@@ -680,33 +690,39 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setAddSupplyForm({ resourceId: '', projectId: '' });
   }, [addSupplyForm, ccResources, projects]);
 
-  // Global mouseup to end drag
+  // Window mouseup: finalize drag or clear click-only selection
   useEffect(() => {
-    const handleMouseUp = () => setIsDragging(false);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => window.removeEventListener('mouseup', handleMouseUp);
-  }, []);
-
-  const handleEditCC = useCallback(async (ccId: string) => {
-    const resetEditState = () => {
-      setSelectedCells(new Set());
-      setApplyValue('');
-      setEditError(null);
-      setDragStart(null);
+    const up = (e: MouseEvent) => {
+      if (isDraggingRef.current) {
+        if (hasDraggedRef.current) {
+          setPopoverPos({ x: e.clientX, y: e.clientY });
+        } else {
+          // Just a click, not a real drag — clear so inline edit can work
+          setSelectedCells(new Set());
+        }
+      }
       setIsDragging(false);
-      setDragType(null);
+      isDraggingRef.current = false;
+      hasDraggedRef.current = false;
     };
+    window.addEventListener('mouseup', up);
+    return () => window.removeEventListener('mouseup', up);
+  }, []); // stable: only refs and stable state setters
 
-    if (editingCC === ccId) {
-      setEditingCC(null);
-      resetEditState();
-    } else {
-      resetEditState();
-      setEditingCC(ccId);
-      setExpandedCCs(prev => { const next = new Set(prev); next.add(ccId); return next; });
-      await loadCcData(ccId);
-    }
-  }, [editingCC, loadCcData]);
+  // Click-outside closes popover
+  useEffect(() => {
+    if (!popoverPos) return;
+    const handleDocMouseDown = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setSelectedCells(new Set());
+        setPopoverPos(null);
+        setApplyValue('');
+        setEditError(null);
+      }
+    };
+    document.addEventListener('mousedown', handleDocMouseDown);
+    return () => document.removeEventListener('mousedown', handleDocMouseDown);
+  }, [popoverPos]);
 
   const handleCellMouseDown = useCallback((
     e: React.MouseEvent,
@@ -718,26 +734,36 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     placeholderId: string | null,
     projectId: string | null,
     periodId: string,
+    ccId: string,
   ) => {
     e.preventDefault();
+    e.stopPropagation(); // prevent click-outside from firing on cell clicks
     setIsDragging(true);
+    isDraggingRef.current = true;
+    hasDraggedRef.current = false;
     setDragType(type);
-    setDragStart({ cellKey, resourceId, placeholderId, projectId, periodId, type, rowIndex, colIndex });
+    setDragStart({ cellKey, resourceId, placeholderId, projectId, periodId, type, rowIndex, colIndex, ccId });
     setSelectedCells(new Set([cellKey]));
+    setPopoverPos(null);
+    setApplyValue('');
+    setEditError(null);
   }, []);
 
   const handleCellMouseEnter = useCallback((
     rowIndex: number,
     colIndex: number,
     allGroupRows: MergedMatrixRow[],
+    ccId: string,
   ) => {
     if (!isDragging || !dragStart || !dragType) return;
+    if (dragStart.ccId !== ccId) return; // restrict to same cost center
 
     const minRow = Math.min(dragStart.rowIndex, rowIndex);
     const maxRow = Math.max(dragStart.rowIndex, rowIndex);
     const minCol = Math.min(dragStart.colIndex, colIndex);
     const maxCol = Math.max(dragStart.colIndex, colIndex);
 
+    hasDraggedRef.current = true;
     const newSelection = new Set<string>();
     allGroupRows.forEach((row, flatIdx) => {
       const demandRowIdx = flatIdx * 2;
@@ -839,6 +865,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       onReload();
       setSelectedCells(new Set());
       setApplyValue('');
+      setPopoverPos(null);
+      setEditError(null);
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Failed to apply changes');
     } finally {
@@ -894,6 +922,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       }
 
       setSelectedCells(new Set());
+      setPopoverPos(null);
+      setEditError(null);
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Failed to clear cells');
     } finally {
@@ -997,8 +1027,79 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
   const totalCols = 3 + periods.length;
 
+  const getPopoverStyle = (pos: { x: number; y: number }): React.CSSProperties => {
+    const W = 360;
+    const H = 52;
+    const margin = 8;
+    const offsetY = 16;
+    let left = pos.x;
+    let top = pos.y + offsetY;
+    if (left + W + margin > window.innerWidth) left = window.innerWidth - W - margin;
+    if (left < margin) left = margin;
+    if (top + H + margin > window.innerHeight) top = pos.y - H - margin;
+    return { left, top };
+  };
+
   return (
     <>
+    {/* Floating popover for drag-select bulk editing */}
+    {popoverPos && selectedCells.size > 0 && (
+      <div
+        ref={popoverRef}
+        className={styles.popover}
+        style={getPopoverStyle(popoverPos)}
+        onMouseDown={e => e.stopPropagation()}
+      >
+        <span style={{ fontSize: tokens.fontSizeBase200, whiteSpace: 'nowrap', color: tokens.colorNeutralForeground2 }}>
+          {selectedCells.size} cell{selectedCells.size !== 1 ? 's' : ''}
+        </span>
+        <input
+          type="number"
+          min={0}
+          max={200}
+          step={5}
+          placeholder="FTE %"
+          value={applyValue}
+          onChange={e => setApplyValue(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') handleApply();
+            if (e.key === 'Escape') { setSelectedCells(new Set()); setPopoverPos(null); }
+          }}
+          style={{
+            width: '72px',
+            padding: '3px 6px',
+            border: `1px solid ${tokens.colorNeutralStroke1}`,
+            borderRadius: tokens.borderRadiusSmall,
+            fontSize: tokens.fontSizeBase200,
+            outline: 'none',
+          }}
+          autoFocus
+        />
+        <span style={{ fontSize: tokens.fontSizeBase200 }}>%</span>
+        <Button
+          size="small"
+          appearance="primary"
+          disabled={applyValue === '' || applying}
+          onClick={handleApply}
+          icon={applying ? <Spinner size="extra-tiny" /> : undefined}
+        >
+          Apply
+        </Button>
+        <Button
+          size="small"
+          appearance="secondary"
+          disabled={applying}
+          onClick={handleClear}
+        >
+          Clear
+        </Button>
+        {editError && (
+          <span style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorPaletteRedForeground2 }}>
+            {editError}
+          </span>
+        )}
+      </div>
+    )}
     <div style={{ padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`, borderBottom: `1px solid ${tokens.colorNeutralStroke2}`, display: 'flex', alignItems: 'center' }}>
       <Button
         size="small"
@@ -1036,7 +1137,6 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         <tbody>
           {groups.map(group => {
             const isExpanded = expandedCCs.has(group.ccId);
-            const isEditingThisCC = editingCC === group.ccId;
             const allRows = group.resourceGroups.flatMap(rg => rg.rows);
 
             const periodTotals = periods.map(p => {
@@ -1055,26 +1155,13 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                   className={styles.summaryRow}
                   onClick={() => handleExpandCC(group.ccId)}
                 >
-                  <td
-                    className={styles.summaryFixed}
-                    style={isEditingThisCC
-                      ? { borderLeft: `3px solid ${tokens.colorBrandBackground}` }
-                      : undefined}
-                  >
+                  <td className={styles.summaryFixed}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                       {isExpanded ? <ChevronDown20Regular /> : <ChevronRight20Regular />}
                       {group.ccName}
                     </span>
                   </td>
-                  <td className={styles.summaryProject}>
-                    <Button
-                      size="small"
-                      appearance={isEditingThisCC ? 'primary' : 'subtle'}
-                      onClick={e => { e.stopPropagation(); handleEditCC(group.ccId); }}
-                    >
-                      {isEditingThisCC ? 'Done' : 'Edit'}
-                    </Button>
-                  </td>
+                  <td className={styles.summaryProject} />
                   <td className={styles.summaryType} />
                   {periodTotals.map(({ dSum, sSum }, i) => (
                     <td key={periods[i].id} className={styles.summaryValueCell}>
@@ -1098,65 +1185,6 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
                 {isExpanded && (
                   <>
-                    {/* Edit toolbar */}
-                    {isEditingThisCC && (
-                      <tr>
-                        <td colSpan={totalCols} style={{ padding: 0 }}>
-                          <div className={styles.editToolbar}>
-                            <span style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
-                              ✏ Edit mode — click and drag to select cells
-                            </span>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <span style={{ fontSize: tokens.fontSizeBase200 }}>Value:</span>
-                              <input
-                                type="number"
-                                min={0}
-                                max={200}
-                                step={5}
-                                placeholder="FTE %"
-                                value={applyValue}
-                                onChange={e => setApplyValue(e.target.value)}
-                                style={{
-                                  width: '72px',
-                                  padding: '3px 6px',
-                                  border: `1px solid ${tokens.colorNeutralStroke1}`,
-                                  borderRadius: tokens.borderRadiusSmall,
-                                  fontSize: tokens.fontSizeBase200,
-                                  outline: 'none',
-                                }}
-                              />
-                              <span style={{ fontSize: tokens.fontSizeBase200 }}>%</span>
-                            </span>
-                            <Button
-                              size="small"
-                              appearance="primary"
-                              disabled={selectedCells.size === 0 || applyValue === '' || applying}
-                              onClick={handleApply}
-                              icon={applying ? <Spinner size="extra-tiny" /> : undefined}
-                            >
-                              Apply
-                            </Button>
-                            <Button
-                              size="small"
-                              appearance="secondary"
-                              disabled={selectedCells.size === 0 || applying}
-                              onClick={handleClear}
-                            >
-                              Clear
-                            </Button>
-                            <span style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
-                              {selectedCells.size} cells selected
-                            </span>
-                            {editError && (
-                              <span style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorPaletteRedForeground2 }}>
-                                {editError}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-
                     {/* Resource groups → data rows (2 per MatrixRow: demand + supply) */}
                     {group.resourceGroups.map(rg => (
                       rg.rows.map((row, rowIdx) => {
@@ -1206,27 +1234,27 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                 const existingCellKey = `d-${row.key}-${period.id}`;
                                 const dragCellKey = buildCellKey('demand', row.resourceId, row.placeholderId, row.projectId, period.id);
                                 const isSelectable = canEditDemand && !row.isGeneral;
-                                const canEdit = isSelectable && editingCC !== group.ccId;
+                                const canEdit = isSelectable && !isDragging;
                                 const isSelected = selectedCells.has(dragCellKey);
-                                const isDimmed = isEditingThisCC && isDragging && dragType !== 'demand';
+                                const isDimmed = isDragging && dragType !== 'demand' && dragStart?.ccId === group.ccId;
                                 return (
                                   <td
                                     key={period.id}
                                     className={mergeClasses(
                                       styles.valueCell,
-                                      isEditingThisCC && isSelectable && styles.cellEditable,
-                                      isEditingThisCC && isSelected && styles.cellSelected,
-                                      isEditingThisCC && isDimmed && styles.cellDimmed,
+                                      isSelectable && styles.cellEditable,
+                                      isSelected && styles.cellSelected,
+                                      isDimmed && styles.cellDimmed,
                                     )}
                                     data-row-index={demandRowIndex}
                                     data-col-index={colIndex}
                                     data-cell-key={dragCellKey}
                                     data-type="demand"
-                                    onMouseDown={isEditingThisCC && isSelectable
-                                      ? (e) => handleCellMouseDown(e, dragCellKey, 'demand', demandRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id)
+                                    onMouseDown={isSelectable
+                                      ? (e) => handleCellMouseDown(e, dragCellKey, 'demand', demandRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, group.ccId)
                                       : undefined}
-                                    onMouseEnter={isDragging && isEditingThisCC
-                                      ? () => handleCellMouseEnter(demandRowIndex, colIndex, allRows)
+                                    onMouseEnter={isDragging
+                                      ? () => handleCellMouseEnter(demandRowIndex, colIndex, allRows, group.ccId)
                                       : undefined}
                                   >
                                     <CellEditor
@@ -1256,27 +1284,27 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                 const existingCellKey = `s-${row.key}-${period.id}`;
                                 const dragCellKey = buildCellKey('supply', row.resourceId, row.placeholderId, row.projectId, period.id);
                                 const isSelectable = canEditSupply && !row.isPlaceholder;
-                                const canEdit = isSelectable && editingCC !== group.ccId;
+                                const canEdit = isSelectable && !isDragging;
                                 const isSelected = selectedCells.has(dragCellKey);
-                                const isDimmed = isEditingThisCC && isDragging && dragType !== 'supply';
+                                const isDimmed = isDragging && dragType !== 'supply' && dragStart?.ccId === group.ccId;
                                 return (
                                   <td
                                     key={period.id}
                                     className={mergeClasses(
                                       styles.valueCell,
-                                      isEditingThisCC && isSelectable && styles.cellEditable,
-                                      isEditingThisCC && isSelected && styles.cellSelected,
-                                      isEditingThisCC && isDimmed && styles.cellDimmed,
+                                      isSelectable && styles.cellEditable,
+                                      isSelected && styles.cellSelected,
+                                      isDimmed && styles.cellDimmed,
                                     )}
                                     data-row-index={supplyRowIndex}
                                     data-col-index={colIndex}
                                     data-cell-key={dragCellKey}
                                     data-type="supply"
-                                    onMouseDown={isEditingThisCC && isSelectable
-                                      ? (e) => handleCellMouseDown(e, dragCellKey, 'supply', supplyRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id)
+                                    onMouseDown={isSelectable
+                                      ? (e) => handleCellMouseDown(e, dragCellKey, 'supply', supplyRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, group.ccId)
                                       : undefined}
-                                    onMouseEnter={isDragging && isEditingThisCC
-                                      ? () => handleCellMouseEnter(supplyRowIndex, colIndex, allRows)
+                                    onMouseEnter={isDragging
+                                      ? () => handleCellMouseEnter(supplyRowIndex, colIndex, allRows, group.ccId)
                                       : undefined}
                                   >
                                     <CellEditor

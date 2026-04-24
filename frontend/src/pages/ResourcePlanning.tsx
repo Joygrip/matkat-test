@@ -142,12 +142,19 @@ export const ResourcePlanning: React.FC = () => {
     }
   }, [contextPeriods]);
 
+  const isPM = user?.role === 'PM';
+
   const loadAll = async () => {
     try {
       setLoading(true);
+      // PMs only see their assigned projects; Finance/Admin see all via scoped too.
+      // Manager is not allowed on the scoped endpoint so falls back to listProjects.
+      const projectsFetch = (isPM || user?.role === 'Finance' || user?.role === 'Admin')
+        ? lookupsApi.listProjectsScoped()
+        : lookupsApi.listProjects();
       const [periodsData, projectsData, costCentersData] = await Promise.all([
         periodsApi.list(),
-        lookupsApi.listProjects(),
+        projectsFetch,
         lookupsApi.listCostCenters(),
       ]);
 

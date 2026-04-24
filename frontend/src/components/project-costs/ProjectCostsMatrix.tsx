@@ -11,7 +11,7 @@ import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular, DeleteRegula
 import { projectCostsApi, ExternalLine, EquipmentLine } from '../../api/projectCosts';
 import { lookupsApi } from '../../api/lookups';
 import { periodsApi } from '../../api/periods';
-import { useHasRole } from '../../auth/AuthProvider';
+import { useAuth } from '../../auth/AuthProvider';
 import { useToast } from '../../hooks/useToast';
 import type { Period } from '../../types';
 
@@ -48,13 +48,13 @@ function parseCellKey(key: string): { projectId: string; type: 'oop'|'equip'; de
 // ─── Data types ───────────────────────────────────────────────────────────────
 
 interface PeriodCell {
-  id: string;   // line item id
-  cost: number; // cents
+  id: string;
+  cost: number;
   isMulti: boolean;
 }
 
 interface MatrixLine {
-  lineKey: string; // unique within project
+  lineKey: string;
   description: string;
   type: 'oop' | 'equip';
   isLocal: boolean;
@@ -64,6 +64,7 @@ interface MatrixLine {
 interface ProjectGroup {
   projectId: string;
   projectName: string;
+  pmUserIds: string[];
   lines: MatrixLine[];
   totalsByPeriod: Map<string, number>;
 }
@@ -92,7 +93,6 @@ const useStyles = makeStyles({
   thDesc:    { position: 'sticky' as const, left: DESC_LEFT_PX, zIndex: 4, textAlign: 'left' as const, minWidth: DESC_COL_PX },
   thType:    { position: 'sticky' as const, left: TYPE_LEFT_PX, zIndex: 4, textAlign: 'left' as const, minWidth: TYPE_COL_PX },
 
-  // Summary row (project header)
   summaryRow: {
     cursor: 'pointer',
     backgroundColor: tokens.colorNeutralBackground3,
@@ -139,7 +139,6 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
 
-  // Line item rows
   projectCell: {
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
@@ -196,7 +195,6 @@ const useStyles = makeStyles({
     verticalAlign: 'middle' as const,
   },
 
-  // Value cells
   valueCell: {
     padding: '2px 2px',
     borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
@@ -215,7 +213,6 @@ const useStyles = makeStyles({
   },
   cellDimmed: { opacity: 0.35, pointerEvents: 'none' as const },
 
-  // Cell content
   cellInput: {
     width: '80px',
     textAlign: 'right' as const,
@@ -263,7 +260,6 @@ const useStyles = makeStyles({
     cursor: 'default',
   },
 
-  // Add-line row
   addLineRow: { backgroundColor: tokens.colorNeutralBackground1 },
   addLineCell: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
@@ -273,17 +269,19 @@ const useStyles = makeStyles({
   },
   addLineForm: { display: 'flex', gap: tokens.spacingHorizontalS, alignItems: 'center', flexWrap: 'wrap' as const },
 
-  // Edit toolbar
-  editToolbar: {
+  // Floating popover (replaces top toolbar)
+  popover: {
+    position: 'fixed' as const,
+    zIndex: 1000,
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusMedium,
+    boxShadow: tokens.shadow16,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusMedium,
-    marginBottom: tokens.spacingVerticalS,
-    flexWrap: 'wrap' as const,
+    flexWrap: 'nowrap' as const,
   },
 
   loading: { display: 'flex', justifyContent: 'center', padding: tokens.spacingVerticalXXL },
@@ -364,30 +362,46 @@ const CostCellEditor: React.FC<CostCellEditorProps> = ({
 
 export const ProjectCostsMatrix: React.FC = () => {
   const styles = useStyles();
-  const canEdit = useHasRole('Admin', 'Finance', 'PM');
+  const { user } = useAuth();
   const { showApiError } = useToast();
+
+  const isFinanceOrAdmin = user?.role === 'Finance' || user?.role === 'Admin';
+  const isPM = user?.role === 'PM';
+
+  // The backend's /lookups/projects/scoped already restricts PMs to their assigned
+  // projects only, so any project returned to a PM is one they can edit.
+  // pm_user_ids in the response contains internal DB UUIDs, not Azure AD object_ids,
+  // so we cannot reliably compare them in the frontend.
+  const canEditProject = useCallback((_pmUserIds: string[]): boolean => {
+    return isFinanceOrAdmin || isPM;
+  }, [isFinanceOrAdmin, isPM]);
 
   // ── Data ──
   const [allPeriods, setAllPeriods] = useState<Period[]>([]);
-  const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
+  const [projects, setProjects] = useState<Array<{ id: string; name: string; pm_user_ids: string[] }>>([]);
   const [extLines, setExtLines] = useState<ExternalLine[]>([]);
   const [equipLines, setEquipLines] = useState<EquipmentLine[]>([]);
   const [loading, setLoading] = useState(true);
 
   // ── UI state ──
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
-  const [editingProject, setEditingProject] = useState<string | null>(null);
-  const [editingCell, setEditingCell] = useState<string | null>(null); // cell key
+  const [editingCell, setEditingCell] = useState<string | null>(null);
   const [savingCells, setSavingCells] = useState<Set<string>>(new Set());
 
   // ── Drag-to-fill ──
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
   const [isDragging, setIsDragging] = useState(false);
   const [dragType, setDragType] = useState<'oop' | 'equip' | null>(null);
-  const [dragStart, setDragStart] = useState<{ lineIdx: number; colIdx: number } | null>(null);
+  const [dragStart, setDragStart] = useState<{ projectId: string; lineIdx: number; colIdx: number } | null>(null);
+  const [popoverPos, setPopoverPos] = useState<{ x: number; y: number } | null>(null);
   const [applyValue, setApplyValue] = useState('');
   const [applying, setApplying] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+
+  // Refs for window event handlers (avoid stale closures)
+  const isDraggingRef = useRef(false);
+  const hasDraggedRef = useRef(false);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
   // ── Local (unsaved) lines ──
   const [localLines, setLocalLines] = useState<Array<{ projectId: string; type: 'oop'|'equip'; description: string }>>([]);
@@ -406,7 +420,7 @@ export const ProjectCostsMatrix: React.FC = () => {
       periodsData.sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
       projectsData.sort((a, b) => a.name.localeCompare(b.name));
       setAllPeriods(periodsData);
-      setProjects(projectsData);
+      setProjects(projectsData as Array<{ id: string; name: string; pm_user_ids: string[] }>);
       setExtLines(extData);
       setEquipLines(equipData);
     } catch (err) {
@@ -418,11 +432,39 @@ export const ProjectCostsMatrix: React.FC = () => {
 
   useEffect(() => { load(); }, [load]);
 
+  // Window mouseup: finalize drag or clear click-only selection
   useEffect(() => {
-    const up = () => setIsDragging(false);
+    const up = (e: MouseEvent) => {
+      if (isDraggingRef.current) {
+        if (hasDraggedRef.current) {
+          setPopoverPos({ x: e.clientX, y: e.clientY });
+        } else {
+          // Just a click, not a real drag — clear selection so inline edit works
+          setSelectedCells(new Set());
+        }
+      }
+      setIsDragging(false);
+      isDraggingRef.current = false;
+      hasDraggedRef.current = false;
+    };
     window.addEventListener('mouseup', up);
     return () => window.removeEventListener('mouseup', up);
-  }, []);
+  }, []); // stable: only refs and stable state setters
+
+  // Click-outside closes popover
+  useEffect(() => {
+    if (!popoverPos) return;
+    const handleDocMouseDown = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setSelectedCells(new Set());
+        setPopoverPos(null);
+        setApplyValue('');
+        setEditError(null);
+      }
+    };
+    document.addEventListener('mousedown', handleDocMouseDown);
+    return () => document.removeEventListener('mousedown', handleDocMouseDown);
+  }, [popoverPos]);
 
   // ── Open periods only ──
   const openPeriods = useMemo(() => allPeriods.filter(p => p.status === 'open'), [allPeriods]);
@@ -431,7 +473,6 @@ export const ProjectCostsMatrix: React.FC = () => {
   // ── Build matrix groups ──
   const matrixGroups = useMemo<ProjectGroup[]>(() => {
     return projects.map(proj => {
-      // Group OoP lines by description (skip locked periods)
       const oopDescMap = new Map<string, Map<string, Array<{ id: string; cost: number }>>>();
       for (const l of extLines) {
         if (l.project_id !== proj.id || !openPeriodIds.has(l.period_id)) continue;
@@ -443,7 +484,6 @@ export const ProjectCostsMatrix: React.FC = () => {
         pm.set(l.period_id, arr);
       }
 
-      // Group Equipment lines by description (skip locked periods)
       const equipDescMap = new Map<string, Map<string, Array<{ id: string; cost: number }>>>();
       for (const l of equipLines) {
         if (l.project_id !== proj.id || !openPeriodIds.has(l.period_id)) continue;
@@ -473,7 +513,6 @@ export const ProjectCostsMatrix: React.FC = () => {
         lines.push({ lineKey: `equip::${encodeURIComponent(desc)}`, description: desc, type: 'equip', isLocal: false, costsByPeriod });
       }
 
-      // Add locally-created lines not yet in DB
       for (const local of localLines) {
         if (local.projectId !== proj.id) continue;
         const lk = `${local.type}::${encodeURIComponent(local.description)}`;
@@ -482,19 +521,17 @@ export const ProjectCostsMatrix: React.FC = () => {
         }
       }
 
-      // Sort: OoP first then Equipment, alpha within type
       lines.sort((a, b) => {
         if (a.type !== b.type) return a.type === 'oop' ? -1 : 1;
         return a.description.localeCompare(b.description);
       });
 
-      // Totals for summary row
       const totalsByPeriod = new Map<string, number>();
       for (const period of openPeriods) {
         totalsByPeriod.set(period.id, lines.reduce((s, l) => s + (l.costsByPeriod.get(period.id)?.cost ?? 0), 0));
       }
 
-      return { projectId: proj.id, projectName: proj.name, lines, totalsByPeriod };
+      return { projectId: proj.id, projectName: proj.name, pmUserIds: proj.pm_user_ids ?? [], lines, totalsByPeriod };
     });
   }, [projects, extLines, equipLines, localLines, openPeriods, openPeriodIds]);
 
@@ -529,7 +566,6 @@ export const ProjectCostsMatrix: React.FC = () => {
           await projectCostsApi.deleteEquipment(existingId);
         }
       }
-      // Promote local line to DB line after first save
       if (isLocal && cents > 0) {
         setLocalLines(prev => prev.filter(l => !(l.projectId === projectId && l.type === type && l.description === description)));
       }
@@ -582,35 +618,32 @@ export const ProjectCostsMatrix: React.FC = () => {
     setAddLineState(null);
   };
 
-  // ── Edit mode per project ──
-  const handleEditProject = (projectId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (editingProject === projectId) {
-      setEditingProject(null);
-      setSelectedCells(new Set());
-      setApplyValue('');
-      setEditError(null);
-      setAddLineState(null);
-    } else {
-      setEditingProject(projectId);
-      setExpandedProjects(prev => { const s = new Set(prev); s.add(projectId); return s; });
-      setSelectedCells(new Set());
-    }
-  };
-
   // ── Drag handlers ──
-  const handleCellMouseDown = useCallback((e: React.MouseEvent, cellKey: string, type: 'oop'|'equip', lineIdx: number, colIdx: number) => {
+  const handleCellMouseDown = useCallback((
+    e: React.MouseEvent,
+    cellKey: string,
+    type: 'oop'|'equip',
+    projectId: string,
+    lineIdx: number,
+    colIdx: number,
+  ) => {
     e.preventDefault();
+    e.stopPropagation(); // prevent click-outside listener from firing on cell clicks
     setIsDragging(true);
+    isDraggingRef.current = true;
+    hasDraggedRef.current = false;
     setDragType(type);
-    setDragStart({ lineIdx, colIdx });
+    setDragStart({ projectId, lineIdx, colIdx });
     setSelectedCells(new Set([cellKey]));
+    setPopoverPos(null);
     setApplyValue('');
     setEditError(null);
   }, []);
 
   const handleCellMouseEnter = useCallback((projectId: string, lineIdx: number, colIdx: number) => {
     if (!isDragging || !dragStart || !dragType) return;
+    if (dragStart.projectId !== projectId) return; // restrict to same project
+
     const group = matrixGroups.find(g => g.projectId === projectId);
     if (!group) return;
 
@@ -619,6 +652,7 @@ export const ProjectCostsMatrix: React.FC = () => {
     const minCol = Math.min(dragStart.colIdx, colIdx);
     const maxCol = Math.max(dragStart.colIdx, colIdx);
 
+    hasDraggedRef.current = true;
     const newSel = new Set<string>();
     group.lines.forEach((line, lIdx) => {
       if (line.type !== dragType) return;
@@ -633,24 +667,22 @@ export const ProjectCostsMatrix: React.FC = () => {
   }, [isDragging, dragStart, dragType, matrixGroups, openPeriods]);
 
   // ── Bulk apply ──
-  const handleApply = useCallback(async () => {
-    const num = parseFloat(applyValue);
-    if (isNaN(num) || num < 0 || !editingProject) return;
-    const group = matrixGroups.find(g => g.projectId === editingProject);
-    if (!group) return;
-
+  const handleApplyValue = useCallback(async (dkkValue: number) => {
+    if (selectedCells.size === 0) return;
     setApplying(true);
     setEditError(null);
     try {
       const promises: Promise<void>[] = [];
       for (const ck of selectedCells) {
         const { projectId, type, description, periodId } = parseCellKey(ck);
+        const group = matrixGroups.find(g => g.projectId === projectId);
+        if (!group) continue;
         const line = group.lines.find(l => l.type === type && l.description === description);
         if (!line) continue;
         const cell = line.costsByPeriod.get(periodId);
         if (cell?.isMulti) continue;
         const existingId = cell?.id ?? null;
-        const cents = Math.round(num * 100);
+        const cents = Math.round(dkkValue * 100);
         if (type === 'oop') {
           if (cents > 0 && !existingId) promises.push(projectCostsApi.createExternal({ project_id: projectId, period_id: periodId, description, cost: cents }).then(() => {}));
           else if (cents > 0 && existingId) promises.push(projectCostsApi.updateExternal(existingId, { cost: cents }).then(() => {}));
@@ -665,12 +697,38 @@ export const ProjectCostsMatrix: React.FC = () => {
       await load();
       setSelectedCells(new Set());
       setApplyValue('');
+      setPopoverPos(null);
+      setEditError(null);
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Failed to apply');
     } finally {
       setApplying(false);
     }
-  }, [applyValue, editingProject, matrixGroups, selectedCells, load]);
+  }, [selectedCells, matrixGroups, load]);
+
+  const handleApply = useCallback(async () => {
+    const num = parseFloat(applyValue);
+    if (isNaN(num) || num < 0) return;
+    await handleApplyValue(num);
+  }, [applyValue, handleApplyValue]);
+
+  const handleClear = useCallback(async () => {
+    await handleApplyValue(0);
+  }, [handleApplyValue]);
+
+  // ── Popover position with edge-flip ──
+  const getPopoverStyle = (pos: { x: number; y: number }): React.CSSProperties => {
+    const W = 360;
+    const H = 52;
+    const margin = 8;
+    const offsetY = 16;
+    let left = pos.x;
+    let top = pos.y + offsetY;
+    if (left + W + margin > window.innerWidth) left = window.innerWidth - W - margin;
+    if (left < margin) left = margin;
+    if (top + H + margin > window.innerHeight) top = pos.y - H - margin;
+    return { left, top };
+  };
 
   const totalCols = 3 + openPeriods.length;
 
@@ -678,11 +736,16 @@ export const ProjectCostsMatrix: React.FC = () => {
 
   return (
     <div>
-      {/* Drag-select bulk toolbar */}
-      {editingProject && selectedCells.size > 0 && (
-        <div className={styles.editToolbar}>
-          <span style={{ fontSize: tokens.fontSizeBase200 }}>
-            {selectedCells.size} cell{selectedCells.size !== 1 ? 's' : ''} selected
+      {/* Floating popover for drag-select bulk editing */}
+      {popoverPos && selectedCells.size > 0 && (
+        <div
+          ref={popoverRef}
+          className={styles.popover}
+          style={getPopoverStyle(popoverPos)}
+          onMouseDown={e => e.stopPropagation()}
+        >
+          <span style={{ fontSize: tokens.fontSizeBase200, whiteSpace: 'nowrap', color: tokens.colorNeutralForeground2 }}>
+            {selectedCells.size} cell{selectedCells.size !== 1 ? 's' : ''}
           </span>
           <input
             type="number"
@@ -692,15 +755,18 @@ export const ProjectCostsMatrix: React.FC = () => {
             value={applyValue}
             className={styles.cellInput}
             onChange={e => setApplyValue(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') handleApply(); }}
-            style={{ width: '120px' }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') handleApply();
+              if (e.key === 'Escape') { setSelectedCells(new Set()); setPopoverPos(null); }
+            }}
+            style={{ width: '110px' }}
             autoFocus
           />
           <Button size="small" appearance="primary" onClick={handleApply} disabled={applying || !applyValue}>
             {applying ? <Spinner size="tiny" /> : 'Apply'}
           </Button>
-          <Button size="small" appearance="subtle" onClick={() => setSelectedCells(new Set())} disabled={applying}>
-            Deselect
+          <Button size="small" appearance="subtle" onClick={handleClear} disabled={applying}>
+            Clear
           </Button>
           {editError && (
             <span style={{ color: tokens.colorStatusDangerForeground1, fontSize: tokens.fontSizeBase200 }}>
@@ -726,8 +792,8 @@ export const ProjectCostsMatrix: React.FC = () => {
           </thead>
           <tbody>
             {matrixGroups.map(group => {
-              const isExpanded  = expandedProjects.has(group.projectId);
-              const isEditing   = editingProject === group.projectId;
+              const isExpanded = expandedProjects.has(group.projectId);
+              const canEditThisProject = canEditProject(group.pmUserIds);
 
               return (
                 <React.Fragment key={group.projectId}>
@@ -740,26 +806,13 @@ export const ProjectCostsMatrix: React.FC = () => {
                       return s;
                     })}
                   >
-                    <td
-                      className={styles.summaryFixed}
-                      style={isEditing ? { borderLeft: `3px solid ${tokens.colorBrandBackground}` } : undefined}
-                    >
+                    <td className={styles.summaryFixed}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         {isExpanded ? <ChevronDown20Regular /> : <ChevronRight20Regular />}
                         {group.projectName}
                       </span>
                     </td>
-                    <td className={styles.summaryDesc}>
-                      {canEdit && (
-                        <Button
-                          size="small"
-                          appearance={isEditing ? 'primary' : 'subtle'}
-                          onClick={e => handleEditProject(group.projectId, e)}
-                        >
-                          {isEditing ? 'Done' : 'Edit'}
-                        </Button>
-                      )}
-                    </td>
+                    <td className={styles.summaryDesc} />
                     <td className={styles.summaryType} />
                     {openPeriods.map(p => {
                       const total = group.totalsByPeriod.get(p.id) ?? 0;
@@ -773,16 +826,13 @@ export const ProjectCostsMatrix: React.FC = () => {
 
                   {/* ── Line item rows (expanded) ── */}
                   {isExpanded && group.lines.map((line, lineIdx) => {
-                    const canEditCell  = canEdit && !isEditing; // inline edit only when NOT in drag-edit mode
-                    const canSelectCell = canEdit && isEditing;  // drag only when in edit mode
-                    const isDimmed = isEditing && isDragging && dragType !== null && dragType !== line.type;
+                    // Dim rows of the wrong type only while dragging within this project
+                    const isDimmed = isDragging && dragType !== null && dragType !== line.type && dragStart?.projectId === group.projectId;
 
                     return (
                       <tr key={line.lineKey}>
-                        {/* Project col (empty, just border) */}
                         <td className={styles.projectCell} />
 
-                        {/* Description col */}
                         <td className={styles.descCell} title={line.description}>
                           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                             {line.isLocal && (
@@ -792,11 +842,10 @@ export const ProjectCostsMatrix: React.FC = () => {
                           </span>
                         </td>
 
-                        {/* Type col */}
                         <td className={line.type === 'oop' ? styles.typeCellOop : styles.typeCellEquip}>
                           <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
                             {line.type === 'oop' ? 'OoP' : 'Equip'}
-                            {isEditing && (
+                            {canEditThisProject && (
                               <Button
                                 size="small"
                                 appearance="subtle"
@@ -808,12 +857,11 @@ export const ProjectCostsMatrix: React.FC = () => {
                           </span>
                         </td>
 
-                        {/* Period cells */}
                         {openPeriods.map((period, colIdx) => {
-                          const cell     = line.costsByPeriod.get(period.id);
-                          const cellKey  = makeCellKey(group.projectId, line.type, line.description, period.id);
+                          const cell = line.costsByPeriod.get(period.id);
+                          const cellKey = makeCellKey(group.projectId, line.type, line.description, period.id);
                           const isSelected = selectedCells.has(cellKey);
-                          const canDrag  = canSelectCell && !cell?.isMulti;
+                          const canDrag = canEditThisProject && !cell?.isMulti;
 
                           return (
                             <td
@@ -825,17 +873,17 @@ export const ProjectCostsMatrix: React.FC = () => {
                                 isDimmed && styles.cellDimmed,
                               )}
                               onMouseDown={canDrag
-                                ? e => handleCellMouseDown(e, cellKey, line.type, lineIdx, colIdx)
+                                ? e => handleCellMouseDown(e, cellKey, line.type, group.projectId, lineIdx, colIdx)
                                 : undefined}
-                              onMouseEnter={isDragging && isEditing
+                              onMouseEnter={isDragging
                                 ? () => handleCellMouseEnter(group.projectId, lineIdx, colIdx)
                                 : undefined}
                             >
                               <CostCellEditor
                                 cell={cell}
-                                isEditing={!isEditing && editingCell === cellKey}
+                                isEditing={editingCell === cellKey}
                                 isSaving={savingCells.has(cellKey)}
-                                canEdit={canEditCell && !cell?.isMulti}
+                                canEdit={canEditThisProject && !isDragging && !cell?.isMulti}
                                 onStartEdit={() => setEditingCell(cellKey)}
                                 onCancel={() => setEditingCell(null)}
                                 onSave={val => saveCostCell(group.projectId, line.type, line.description, period.id, cell?.id ?? null, line.isLocal, val)}
@@ -848,8 +896,8 @@ export const ProjectCostsMatrix: React.FC = () => {
                     );
                   })}
 
-                  {/* ── Add line form row (edit mode, expanded) ── */}
-                  {isExpanded && isEditing && canEdit && (
+                  {/* ── Add line row — always visible when expanded and user can edit this project ── */}
+                  {isExpanded && canEditThisProject && (
                     <tr className={styles.addLineRow}>
                       <td className={styles.addLineCell} colSpan={totalCols} style={{ position: 'sticky', left: 0 }}>
                         {addLineState?.projectId === group.projectId ? (

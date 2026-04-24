@@ -29,6 +29,9 @@ const PERIOD_COL_PX = `${PERIOD_COL_WIDTH}px`;
 const TYPE_LEFT = RESOURCE_COL_WIDTH + PROJECT_COL_WIDTH;
 const TYPE_LEFT_PX = `${TYPE_LEFT}px`;
 
+const DEMAND_COLOR = '#dbeafe';
+const SUPPLY_COLOR = '#dcfce7';
+
 const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function getFteColor(val: number): { background: string; color: string } | undefined {
   if (val === 0) return undefined;
@@ -148,7 +151,7 @@ const useStyles = makeStyles({
     verticalAlign: 'middle' as const,
   },
   typeCellDemand: {
-    backgroundColor: '#e8f0ff',
+    backgroundColor: DEMAND_COLOR,
     color: '#1a3a7a',
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase100,
@@ -161,7 +164,7 @@ const useStyles = makeStyles({
     minWidth: TYPE_COL_PX,
   },
   typeCellSupply: {
-    backgroundColor: '#e8f8ee',
+    backgroundColor: SUPPLY_COLOR,
     color: '#0a4a1a',
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase100,
@@ -1168,14 +1171,16 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                       <div style={{
                         fontSize: '11px',
                         fontWeight: 600,
-                        ...(getFteColor(dSum) ?? { color: tokens.colorNeutralForeground3 }),
+                        backgroundColor: DEMAND_COLOR,
+                        color: getFteColor(dSum)?.color ?? tokens.colorNeutralForeground3,
                       }}>
                         D: {dSum > 0 ? `${dSum}%` : '—'}
                       </div>
                       <div style={{
                         fontSize: '11px',
                         fontWeight: 600,
-                        ...(getFteColor(sSum) ?? { color: tokens.colorNeutralForeground3 }),
+                        backgroundColor: SUPPLY_COLOR,
+                        color: getFteColor(sSum)?.color ?? tokens.colorNeutralForeground3,
                       }}>
                         S: {sSum > 0 ? `${sSum}%` : '—'}
                       </div>
@@ -1196,7 +1201,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                         return (
                           <React.Fragment key={row.key}>
                             {/* Demand row */}
-                            <tr>
+                            <tr style={{ backgroundColor: DEMAND_COLOR }}>
                               {rowIdx === 0 && (
                                 <td
                                   className={styles.resourceCell}
@@ -1273,7 +1278,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                               })}
                             </tr>
                             {/* Supply row */}
-                            <tr>
+                            <tr style={{ backgroundColor: SUPPLY_COLOR }}>
                               {/* resource and project cells spanned by rowSpan above */}
                               <td className={styles.typeCellSupply}>Supply</td>
                               {periods.map((period, colIndex) => {

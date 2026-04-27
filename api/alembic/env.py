@@ -14,7 +14,8 @@ from api.app.models import actuals       # noqa: F401
 from api.app.models import finance       # noqa: F401
 from api.app.models import approvals     # noqa: F401
 from api.app.models import consolidation # noqa: F401
-from api.app.models import notifications # noqa: F401
+from api.app.models import notifications          # noqa: F401
+from api.app.models import notification_schedule  # noqa: F401
 from api.app.models import audit         # noqa: F401
 
 # this is the Alembic Config object, which provides

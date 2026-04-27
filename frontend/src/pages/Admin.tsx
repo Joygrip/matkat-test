@@ -45,6 +45,7 @@ import {
   PeopleTeamRegular,
   ChevronRightRegular,
   ArrowSyncRegular,
+  AlertRegular,
 } from '@fluentui/react-icons';
 import {
   adminApi,
@@ -152,7 +153,8 @@ type TabValue =
   | 'manager-overrides'
   | 'delegates'
   | 'users'
-  | 'sync';
+  | 'sync'
+  | 'notifications';
 
 function DevSeedResetButton() {
   const { showSuccess, showApiError } = useToast();
@@ -337,6 +339,452 @@ function SyncPanel() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Notification Schedules & Logs Panel ──────────────────────────────────────
+
+interface NotificationScheduleItem {
+  id: string;
+  notification_type: string;
+  trigger_type: string;
+  trigger_value: number;
+  time_of_day: string;
+  is_active: boolean;
+  last_run_at: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+}
+
+interface NotificationLogEntry {
+  id: string;
+  phase: string;
+  year: number;
+  month: number;
+  recipient_email: string | null;
+  status: string;
+  message: string | null;
+  run_id: string;
+  resource_id: string | null;
+  created_at: string;
+  sent_at: string | null;
+}
+
+const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
+  conflict_alerts: 'Conflict Alerts',
+  missing_actuals: 'Missing Actuals Reminder',
+  planning_reminder: 'Planning Reminder',
+  approval_reminder: 'Approval Reminder',
+};
+
+const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function triggerLabel(type: string, value: number): string {
+  switch (type) {
+    case 'day_of_month': return `${ordinal(value)} of each month`;
+    case 'day_of_week': return `Every ${DAYS_OF_WEEK[value] ?? value}`;
+    case 'days_before_period_close': return `${value} day${value !== 1 ? 's' : ''} before period close`;
+    default: return String(value);
+  }
+}
+
+function relativeTime(dateStr: string | null): string {
+  if (!dateStr) return 'Never';
+  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  if (diff < 60) return 'Just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`;
+  return `${Math.floor(diff / 86400)} days ago`;
+}
+
+const useNotifPanelStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXL },
+  sectionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: tokens.spacingVerticalM,
+  },
+  dialogField: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    marginBottom: tokens.spacingVerticalM,
+  },
+  nativeSelect: {
+    padding: '8px',
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    fontSize: tokens.fontSizeBase300,
+    width: '100%',
+  },
+  statusBadge: { minWidth: '60px', justifyContent: 'center' },
+});
+
+function NotificationsPanel() {
+  const panelStyles = useNotifPanelStyles();
+  const { showSuccess, showApiError } = useToast();
+
+  const [schedules, setSchedules] = useState<NotificationScheduleItem[]>([]);
+  const [logs, setLogs] = useState<NotificationLogEntry[]>([]);
+  const [schedLoading, setSchedLoading] = useState(false);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editSched, setEditSched] = useState<NotificationScheduleItem | null>(null);
+  const [form, setForm] = useState<Partial<NotificationScheduleItem>>({
+    notification_type: 'conflict_alerts',
+    trigger_type: 'day_of_month',
+    trigger_value: 1,
+    time_of_day: '07:00',
+    is_active: true,
+  });
+
+  const loadSchedules = useCallback(async () => {
+    setSchedLoading(true);
+    try {
+      const data = await apiClient.get<NotificationScheduleItem[]>('/notification-schedules');
+      setSchedules(data);
+    } catch (err) {
+      showApiError(err as Error);
+    } finally {
+      setSchedLoading(false);
+    }
+  }, []);
+
+  const loadLogs = useCallback(async () => {
+    setLogsLoading(true);
+    try {
+      const data = await apiClient.get<NotificationLogEntry[]>('/notifications/logs');
+      setLogs(data.slice(0, 50));
+    } catch (err) {
+      showApiError(err as Error);
+    } finally {
+      setLogsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSchedules();
+    loadLogs();
+  }, []);
+
+  const openCreate = () => {
+    setEditSched(null);
+    setForm({ notification_type: 'conflict_alerts', trigger_type: 'day_of_month', trigger_value: 1, time_of_day: '07:00', is_active: true });
+    setDialogOpen(true);
+  };
+
+  const openEdit = (s: NotificationScheduleItem) => {
+    setEditSched(s);
+    setForm({ notification_type: s.notification_type, trigger_type: s.trigger_type, trigger_value: s.trigger_value, time_of_day: s.time_of_day, is_active: s.is_active });
+    setDialogOpen(true);
+  };
+
+  const handleSave = async () => {
+    try {
+      const payload = {
+        notification_type: form.notification_type!,
+        trigger_type: form.trigger_type!,
+        trigger_value: Number(form.trigger_value),
+        time_of_day: form.time_of_day!,
+        is_active: form.is_active ?? true,
+      };
+      if (editSched) {
+        await apiClient.put<NotificationScheduleItem>(`/notification-schedules/${editSched.id}`, payload);
+        showSuccess('Schedule updated');
+      } else {
+        await apiClient.post<NotificationScheduleItem>('/notification-schedules', payload);
+        showSuccess('Schedule created');
+      }
+      setDialogOpen(false);
+      loadSchedules();
+    } catch (err) {
+      showApiError(err as Error);
+    }
+  };
+
+  const handleToggleActive = async (s: NotificationScheduleItem) => {
+    try {
+      await apiClient.put<NotificationScheduleItem>(`/notification-schedules/${s.id}`, { is_active: !s.is_active });
+      setSchedules((prev) => prev.map((x) => (x.id === s.id ? { ...x, is_active: !s.is_active } : x)));
+    } catch (err) {
+      showApiError(err as Error);
+    }
+  };
+
+  const handleDelete = async (s: NotificationScheduleItem) => {
+    if (!confirm('Delete this schedule?')) return;
+    try {
+      await apiClient.delete<{ message: string }>(`/notification-schedules/${s.id}`);
+      showSuccess('Schedule deleted');
+      loadSchedules();
+    } catch (err) {
+      showApiError(err as Error);
+    }
+  };
+
+  const handleRunNow = async (s: NotificationScheduleItem) => {
+    setRunningId(s.id);
+    try {
+      await apiClient.post(`/notification-schedules/${s.id}/run`);
+      showSuccess('Triggered', `${NOTIFICATION_TYPE_LABELS[s.notification_type] ?? s.notification_type} sent`);
+      loadSchedules();
+      loadLogs();
+    } catch (err) {
+      showApiError(err as Error);
+    } finally {
+      setRunningId(null);
+    }
+  };
+
+  const handleRetryFailed = async () => {
+    setRetrying(true);
+    try {
+      await apiClient.post('/notifications/retry-failed');
+      showSuccess('Retry complete');
+      loadLogs();
+    } catch (err) {
+      showApiError(err as Error);
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const triggerValueInput = () => {
+    const trigType = form.trigger_type;
+    if (trigType === 'day_of_week') {
+      return (
+        <select
+          className={panelStyles.nativeSelect}
+          value={String(form.trigger_value ?? 0)}
+          onChange={(e) => setForm({ ...form, trigger_value: Number(e.target.value) })}
+        >
+          {DAYS_OF_WEEK.map((day, i) => <option key={i} value={i}>{day}</option>)}
+        </select>
+      );
+    }
+    const [min, max] = trigType === 'days_before_period_close' ? [1, 14] : [1, 28];
+    return (
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={form.trigger_value ?? 1}
+        onChange={(e) => setForm({ ...form, trigger_value: Number(e.target.value) })}
+        style={{ padding: '8px', borderRadius: tokens.borderRadiusMedium, border: `1px solid ${tokens.colorNeutralStroke1}`, fontSize: tokens.fontSizeBase300, width: '100%' }}
+      />
+    );
+  };
+
+  const logStatusColor = (s: string): 'success' | 'danger' | 'subtle' => {
+    if (s === 'sent') return 'success';
+    if (s === 'failed') return 'danger';
+    return 'subtle';
+  };
+
+  return (
+    <div className={panelStyles.root}>
+      {/* Section A — Schedules */}
+      <div>
+        <div className={panelStyles.sectionHeader}>
+          <Title3>Notification Schedules</Title3>
+          <Button appearance="primary" icon={<AddRegular />} onClick={openCreate}>
+            Add Schedule
+          </Button>
+        </div>
+
+        {schedLoading ? (
+          <Spinner label="Loading schedules…" />
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHeaderCell>Type</TableHeaderCell>
+                <TableHeaderCell>Trigger</TableHeaderCell>
+                <TableHeaderCell>Time (UTC)</TableHeaderCell>
+                <TableHeaderCell>Status</TableHeaderCell>
+                <TableHeaderCell>Last Run</TableHeaderCell>
+                <TableHeaderCell>Actions</TableHeaderCell>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {schedules.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6}>
+                    <Text style={{ color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>
+                      No schedules configured. Add one to automate notifications.
+                    </Text>
+                  </TableCell>
+                </TableRow>
+              )}
+              {schedules.map((s) => (
+                <TableRow key={s.id}>
+                  <TableCell>{NOTIFICATION_TYPE_LABELS[s.notification_type] ?? s.notification_type}</TableCell>
+                  <TableCell>{triggerLabel(s.trigger_type, s.trigger_value)}</TableCell>
+                  <TableCell>{s.time_of_day}</TableCell>
+                  <TableCell>
+                    <Badge
+                      className={panelStyles.statusBadge}
+                      appearance="filled"
+                      color={s.is_active ? 'success' : 'subtle'}
+                    >
+                      {s.is_active ? 'Active' : 'Inactive'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{relativeTime(s.last_run_at)}</TableCell>
+                  <TableCell>
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      title={s.is_active ? 'Deactivate' : 'Activate'}
+                      onClick={() => handleToggleActive(s)}
+                    >
+                      {s.is_active ? 'Disable' : 'Enable'}
+                    </Button>
+                    <Button size="small" appearance="subtle" icon={<EditRegular />} title="Edit" onClick={() => openEdit(s)} />
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      icon={runningId === s.id ? <Spinner size="tiny" /> : <ArrowSyncRegular />}
+                      title="Run now"
+                      disabled={runningId === s.id}
+                      onClick={() => handleRunNow(s)}
+                    />
+                    <Button size="small" appearance="subtle" icon={<DeleteRegular />} title="Delete" onClick={() => handleDelete(s)} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+
+      {/* Section B — Logs */}
+      <div>
+        <div className={panelStyles.sectionHeader}>
+          <Title3>Notification Logs</Title3>
+          <Button
+            appearance="secondary"
+            disabled={retrying}
+            icon={retrying ? <Spinner size="tiny" /> : undefined}
+            onClick={handleRetryFailed}
+          >
+            {retrying ? 'Retrying…' : 'Retry Failed'}
+          </Button>
+        </div>
+
+        {logsLoading ? (
+          <Spinner label="Loading logs…" />
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHeaderCell>Type</TableHeaderCell>
+                <TableHeaderCell>Period</TableHeaderCell>
+                <TableHeaderCell>Recipient</TableHeaderCell>
+                <TableHeaderCell>Status</TableHeaderCell>
+                <TableHeaderCell>Sent At</TableHeaderCell>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {logs.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5}>
+                    <Text style={{ color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>No notification logs.</Text>
+                  </TableCell>
+                </TableRow>
+              )}
+              {logs.map((log) => (
+                <TableRow key={log.id}>
+                  <TableCell>{log.phase}</TableCell>
+                  <TableCell>{log.year}/{String(log.month).padStart(2, '0')}</TableCell>
+                  <TableCell>{log.recipient_email ?? '—'}</TableCell>
+                  <TableCell>
+                    <Badge appearance="filled" color={logStatusColor(log.status)}>
+                      {log.status.charAt(0).toUpperCase() + log.status.slice(1)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{log.sent_at ? relativeTime(log.sent_at) : '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+
+      {/* Create / Edit dialog */}
+      <Dialog open={dialogOpen} onOpenChange={(_, d) => setDialogOpen(d.open)}>
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>{editSched ? 'Edit Schedule' : 'Add Schedule'}</DialogTitle>
+            <DialogContent>
+              <div className={panelStyles.dialogField}>
+                <Label required>Notification Type</Label>
+                <select
+                  className={panelStyles.nativeSelect}
+                  value={form.notification_type ?? 'conflict_alerts'}
+                  onChange={(e) => setForm({ ...form, notification_type: e.target.value })}
+                >
+                  <option value="conflict_alerts">Conflict Alerts</option>
+                  <option value="missing_actuals">Missing Actuals Reminder</option>
+                  <option value="planning_reminder">Planning Reminder</option>
+                  <option value="approval_reminder">Approval Reminder</option>
+                </select>
+              </div>
+              <div className={panelStyles.dialogField}>
+                <Label required>Trigger Type</Label>
+                <select
+                  className={panelStyles.nativeSelect}
+                  value={form.trigger_type ?? 'day_of_month'}
+                  onChange={(e) => setForm({ ...form, trigger_type: e.target.value, trigger_value: 1 })}
+                >
+                  <option value="day_of_month">On a specific day of the month</option>
+                  <option value="day_of_week">On a specific day of the week</option>
+                  <option value="days_before_period_close">X days before period closes</option>
+                </select>
+              </div>
+              <div className={panelStyles.dialogField}>
+                <Label required>
+                  {form.trigger_type === 'day_of_month' && 'Day of month (1–28)'}
+                  {form.trigger_type === 'day_of_week' && 'Day of week'}
+                  {form.trigger_type === 'days_before_period_close' && 'Days before period close (1–14)'}
+                  {!form.trigger_type && 'Trigger value'}
+                </Label>
+                {triggerValueInput()}
+              </div>
+              <div className={panelStyles.dialogField}>
+                <Label required>Time (UTC)</Label>
+                <input
+                  type="time"
+                  value={form.time_of_day ?? '07:00'}
+                  onChange={(e) => setForm({ ...form, time_of_day: e.target.value })}
+                  style={{ padding: '8px', borderRadius: tokens.borderRadiusMedium, border: `1px solid ${tokens.colorNeutralStroke1}`, fontSize: tokens.fontSizeBase300 }}
+                />
+              </div>
+              <Checkbox
+                label="Active"
+                checked={form.is_active !== false}
+                onChange={(_, d) => setForm({ ...form, is_active: d.checked as boolean })}
+              />
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="secondary" onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button appearance="primary" onClick={handleSave}>Save</Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
     </div>
   );
 }
@@ -668,6 +1116,7 @@ export function Admin() {
 
   const renderTable = () => {
     if (selectedTab === 'sync') return <SyncPanel />;
+    if (selectedTab === 'notifications') return <NotificationsPanel />;
     if (loading) return <Spinner label="Loading..." />;
 
     switch (selectedTab) {
@@ -1486,6 +1935,7 @@ export function Admin() {
     'delegates': 'Approval Delegates',
     'users': 'Users',
     'sync': 'Graph Synchronization',
+    'notifications': 'Notifications',
   };
 
   const detailDialogTitle =
@@ -1517,6 +1967,9 @@ export function Admin() {
           {canManageSettings && (
             <Tab value="sync" icon={<ArrowSyncRegular />}>Sync</Tab>
           )}
+          {canManageMasterData && (
+            <Tab value="notifications" icon={<AlertRegular />}>Notifications</Tab>
+          )}
         </TabList>
 
         <div className={styles.tabContent}>
@@ -1534,7 +1987,7 @@ export function Admin() {
                 </p>
               )}
             </div>
-            {selectedTab !== 'users' && selectedTab !== 'sync' && (canManageMasterData ||
+            {selectedTab !== 'users' && selectedTab !== 'sync' && selectedTab !== 'notifications' && (canManageMasterData ||
               (selectedTab === 'manager-overrides' && canManageSettings) ||
               (selectedTab === 'delegates' && canManageDelegates)) && (
               <Button appearance="primary" icon={<AddRegular />} onClick={openCreateDialog}>

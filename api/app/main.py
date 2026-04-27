@@ -8,6 +8,8 @@ from fastapi.exceptions import RequestValidationError
 from api.app.config import get_settings
 from api.app.routers import health, me, dev, periods, admin, planning, actuals, approvals, consolidation, notifications, lookups
 from api.app.routers import finance, audit, dashboard, reporting, project_costs
+from api.app.routers import notification_schedules
+from api.app.services import scheduler as notification_scheduler
 
 # Create FastAPI app
 app = FastAPI(
@@ -149,6 +151,7 @@ app.include_router(audit.router)
 app.include_router(dashboard.router)
 app.include_router(reporting.router)
 app.include_router(project_costs.router)
+app.include_router(notification_schedules.router)
 
 
 @app.on_event("startup")
@@ -175,6 +178,8 @@ async def startup_event():
             "Set DATABASE_URL to a SQL Server connection string in Azure App Service."
         )
 
+    notification_scheduler.start()
+
     if settings.dev_auth_bypass:
         print("WARNING: DEV_AUTH_BYPASS is enabled. Do not use in production!")
         # --- Dev seeding: full example data (periods 2026-01 to 2026-12, demand, supply, actuals) ---
@@ -192,4 +197,5 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown."""
+    notification_scheduler.shutdown()
     print("Shutting down Resource Allocation API")

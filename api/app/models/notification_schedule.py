@@ -54,6 +54,12 @@ class NotificationSchedule(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    # Recipient role flags — which audience groups receive this schedule's notifications
+    notify_pm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    notify_manager: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    notify_finance: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    notify_employee: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     created_by: Mapped[str] = mapped_column(String(36), nullable=False)

@@ -33,6 +33,8 @@ import {
   MessageBar,
   MessageBarBody,
   Text,
+  Radio,
+  RadioGroup,
 } from '@fluentui/react-components';
 import {
   AddRegular,
@@ -46,6 +48,7 @@ import {
   ChevronRightRegular,
   ArrowSyncRegular,
   AlertRegular,
+  EyeRegular,
 } from '@fluentui/react-icons';
 import {
   adminApi,
@@ -345,6 +348,24 @@ function SyncPanel() {
 
 // ── Notification Schedules & Logs Panel ──────────────────────────────────────
 
+interface PreviewRecipientItem {
+  email: string;
+  display_name: string;
+  role: string;
+  reason: string;
+  email_subject: string;
+  email_body_html: string;
+  already_notified: boolean;
+}
+
+interface SchedulePreviewData {
+  period: { year: number; month: number; label: string };
+  recipients: PreviewRecipientItem[];
+  total_recipients: number;
+  skipped: number;
+  would_skip: boolean;
+}
+
 interface NotificationScheduleItem {
   id: string;
   notification_type: string;
@@ -353,6 +374,10 @@ interface NotificationScheduleItem {
   time_of_day: string;
   is_active: boolean;
   last_run_at: string | null;
+  notify_pm: boolean;
+  notify_manager: boolean;
+  notify_finance: boolean;
+  notify_employee: boolean;
   created_at: string;
   updated_at: string;
   created_by: string;
@@ -387,14 +412,94 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
-function triggerLabel(type: string, value: number): string {
+function triggerLabelFull(type: string, value: number, time: string): string {
   switch (type) {
-    case 'day_of_month': return `${ordinal(value)} of each month`;
-    case 'day_of_week': return `Every ${DAYS_OF_WEEK[value] ?? value}`;
-    case 'days_before_period_close': return `${value} day${value !== 1 ? 's' : ''} before period close`;
-    default: return String(value);
+    case 'day_of_month': return `${ordinal(value)} of each month at ${time}`;
+    case 'day_of_week': return `Every ${DAYS_OF_WEEK[value] ?? value} at ${time}`;
+    case 'days_before_period_close': return `${value} day${value !== 1 ? 's' : ''} before close at ${time}`;
+    default: return `${String(value)} at ${time}`;
   }
 }
+
+function computeNextRun(s: NotificationScheduleItem): string {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (s.trigger_type === 'day_of_month') {
+    let d = new Date(today.getFullYear(), today.getMonth(), s.trigger_value);
+    if (d < today) d = new Date(today.getFullYear(), today.getMonth() + 1, s.trigger_value);
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  }
+
+  if (s.trigger_type === 'day_of_week') {
+    // Our system: 0=Monday … 6=Sunday. JS Date.getDay(): 0=Sunday … 6=Saturday.
+    const jsTarget = (s.trigger_value + 1) % 7;
+    const daysAhead = (jsTarget - today.getDay() + 7) % 7 || 7;
+    const d = new Date(today);
+    d.setDate(today.getDate() + daysAhead);
+    return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  }
+
+  if (s.trigger_type === 'days_before_period_close') {
+    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    const d = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate() - s.trigger_value);
+    if (d < today) {
+      const nextLast = new Date(today.getFullYear(), today.getMonth() + 2, 0);
+      return new Date(nextLast.getFullYear(), nextLast.getMonth(), nextLast.getDate() - s.trigger_value)
+        .toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    }
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  }
+
+  return '—';
+}
+
+function snapToQuarterHour(time: string): string {
+  const [h, m] = time.split(':');
+  const minutes = parseInt(m ?? '0', 10);
+  const snapped = [0, 15, 30, 45].reduce((prev, curr) =>
+    Math.abs(curr - minutes) < Math.abs(prev - minutes) ? curr : prev
+  );
+  return `${h}:${String(snapped).padStart(2, '0')}`;
+}
+
+function scheduleSummary(form: Partial<NotificationScheduleItem>): string {
+  const typeName = NOTIFICATION_TYPE_LABELS[form.notification_type ?? ''] ?? (form.notification_type ?? 'Notification');
+  const time = form.time_of_day ?? '00:00';
+
+  let triggerDesc = 'on the scheduled trigger';
+  switch (form.trigger_type) {
+    case 'day_of_month':
+      triggerDesc = `on the ${ordinal(form.trigger_value ?? 1)} of each month`;
+      break;
+    case 'day_of_week':
+      triggerDesc = `every ${DAYS_OF_WEEK[form.trigger_value ?? 0] ?? 'day'}`;
+      break;
+    case 'days_before_period_close': {
+      const n = form.trigger_value ?? 3;
+      triggerDesc = `${n} day${n !== 1 ? 's' : ''} before period close`;
+      break;
+    }
+  }
+
+  const recips: string[] = [];
+  if (form.notify_pm && form.notification_type !== 'missing_actuals') recips.push('PMs (their projects)');
+  if (form.notify_manager) recips.push('Managers (their department)');
+  if (form.notify_finance) recips.push('Finance');
+  if (form.notify_employee && form.notification_type === 'missing_actuals') recips.push('Employees');
+
+  const recipStr = recips.length === 0 ? ''
+    : recips.length === 1 ? ` to ${recips[0]}`
+    : ` to ${recips.slice(0, -1).join(', ')}, and ${recips[recips.length - 1]}`;
+
+  return `${typeName} will be sent ${triggerDesc} at ${time} CEST${recipStr}.`;
+}
+
+const DEFAULT_TRIGGER_VALUES: Record<string, number> = {
+  day_of_month: 1,
+  day_of_week: 0,
+  days_before_period_close: 3,
+};
 
 function relativeTime(dateStr: string | null): string {
   if (!dateStr) return 'Never';
@@ -442,12 +547,22 @@ function NotificationsPanel() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editSched, setEditSched] = useState<NotificationScheduleItem | null>(null);
+
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewSched, setPreviewSched] = useState<NotificationScheduleItem | null>(null);
+  const [previewData, setPreviewData] = useState<SchedulePreviewData | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [selectedPreviewEmail, setSelectedPreviewEmail] = useState<string>('');
   const [form, setForm] = useState<Partial<NotificationScheduleItem>>({
     notification_type: 'conflict_alerts',
     trigger_type: 'day_of_month',
     trigger_value: 1,
     time_of_day: '07:00',
     is_active: true,
+    notify_pm: true,
+    notify_manager: true,
+    notify_finance: true,
+    notify_employee: true,
   });
 
   const loadSchedules = useCallback(async () => {
@@ -481,13 +596,33 @@ function NotificationsPanel() {
 
   const openCreate = () => {
     setEditSched(null);
-    setForm({ notification_type: 'conflict_alerts', trigger_type: 'day_of_month', trigger_value: 1, time_of_day: '07:00', is_active: true });
+    setForm({
+      notification_type: 'conflict_alerts',
+      trigger_type: 'day_of_month',
+      trigger_value: 1,
+      time_of_day: '07:00',
+      is_active: true,
+      notify_pm: true,
+      notify_manager: true,
+      notify_finance: true,
+      notify_employee: true,
+    });
     setDialogOpen(true);
   };
 
   const openEdit = (s: NotificationScheduleItem) => {
     setEditSched(s);
-    setForm({ notification_type: s.notification_type, trigger_type: s.trigger_type, trigger_value: s.trigger_value, time_of_day: s.time_of_day, is_active: s.is_active });
+    setForm({
+      notification_type: s.notification_type,
+      trigger_type: s.trigger_type,
+      trigger_value: s.trigger_value,
+      time_of_day: snapToQuarterHour(s.time_of_day),
+      is_active: s.is_active,
+      notify_pm: s.notify_pm,
+      notify_manager: s.notify_manager,
+      notify_finance: s.notify_finance,
+      notify_employee: s.notify_employee,
+    });
     setDialogOpen(true);
   };
 
@@ -499,6 +634,10 @@ function NotificationsPanel() {
         trigger_value: Number(form.trigger_value),
         time_of_day: form.time_of_day!,
         is_active: form.is_active ?? true,
+        notify_pm: form.notify_pm ?? true,
+        notify_manager: form.notify_manager ?? true,
+        notify_finance: form.notify_finance ?? true,
+        notify_employee: form.notify_employee ?? true,
       };
       if (editSched) {
         await apiClient.put<NotificationScheduleItem>(`/notification-schedules/${editSched.id}`, payload);
@@ -548,6 +687,26 @@ function NotificationsPanel() {
     }
   };
 
+  const handlePreview = async (s: NotificationScheduleItem) => {
+    setPreviewSched(s);
+    setPreviewData(null);
+    setSelectedPreviewEmail('');
+    setPreviewOpen(true);
+    setPreviewLoading(true);
+    try {
+      const data = await apiClient.get<SchedulePreviewData>(`/notification-schedules/${s.id}/preview`);
+      setPreviewData(data);
+      if (data.recipients.length > 0) {
+        setSelectedPreviewEmail(data.recipients[0].email);
+      }
+    } catch (err) {
+      showApiError(err as Error);
+      setPreviewOpen(false);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   const handleRetryFailed = async () => {
     setRetrying(true);
     try {
@@ -559,32 +718,6 @@ function NotificationsPanel() {
     } finally {
       setRetrying(false);
     }
-  };
-
-  const triggerValueInput = () => {
-    const trigType = form.trigger_type;
-    if (trigType === 'day_of_week') {
-      return (
-        <select
-          className={panelStyles.nativeSelect}
-          value={String(form.trigger_value ?? 0)}
-          onChange={(e) => setForm({ ...form, trigger_value: Number(e.target.value) })}
-        >
-          {DAYS_OF_WEEK.map((day, i) => <option key={i} value={i}>{day}</option>)}
-        </select>
-      );
-    }
-    const [min, max] = trigType === 'days_before_period_close' ? [1, 14] : [1, 28];
-    return (
-      <input
-        type="number"
-        min={min}
-        max={max}
-        value={form.trigger_value ?? 1}
-        onChange={(e) => setForm({ ...form, trigger_value: Number(e.target.value) })}
-        style={{ padding: '8px', borderRadius: tokens.borderRadiusMedium, border: `1px solid ${tokens.colorNeutralStroke1}`, fontSize: tokens.fontSizeBase300, width: '100%' }}
-      />
-    );
   };
 
   const logStatusColor = (s: string): 'success' | 'danger' | 'subtle' => {
@@ -612,16 +745,18 @@ function NotificationsPanel() {
               <TableRow>
                 <TableHeaderCell>Type</TableHeaderCell>
                 <TableHeaderCell>Trigger</TableHeaderCell>
-                <TableHeaderCell>Time (UTC)</TableHeaderCell>
+                <TableHeaderCell>Recipients</TableHeaderCell>
+                <TableHeaderCell>Time (CEST)</TableHeaderCell>
                 <TableHeaderCell>Status</TableHeaderCell>
                 <TableHeaderCell>Last Run</TableHeaderCell>
+                <TableHeaderCell>Next Run</TableHeaderCell>
                 <TableHeaderCell>Actions</TableHeaderCell>
               </TableRow>
             </TableHeader>
             <TableBody>
               {schedules.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6}>
+                  <TableCell colSpan={8}>
                     <Text style={{ color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>
                       No schedules configured. Add one to automate notifications.
                     </Text>
@@ -631,8 +766,18 @@ function NotificationsPanel() {
               {schedules.map((s) => (
                 <TableRow key={s.id}>
                   <TableCell>{NOTIFICATION_TYPE_LABELS[s.notification_type] ?? s.notification_type}</TableCell>
-                  <TableCell>{triggerLabel(s.trigger_type, s.trigger_value)}</TableCell>
-                  <TableCell>{s.time_of_day}</TableCell>
+                  <TableCell>{triggerLabelFull(s.trigger_type, s.trigger_value, s.time_of_day)}</TableCell>
+                  <TableCell>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {s.notify_pm && <Badge appearance="tint" color="brand" size="small">PM</Badge>}
+                      {s.notify_manager && <Badge appearance="tint" color="warning" size="small">Manager</Badge>}
+                      {s.notify_finance && <Badge appearance="tint" color="success" size="small">Finance</Badge>}
+                      {s.notify_employee && s.notification_type === 'missing_actuals' && (
+                        <Badge appearance="tint" color="informative" size="small">Employee</Badge>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>{s.time_of_day} CEST</TableCell>
                   <TableCell>
                     <Badge
                       className={panelStyles.statusBadge}
@@ -643,6 +788,7 @@ function NotificationsPanel() {
                     </Badge>
                   </TableCell>
                   <TableCell>{relativeTime(s.last_run_at)}</TableCell>
+                  <TableCell>{computeNextRun(s)}</TableCell>
                   <TableCell>
                     <Button
                       size="small"
@@ -653,6 +799,7 @@ function NotificationsPanel() {
                       {s.is_active ? 'Disable' : 'Enable'}
                     </Button>
                     <Button size="small" appearance="subtle" icon={<EditRegular />} title="Edit" onClick={() => openEdit(s)} />
+                    <Button size="small" appearance="subtle" icon={<EyeRegular />} title="Preview" onClick={() => handlePreview(s)} />
                     <Button
                       size="small"
                       appearance="subtle"
@@ -723,12 +870,161 @@ function NotificationsPanel() {
         )}
       </div>
 
+      {/* Preview modal */}
+      <Dialog open={previewOpen} onOpenChange={(_, d) => setPreviewOpen(d.open)}>
+        <DialogSurface style={{ maxWidth: '860px', width: '860px' }}>
+          <DialogBody>
+            <DialogTitle>
+              Preview — {previewSched ? (NOTIFICATION_TYPE_LABELS[previewSched.notification_type] ?? previewSched.notification_type) : ''}
+            </DialogTitle>
+            <DialogContent>
+              {previewLoading && <Spinner label="Loading preview…" />}
+              {!previewLoading && previewData && (() => {
+                const { period, recipients, total_recipients, skipped } = previewData;
+                const selectedRecipient = recipients.find((r) => r.email === selectedPreviewEmail) ?? null;
+
+                return (
+                  <>
+                    {/* Section A — Recipient list */}
+                    <Text weight="semibold" style={{ display: 'block', marginBottom: tokens.spacingVerticalS }}>
+                      {period.label} — {total_recipients} recipient{total_recipients !== 1 ? 's' : ''}
+                      {skipped > 0 ? ` (${skipped} already notified)` : ''}
+                    </Text>
+
+                    {recipients.length === 0 ? (
+                      <Text style={{ color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>
+                        No recipients found for this period. No emails would be sent.
+                      </Text>
+                    ) : (
+                      <div style={{ maxHeight: '240px', overflowY: 'auto', marginBottom: tokens.spacingVerticalL }}>
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHeaderCell>Name</TableHeaderCell>
+                              <TableHeaderCell>Email</TableHeaderCell>
+                              <TableHeaderCell>Role</TableHeaderCell>
+                              <TableHeaderCell>Reason</TableHeaderCell>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {recipients.map((r, idx) => (
+                              <TableRow key={idx} style={{ opacity: r.already_notified ? 0.5 : 1 }}>
+                                <TableCell>
+                                  <Text>{r.display_name}</Text>
+                                  {r.already_notified && (
+                                    <Badge appearance="tint" color="subtle" size="small" style={{ marginLeft: 6 }}>
+                                      Already sent
+                                    </Badge>
+                                  )}
+                                </TableCell>
+                                <TableCell><Text size={200}>{r.email}</Text></TableCell>
+                                <TableCell>
+                                  <Badge
+                                    appearance="tint"
+                                    size="small"
+                                    color={
+                                      r.role === 'PM' ? 'brand'
+                                        : r.role === 'Manager' ? 'warning'
+                                        : r.role === 'Finance' ? 'success'
+                                        : 'informative'
+                                    }
+                                  >
+                                    {r.role}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell><Text size={200}>{r.reason}</Text></TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+
+                    {/* Section B — Email preview */}
+                    {recipients.length > 0 && (
+                      <>
+                        <div style={{ borderTop: `1px solid ${tokens.colorNeutralStroke2}`, paddingTop: tokens.spacingVerticalM, marginBottom: tokens.spacingVerticalS }}>
+                          <Label>Preview email for</Label>
+                          <select
+                            className={panelStyles.nativeSelect}
+                            style={{ marginTop: '4px' }}
+                            value={selectedPreviewEmail}
+                            onChange={(e) => setSelectedPreviewEmail(e.target.value)}
+                          >
+                            {recipients.map((r, idx) => (
+                              <option key={idx} value={r.email}>
+                                {r.display_name} &lt;{r.email}&gt;
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {selectedRecipient && (
+                          <div style={{
+                            border: `1px solid ${tokens.colorNeutralStroke2}`,
+                            borderRadius: tokens.borderRadiusMedium,
+                            overflow: 'hidden',
+                          }}>
+                            {/* Email header bar */}
+                            <div style={{
+                              background: '#1e3a5f',
+                              color: 'white',
+                              padding: '8px 16px',
+                              fontWeight: 600,
+                              fontSize: tokens.fontSizeBase300,
+                              letterSpacing: '0.02em',
+                            }}>
+                              MatKat
+                            </div>
+                            {/* Email metadata */}
+                            <div style={{ padding: '12px 16px 8px', background: tokens.colorNeutralBackground2, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                              <div><strong>From:</strong> matkat-noreply@ferrosanmd.com</div>
+                              <div><strong>To:</strong> {selectedRecipient.email}</div>
+                              <div><strong>Subject:</strong> {selectedRecipient.email_subject}</div>
+                            </div>
+                            <div style={{ borderTop: `1px solid ${tokens.colorNeutralStroke2}` }} />
+                            {/* Email body */}
+                            <iframe
+                              srcDoc={selectedRecipient.email_body_html}
+                              style={{ width: '100%', height: '180px', border: 'none', display: 'block' }}
+                              sandbox="allow-same-origin"
+                              title="Email preview"
+                            />
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </>
+                );
+              })()}
+            </DialogContent>
+            <DialogActions>
+              <Button
+                appearance="primary"
+                disabled={!previewSched || runningId === previewSched?.id}
+                icon={runningId === previewSched?.id ? <Spinner size="tiny" /> : undefined}
+                onClick={() => {
+                  if (previewSched) {
+                    setPreviewOpen(false);
+                    handleRunNow(previewSched);
+                  }
+                }}
+              >
+                Send Now
+              </Button>
+              <Button appearance="secondary" onClick={() => setPreviewOpen(false)}>Close</Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
       {/* Create / Edit dialog */}
       <Dialog open={dialogOpen} onOpenChange={(_, d) => setDialogOpen(d.open)}>
         <DialogSurface>
           <DialogBody>
             <DialogTitle>{editSched ? 'Edit Schedule' : 'Add Schedule'}</DialogTitle>
             <DialogContent>
+              {/* Notification Type */}
               <div className={panelStyles.dialogField}>
                 <Label required>Notification Type</Label>
                 <select
@@ -742,41 +1038,193 @@ function NotificationsPanel() {
                   <option value="approval_reminder">Approval Reminder</option>
                 </select>
               </div>
+
+              {/* Trigger Type — radio buttons */}
               <div className={panelStyles.dialogField}>
                 <Label required>Trigger Type</Label>
-                <select
-                  className={panelStyles.nativeSelect}
+                <RadioGroup
                   value={form.trigger_type ?? 'day_of_month'}
-                  onChange={(e) => setForm({ ...form, trigger_type: e.target.value, trigger_value: 1 })}
+                  onChange={(_, d) => setForm({ ...form, trigger_type: d.value, trigger_value: DEFAULT_TRIGGER_VALUES[d.value] ?? 1 })}
                 >
-                  <option value="day_of_month">On a specific day of the month</option>
-                  <option value="day_of_week">On a specific day of the week</option>
-                  <option value="days_before_period_close">X days before period closes</option>
-                </select>
+                  <Radio value="day_of_month" label="On a specific day of the month" />
+                  <Radio value="day_of_week" label="On a specific day of the week" />
+                  <Radio value="days_before_period_close" label="X days before period closes" />
+                </RadioGroup>
               </div>
+
+              {/* Day of Month — mini calendar grid */}
+              {form.trigger_type === 'day_of_month' && (
+                <div className={panelStyles.dialogField}>
+                  <Label>Day of month</Label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', marginTop: '4px' }}>
+                    {Array.from({ length: 28 }, (_, i) => i + 1).map((day) => (
+                      <button
+                        key={day}
+                        type="button"
+                        onClick={() => setForm({ ...form, trigger_value: day })}
+                        style={{
+                          padding: '6px 0',
+                          borderRadius: tokens.borderRadiusMedium,
+                          border: `1px solid ${form.trigger_value === day ? tokens.colorBrandBackground : tokens.colorNeutralStroke1}`,
+                          background: form.trigger_value === day ? tokens.colorBrandBackground : 'transparent',
+                          color: form.trigger_value === day ? tokens.colorNeutralForegroundOnBrand : tokens.colorNeutralForeground1,
+                          cursor: 'pointer',
+                          fontSize: tokens.fontSizeBase200,
+                          textAlign: 'center',
+                        }}
+                      >
+                        {day}
+                      </button>
+                    ))}
+                  </div>
+                  <Text size={200} style={{ color: tokens.colorNeutralForeground3, marginTop: '6px', display: 'block' }}>
+                    Will run on the {ordinal(form.trigger_value ?? 1)} of each month
+                  </Text>
+                </div>
+              )}
+
+              {/* Day of Week — pill buttons */}
+              {form.trigger_type === 'day_of_week' && (
+                <div className={panelStyles.dialogField}>
+                  <Label>Day of week</Label>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setForm({ ...form, trigger_value: i })}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '100px',
+                          border: `1px solid ${form.trigger_value === i ? tokens.colorBrandBackground : tokens.colorNeutralStroke1}`,
+                          background: form.trigger_value === i ? tokens.colorBrandBackground : 'transparent',
+                          color: form.trigger_value === i ? tokens.colorNeutralForegroundOnBrand : tokens.colorNeutralForeground1,
+                          cursor: 'pointer',
+                          fontSize: tokens.fontSizeBase300,
+                        }}
+                      >
+                        {day}
+                      </button>
+                    ))}
+                  </div>
+                  <Text size={200} style={{ color: tokens.colorNeutralForeground3, marginTop: '6px', display: 'block' }}>
+                    Will run every {DAYS_OF_WEEK[form.trigger_value ?? 0]}
+                  </Text>
+                </div>
+              )}
+
+              {/* Days before period close */}
+              {form.trigger_type === 'days_before_period_close' && (() => {
+                const today = new Date();
+                const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+                const closeDate = lastDay.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+                const nDays = form.trigger_value ?? 3;
+                const triggerDay = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate() - nDays);
+                const triggerDate = triggerDay.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+                return (
+                  <div className={panelStyles.dialogField}>
+                    <Label>Days before period close (1–14)</Label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={14}
+                      value={nDays}
+                      onChange={(e) => setForm({ ...form, trigger_value: Number(e.target.value) })}
+                      style={{ padding: '8px', borderRadius: tokens.borderRadiusMedium, border: `1px solid ${tokens.colorNeutralStroke1}`, fontSize: tokens.fontSizeBase300, width: '100%' }}
+                    />
+                    <Text size={200} style={{ color: tokens.colorNeutralForeground3, marginTop: '6px', display: 'block' }}>
+                      Enter {nDays} to send notifications {nDays} day{nDays !== 1 ? 's' : ''} before the period locks.
+                      {' '}Current period closes on {closeDate}. Next trigger: {triggerDate}.
+                    </Text>
+                  </div>
+                );
+              })()}
+
+              {/* Time — hour + minute dropdowns */}
               <div className={panelStyles.dialogField}>
-                <Label required>
-                  {form.trigger_type === 'day_of_month' && 'Day of month (1–28)'}
-                  {form.trigger_type === 'day_of_week' && 'Day of week'}
-                  {form.trigger_type === 'days_before_period_close' && 'Days before period close (1–14)'}
-                  {!form.trigger_type && 'Trigger value'}
-                </Label>
-                {triggerValueInput()}
+                <Label required>Time (UTC+2 / CEST)</Label>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <select
+                    className={panelStyles.nativeSelect}
+                    style={{ width: 'auto' }}
+                    value={(form.time_of_day ?? '07:00').split(':')[0]}
+                    onChange={(e) => {
+                      const min = (form.time_of_day ?? '07:00').split(':')[1] ?? '00';
+                      setForm({ ...form, time_of_day: `${e.target.value}:${min}` });
+                    }}
+                  >
+                    {Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')).map((h) => (
+                      <option key={h} value={h}>{h}</option>
+                    ))}
+                  </select>
+                  <Text weight="semibold">:</Text>
+                  <select
+                    className={panelStyles.nativeSelect}
+                    style={{ width: 'auto' }}
+                    value={(form.time_of_day ?? '07:00').split(':')[1] ?? '00'}
+                    onChange={(e) => {
+                      const hr = (form.time_of_day ?? '07:00').split(':')[0] ?? '07';
+                      setForm({ ...form, time_of_day: `${hr}:${e.target.value}` });
+                    }}
+                  >
+                    {['00', '15', '30', '45'].map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+                <Text size={200} style={{ color: tokens.colorNeutralForeground3, marginTop: '6px', display: 'block' }}>
+                  Will send at {form.time_of_day ?? '07:00'} CEST
+                </Text>
               </div>
+
+              {/* Recipients */}
               <div className={panelStyles.dialogField}>
-                <Label required>Time (UTC)</Label>
-                <input
-                  type="time"
-                  value={form.time_of_day ?? '07:00'}
-                  onChange={(e) => setForm({ ...form, time_of_day: e.target.value })}
-                  style={{ padding: '8px', borderRadius: tokens.borderRadiusMedium, border: `1px solid ${tokens.colorNeutralStroke1}`, fontSize: tokens.fontSizeBase300 }}
-                />
+                <Label>Recipients</Label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+                  {form.notification_type !== 'missing_actuals' && (
+                    <Checkbox
+                      label="Notify PMs (scoped to their projects)"
+                      checked={form.notify_pm !== false}
+                      onChange={(_, d) => setForm({ ...form, notify_pm: d.checked as boolean })}
+                    />
+                  )}
+                  <Checkbox
+                    label="Notify Managers / ROs (scoped to their department)"
+                    checked={form.notify_manager !== false}
+                    onChange={(_, d) => setForm({ ...form, notify_manager: d.checked as boolean })}
+                  />
+                  <Checkbox
+                    label="Notify Finance & Admin (full overview)"
+                    checked={form.notify_finance !== false}
+                    onChange={(_, d) => setForm({ ...form, notify_finance: d.checked as boolean })}
+                  />
+                  {form.notification_type === 'missing_actuals' && (
+                    <Checkbox
+                      label="Notify Employees (their own missing actuals)"
+                      checked={form.notify_employee !== false}
+                      onChange={(_, d) => setForm({ ...form, notify_employee: d.checked as boolean })}
+                    />
+                  )}
+                </div>
               </div>
+
               <Checkbox
                 label="Active"
                 checked={form.is_active !== false}
                 onChange={(_, d) => setForm({ ...form, is_active: d.checked as boolean })}
               />
+
+              {/* Schedule summary preview */}
+              <div style={{
+                padding: tokens.spacingVerticalM,
+                borderRadius: tokens.borderRadiusMedium,
+                background: tokens.colorNeutralBackground2,
+                marginTop: tokens.spacingVerticalM,
+              }}>
+                <Text size={200} style={{ color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>
+                  {scheduleSummary(form)}
+                </Text>
+              </div>
             </DialogContent>
             <DialogActions>
               <Button appearance="secondary" onClick={() => setDialogOpen(false)}>Cancel</Button>

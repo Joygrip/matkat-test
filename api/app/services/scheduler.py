@@ -3,11 +3,15 @@
 Runs a single interval job every 15 minutes that evaluates all active
 NotificationSchedule rows across all tenants and fires the appropriate
 NotificationsService method when the schedule conditions are met.
+
+Time comparisons use UTC+2 (CEST) so that schedules configured in local
+business hours fire at the correct local time. last_run_at is stored as
+UTC for consistency with the rest of the database.
 """
 import calendar
 import logging
-from datetime import datetime, date
-from typing import Tuple
+from datetime import datetime, date, timedelta, timezone
+from typing import Optional, Tuple
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -26,6 +30,7 @@ from api.app.services.notifications import NotificationsService
 logger = logging.getLogger(__name__)
 
 _scheduler = BackgroundScheduler()
+_UTC2 = timezone(timedelta(hours=2))
 
 
 def _open_session():
@@ -34,32 +39,40 @@ def _open_session():
     return SessionLocal()
 
 
-def _get_open_period(db, tenant_id: str) -> Tuple[int, int]:
-    """Return (year, month) of the current open period, or current calendar month."""
+def _get_open_period(db, tenant_id: str) -> Optional[Tuple[int, int]]:
+    """Return (year, month) of the EARLIEST open period, or None if no open period exists."""
     period = (
         db.query(Period)
         .filter(Period.tenant_id == tenant_id, Period.status == PeriodStatus.OPEN)
-        .order_by(Period.year.desc(), Period.month.desc())
+        .order_by(Period.year.asc(), Period.month.asc())
         .first()
     )
     if period:
         return period.year, period.month
-    today = date.today()
-    return today.year, today.month
+    return None
 
 
-def _should_fire(schedule: NotificationSchedule, now_utc: datetime, db) -> bool:
-    """Determine whether this schedule should fire on this tick."""
-    today = now_utc.date()
-    current_hhmm = now_utc.strftime("%H:%M")
+def _should_fire(schedule: NotificationSchedule, now_local: datetime, db) -> bool:
+    """Determine whether this schedule should fire on this tick.
 
-    # Time gate: hasn't reached the scheduled time yet
+    now_local must be expressed in UTC+2 — both the date and HH:MM comparison
+    are performed in that timezone so that configured times reflect local
+    business hours.  last_run_at is stored as UTC and is converted before
+    the date comparison.
+    """
+    today = now_local.date()
+    current_hhmm = now_local.strftime("%H:%M")
+
+    # Time gate: hasn't reached the scheduled time yet (in UTC+2)
     if current_hhmm < schedule.time_of_day:
         return False
 
-    # Already fired today (covers all trigger types — each fires at most once per day)
-    if schedule.last_run_at and schedule.last_run_at.date() >= today:
-        return False
+    # Already fired today in UTC+2 terms — each schedule fires at most once per day
+    if schedule.last_run_at:
+        # last_run_at is stored as UTC; convert to UTC+2 for the date comparison
+        last_run_local = schedule.last_run_at.replace(tzinfo=timezone.utc).astimezone(_UTC2)
+        if last_run_local.date() >= today:
+            return False
 
     trigger = schedule.trigger_type
 
@@ -71,7 +84,10 @@ def _should_fire(schedule: NotificationSchedule, now_utc: datetime, db) -> bool:
         return today.weekday() == schedule.trigger_value
 
     if trigger == TriggerType.DAYS_BEFORE_PERIOD_CLOSE:
-        year, month = _get_open_period(db, schedule.tenant_id)
+        period_ym = _get_open_period(db, schedule.tenant_id)
+        if period_ym is None:
+            return False
+        year, month = period_ym
         _, last_day = calendar.monthrange(year, month)
         close_date = date(year, month, last_day)
         return (close_date - today).days == schedule.trigger_value
@@ -82,13 +98,32 @@ def _should_fire(schedule: NotificationSchedule, now_utc: datetime, db) -> bool:
 def _dispatch(service: NotificationsService, schedule: NotificationSchedule, year: int, month: int):
     ntype = schedule.notification_type
     if ntype == NotificationScheduleType.CONFLICT_ALERTS:
-        return service.run_conflict_alerts(year, month)
+        return service.run_conflict_alerts(
+            year, month,
+            notify_pm=schedule.notify_pm,
+            notify_manager=schedule.notify_manager,
+            notify_finance=schedule.notify_finance,
+        )
     if ntype == NotificationScheduleType.MISSING_ACTUALS:
-        return service.run_missing_actuals_alerts(year, month)
+        return service.run_missing_actuals_alerts(
+            year, month,
+            notify_employee=schedule.notify_employee,
+            notify_manager=schedule.notify_manager,
+            notify_finance=schedule.notify_finance,
+        )
     if ntype == NotificationScheduleType.PLANNING_REMINDER:
-        return service.run_notifications(NotificationPhase.PM_RO, year, month)
+        return service.run_planning_reminder(
+            year, month,
+            notify_pm=schedule.notify_pm,
+            notify_manager=schedule.notify_manager,
+            notify_finance=schedule.notify_finance,
+        )
     if ntype == NotificationScheduleType.APPROVAL_REMINDER:
-        return service.run_notifications(NotificationPhase.RO_DIRECTOR, year, month)
+        return service.run_approval_reminder(
+            year, month,
+            notify_manager=schedule.notify_manager,
+            notify_finance=schedule.notify_finance,
+        )
     return {}
 
 
@@ -96,7 +131,8 @@ def _run_tick() -> None:
     """Check all active schedules and fire those whose conditions are met."""
     db = _open_session()
     try:
-        now_utc = datetime.utcnow()
+        # All time comparisons use UTC+2; last_run_at is stored as UTC
+        now_local = datetime.now(tz=_UTC2)
 
         schedules = (
             db.query(NotificationSchedule)
@@ -106,10 +142,19 @@ def _run_tick() -> None:
 
         for schedule in schedules:
             try:
-                if not _should_fire(schedule, now_utc, db):
+                if not _should_fire(schedule, now_local, db):
                     continue
 
-                year, month = _get_open_period(db, schedule.tenant_id)
+                period_ym = _get_open_period(db, schedule.tenant_id)
+                if period_ym is None:
+                    logger.warning(
+                        "scheduler: no open period for tenant=%s — skipping schedule %s (type=%s)",
+                        schedule.tenant_id,
+                        schedule.id,
+                        schedule.notification_type.value,
+                    )
+                    continue
+                year, month = period_ym
 
                 system_user = CurrentUser(
                     tenant_id=schedule.tenant_id,
@@ -122,7 +167,8 @@ def _run_tick() -> None:
                 service = NotificationsService(db, system_user)
                 result = _dispatch(service, schedule, year, month)
 
-                schedule.last_run_at = now_utc
+                # Store last_run_at as UTC
+                schedule.last_run_at = datetime.utcnow()
                 db.commit()
 
                 logger.info(

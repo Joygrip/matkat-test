@@ -39,6 +39,7 @@ from api.app.config import Settings
 logger = logging.getLogger(__name__)
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+EMAIL_STAGGER_SECONDS = 15
 
 # ---------------------------------------------------------------------------
 # Template registry
@@ -169,6 +170,10 @@ class GraphMailService:
                     logger.info(
                         "GraphMailService: mail sent to %s (attempt %d)", to_email, attempt + 1
                     )
+                    logger.info(
+                        "GraphMailService: staggering %ds before next send", EMAIL_STAGGER_SECONDS
+                    )
+                    time.sleep(EMAIL_STAGGER_SECONDS)
                     return True
                 # 4xx (except 429 Too Many Requests) are client errors that
                 # will not resolve by retrying — fail immediately.

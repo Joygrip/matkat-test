@@ -18,19 +18,25 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def drop_fk_and_column(conn, table_name, column_name):
-    result = conn.execute(sa.text("""
-        SELECT fk.name 
-        FROM sys.foreign_keys fk
-        INNER JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
-        INNER JOIN sys.columns c ON fkc.parent_object_id = c.object_id 
-            AND fkc.parent_column_id = c.column_id
-        WHERE fk.parent_object_id = OBJECT_ID(:table)
-        AND c.name = :column
-    """), {"table": table_name, "column": column_name})
-    for row in result:
-        op.drop_constraint(row[0], table_name, type_="foreignkey")
-    with op.batch_alter_table(table_name, schema=None) as batch_op:
-        batch_op.drop_column(column_name)
+    if conn.dialect.name == "sqlite":
+        # batch_alter_table recreates the table without the column, dropping all constraints automatically
+        with op.batch_alter_table(table_name, schema=None) as batch_op:
+            batch_op.drop_column(column_name)
+    else:
+        # SQL Server: discover and drop FK constraints explicitly before dropping the column
+        result = conn.execute(sa.text("""
+            SELECT fk.name
+            FROM sys.foreign_keys fk
+            INNER JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
+            INNER JOIN sys.columns c ON fkc.parent_object_id = c.object_id
+                AND fkc.parent_column_id = c.column_id
+            WHERE fk.parent_object_id = OBJECT_ID(:table)
+            AND c.name = :column
+        """), {"table": table_name, "column": column_name})
+        for row in result:
+            op.drop_constraint(row[0], table_name, type_="foreignkey")
+        with op.batch_alter_table(table_name, schema=None) as batch_op:
+            batch_op.drop_column(column_name)
 
 
 def upgrade() -> None:

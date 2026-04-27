@@ -31,6 +31,10 @@ class NotificationScheduleCreate(BaseModel):
     trigger_value: int
     time_of_day: str
     is_active: bool = True
+    notify_pm: bool = True
+    notify_manager: bool = True
+    notify_finance: bool = True
+    notify_employee: bool = True
 
 
 class NotificationScheduleUpdate(BaseModel):
@@ -39,6 +43,28 @@ class NotificationScheduleUpdate(BaseModel):
     trigger_value: Optional[int] = None
     time_of_day: Optional[str] = None
     is_active: Optional[bool] = None
+    notify_pm: Optional[bool] = None
+    notify_manager: Optional[bool] = None
+    notify_finance: Optional[bool] = None
+    notify_employee: Optional[bool] = None
+
+
+class PreviewRecipient(BaseModel):
+    email: str
+    display_name: str
+    role: str
+    reason: str
+    email_subject: str
+    email_body_html: str
+    already_notified: bool
+
+
+class SchedulePreviewResponse(BaseModel):
+    period: dict
+    recipients: list[PreviewRecipient]
+    total_recipients: int
+    skipped: int
+    would_skip: bool
 
 
 class NotificationScheduleResponse(BaseModel):
@@ -50,6 +76,10 @@ class NotificationScheduleResponse(BaseModel):
     time_of_day: str
     is_active: bool
     last_run_at: Optional[str]
+    notify_pm: bool
+    notify_manager: bool
+    notify_finance: bool
+    notify_employee: bool
     created_at: str
     updated_at: str
     created_by: str
@@ -67,6 +97,10 @@ def _to_response(s: NotificationSchedule) -> NotificationScheduleResponse:
         time_of_day=s.time_of_day,
         is_active=s.is_active,
         last_run_at=str(s.last_run_at) if s.last_run_at else None,
+        notify_pm=s.notify_pm,
+        notify_manager=s.notify_manager,
+        notify_finance=s.notify_finance,
+        notify_employee=s.notify_employee,
         created_at=str(s.created_at),
         updated_at=str(s.updated_at),
         created_by=s.created_by,
@@ -130,6 +164,10 @@ async def create_schedule(
         trigger_value=data.trigger_value,
         time_of_day=data.time_of_day,
         is_active=data.is_active,
+        notify_pm=data.notify_pm,
+        notify_manager=data.notify_manager,
+        notify_finance=data.notify_finance,
+        notify_employee=data.notify_employee,
         created_by=current_user.object_id,
     )
     db.add(schedule)
@@ -158,6 +196,14 @@ async def update_schedule(
         schedule.time_of_day = data.time_of_day
     if data.is_active is not None:
         schedule.is_active = data.is_active
+    if data.notify_pm is not None:
+        schedule.notify_pm = data.notify_pm
+    if data.notify_manager is not None:
+        schedule.notify_manager = data.notify_manager
+    if data.notify_finance is not None:
+        schedule.notify_finance = data.notify_finance
+    if data.notify_employee is not None:
+        schedule.notify_employee = data.notify_employee
 
     schedule.updated_at = datetime.utcnow()
     db.commit()
@@ -178,13 +224,57 @@ async def delete_schedule(
     return {"message": "Schedule deleted"}
 
 
+@router.get("/{schedule_id}/preview", response_model=SchedulePreviewResponse)
+async def preview_schedule(
+    schedule_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(*_ROLES)),
+):
+    """Preview recipients and email content for a schedule — read-only. (Admin, Finance)"""
+    schedule = _get_or_404(db, schedule_id, current_user.tenant_id)
+
+    # Earliest open period — consistent with scheduler.py
+    period = (
+        db.query(Period)
+        .filter(Period.tenant_id == current_user.tenant_id, Period.status == PeriodStatus.OPEN)
+        .order_by(Period.year.asc(), Period.month.asc())
+        .first()
+    )
+    if period:
+        year, month = period.year, period.month
+    else:
+        today = date.today()
+        year, month = today.year, today.month
+
+    month_name = calendar.month_name[month]
+
+    service = NotificationsService(db, current_user)
+    preview = service.preview_schedule(
+        notification_type=schedule.notification_type,
+        year=year,
+        month=month,
+        notify_pm=schedule.notify_pm,
+        notify_manager=schedule.notify_manager,
+        notify_finance=schedule.notify_finance,
+        notify_employee=schedule.notify_employee,
+    )
+
+    return SchedulePreviewResponse(
+        period={"year": year, "month": month, "label": f"{month_name} {year}"},
+        recipients=[PreviewRecipient(**r) for r in preview["recipients"]],
+        total_recipients=preview["total_recipients"],
+        skipped=preview["skipped"],
+        would_skip=preview["would_skip"],
+    )
+
+
 @router.post("/{schedule_id}/run")
 async def run_schedule_now(
     schedule_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(*_ROLES)),
 ):
-    """Manually trigger a schedule immediately. (Admin, Finance)"""
+    """Manually trigger a schedule immediately, respecting its recipient flags. (Admin, Finance)"""
     schedule = _get_or_404(db, schedule_id, current_user.tenant_id)
 
     year, month = _current_open_period(db, current_user.tenant_id)
@@ -192,13 +282,32 @@ async def run_schedule_now(
 
     ntype = schedule.notification_type
     if ntype == NotificationScheduleType.CONFLICT_ALERTS:
-        result = service.run_conflict_alerts(year, month)
+        result = service.run_conflict_alerts(
+            year, month,
+            notify_pm=schedule.notify_pm,
+            notify_manager=schedule.notify_manager,
+            notify_finance=schedule.notify_finance,
+        )
     elif ntype == NotificationScheduleType.MISSING_ACTUALS:
-        result = service.run_missing_actuals_alerts(year, month)
+        result = service.run_missing_actuals_alerts(
+            year, month,
+            notify_employee=schedule.notify_employee,
+            notify_manager=schedule.notify_manager,
+            notify_finance=schedule.notify_finance,
+        )
     elif ntype == NotificationScheduleType.PLANNING_REMINDER:
-        result = service.run_notifications(NotificationPhase.PM_RO, year, month)
+        result = service.run_planning_reminder(
+            year, month,
+            notify_pm=schedule.notify_pm,
+            notify_manager=schedule.notify_manager,
+            notify_finance=schedule.notify_finance,
+        )
     elif ntype == NotificationScheduleType.APPROVAL_REMINDER:
-        result = service.run_notifications(NotificationPhase.RO_DIRECTOR, year, month)
+        result = service.run_approval_reminder(
+            year, month,
+            notify_manager=schedule.notify_manager,
+            notify_finance=schedule.notify_finance,
+        )
     else:
         result = {}
 

@@ -49,6 +49,10 @@ class NotificationScheduleUpdate(BaseModel):
     notify_employee: Optional[bool] = None
 
 
+class RunScheduleRequest(BaseModel):
+    recipient_emails: Optional[list[str]] = None
+
+
 class PreviewRecipient(BaseModel):
     email: str
     display_name: str
@@ -271,6 +275,7 @@ async def preview_schedule(
 @router.post("/{schedule_id}/run")
 async def run_schedule_now(
     schedule_id: str,
+    body: Optional[RunScheduleRequest] = None,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(*_ROLES)),
 ):
@@ -280,6 +285,8 @@ async def run_schedule_now(
     year, month = _current_open_period(db, current_user.tenant_id)
     service = NotificationsService(db, current_user)
 
+    recipient_emails = (body.recipient_emails or None) if body else None
+
     ntype = schedule.notification_type
     if ntype == NotificationScheduleType.CONFLICT_ALERTS:
         result = service.run_conflict_alerts(
@@ -287,6 +294,7 @@ async def run_schedule_now(
             notify_pm=schedule.notify_pm,
             notify_manager=schedule.notify_manager,
             notify_finance=schedule.notify_finance,
+            recipient_emails=recipient_emails,
         )
     elif ntype == NotificationScheduleType.MISSING_ACTUALS:
         result = service.run_missing_actuals_alerts(
@@ -294,6 +302,7 @@ async def run_schedule_now(
             notify_employee=schedule.notify_employee,
             notify_manager=schedule.notify_manager,
             notify_finance=schedule.notify_finance,
+            recipient_emails=recipient_emails,
         )
     elif ntype == NotificationScheduleType.PLANNING_REMINDER:
         result = service.run_planning_reminder(
@@ -301,12 +310,14 @@ async def run_schedule_now(
             notify_pm=schedule.notify_pm,
             notify_manager=schedule.notify_manager,
             notify_finance=schedule.notify_finance,
+            recipient_emails=recipient_emails,
         )
     elif ntype == NotificationScheduleType.APPROVAL_REMINDER:
         result = service.run_approval_reminder(
             year, month,
             notify_manager=schedule.notify_manager,
             notify_finance=schedule.notify_finance,
+            recipient_emails=recipient_emails,
         )
     else:
         result = {}

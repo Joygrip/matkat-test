@@ -252,6 +252,7 @@ class NotificationsService:
         notify_pm: bool = True,
         notify_manager: bool = True,
         notify_finance: bool = True,
+        recipient_emails: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Detect demand > supply conflicts and notify affected ROs, PMs, and/or Finance.
 
@@ -270,6 +271,7 @@ class NotificationsService:
         detector = ConflictDetectionService(self.db, tenant_id)
         conflicts = detector.find_conflicts(year, month)
 
+        email_set = set(recipient_emails) if recipient_emails else None
         sent_count = 0
         skipped_count = 0
 
@@ -288,6 +290,9 @@ class NotificationsService:
                 seen_ids.add(recipient.id)
 
                 if not recipient.email:
+                    continue
+
+                if email_set and recipient.email not in email_set:
                     continue
 
                 existing = self._get_existing_log(
@@ -347,6 +352,8 @@ class NotificationsService:
         # ── Finance summary email (one per Finance/Admin user) ───────────────
         if notify_finance and conflicts:
             finance_users = self._get_users_by_roles(tenant_id, ["Finance", "Admin"])
+            if email_set:
+                finance_users = [u for u in finance_users if u.email and u.email in email_set]
             summary_msg = self._conflict_finance_summary(conflicts, year, month)
             s, sk = self._send_summary_notifications(phase, year, month, run_id, finance_users, summary_msg)
             sent_count += s
@@ -395,6 +402,7 @@ class NotificationsService:
         notify_employee: bool = True,
         notify_manager: bool = True,
         notify_finance: bool = True,
+        recipient_emails: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Find employees with unsigned/absent actuals and send reminders.
 
@@ -413,6 +421,7 @@ class NotificationsService:
         detector = MissingActualsService(self.db, tenant_id)
         missing = detector.find_missing(year, month)
 
+        email_set = set(recipient_emails) if recipient_emails else None
         sent_count = 0
         skipped_count = 0
 
@@ -421,6 +430,9 @@ class NotificationsService:
             for item in missing:
                 recipient = item.recipient
                 if not recipient.email:
+                    continue
+
+                if email_set and recipient.email not in email_set:
                     continue
 
                 existing = self._get_existing_log(
@@ -495,6 +507,8 @@ class NotificationsService:
                 ro = cc.ro_user
                 if not ro or not ro.email:
                     continue
+                if email_set and ro.email not in email_set:
+                    continue
                 msg = self._missing_actuals_manager_summary(cc, cc_missing, year, month)
                 s, sk = self._send_summary_notifications(phase, year, month, run_id, [ro], msg)
                 sent_count += s
@@ -503,6 +517,8 @@ class NotificationsService:
         # ── Finance summary email ────────────────────────────────────────────
         if notify_finance and missing:
             finance_users = self._get_users_by_roles(tenant_id, ["Finance", "Admin"])
+            if email_set:
+                finance_users = [u for u in finance_users if u.email and u.email in email_set]
             msg = self._missing_actuals_finance_summary(missing, year, month)
             s, sk = self._send_summary_notifications(phase, year, month, run_id, finance_users, msg)
             sent_count += s
@@ -551,6 +567,7 @@ class NotificationsService:
         notify_pm: bool = True,
         notify_manager: bool = True,
         notify_finance: bool = True,
+        recipient_emails: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Send planning reminders scoped by role.
 
@@ -561,6 +578,7 @@ class NotificationsService:
         """
         tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
         run_id = str(uuid.uuid4())
+        email_set = set(recipient_emails) if recipient_emails else None
         sent_count = skipped_count = 0
 
         if notify_pm or notify_manager:
@@ -579,6 +597,8 @@ class NotificationsService:
                 if u.id not in seen:
                     seen.add(u.id)
                     unique_recipients.append(u)
+            if email_set:
+                unique_recipients = [u for u in unique_recipients if u.email and u.email in email_set]
             s, sk = self._send_summary_notifications(phase, year, month, run_id, unique_recipients, message)
             sent_count += s
             skipped_count += sk
@@ -588,6 +608,8 @@ class NotificationsService:
             deadline_fin = self.calculate_phase_deadline(phase_fin, year, month)
             message_fin = self._get_message_template(phase_fin, year, month, deadline_fin)
             finance_users = self._get_users_by_roles(tenant_id, ["Finance", "Admin"])
+            if email_set:
+                finance_users = [u for u in finance_users if u.email and u.email in email_set]
             s, sk = self._send_summary_notifications(phase_fin, year, month, run_id, finance_users, message_fin)
             sent_count += s
             skipped_count += sk
@@ -624,6 +646,7 @@ class NotificationsService:
         month: int,
         notify_manager: bool = True,
         notify_finance: bool = True,
+        recipient_emails: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Send approval reminders scoped by role.
 
@@ -634,6 +657,7 @@ class NotificationsService:
         tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
         run_id = str(uuid.uuid4())
         phase = NotificationPhase.RO_DIRECTOR
+        email_set = set(recipient_emails) if recipient_emails else None
         sent_count = skipped_count = 0
 
         deadline = self.calculate_phase_deadline(phase, year, month)
@@ -647,6 +671,8 @@ class NotificationsService:
 
         seen: set = set()
         unique_recipients = [u for u in recipients if not (u.id in seen or seen.add(u.id))]  # type: ignore[func-returns-value]
+        if email_set:
+            unique_recipients = [u for u in unique_recipients if u.email and u.email in email_set]
 
         s, sk = self._send_summary_notifications(phase, year, month, run_id, unique_recipients, message)
         sent_count += s

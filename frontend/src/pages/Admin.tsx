@@ -553,6 +553,9 @@ function NotificationsPanel() {
   const [previewData, setPreviewData] = useState<SchedulePreviewData | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [selectedPreviewEmail, setSelectedPreviewEmail] = useState<string>('');
+  const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
+  const [sendLoading, setSendLoading] = useState(false);
+  const [sendResult, setSendResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [form, setForm] = useState<Partial<NotificationScheduleItem>>({
     notification_type: 'conflict_alerts',
     trigger_type: 'day_of_month',
@@ -691,19 +694,45 @@ function NotificationsPanel() {
     setPreviewSched(s);
     setPreviewData(null);
     setSelectedPreviewEmail('');
+    setSelectedEmails(new Set());
+    setSendResult(null);
     setPreviewOpen(true);
     setPreviewLoading(true);
     try {
       const data = await apiClient.get<SchedulePreviewData>(`/notification-schedules/${s.id}/preview`);
       setPreviewData(data);
-      if (data.recipients.length > 0) {
-        setSelectedPreviewEmail(data.recipients[0].email);
-      }
+      const initialSelected = new Set(
+        data.recipients.filter((r) => !r.already_notified).map((r) => r.email),
+      );
+      setSelectedEmails(initialSelected);
+      const firstChecked = data.recipients.find((r) => !r.already_notified);
+      if (firstChecked) setSelectedPreviewEmail(firstChecked.email);
     } catch (err) {
       showApiError(err as Error);
       setPreviewOpen(false);
     } finally {
       setPreviewLoading(false);
+    }
+  };
+
+  const handleSendFromPreview = async () => {
+    if (!previewSched) return;
+    const emailList = [...selectedEmails];
+    setSendLoading(true);
+    setSendResult(null);
+    try {
+      await apiClient.post(`/notification-schedules/${previewSched.id}/run`, {
+        recipient_emails: emailList,
+      });
+      const n = emailList.length;
+      setSendResult({ ok: true, msg: `Sent to ${n} recipient${n !== 1 ? 's' : ''}` });
+      loadSchedules();
+      loadLogs();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to send';
+      setSendResult({ ok: false, msg: `Failed to send — ${msg}` });
+    } finally {
+      setSendLoading(false);
     }
   };
 
@@ -881,7 +910,36 @@ function NotificationsPanel() {
               {previewLoading && <Spinner label="Loading preview…" />}
               {!previewLoading && previewData && (() => {
                 const { period, recipients, total_recipients, skipped } = previewData;
-                const selectedRecipient = recipients.find((r) => r.email === selectedPreviewEmail) ?? null;
+
+                const allCheckable = recipients.filter((r) => !r.already_notified);
+                const checkedCheckable = allCheckable.filter((r) => selectedEmails.has(r.email));
+                const headerCheckState: boolean | 'mixed' =
+                  checkedCheckable.length === 0 ? false
+                  : checkedCheckable.length === allCheckable.length ? true
+                  : 'mixed';
+
+                const toggleAll = () => {
+                  if (headerCheckState === true) {
+                    setSelectedEmails(new Set());
+                  } else {
+                    setSelectedEmails(new Set(allCheckable.map((r) => r.email)));
+                  }
+                };
+
+                const toggleEmail = (email: string) => {
+                  const next = new Set(selectedEmails);
+                  if (next.has(email)) next.delete(email);
+                  else next.add(email);
+                  setSelectedEmails(next);
+                };
+
+                const checkedRecipients = recipients.filter((r) => selectedEmails.has(r.email));
+                const effectivePreviewEmail = selectedEmails.has(selectedPreviewEmail)
+                  ? selectedPreviewEmail
+                  : checkedRecipients[0]?.email ?? '';
+                const selectedRecipient = recipients.find((r) => r.email === effectivePreviewEmail) ?? null;
+
+                const selectedCount = checkedCheckable.length;
 
                 return (
                   <>
@@ -896,48 +954,68 @@ function NotificationsPanel() {
                         No recipients found for this period. No emails would be sent.
                       </Text>
                     ) : (
-                      <div style={{ maxHeight: '240px', overflowY: 'auto', marginBottom: tokens.spacingVerticalL }}>
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHeaderCell>Name</TableHeaderCell>
-                              <TableHeaderCell>Email</TableHeaderCell>
-                              <TableHeaderCell>Role</TableHeaderCell>
-                              <TableHeaderCell>Reason</TableHeaderCell>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {recipients.map((r, idx) => (
-                              <TableRow key={idx} style={{ opacity: r.already_notified ? 0.5 : 1 }}>
-                                <TableCell>
-                                  <Text>{r.display_name}</Text>
-                                  {r.already_notified && (
-                                    <Badge appearance="tint" color="subtle" size="small" style={{ marginLeft: 6 }}>
-                                      Already sent
-                                    </Badge>
-                                  )}
-                                </TableCell>
-                                <TableCell><Text size={200}>{r.email}</Text></TableCell>
-                                <TableCell>
-                                  <Badge
-                                    appearance="tint"
-                                    size="small"
-                                    color={
-                                      r.role === 'PM' ? 'brand'
-                                        : r.role === 'Manager' ? 'warning'
-                                        : r.role === 'Finance' ? 'success'
-                                        : 'informative'
-                                    }
-                                  >
-                                    {r.role}
-                                  </Badge>
-                                </TableCell>
-                                <TableCell><Text size={200}>{r.reason}</Text></TableCell>
+                      <>
+                        <div style={{ maxHeight: '240px', overflowY: 'auto', marginBottom: tokens.spacingVerticalXS }}>
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHeaderCell style={{ width: '40px' }}>
+                                  <Checkbox
+                                    checked={headerCheckState}
+                                    onChange={toggleAll}
+                                    title={headerCheckState === true ? 'Deselect all' : 'Select all'}
+                                  />
+                                </TableHeaderCell>
+                                <TableHeaderCell>Name</TableHeaderCell>
+                                <TableHeaderCell>Email</TableHeaderCell>
+                                <TableHeaderCell>Role</TableHeaderCell>
+                                <TableHeaderCell>Reason</TableHeaderCell>
                               </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
+                            </TableHeader>
+                            <TableBody>
+                              {recipients.map((r, idx) => (
+                                <TableRow key={idx} style={{ opacity: r.already_notified ? 0.5 : 1 }}>
+                                  <TableCell>
+                                    <Checkbox
+                                      checked={selectedEmails.has(r.email)}
+                                      disabled={r.already_notified}
+                                      onChange={() => toggleEmail(r.email)}
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <Text>{r.display_name}</Text>
+                                    {r.already_notified && (
+                                      <Badge appearance="tint" color="subtle" size="small" style={{ marginLeft: 6 }}>
+                                        Already sent
+                                      </Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell><Text size={200}>{r.email}</Text></TableCell>
+                                  <TableCell>
+                                    <Badge
+                                      appearance="tint"
+                                      size="small"
+                                      color={
+                                        r.role === 'PM' ? 'brand'
+                                          : r.role === 'Manager' ? 'warning'
+                                          : r.role === 'Finance' ? 'success'
+                                          : 'informative'
+                                      }
+                                    >
+                                      {r.role}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell><Text size={200}>{r.reason}</Text></TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                        <Text size={200} style={{ color: tokens.colorNeutralForeground2, display: 'block', marginBottom: tokens.spacingVerticalM }}>
+                          {selectedCount} of {total_recipients} recipient{total_recipients !== 1 ? 's' : ''} selected
+                          {skipped > 0 ? ` (${skipped} already notified, excluded)` : ''}
+                        </Text>
+                      </>
                     )}
 
                     {/* Section B — Email preview */}
@@ -948,10 +1026,10 @@ function NotificationsPanel() {
                           <select
                             className={panelStyles.nativeSelect}
                             style={{ marginTop: '4px' }}
-                            value={selectedPreviewEmail}
+                            value={effectivePreviewEmail}
                             onChange={(e) => setSelectedPreviewEmail(e.target.value)}
                           >
-                            {recipients.map((r, idx) => (
+                            {checkedRecipients.map((r, idx) => (
                               <option key={idx} value={r.email}>
                                 {r.display_name} &lt;{r.email}&gt;
                               </option>
@@ -965,7 +1043,6 @@ function NotificationsPanel() {
                             borderRadius: tokens.borderRadiusMedium,
                             overflow: 'hidden',
                           }}>
-                            {/* Email header bar */}
                             <div style={{
                               background: '#1e3a5f',
                               color: 'white',
@@ -976,14 +1053,12 @@ function NotificationsPanel() {
                             }}>
                               MatKat
                             </div>
-                            {/* Email metadata */}
                             <div style={{ padding: '12px 16px 8px', background: tokens.colorNeutralBackground2, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
                               <div><strong>From:</strong> matkat-noreply@ferrosanmd.com</div>
                               <div><strong>To:</strong> {selectedRecipient.email}</div>
                               <div><strong>Subject:</strong> {selectedRecipient.email_subject}</div>
                             </div>
                             <div style={{ borderTop: `1px solid ${tokens.colorNeutralStroke2}` }} />
-                            {/* Email body */}
                             <iframe
                               srcDoc={selectedRecipient.email_body_html}
                               style={{ width: '100%', height: '180px', border: 'none', display: 'block' }}
@@ -994,6 +1069,13 @@ function NotificationsPanel() {
                         )}
                       </>
                     )}
+
+                    {/* Send result */}
+                    {sendResult && (
+                      <MessageBar intent={sendResult.ok ? 'success' : 'error'} style={{ marginTop: tokens.spacingVerticalM }}>
+                        <MessageBarBody>{sendResult.msg}</MessageBarBody>
+                      </MessageBar>
+                    )}
                   </>
                 );
               })()}
@@ -1001,16 +1083,19 @@ function NotificationsPanel() {
             <DialogActions>
               <Button
                 appearance="primary"
-                disabled={!previewSched || runningId === previewSched?.id}
-                icon={runningId === previewSched?.id ? <Spinner size="tiny" /> : undefined}
-                onClick={() => {
-                  if (previewSched) {
-                    setPreviewOpen(false);
-                    handleRunNow(previewSched);
-                  }
-                }}
+                disabled={!previewSched || !previewData || selectedEmails.size === 0 || sendLoading}
+                icon={sendLoading ? <Spinner size="tiny" /> : undefined}
+                title={selectedEmails.size === 0 ? 'Select at least one recipient' : undefined}
+                onClick={handleSendFromPreview}
               >
-                Send Now
+                {(() => {
+                  if (!previewData) return 'Send Now';
+                  const { total_recipients } = previewData;
+                  const n = previewData.recipients.filter((r) => !r.already_notified && selectedEmails.has(r.email)).length;
+                  if (n === 0) return 'Send Now';
+                  if (n === total_recipients) return `Send Now (${n} recipient${n !== 1 ? 's' : ''})`;
+                  return `Send Now (${n} of ${total_recipients} recipient${total_recipients !== 1 ? 's' : ''})`;
+                })()}
               </Button>
               <Button appearance="secondary" onClick={() => setPreviewOpen(false)}>Close</Button>
             </DialogActions>

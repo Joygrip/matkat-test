@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Enum as SQLEnum,
+    JSON,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 import enum
@@ -59,6 +60,8 @@ class NotificationSchedule(Base):
     notify_manager: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notify_finance: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notify_employee: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    excluded_emails: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, default=list)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)

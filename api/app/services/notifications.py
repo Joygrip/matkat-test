@@ -14,6 +14,7 @@ Scoped fan-out (controlled by notify_* flags on NotificationSchedule):
   See run_conflict_alerts, run_missing_actuals_alerts, run_planning_reminder,
   run_approval_reminder for per-type details.
 """
+import calendar
 import logging
 import uuid
 from datetime import datetime, date, timedelta
@@ -29,7 +30,7 @@ from api.app.models.notifications import NotificationLog, NotificationPhase, Not
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
 from api.app.services.conflict_detection import ConflictDetectionService
-from api.app.services.graph_mail import GraphMailService
+from api.app.services.graph_mail import GraphMailService, build_conflict_alert_html, build_phase_html
 from api.app.services.missing_actuals import MissingActualsService
 from api.app.config import get_settings
 
@@ -253,16 +254,18 @@ class NotificationsService:
         notify_manager: bool = True,
         notify_finance: bool = True,
         recipient_emails: Optional[List[str]] = None,
+        excluded_emails: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Detect demand > supply conflicts and notify affected ROs, PMs, and/or Finance.
+        """Detect demand > supply conflicts and send ONE consolidated email per recipient.
 
-        Per-entity idempotent for PM/Manager emails: (phase, year, month, resource_id, recipient).
-        Finance summary emails use resource_id=None and are idempotent per (phase, year, month, recipient).
+        Each PM/Manager receives a single email listing ALL conflicts relevant to them.
+        Finance receives one email listing all conflicts across all resources.
+        Idempotent per (phase, year, month, recipient) — running twice won't duplicate.
 
         Args:
-            notify_pm: Send per-conflict emails to PMs whose projects are affected.
-            notify_manager: Send per-conflict emails to the RO who owns each resource's CC.
-            notify_finance: Send one summary email to each Finance/Admin user.
+            notify_pm: Include PMs whose projects are affected.
+            notify_manager: Include the RO/manager for each conflicted resource's CC.
+            notify_finance: Send a full-summary email to each Finance/Admin user.
         """
         tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
         run_id = str(uuid.uuid4())
@@ -272,92 +275,186 @@ class NotificationsService:
         conflicts = detector.find_conflicts(year, month)
 
         email_set = set(recipient_emails) if recipient_emails else None
+        excluded_set = set(excluded_emails) if excluded_emails else set()
         sent_count = 0
         skipped_count = 0
+        month_name = calendar.month_name[month]
 
-        # ── Per-conflict emails to PMs and/or Managers ──────────────────────
+        # ── Build recipient → [conflicts] map ───────────────────────────────
+        # Each recipient gets ONE email listing all their relevant conflicts.
+        per_recipient: Dict[str, Dict] = {}  # user_id → {user, conflicts[]}
+
         for conflict in conflicts:
-            recipients: List[User] = []
+            candidates: List[User] = []
             if notify_manager and conflict.ro_recipient:
-                recipients.append(conflict.ro_recipient)
+                candidates.append(conflict.ro_recipient)
             if notify_pm:
-                recipients.extend(conflict.pm_recipients)
+                candidates.extend(conflict.pm_recipients)
 
-            seen_ids: set = set()
-            for recipient in recipients:
-                if recipient.id in seen_ids:
+            for user in candidates:
+                if not user.email:
                     continue
-                seen_ids.add(recipient.id)
-
-                if not recipient.email:
+                if email_set and user.email not in email_set:
                     continue
-
-                if email_set and recipient.email not in email_set:
+                if excluded_set and user.email in excluded_set:
                     continue
+                if user.id not in per_recipient:
+                    per_recipient[user.id] = {"user": user, "conflicts": []}
+                per_recipient[user.id]["conflicts"].append(conflict)
 
-                existing = self._get_existing_log(
-                    phase, year, month, conflict.resource_id, recipient.id
+        # ── Send one consolidated email per PM/Manager recipient ─────────────
+        for uid, data in per_recipient.items():
+            user: User = data["user"]
+            user_conflicts = data["conflicts"]
+
+            # Per-recipient idempotency (resource_id=None — one log per recipient per period)
+            existing = self._get_existing_log(phase, year, month, None, uid)
+            if existing is not None:
+                if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
+                    skipped_count += 1
+                    continue
+                if existing.retry_count >= existing.max_retries:
+                    skipped_count += 1
+                    continue
+                existing.status = NotificationStatus.PENDING
+                existing.retry_count += 1
+                existing.error = None
+                log = existing
+            else:
+                ikey = self._idempotency_key(tenant_id, phase, year, month, uid)
+                names = ", ".join(c.resource.display_name for c in user_conflicts[:5])
+                extra = f" +{len(user_conflicts) - 5} more" if len(user_conflicts) > 5 else ""
+                message = (
+                    f"{len(user_conflicts)} resource conflict(s) for {month_name} {year}: "
+                    f"{names}{extra}. Please review in MatKat."
                 )
-                if existing is not None:
-                    if existing.status == NotificationStatus.SENT:
-                        skipped_count += 1
-                        continue
-                    if existing.status == NotificationStatus.PENDING:
-                        skipped_count += 1
-                        continue
-                    if existing.retry_count >= existing.max_retries:
-                        skipped_count += 1
-                        continue
-                    existing.status = NotificationStatus.PENDING
-                    existing.retry_count += 1
-                    existing.error = None
-                    log = existing
-                else:
-                    ikey = self._idempotency_key(
-                        tenant_id, phase, year, month, recipient.id, conflict.resource_id
+                log = self._create_entity_log(
+                    phase=phase,
+                    year=year,
+                    month=month,
+                    run_id=run_id,
+                    recipient_user_id=uid,
+                    recipient_email=user.email,
+                    resource_id=None,
+                    message=message,
+                    idempotency_key=ikey,
+                )
+                try:
+                    with self.db.begin_nested():
+                        self.db.add(log)
+                        self.db.flush()
+                except IntegrityError:
+                    logger.info(
+                        "run_conflict_alerts: duplicate skipped for %s (concurrent run)",
+                        user.email,
                     )
-                    message = self._conflict_message(conflict, year, month)
-                    log = self._create_entity_log(
-                        phase=phase,
-                        year=year,
-                        month=month,
-                        run_id=run_id,
-                        recipient_user_id=recipient.id,
-                        recipient_email=recipient.email,
-                        resource_id=conflict.resource_id,
-                        message=message,
-                        idempotency_key=ikey,
-                    )
-                    try:
-                        with self.db.begin_nested():
-                            self.db.add(log)
-                            self.db.flush()
-                    except IntegrityError:
-                        logger.info(
-                            "run_conflict_alerts: duplicate skipped for %s (concurrent run)",
-                            recipient.email,
-                        )
-                        skipped_count += 1
-                        continue
+                    skipped_count += 1
+                    continue
 
-                if self.settings.notify_mode == "graph":
-                    self._dispatch_mail(log)
-                else:
+            if self.settings.notify_mode == "graph":
+                context = {
+                    "year": year,
+                    "month": month,
+                    "month_name": month_name,
+                    "conflicts": [
+                        {
+                            "resource_name": c.resource.display_name,
+                            "total_demand": c.total_demand,
+                            "total_supply": c.total_supply,
+                            "gap": c.total_supply - c.total_demand,
+                        }
+                        for c in user_conflicts
+                    ],
+                }
+                subject = self._subject_for_phase(phase)
+                body_html = build_conflict_alert_html(context)
+                success = self._get_mail_service().send_mail(user.email, subject, body_html)
+                if success:
                     log.status = NotificationStatus.SENT
                     log.sent_at = datetime.utcnow()
+                else:
+                    log.status = NotificationStatus.FAILED
+                    log.error = "GraphMailService returned an error — see application logs"
+                    logger.warning(
+                        "Mail dispatch failed: phase=%s recipient=%s", phase, user.email
+                    )
+            else:
+                log.status = NotificationStatus.SENT
+                log.sent_at = datetime.utcnow()
 
-                self.db.commit()
-                sent_count += 1
+            self.db.commit()
+            sent_count += 1
 
         # ── Finance summary email (one per Finance/Admin user) ───────────────
         if notify_finance and conflicts:
             finance_users = self._get_users_by_roles(tenant_id, ["Finance", "Admin"])
             if email_set:
                 finance_users = [u for u in finance_users if u.email and u.email in email_set]
-            summary_msg = self._conflict_finance_summary(conflicts, year, month)
-            s, sk = self._send_summary_notifications(phase, year, month, run_id, finance_users, summary_msg)
-            sent_count += s
-            skipped_count += sk
+            if excluded_set:
+                finance_users = [u for u in finance_users if not u.email or u.email not in excluded_set]
+
+            if self.settings.notify_mode == "graph":
+                # Send rich HTML directly for finance too
+                finance_context = {
+                    "year": year,
+                    "month": month,
+                    "month_name": month_name,
+                    "conflicts": [
+                        {
+                            "resource_name": c.resource.display_name,
+                            "total_demand": c.total_demand,
+                            "total_supply": c.total_supply,
+                            "gap": c.total_supply - c.total_demand,
+                        }
+                        for c in conflicts
+                    ],
+                }
+                subject = self._subject_for_phase(phase)
+                body_html = build_conflict_alert_html(finance_context)
+                for fu in finance_users:
+                    if not fu.email:
+                        continue
+                    existing = self._get_existing_log(phase, year, month, None, fu.id)
+                    if existing is not None:
+                        if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
+                            skipped_count += 1
+                            continue
+                        if existing.retry_count >= existing.max_retries:
+                            skipped_count += 1
+                            continue
+                        existing.status = NotificationStatus.PENDING
+                        existing.retry_count += 1
+                        existing.error = None
+                        log = existing
+                    else:
+                        ikey = self._idempotency_key(tenant_id, phase, year, month, fu.id)
+                        summary_msg = self._conflict_finance_summary(conflicts, year, month)
+                        log = self._create_entity_log(
+                            phase=phase, year=year, month=month, run_id=run_id,
+                            recipient_user_id=fu.id, recipient_email=fu.email,
+                            resource_id=None, message=summary_msg, idempotency_key=ikey,
+                        )
+                        try:
+                            with self.db.begin_nested():
+                                self.db.add(log)
+                                self.db.flush()
+                        except IntegrityError:
+                            skipped_count += 1
+                            continue
+                    success = self._get_mail_service().send_mail(fu.email, subject, body_html)
+                    if success:
+                        log.status = NotificationStatus.SENT
+                        log.sent_at = datetime.utcnow()
+                    else:
+                        log.status = NotificationStatus.FAILED
+                        log.error = "GraphMailService returned an error — see application logs"
+                    self.db.commit()
+                    sent_count += 1
+            else:
+                summary_msg = self._conflict_finance_summary(conflicts, year, month)
+                s, sk = self._send_summary_notifications(phase, year, month, run_id, finance_users, summary_msg)
+                sent_count += s
+                skipped_count += sk
 
         if self.current_user:
             log_audit(
@@ -403,6 +500,7 @@ class NotificationsService:
         notify_manager: bool = True,
         notify_finance: bool = True,
         recipient_emails: Optional[List[str]] = None,
+        excluded_emails: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Find employees with unsigned/absent actuals and send reminders.
 
@@ -422,6 +520,7 @@ class NotificationsService:
         missing = detector.find_missing(year, month)
 
         email_set = set(recipient_emails) if recipient_emails else None
+        excluded_set = set(excluded_emails) if excluded_emails else set()
         sent_count = 0
         skipped_count = 0
 
@@ -433,6 +532,9 @@ class NotificationsService:
                     continue
 
                 if email_set and recipient.email not in email_set:
+                    continue
+
+                if excluded_set and recipient.email in excluded_set:
                     continue
 
                 existing = self._get_existing_log(
@@ -509,6 +611,8 @@ class NotificationsService:
                     continue
                 if email_set and ro.email not in email_set:
                     continue
+                if excluded_set and ro.email in excluded_set:
+                    continue
                 msg = self._missing_actuals_manager_summary(cc, cc_missing, year, month)
                 s, sk = self._send_summary_notifications(phase, year, month, run_id, [ro], msg)
                 sent_count += s
@@ -519,6 +623,8 @@ class NotificationsService:
             finance_users = self._get_users_by_roles(tenant_id, ["Finance", "Admin"])
             if email_set:
                 finance_users = [u for u in finance_users if u.email and u.email in email_set]
+            if excluded_set:
+                finance_users = [u for u in finance_users if not u.email or u.email not in excluded_set]
             msg = self._missing_actuals_finance_summary(missing, year, month)
             s, sk = self._send_summary_notifications(phase, year, month, run_id, finance_users, msg)
             sent_count += s
@@ -568,6 +674,7 @@ class NotificationsService:
         notify_manager: bool = True,
         notify_finance: bool = True,
         recipient_emails: Optional[List[str]] = None,
+        excluded_emails: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Send planning reminders scoped by role.
 
@@ -579,6 +686,7 @@ class NotificationsService:
         tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
         run_id = str(uuid.uuid4())
         email_set = set(recipient_emails) if recipient_emails else None
+        excluded_set = set(excluded_emails) if excluded_emails else set()
         sent_count = skipped_count = 0
 
         if notify_pm or notify_manager:
@@ -599,6 +707,8 @@ class NotificationsService:
                     unique_recipients.append(u)
             if email_set:
                 unique_recipients = [u for u in unique_recipients if u.email and u.email in email_set]
+            if excluded_set:
+                unique_recipients = [u for u in unique_recipients if not u.email or u.email not in excluded_set]
             s, sk = self._send_summary_notifications(phase, year, month, run_id, unique_recipients, message)
             sent_count += s
             skipped_count += sk
@@ -610,6 +720,8 @@ class NotificationsService:
             finance_users = self._get_users_by_roles(tenant_id, ["Finance", "Admin"])
             if email_set:
                 finance_users = [u for u in finance_users if u.email and u.email in email_set]
+            if excluded_set:
+                finance_users = [u for u in finance_users if not u.email or u.email not in excluded_set]
             s, sk = self._send_summary_notifications(phase_fin, year, month, run_id, finance_users, message_fin)
             sent_count += s
             skipped_count += sk
@@ -647,6 +759,7 @@ class NotificationsService:
         notify_manager: bool = True,
         notify_finance: bool = True,
         recipient_emails: Optional[List[str]] = None,
+        excluded_emails: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Send approval reminders scoped by role.
 
@@ -658,6 +771,7 @@ class NotificationsService:
         run_id = str(uuid.uuid4())
         phase = NotificationPhase.RO_DIRECTOR
         email_set = set(recipient_emails) if recipient_emails else None
+        excluded_set = set(excluded_emails) if excluded_emails else set()
         sent_count = skipped_count = 0
 
         deadline = self.calculate_phase_deadline(phase, year, month)
@@ -673,6 +787,8 @@ class NotificationsService:
         unique_recipients = [u for u in recipients if not (u.id in seen or seen.add(u.id))]  # type: ignore[func-returns-value]
         if email_set:
             unique_recipients = [u for u in unique_recipients if u.email and u.email in email_set]
+        if excluded_set:
+            unique_recipients = [u for u in unique_recipients if not u.email or u.email not in excluded_set]
 
         s, sk = self._send_summary_notifications(phase, year, month, run_id, unique_recipients, message)
         sent_count += s
@@ -713,6 +829,7 @@ class NotificationsService:
         notify_manager: bool = True,
         notify_finance: bool = True,
         notify_employee: bool = True,
+        excluded_emails: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Return what a scheduled run would send — no emails sent, no logs written."""
         if notification_type == NotificationScheduleType.CONFLICT_ALERTS:
@@ -725,6 +842,14 @@ class NotificationsService:
             recipients, skipped = self._preview_approval_reminder(year, month, notify_manager, notify_finance)
         else:
             recipients, skipped = [], 0
+
+        # Mark excluded recipients — they appear in the list but are flagged, not filtered out
+        excluded_set = set(excluded_emails) if excluded_emails else set()
+        if excluded_set:
+            for r in recipients:
+                if r.get("email") in excluded_set:
+                    r["excluded"] = True
+                    r["already_notified"] = False
 
         return {
             "recipients": recipients,
@@ -759,6 +884,7 @@ class NotificationsService:
                     per_recipient[user.id] = {"user": user, "role": role, "conflicts": []}
                 per_recipient[user.id]["conflicts"].append(conflict)
 
+        month_name = calendar.month_name[month]
         result: List[Dict[str, Any]] = []
         skipped = 0
 
@@ -767,12 +893,9 @@ class NotificationsService:
             role: str = data["role"]
             user_conflicts = data["conflicts"]
 
-            all_sent = True
-            for c in user_conflicts:
-                log = self._get_existing_log(phase, year, month, c.resource_id, uid)
-                if log is None or log.status != NotificationStatus.SENT:
-                    all_sent = False
-                    break
+            # Idempotency matches run_conflict_alerts: one log per recipient (resource_id=None)
+            existing = self._get_existing_log(phase, year, month, None, uid)
+            already = existing is not None and existing.status == NotificationStatus.SENT
 
             names = ", ".join(c.resource.display_name for c in user_conflicts[:5])
             extra = f" and {len(user_conflicts) - 5} more" if len(user_conflicts) > 5 else ""
@@ -781,14 +904,22 @@ class NotificationsService:
             else:
                 reason = f"Conflicts on: {names}{extra}"
 
-            msg = self._conflict_message(user_conflicts[0], year, month)
-            if len(user_conflicts) > 1:
-                msg += (
-                    f"\n\n(You will receive {len(user_conflicts) - 1} additional email(s)"
-                    f" for other conflicted resources.)"
-                )
+            context = {
+                "year": year,
+                "month": month,
+                "month_name": month_name,
+                "conflicts": [
+                    {
+                        "resource_name": c.resource.display_name,
+                        "total_demand": c.total_demand,
+                        "total_supply": c.total_supply,
+                        "gap": c.total_supply - c.total_demand,
+                    }
+                    for c in user_conflicts
+                ],
+            }
 
-            if all_sent:
+            if already:
                 skipped += 1
             result.append({
                 "email": user.email,
@@ -796,16 +927,30 @@ class NotificationsService:
                 "role": role,
                 "reason": reason,
                 "email_subject": self._subject_for_phase(phase),
-                "email_body_html": self._html_body(msg),
-                "already_notified": all_sent,
+                "email_body_html": build_conflict_alert_html(context),
+                "already_notified": already,
+                "excluded": False,
             })
 
         if notify_finance and conflicts:
             finance_users = self._get_users_by_roles(tenant_id, ["Finance", "Admin"])
-            summary_msg = self._conflict_finance_summary(conflicts, year, month)
             subj = self._subject_for_phase(phase)
-            body_html = self._html_body(summary_msg)
             reason = f"Full conflict summary — {len(conflicts)} conflict{'s' if len(conflicts) != 1 else ''}"
+            finance_context = {
+                "year": year,
+                "month": month,
+                "month_name": month_name,
+                "conflicts": [
+                    {
+                        "resource_name": c.resource.display_name,
+                        "total_demand": c.total_demand,
+                        "total_supply": c.total_supply,
+                        "gap": c.total_supply - c.total_demand,
+                    }
+                    for c in conflicts
+                ],
+            }
+            body_html = build_conflict_alert_html(finance_context)
             for fu in finance_users:
                 if not fu.email:
                     continue
@@ -821,6 +966,7 @@ class NotificationsService:
                     "email_subject": subj,
                     "email_body_html": body_html,
                     "already_notified": already,
+                    "excluded": False,
                 })
 
         return result, skipped
@@ -854,8 +1000,9 @@ class NotificationsService:
                     "role": "Employee",
                     "reason": f"Missing actuals for {month:02d}/{year}",
                     "email_subject": self._subject_for_phase(phase),
-                    "email_body_html": self._html_body(msg),
+                    "email_body_html": self._card_html(phase, msg, year, month),
                     "already_notified": already,
+                    "excluded": False,
                 })
 
         if notify_manager and missing:
@@ -883,15 +1030,16 @@ class NotificationsService:
                     "role": "Manager",
                     "reason": f"{n} employee{'s' if n != 1 else ''} missing actuals in {cc.name}",
                     "email_subject": self._subject_for_phase(phase),
-                    "email_body_html": self._html_body(msg),
+                    "email_body_html": self._card_html(phase, msg, year, month),
                     "already_notified": already,
+                    "excluded": False,
                 })
 
         if notify_finance and missing:
             finance_users = self._get_users_by_roles(tenant_id, ["Finance", "Admin"])
             msg = self._missing_actuals_finance_summary(missing, year, month)
             subj = self._subject_for_phase(phase)
-            body_html = self._html_body(msg)
+            body_html = self._card_html(phase, msg, year, month)
             n = len(missing)
             reason = f"Full summary — {n} employee{'s' if n != 1 else ''} missing actuals"
             for fu in finance_users:
@@ -909,6 +1057,7 @@ class NotificationsService:
                     "email_subject": subj,
                     "email_body_html": body_html,
                     "already_notified": already,
+                    "excluded": False,
                 })
 
         return result, skipped
@@ -927,7 +1076,6 @@ class NotificationsService:
             deadline = self.calculate_phase_deadline(phase, year, month)
             msg = self._get_message_template(phase, year, month, deadline)
             subj = self._subject_for_phase(phase)
-            body_html = self._html_body(msg)
             reason = f"Planning deadline: {deadline}"
 
             pm_ro: List[User] = []
@@ -950,8 +1098,9 @@ class NotificationsService:
                     "role": u.role.value,
                     "reason": reason,
                     "email_subject": subj,
-                    "email_body_html": body_html,
+                    "email_body_html": self._card_html(phase, msg, year, month),
                     "already_notified": already,
+                    "excluded": False,
                 })
 
         if notify_finance:
@@ -959,7 +1108,7 @@ class NotificationsService:
             deadline_fin = self.calculate_phase_deadline(phase_fin, year, month)
             msg_fin = self._get_message_template(phase_fin, year, month, deadline_fin)
             subj_fin = self._subject_for_phase(phase_fin)
-            body_fin = self._html_body(msg_fin)
+            body_fin = self._card_html(phase_fin, msg_fin, year, month)
             reason_fin = f"Finance consolidation deadline: {deadline_fin}"
             for u in self._get_users_by_roles(tenant_id, ["Finance", "Admin"]):
                 if not u.email:
@@ -976,6 +1125,7 @@ class NotificationsService:
                     "email_subject": subj_fin,
                     "email_body_html": body_fin,
                     "already_notified": already,
+                    "excluded": False,
                 })
 
         return result, skipped
@@ -990,7 +1140,6 @@ class NotificationsService:
         deadline = self.calculate_phase_deadline(phase, year, month)
         msg = self._get_message_template(phase, year, month, deadline)
         subj = self._subject_for_phase(phase)
-        body_html = self._html_body(msg)
         reason = f"Approval deadline: {deadline}"
 
         candidates: List[User] = []
@@ -1016,8 +1165,9 @@ class NotificationsService:
                 "role": u.role.value,
                 "reason": reason,
                 "email_subject": subj,
-                "email_body_html": body_html,
+                "email_body_html": self._card_html(phase, msg, year, month),
                 "already_notified": already,
+                "excluded": False,
             })
 
         return result, skipped
@@ -1234,10 +1384,20 @@ class NotificationsService:
             self._mail_service = GraphMailService(self.settings)
         return self._mail_service
 
+    _PHASE_TEMPLATE_KEY = {
+        NotificationPhase.CONFLICT_ALERT: "conflict_alert",
+        NotificationPhase.MISSING_ACTUALS: "missing_actuals",
+        NotificationPhase.PM_RO: "planning_reminder",
+        NotificationPhase.FINANCE: "planning_reminder",
+        NotificationPhase.EMPLOYEE: "missing_actuals",
+        NotificationPhase.RO_DIRECTOR: "approval_reminder",
+    }
+
     def _dispatch_mail(self, log: NotificationLog) -> None:
         """Send via Graph and update log.status in place (not yet committed)."""
         subject = self._subject_for_phase(log.phase)
-        body_html = self._html_body(log.message or "")
+        template_key = self._PHASE_TEMPLATE_KEY.get(log.phase, "test")
+        body_html = build_phase_html(template_key, log.message or "", log.year, log.month)
         success = self._get_mail_service().send_mail(
             to_email=log.recipient_email,
             subject=subject,
@@ -1461,3 +1621,8 @@ class NotificationsService:
             f"<p style='color:#888;font-size:12px;'>This is an automated message from MatKat.</p>"
             f"</body></html>"
         )
+
+    def _card_html(self, phase: NotificationPhase, msg: str, year: int, month: int) -> str:
+        """Build card-style HTML for preview and dispatch, matching the sent email appearance."""
+        key = self._PHASE_TEMPLATE_KEY.get(phase, "test")
+        return build_phase_html(key, msg, year, month)

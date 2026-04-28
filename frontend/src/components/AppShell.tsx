@@ -61,18 +61,17 @@ const useStyles = makeStyles({
     zIndex: 10,
   },
   logoSection: {
-    padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalL}`,
+    padding: '16px 12px 12px 12px',
     borderBottom: `1px solid rgba(255, 255, 255, 0.1)`,
-    minHeight: '72px',
     display: 'flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
   },
   logoSlot: {
     display: 'flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
+    gap: tokens.spacingHorizontalS,
     flex: 1,
+    minWidth: 0,
   },
   logoIcon: {
     width: '40px',
@@ -306,16 +305,17 @@ export function AppShell({ children }: { children: ReactNode }) {
       <aside className={styles.sidebar} style={{ display: sidebarOpen ? 'flex' : 'none' }}>
         <div className={styles.logoSection}>
           <div className={styles.logoSlot}>
-            <div className={styles.logoIcon}>MK</div>
-            <div className={styles.logoTextContainer}>
-              <div className={styles.logoText}>MatKat</div>
-              <div className={styles.logoSubtext}>2.0</div>
-            </div>
-            {config.devAuthBypass && (
-              <Badge appearance="filled" color="warning" size="small">
-                DEV
-              </Badge>
-            )}
+            <img
+                src="/MatKatLog.png"
+                alt="MatKat"
+                style={{
+                  height: '72px',
+                  width: 'auto',
+                  maxWidth: '210px',
+                  objectFit: 'contain',
+                  display: 'block',
+                }}
+              />
           </div>
         </div>
 

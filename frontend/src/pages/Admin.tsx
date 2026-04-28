@@ -356,6 +356,7 @@ interface PreviewRecipientItem {
   email_subject: string;
   email_body_html: string;
   already_notified: boolean;
+  excluded?: boolean;
 }
 
 interface SchedulePreviewData {
@@ -378,6 +379,7 @@ interface NotificationScheduleItem {
   notify_manager: boolean;
   notify_finance: boolean;
   notify_employee: boolean;
+  excluded_emails: string[];
   created_at: string;
   updated_at: string;
   created_by: string;
@@ -556,6 +558,9 @@ function NotificationsPanel() {
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
   const [sendLoading, setSendLoading] = useState(false);
   const [sendResult, setSendResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [excludedEmails, setExcludedEmails] = useState<string[]>([]);
+  const [exclusionSearch, setExclusionSearch] = useState('');
+  const [allUsers, setAllUsers] = useState<AdminUser[]>([]);
   const [form, setForm] = useState<Partial<NotificationScheduleItem>>({
     notification_type: 'conflict_alerts',
     trigger_type: 'day_of_month',
@@ -610,6 +615,11 @@ function NotificationsPanel() {
       notify_finance: true,
       notify_employee: true,
     });
+    setExcludedEmails([]);
+    setExclusionSearch('');
+    if (allUsers.length === 0) {
+      adminApi.listUsers().then(setAllUsers).catch(() => {});
+    }
     setDialogOpen(true);
   };
 
@@ -626,6 +636,11 @@ function NotificationsPanel() {
       notify_finance: s.notify_finance,
       notify_employee: s.notify_employee,
     });
+    setExcludedEmails(s.excluded_emails || []);
+    setExclusionSearch('');
+    if (allUsers.length === 0) {
+      adminApi.listUsers().then(setAllUsers).catch(() => {});
+    }
     setDialogOpen(true);
   };
 
@@ -641,6 +656,7 @@ function NotificationsPanel() {
         notify_manager: form.notify_manager ?? true,
         notify_finance: form.notify_finance ?? true,
         notify_employee: form.notify_employee ?? true,
+        excluded_emails: excludedEmails,
       };
       if (editSched) {
         await apiClient.put<NotificationScheduleItem>(`/notification-schedules/${editSched.id}`, payload);
@@ -702,10 +718,10 @@ function NotificationsPanel() {
       const data = await apiClient.get<SchedulePreviewData>(`/notification-schedules/${s.id}/preview`);
       setPreviewData(data);
       const initialSelected = new Set(
-        data.recipients.filter((r) => !r.already_notified).map((r) => r.email),
+        data.recipients.filter((r) => !r.already_notified && !r.excluded).map((r) => r.email),
       );
       setSelectedEmails(initialSelected);
-      const firstChecked = data.recipients.find((r) => !r.already_notified);
+      const firstChecked = data.recipients.find((r) => !r.already_notified && !r.excluded);
       if (firstChecked) setSelectedPreviewEmail(firstChecked.email);
     } catch (err) {
       showApiError(err as Error);
@@ -911,7 +927,12 @@ function NotificationsPanel() {
               {!previewLoading && previewData && (() => {
                 const { period, recipients, total_recipients, skipped } = previewData;
 
-                const allCheckable = recipients.filter((r) => !r.already_notified);
+                // Active first, excluded last
+                const sortedRecipients = [
+                  ...recipients.filter((r) => !r.excluded),
+                  ...recipients.filter((r) => r.excluded),
+                ];
+                const allCheckable = sortedRecipients.filter((r) => !r.already_notified && !r.excluded);
                 const checkedCheckable = allCheckable.filter((r) => selectedEmails.has(r.email));
                 const headerCheckState: boolean | 'mixed' =
                   checkedCheckable.length === 0 ? false
@@ -933,11 +954,11 @@ function NotificationsPanel() {
                   setSelectedEmails(next);
                 };
 
-                const checkedRecipients = recipients.filter((r) => selectedEmails.has(r.email));
+                const checkedRecipients = sortedRecipients.filter((r) => selectedEmails.has(r.email));
                 const effectivePreviewEmail = selectedEmails.has(selectedPreviewEmail)
                   ? selectedPreviewEmail
                   : checkedRecipients[0]?.email ?? '';
-                const selectedRecipient = recipients.find((r) => r.email === effectivePreviewEmail) ?? null;
+                const selectedRecipient = sortedRecipients.find((r) => r.email === effectivePreviewEmail) ?? null;
 
                 const selectedCount = checkedCheckable.length;
 
@@ -973,12 +994,12 @@ function NotificationsPanel() {
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {recipients.map((r, idx) => (
-                                <TableRow key={idx} style={{ opacity: r.already_notified ? 0.5 : 1 }}>
+                              {sortedRecipients.map((r, idx) => (
+                                <TableRow key={idx} style={{ opacity: r.already_notified || r.excluded ? 0.5 : 1 }}>
                                   <TableCell>
                                     <Checkbox
                                       checked={selectedEmails.has(r.email)}
-                                      disabled={r.already_notified}
+                                      disabled={r.already_notified || r.excluded}
                                       onChange={() => toggleEmail(r.email)}
                                     />
                                   </TableCell>
@@ -987,6 +1008,11 @@ function NotificationsPanel() {
                                     {r.already_notified && (
                                       <Badge appearance="tint" color="subtle" size="small" style={{ marginLeft: 6 }}>
                                         Already sent
+                                      </Badge>
+                                    )}
+                                    {r.excluded && (
+                                      <Badge appearance="tint" color="subtle" size="small" style={{ marginLeft: 6 }}>
+                                        Excluded
                                       </Badge>
                                     )}
                                   </TableCell>
@@ -1061,7 +1087,7 @@ function NotificationsPanel() {
                             <div style={{ borderTop: `1px solid ${tokens.colorNeutralStroke2}` }} />
                             <iframe
                               srcDoc={selectedRecipient.email_body_html}
-                              style={{ width: '100%', height: '180px', border: 'none', display: 'block' }}
+                              style={{ width: '100%', height: '500px', border: 'none', borderRadius: '8px', display: 'block' }}
                               sandbox="allow-same-origin"
                               title="Email preview"
                             />
@@ -1091,7 +1117,7 @@ function NotificationsPanel() {
                 {(() => {
                   if (!previewData) return 'Send Now';
                   const { total_recipients } = previewData;
-                  const n = previewData.recipients.filter((r) => !r.already_notified && selectedEmails.has(r.email)).length;
+                  const n = previewData.recipients.filter((r) => !r.already_notified && !r.excluded && selectedEmails.has(r.email)).length;
                   if (n === 0) return 'Send Now';
                   if (n === total_recipients) return `Send Now (${n} recipient${n !== 1 ? 's' : ''})`;
                   return `Send Now (${n} of ${total_recipients} recipient${total_recipients !== 1 ? 's' : ''})`;
@@ -1298,6 +1324,126 @@ function NotificationsPanel() {
                 checked={form.is_active !== false}
                 onChange={(_, d) => setForm({ ...form, is_active: d.checked as boolean })}
               />
+
+              {/* Excluded Recipients */}
+              <div className={panelStyles.dialogField} style={{ marginTop: tokens.spacingVerticalM }}>
+                <Text weight="semibold" style={{ display: 'block', marginBottom: '2px' }}>
+                  Excluded Recipients
+                </Text>
+                <Text size={200} style={{ color: tokens.colorNeutralForeground3, display: 'block', marginBottom: tokens.spacingVerticalS }}>
+                  These users will never receive emails from this schedule.
+                </Text>
+
+                {/* Typeahead input */}
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    placeholder="Search by name or email to exclude…"
+                    value={exclusionSearch}
+                    onChange={(e) => setExclusionSearch(e.target.value)}
+                    style={{
+                      padding: '8px',
+                      borderRadius: tokens.borderRadiusMedium,
+                      border: `1px solid ${tokens.colorNeutralStroke1}`,
+                      fontSize: tokens.fontSizeBase300,
+                      width: '100%',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  {exclusionSearch.trim().length > 0 && (() => {
+                    const q = exclusionSearch.trim().toLowerCase();
+                    const matches = allUsers.filter(
+                      (u) =>
+                        !excludedEmails.includes(u.email) &&
+                        (u.display_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)),
+                    ).slice(0, 10);
+                    if (matches.length === 0) return null;
+                    return (
+                      <div style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        zIndex: 9999,
+                        background: tokens.colorNeutralBackground1,
+                        border: `1px solid ${tokens.colorNeutralStroke1}`,
+                        borderRadius: tokens.borderRadiusMedium,
+                        boxShadow: tokens.shadow8,
+                        maxHeight: '200px',
+                        overflowY: 'auto',
+                      }}>
+                        {matches.map((u) => (
+                          <div
+                            key={u.id}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setExcludedEmails((prev) => [...prev, u.email]);
+                              setExclusionSearch('');
+                            }}
+                            style={{
+                              padding: '8px 12px',
+                              cursor: 'pointer',
+                              fontSize: tokens.fontSizeBase300,
+                              borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+                            }}
+                            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = tokens.colorNeutralBackground1Hover; }}
+                            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ''; }}
+                          >
+                            <strong>{u.display_name}</strong>
+                            <span style={{ color: tokens.colorNeutralForeground3, marginLeft: 6, fontSize: tokens.fontSizeBase200 }}>
+                              &lt;{u.email}&gt;
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Pills */}
+                <div style={{ marginTop: tokens.spacingVerticalS }}>
+                  {excludedEmails.length === 0 ? (
+                    <Text size={200} style={{ color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>
+                      No exclusions — all eligible recipients will receive this notification.
+                    </Text>
+                  ) : (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {excludedEmails.map((email) => (
+                        <div
+                          key={email}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
+                            borderRadius: tokens.borderRadiusMedium,
+                            background: tokens.colorNeutralBackground3,
+                            fontSize: tokens.fontSizeBase200,
+                          }}
+                        >
+                          {email}
+                          <button
+                            type="button"
+                            onClick={() => setExcludedEmails((prev) => prev.filter((e) => e !== email))}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              padding: '0 2px',
+                              fontSize: tokens.fontSizeBase300,
+                              color: tokens.colorNeutralForeground3,
+                              lineHeight: 1,
+                            }}
+                            title={`Remove ${email}`}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
 
               {/* Schedule summary preview */}
               <div style={{

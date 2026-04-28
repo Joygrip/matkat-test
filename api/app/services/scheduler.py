@@ -96,6 +96,7 @@ def _should_fire(schedule: NotificationSchedule, now_local: datetime, db) -> boo
 
 
 def _dispatch(service: NotificationsService, schedule: NotificationSchedule, year: int, month: int):
+    excluded = schedule.excluded_emails or []
     ntype = schedule.notification_type
     if ntype == NotificationScheduleType.CONFLICT_ALERTS:
         return service.run_conflict_alerts(
@@ -103,6 +104,7 @@ def _dispatch(service: NotificationsService, schedule: NotificationSchedule, yea
             notify_pm=schedule.notify_pm,
             notify_manager=schedule.notify_manager,
             notify_finance=schedule.notify_finance,
+            excluded_emails=excluded,
         )
     if ntype == NotificationScheduleType.MISSING_ACTUALS:
         return service.run_missing_actuals_alerts(
@@ -110,6 +112,7 @@ def _dispatch(service: NotificationsService, schedule: NotificationSchedule, yea
             notify_employee=schedule.notify_employee,
             notify_manager=schedule.notify_manager,
             notify_finance=schedule.notify_finance,
+            excluded_emails=excluded,
         )
     if ntype == NotificationScheduleType.PLANNING_REMINDER:
         return service.run_planning_reminder(
@@ -117,12 +120,14 @@ def _dispatch(service: NotificationsService, schedule: NotificationSchedule, yea
             notify_pm=schedule.notify_pm,
             notify_manager=schedule.notify_manager,
             notify_finance=schedule.notify_finance,
+            excluded_emails=excluded,
         )
     if ntype == NotificationScheduleType.APPROVAL_REMINDER:
         return service.run_approval_reminder(
             year, month,
             notify_manager=schedule.notify_manager,
             notify_finance=schedule.notify_finance,
+            excluded_emails=excluded,
         )
     return {}
 

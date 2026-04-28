@@ -24,11 +24,13 @@ module-level ``send_notification`` function::
     result = send_notification(
         template_key="planning_reminder",
         recipients=["alice@example.com"],
-        context={"year": 2026, "month": 3, "deadline": "2026-03-06"},
+        context={"year": 2026, "month": 3, "month_name": "March", "deadline": "2026-03-06"},
     )
     # {"sent": [...], "failed": [...], "mode": "stub"|"graph"}
 """
+import base64
 import logging
+import os
 import time
 from typing import Optional
 
@@ -42,10 +44,23 @@ _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 EMAIL_STAGGER_SECONDS = 15
 
 # ---------------------------------------------------------------------------
+# Logo — embedded as base64 so email clients don't block external images
+# ---------------------------------------------------------------------------
+
+_LOGO_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "frontend", "public", "MatKatLog.png")
+)
+try:
+    with open(_LOGO_PATH, "rb") as _f:
+        _LOGO_SRC = f"data:image/png;base64,{base64.b64encode(_f.read()).decode()}"
+except Exception:
+    _LOGO_SRC = ""  # fallback: show text instead of broken image
+
+# ---------------------------------------------------------------------------
 # Template registry
 # ---------------------------------------------------------------------------
 # Each entry: {"subject": "...", "body": "..."}
-# Body supports {placeholder} substitution via str.format_map(context).
+# Body is used as plain-text fallback for templates without a dedicated HTML builder.
 # Add new templates here; trigger code uses send_notification(key, ...).
 
 NOTIFICATION_TEMPLATES: dict[str, dict[str, str]] = {
@@ -99,6 +114,365 @@ NOTIFICATION_TEMPLATES: dict[str, dict[str, str]] = {
 # Sentinel returned when a Graph call fails with a network / auth error.
 # Callers use `is` identity check to distinguish from a legitimate None value.
 FETCH_FAILED = "__GRAPH_MAIL_ERROR__"
+
+# ---------------------------------------------------------------------------
+# Banner style configs per template key
+# ---------------------------------------------------------------------------
+
+_BANNER_CONFIGS: dict[str, tuple[str, str, str]] = {
+    # (bg, left_border, title_color)
+    "conflict_alert":    ("#fee2e2", "#dc2626", "#991b1b"),
+    "missing_actuals":   ("#fef9c3", "#ca8a04", "#854d0e"),
+    "planning_reminder": ("#dbeafe", "#2563eb", "#1e40af"),
+    "approval_reminder": ("#ffedd5", "#ea580c", "#9a3412"),
+    "test":              ("#dcfce7", "#16a34a", "#166534"),
+}
+
+
+# ---------------------------------------------------------------------------
+# HTML helpers
+# ---------------------------------------------------------------------------
+
+def _esc(text: object) -> str:
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _cta_button(label: str) -> str:
+    return (
+        f'<div style="margin-top:16px;">'
+        f'<a style="display:inline-block;background:#1e3a5f;color:#ffffff;'
+        f'padding:10px 20px;border-radius:6px;font-family:Arial,sans-serif;'
+        f'font-size:13px;font-weight:bold;text-decoration:none;">'
+        f'{_esc(label)}'
+        f'</a></div>'
+    )
+
+
+def _build_base_html(
+    banner_bg: str,
+    banner_border: str,
+    banner_title_color: str,
+    banner_title: str,
+    banner_subtitle: str,
+    body_html: str,
+) -> str:
+    """Assemble the full card-style email HTML with header, banner, body, and footer."""
+    logo_html = (
+        f"<img src='{_LOGO_SRC}' alt='MatKat' height='40' "
+        "style='height:40px;width:auto;display:block;' />"
+        if _LOGO_SRC else
+        "<span style='font-family:Arial,sans-serif;font-size:20px;"
+        "font-weight:bold;color:#ffffff;'>MatKat</span>"
+    )
+    return (
+        "<!DOCTYPE html>"
+        "<html><body style='margin:0;padding:0;background:#f3f4f6;"
+        "font-family:Arial,sans-serif;'>"
+        "<table width='100%' cellpadding='0' cellspacing='0' "
+        "style='background:#f3f4f6;padding:24px 0;'>"
+        "<tr><td align='center'>"
+        "<table width='600' cellpadding='0' cellspacing='0' "
+        "style='max-width:600px;background:#ffffff;border-radius:8px;overflow:hidden;"
+        "border:1px solid #e0e0e0;'>"
+        # ── Header ──────────────────────────────────────────────────────────
+        "<tr>"
+        "<td style='background:#1e3a5f;padding:20px 28px;'>"
+        "<table cellpadding='0' cellspacing='0'><tr>"
+        f"<td style='vertical-align:middle;'>{logo_html}</td>"
+        "<td style='padding-left:12px;vertical-align:middle;"
+        "font-family:Arial,sans-serif;font-size:13px;color:#4a9eff;'>"
+        "FeMD Resource Allocation"
+        "</td>"
+        "</tr></table>"
+        "</td>"
+        "</tr>"
+        # ── Alert banner ─────────────────────────────────────────────────────
+        "<tr>"
+        f"<td style='background:{banner_bg};border-left:4px solid {banner_border};"
+        "padding:14px 28px;'>"
+        f"<div style='font-family:Arial,sans-serif;font-size:14px;font-weight:bold;"
+        f"color:{banner_title_color};'>{_esc(banner_title)}</div>"
+        f"<div style='font-family:Arial,sans-serif;font-size:12px;"
+        f"color:{banner_title_color};margin-top:4px;'>{_esc(banner_subtitle)}</div>"
+        "</td>"
+        "</tr>"
+        # ── Body ─────────────────────────────────────────────────────────────
+        "<tr>"
+        "<td style='background:#ffffff;padding:24px 28px;'>"
+        f"{body_html}"
+        "</td>"
+        "</tr>"
+        # ── Footer ───────────────────────────────────────────────────────────
+        "<tr>"
+        "<td style='background:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 28px;'>"
+        "<p style='margin:0;font-family:Arial,sans-serif;font-size:11px;"
+        "color:#9ca3af;line-height:1.5;'>"
+        "This is an automated message from MatKat. Please do not reply to this email."
+        "</p>"
+        "<p style='margin:4px 0 0;font-family:Arial,sans-serif;font-size:11px;"
+        "color:#9ca3af;line-height:1.5;'>"
+        "Sent from matkat-noreply@ferrosanmd.com"
+        "</p>"
+        "</td>"
+        "</tr>"
+        "</table>"
+        "</td></tr>"
+        "</table>"
+        "</body></html>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-template HTML builders
+# ---------------------------------------------------------------------------
+
+def _build_conflict_alert_html(context: dict) -> str:
+    year = context["year"]
+    month_name = context["month_name"]
+    conflicts = context.get("conflicts", [])
+
+    rows = ""
+    for i, c in enumerate(conflicts):
+        row_bg = "#ffffff" if i % 2 == 0 else "#f9fafb"
+        gap = c["gap"]
+        gap_str = f"{gap:.0f}%"
+        if gap < 0:
+            badge = (
+                f"<span style='display:inline-block;background:#fee2e2;color:#991b1b;"
+                f"padding:3px 8px;border-radius:4px;font-size:12px;"
+                f"font-weight:bold;font-family:Arial,sans-serif;'>"
+                f"{gap_str}</span>"
+            )
+        else:
+            badge = (
+                f"<span style='display:inline-block;background:#dcfce7;color:#166534;"
+                f"padding:3px 8px;border-radius:4px;font-size:12px;"
+                f"font-weight:bold;font-family:Arial,sans-serif;'>"
+                f"+{gap_str}</span>"
+            )
+        rows += (
+            f"<tr style='background:{row_bg};'>"
+            f"<td style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+            f"color:#111827;border-bottom:1px solid #f3f4f6;'>{_esc(c['resource_name'])}</td>"
+            f"<td style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+            f"color:#111827;text-align:right;border-bottom:1px solid #f3f4f6;'>{_esc(c['total_demand'])}%</td>"
+            f"<td style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+            f"color:#111827;text-align:right;border-bottom:1px solid #f3f4f6;'>{_esc(c['total_supply'])}%</td>"
+            f"<td style='padding:10px 12px;text-align:center;border-bottom:1px solid #f3f4f6;'>{badge}</td>"
+            f"</tr>"
+        )
+
+    table = (
+        "<table width='100%' cellpadding='0' cellspacing='0' "
+        "style='border-collapse:collapse;border:1px solid #e5e7eb;margin:16px 0;'>"
+        "<thead><tr style='background:#f9fafb;'>"
+        "<th style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        "font-weight:bold;color:#6b7280;text-align:left;"
+        "border-bottom:1px solid #e5e7eb;'>Resource</th>"
+        "<th style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        "font-weight:bold;color:#6b7280;text-align:right;"
+        "border-bottom:1px solid #e5e7eb;'>Demand</th>"
+        "<th style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        "font-weight:bold;color:#6b7280;text-align:right;"
+        "border-bottom:1px solid #e5e7eb;'>Supply</th>"
+        "<th style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        "font-weight:bold;color:#6b7280;text-align:center;"
+        "border-bottom:1px solid #e5e7eb;'>Gap</th>"
+        f"</tr></thead><tbody>{rows}</tbody></table>"
+    )
+
+    body_html = (
+        f"<p style='margin:0 0 16px;font-family:Arial,sans-serif;font-size:14px;color:#374151;'>"
+        f"The following resources have demand that exceeds available supply for "
+        f"{_esc(month_name)} {_esc(year)}. Please review and adjust demand or supply lines in MatKat."
+        f"</p>"
+        f"{table}"
+        f"{_cta_button('Review in MatKat →')}"
+    )
+
+    bg, border, title_color = _BANNER_CONFIGS["conflict_alert"]
+    return _build_base_html(
+        banner_bg=bg,
+        banner_border=border,
+        banner_title_color=title_color,
+        banner_title="Resource Conflict Detected",
+        banner_subtitle=f"{month_name} {year} — Action required",
+        body_html=body_html,
+    )
+
+
+def _build_missing_actuals_html(context: dict) -> str:
+    year = context["year"]
+    month_name = context["month_name"]
+
+    resources = context.get("resources")
+    resource_name = context.get("resource_name")
+
+    if resources:
+        items_html = "".join(
+            f"<li style='font-family:Arial,sans-serif;font-size:14px;color:#374151;"
+            f"margin-bottom:4px;'>{_esc(r)}</li>"
+            for r in resources
+        )
+        list_html = f"<ul style='margin:12px 0;padding-left:20px;'>{items_html}</ul>"
+    elif resource_name:
+        list_html = (
+            f"<ul style='margin:12px 0;padding-left:20px;'>"
+            f"<li style='font-family:Arial,sans-serif;font-size:14px;color:#374151;'>"
+            f"{_esc(resource_name)}</li></ul>"
+        )
+    else:
+        list_html = ""
+
+    body_html = (
+        f"<p style='margin:0 0 12px;font-family:Arial,sans-serif;font-size:14px;color:#374151;'>"
+        f"The following actuals have not been submitted for {_esc(month_name)} {_esc(year)}. "
+        f"Please log in to MatKat and submit your actuals before the period closes."
+        f"</p>"
+        f"{list_html}"
+        f"{_cta_button('Submit Actuals in MatKat →')}"
+    )
+
+    bg, border, title_color = _BANNER_CONFIGS["missing_actuals"]
+    return _build_base_html(
+        banner_bg=bg,
+        banner_border=border,
+        banner_title_color=title_color,
+        banner_title="Actuals Submission Required",
+        banner_subtitle=f"{month_name} {year} — Please act now",
+        body_html=body_html,
+    )
+
+
+def _build_planning_reminder_html(context: dict) -> str:
+    year = context["year"]
+    month_name = context["month_name"]
+    deadline = context.get("deadline", "")
+
+    body_html = (
+        f"<p style='margin:0 0 12px;font-family:Arial,sans-serif;font-size:14px;color:#374151;'>"
+        f"Please complete your demand and supply planning for {_esc(month_name)} {_esc(year)} "
+        f"by {_esc(deadline)}."
+        f"</p>"
+        f"<p style='margin:0 0 12px;font-family:Arial,sans-serif;font-size:14px;color:#374151;'>"
+        f"Log in to MatKat to review and update your planning lines."
+        f"</p>"
+        f"{_cta_button('Open MatKat →')}"
+    )
+
+    bg, border, title_color = _BANNER_CONFIGS["planning_reminder"]
+    return _build_base_html(
+        banner_bg=bg,
+        banner_border=border,
+        banner_title_color=title_color,
+        banner_title="Planning Reminder",
+        banner_subtitle=f"Deadline: {_esc(deadline)}",
+        body_html=body_html,
+    )
+
+
+def _build_approval_reminder_html(context: dict) -> str:
+    year = context["year"]
+    month_name = context["month_name"]
+    deadline = context.get("deadline", "")
+
+    body_html = (
+        f"<p style='margin:0 0 12px;font-family:Arial,sans-serif;font-size:14px;color:#374151;'>"
+        f"Actuals for {_esc(month_name)} {_esc(year)} are awaiting your approval."
+        f"</p>"
+        f"<p style='margin:0 0 12px;font-family:Arial,sans-serif;font-size:14px;color:#374151;'>"
+        f"Please log in to MatKat and review the pending approvals before {_esc(deadline)}."
+        f"</p>"
+        f"{_cta_button('Review Approvals in MatKat →')}"
+    )
+
+    bg, border, title_color = _BANNER_CONFIGS["approval_reminder"]
+    return _build_base_html(
+        banner_bg=bg,
+        banner_border=border,
+        banner_title_color=title_color,
+        banner_title="Approval Required",
+        banner_subtitle=f"{month_name} {year} — Review pending",
+        body_html=body_html,
+    )
+
+
+def _build_test_html(_context: dict) -> str:
+    body_html = (
+        "<p style='margin:0 0 12px;font-family:Arial,sans-serif;font-size:14px;color:#374151;'>"
+        "This is a test message from MatKat."
+        "</p>"
+        "<p style='margin:0;font-family:Arial,sans-serif;font-size:14px;color:#374151;'>"
+        "If you received this, Microsoft Graph mail is configured correctly."
+        "</p>"
+    )
+
+    bg, border, title_color = _BANNER_CONFIGS["test"]
+    return _build_base_html(
+        banner_bg=bg,
+        banner_border=border,
+        banner_title_color=title_color,
+        banner_title="Configuration Test",
+        banner_subtitle="Graph mail is working",
+        body_html=body_html,
+    )
+
+
+_HTML_BUILDERS = {
+    "conflict_alert":    _build_conflict_alert_html,
+    "missing_actuals":   _build_missing_actuals_html,
+    "planning_reminder": _build_planning_reminder_html,
+    "approval_reminder": _build_approval_reminder_html,
+    "test":              _build_test_html,
+}
+
+
+def build_conflict_alert_html(context: dict) -> str:
+    """Build rich card-style HTML for a conflict alert with a structured conflict list.
+
+    context keys:
+        year, month, month_name — period info
+        conflicts — list of dicts with resource_name, total_demand, total_supply, gap
+    """
+    return _build_conflict_alert_html(context)
+
+
+def build_phase_html(template_key: str, message: str, year: int, month: int) -> str:
+    """Build card-style HTML for a plain-text notification message.
+
+    Used by NotificationsService._dispatch_mail to wrap log messages in the
+    appropriate banner style without requiring structured context.
+    """
+    import calendar as cal
+
+    banner_titles = {
+        "conflict_alert":    ("Resource Conflict Detected", "Action required"),
+        "missing_actuals":   ("Actuals Submission Required", "Please act now"),
+        "planning_reminder": ("Planning Reminder", "Please complete your planning"),
+        "approval_reminder": ("Approval Required", "Review pending"),
+        "test":              ("Configuration Test", "Graph mail is working"),
+    }
+
+    key = template_key if template_key in _BANNER_CONFIGS else "test"
+    bg, border, title_color = _BANNER_CONFIGS[key]
+    title, subtitle_fallback = banner_titles.get(key, ("Notification", ""))
+    month_name = cal.month_name[month] if 1 <= month <= 12 else ""
+    subtitle = f"{month_name} {year}" if month_name and year else subtitle_fallback
+
+    safe = _esc(message).replace("\n\n", "</p><p style='margin:0 0 12px;"
+                                 "font-family:Arial,sans-serif;font-size:14px;color:#374151;'>")
+    safe = safe.replace("\n", "<br/>")
+    body_html = (
+        f"<p style='margin:0 0 12px;font-family:Arial,sans-serif;"
+        f"font-size:14px;color:#374151;'>{safe}</p>"
+    )
+
+    return _build_base_html(bg, border, title_color, title, subtitle, body_html)
+
+
+# ---------------------------------------------------------------------------
+# GraphMailService
+# ---------------------------------------------------------------------------
 
 
 class GraphMailService:
@@ -281,7 +655,7 @@ def send_notification(
     Args:
         template_key: Key from NOTIFICATION_TEMPLATES (e.g. "planning_reminder").
         recipients:   List of recipient email addresses.
-        context:      Dict of values for {placeholder} substitution in the template.
+        context:      Dict of values for {placeholder} substitution / HTML builder.
 
     Returns:
         {"sent": [<emails>], "failed": [<emails>], "mode": "stub"|"graph"}
@@ -303,18 +677,29 @@ def send_notification(
 
     try:
         subject = template["subject"].format_map(context)
-        body_text = template["body"].format_map(context)
     except KeyError as exc:
         raise ValueError(
             f"Template '{template_key}' requires context key {exc} which was not provided."
         ) from exc
 
-    body_html = (
-        f"<html><body>"
-        f"<p>{body_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')}</p>"
-        f"<p style='color:#888;font-size:12px;'>This is an automated message from MatKat.</p>"
-        f"</body></html>"
-    )
+    builder = _HTML_BUILDERS.get(template_key)
+    if builder:
+        body_html = builder(context)
+    else:
+        # Fallback for templates without a dedicated HTML builder
+        try:
+            body_text = template["body"].format_map(context)
+        except KeyError as exc:
+            raise ValueError(
+                f"Template '{template_key}' requires context key {exc} which was not provided."
+            ) from exc
+        safe = body_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        body_html = (
+            f"<html><body>"
+            f"<p>{safe}</p>"
+            f"<p style='color:#888;font-size:12px;'>This is an automated message from MatKat.</p>"
+            f"</body></html>"
+        )
 
     sent: list[str] = []
     failed: list[str] = []

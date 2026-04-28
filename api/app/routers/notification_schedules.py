@@ -35,6 +35,7 @@ class NotificationScheduleCreate(BaseModel):
     notify_manager: bool = True
     notify_finance: bool = True
     notify_employee: bool = True
+    excluded_emails: list[str] = []
 
 
 class NotificationScheduleUpdate(BaseModel):
@@ -47,6 +48,7 @@ class NotificationScheduleUpdate(BaseModel):
     notify_manager: Optional[bool] = None
     notify_finance: Optional[bool] = None
     notify_employee: Optional[bool] = None
+    excluded_emails: Optional[list[str]] = None
 
 
 class RunScheduleRequest(BaseModel):
@@ -61,6 +63,7 @@ class PreviewRecipient(BaseModel):
     email_subject: str
     email_body_html: str
     already_notified: bool
+    excluded: bool = False
 
 
 class SchedulePreviewResponse(BaseModel):
@@ -84,6 +87,7 @@ class NotificationScheduleResponse(BaseModel):
     notify_manager: bool
     notify_finance: bool
     notify_employee: bool
+    excluded_emails: list[str]
     created_at: str
     updated_at: str
     created_by: str
@@ -105,6 +109,7 @@ def _to_response(s: NotificationSchedule) -> NotificationScheduleResponse:
         notify_manager=s.notify_manager,
         notify_finance=s.notify_finance,
         notify_employee=s.notify_employee,
+        excluded_emails=s.excluded_emails or [],
         created_at=str(s.created_at),
         updated_at=str(s.updated_at),
         created_by=s.created_by,
@@ -172,6 +177,7 @@ async def create_schedule(
         notify_manager=data.notify_manager,
         notify_finance=data.notify_finance,
         notify_employee=data.notify_employee,
+        excluded_emails=data.excluded_emails,
         created_by=current_user.object_id,
     )
     db.add(schedule)
@@ -208,6 +214,8 @@ async def update_schedule(
         schedule.notify_finance = data.notify_finance
     if data.notify_employee is not None:
         schedule.notify_employee = data.notify_employee
+    if data.excluded_emails is not None:
+        schedule.excluded_emails = data.excluded_emails
 
     schedule.updated_at = datetime.utcnow()
     db.commit()
@@ -261,6 +269,7 @@ async def preview_schedule(
         notify_manager=schedule.notify_manager,
         notify_finance=schedule.notify_finance,
         notify_employee=schedule.notify_employee,
+        excluded_emails=schedule.excluded_emails or [],
     )
 
     return SchedulePreviewResponse(
@@ -287,6 +296,7 @@ async def run_schedule_now(
 
     recipient_emails = (body.recipient_emails or None) if body else None
 
+    excluded = schedule.excluded_emails or []
     ntype = schedule.notification_type
     if ntype == NotificationScheduleType.CONFLICT_ALERTS:
         result = service.run_conflict_alerts(
@@ -295,6 +305,7 @@ async def run_schedule_now(
             notify_manager=schedule.notify_manager,
             notify_finance=schedule.notify_finance,
             recipient_emails=recipient_emails,
+            excluded_emails=excluded,
         )
     elif ntype == NotificationScheduleType.MISSING_ACTUALS:
         result = service.run_missing_actuals_alerts(
@@ -303,6 +314,7 @@ async def run_schedule_now(
             notify_manager=schedule.notify_manager,
             notify_finance=schedule.notify_finance,
             recipient_emails=recipient_emails,
+            excluded_emails=excluded,
         )
     elif ntype == NotificationScheduleType.PLANNING_REMINDER:
         result = service.run_planning_reminder(
@@ -311,6 +323,7 @@ async def run_schedule_now(
             notify_manager=schedule.notify_manager,
             notify_finance=schedule.notify_finance,
             recipient_emails=recipient_emails,
+            excluded_emails=excluded,
         )
     elif ntype == NotificationScheduleType.APPROVAL_REMINDER:
         result = service.run_approval_reminder(
@@ -318,6 +331,7 @@ async def run_schedule_now(
             notify_manager=schedule.notify_manager,
             notify_finance=schedule.notify_finance,
             recipient_emails=recipient_emails,
+            excluded_emails=excluded,
         )
     else:
         result = {}

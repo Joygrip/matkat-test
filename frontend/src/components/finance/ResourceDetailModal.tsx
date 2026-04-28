@@ -39,6 +39,7 @@ import { consolidationApi } from '../../api/consolidation';
 import { planningApi, type DemandLine, type SupplyLine } from '../../api/planning';
 import { lookupsApi, type Project } from '../../api/lookups';
 import { useToast } from '../../hooks/useToast';
+import { usePeriod } from '../../contexts/PeriodContext';
 import { GapBadge } from './FinanceBadges';
 
 export interface ResourceDetailModalProps {
@@ -95,6 +96,8 @@ export function ResourceDetailModal({
 }: ResourceDetailModalProps) {
   const styles = useStyles();
   const { showSuccess, showApiError } = useToast();
+  const { periods } = usePeriod();
+  const selectedPeriod = periods.find(p => p.id === periodId);
 
   // Planning lines (editable, with IDs)
   const [demandLines, setDemandLines] = useState<DemandLine[]>([]);
@@ -191,6 +194,7 @@ export function ResourceDetailModal({
 
   const saveDemand = async (lineId: string | null) => {
     if (!demandForm.project_id || !periodId || !resourceId) return;
+    if (!lineId && (!selectedPeriod?.year || !selectedPeriod?.month)) return;
     setSaving(true);
     try {
       if (lineId) {
@@ -205,6 +209,8 @@ export function ResourceDetailModal({
           project_id: demandForm.project_id,
           resource_id: resourceId,
           fte_percent: demandForm.fte_percent,
+          year: selectedPeriod!.year,
+          month: selectedPeriod!.month,
         });
         showSuccess('Demand line added');
       }
@@ -255,6 +261,7 @@ export function ResourceDetailModal({
 
   const saveSupply = async (lineId: string | null) => {
     if (!periodId || !resourceId) return;
+    if (!lineId && (!selectedPeriod?.year || !selectedPeriod?.month)) return;
     setSaving(true);
     try {
       if (lineId) {
@@ -269,6 +276,8 @@ export function ResourceDetailModal({
           resource_id: resourceId,
           project_id: supplyForm.project_id || undefined,
           fte_percent: supplyForm.fte_percent,
+          year: selectedPeriod!.year,
+          month: selectedPeriod!.month,
         });
         showSuccess('Supply line added');
       }
@@ -303,10 +312,17 @@ export function ResourceDetailModal({
   const anyCanEdit = canEditDemand || canEditSupply;
   // When role can edit and lines are loaded, use planning lines for count/display
   const showEditableLines = anyCanEdit && !linesLoading;
-  const demandCount = showEditableLines ? demandLines.length : (activeDetail?.demand_lines.length ?? 0);
-  const supplyCount = showEditableLines ? supplyLines.length : (activeDetail?.supply_lines.length ?? 0);
-  // For PM: set of project IDs they own (used to gate per-line edit buttons)
+  // For PM: set of project IDs they own — gates edit/delete buttons and filters visible lines
   const editableProjectIds = isPM ? new Set(projects.map(p => p.id)) : null;
+  // PM only sees demand lines for their own projects
+  const visibleDemandLines = editableProjectIds
+    ? demandLines.filter(l => editableProjectIds.has(l.project_id))
+    : demandLines;
+  const visibleReadOnlyDemandLines = editableProjectIds && activeDetail
+    ? activeDetail.demand_lines.filter(l => l.project_id && editableProjectIds.has(l.project_id))
+    : activeDetail?.demand_lines ?? [];
+  const demandCount = showEditableLines ? visibleDemandLines.length : visibleReadOnlyDemandLines.length;
+  const supplyCount = showEditableLines ? supplyLines.length : (activeDetail?.supply_lines.length ?? 0);
 
 
   return (
@@ -364,7 +380,7 @@ export function ResourceDetailModal({
                     <Spinner size="tiny" label="Loading..." />
                   ) : (
                     <>
-                      {(showEditableLines ? demandLines.length === 0 : activeDetail.demand_lines.length === 0) && !addingDemand ? (
+                      {(showEditableLines ? visibleDemandLines.length === 0 : visibleReadOnlyDemandLines.length === 0) && !addingDemand ? (
                         <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>No demand assignments.</Caption1>
                       ) : (
                         <Table>
@@ -377,7 +393,7 @@ export function ResourceDetailModal({
                           </TableHeader>
                           <TableBody>
                             {showEditableLines
-                              ? demandLines.map(line => (
+                              ? visibleDemandLines.map(line => (
                                   <TableRow key={line.id}>
                                     {editingDemandId === line.id ? (
                                       <>
@@ -396,10 +412,11 @@ export function ResourceDetailModal({
                                         <TableCell>
                                           <input
                                             type="number"
-                                            min={1}
+                                            min={5}
                                             max={100}
+                                            step={5}
                                             value={demandForm.fte_percent}
-                                            onChange={(e) => setDemandForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(1, parseInt(e.target.value) || 1)) }))}
+                                            onChange={(e) => setDemandForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(5, parseInt(e.target.value) || 5)) }))}
                                             style={{ width: '70px' }}
                                           />
                                         </TableCell>
@@ -416,19 +433,17 @@ export function ResourceDetailModal({
                                         <TableCell>{line.fte_percent}%</TableCell>
                                         {canEditDemand && (
                                           <TableCell>
-                                            {(!editableProjectIds || editableProjectIds.has(line.project_id)) && (
-                                              <div className={styles.actionCell}>
-                                                <Button size="small" appearance="subtle" icon={<Edit24Regular />} onClick={() => startEditDemand(line)} disabled={saving || !!editingDemandId || addingDemand} title="Edit" />
-                                                <Button size="small" appearance="subtle" icon={<Delete24Regular />} onClick={() => deleteDemand(line.id)} disabled={saving || !!editingDemandId || addingDemand} title="Delete" />
-                                              </div>
-                                            )}
+                                            <div className={styles.actionCell}>
+                                              <Button size="small" appearance="subtle" icon={<Edit24Regular />} onClick={() => startEditDemand(line)} disabled={saving || !!editingDemandId || addingDemand} title="Edit" />
+                                              <Button size="small" appearance="subtle" icon={<Delete24Regular />} onClick={() => deleteDemand(line.id)} disabled={saving || !!editingDemandId || addingDemand} title="Delete" />
+                                            </div>
                                           </TableCell>
                                         )}
                                       </>
                                     )}
                                   </TableRow>
                                 ))
-                              : activeDetail.demand_lines.map((line, i) => (
+                              : visibleReadOnlyDemandLines.map((line, i) => (
                                   <TableRow key={i}>
                                     <TableCell>{line.project_name ?? '—'}</TableCell>
                                     <TableCell>{line.fte_percent}%</TableCell>
@@ -452,10 +467,11 @@ export function ResourceDetailModal({
                                 <TableCell>
                                   <input
                                     type="number"
-                                    min={1}
+                                    min={5}
                                     max={100}
+                                    step={5}
                                     value={demandForm.fte_percent}
-                                    onChange={(e) => setDemandForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(1, parseInt(e.target.value) || 1)) }))}
+                                    onChange={(e) => setDemandForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(5, parseInt(e.target.value) || 5)) }))}
                                     style={{ width: '70px' }}
                                   />
                                 </TableCell>
@@ -532,10 +548,11 @@ export function ResourceDetailModal({
                                         <TableCell>
                                           <input
                                             type="number"
-                                            min={1}
+                                            min={5}
                                             max={100}
+                                            step={5}
                                             value={supplyForm.fte_percent}
-                                            onChange={(e) => setSupplyForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(1, parseInt(e.target.value) || 1)) }))}
+                                            onChange={(e) => setSupplyForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(5, parseInt(e.target.value) || 5)) }))}
                                             style={{ width: '70px' }}
                                           />
                                         </TableCell>
@@ -590,10 +607,11 @@ export function ResourceDetailModal({
                                 <TableCell>
                                   <input
                                     type="number"
-                                    min={1}
+                                    min={5}
                                     max={100}
+                                    step={5}
                                     value={supplyForm.fte_percent}
-                                    onChange={(e) => setSupplyForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(1, parseInt(e.target.value) || 1)) }))}
+                                    onChange={(e) => setSupplyForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(5, parseInt(e.target.value) || 5)) }))}
                                     style={{ width: '70px' }}
                                   />
                                 </TableCell>

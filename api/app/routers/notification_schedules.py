@@ -128,7 +128,7 @@ def _current_open_period(db: Session, tenant_id: str):
     period = (
         db.query(Period)
         .filter(Period.tenant_id == tenant_id, Period.status == PeriodStatus.OPEN)
-        .order_by(Period.year.desc(), Period.month.desc())
+        .order_by(Period.year.asc(), Period.month.asc())
         .first()
     )
     if period:

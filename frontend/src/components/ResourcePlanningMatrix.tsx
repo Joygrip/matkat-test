@@ -143,7 +143,7 @@ const useStyles = makeStyles({
     minWidth: TYPE_COL_PX,
   },
   summaryValueCell: {
-    padding: `2px ${tokens.spacingHorizontalXS}`,
+    padding: `8px ${tokens.spacingHorizontalXS}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     textAlign: 'center' as const,
     width: PERIOD_COL_PX,
@@ -1169,20 +1169,18 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                   {periodTotals.map(({ dSum, sSum }, i) => (
                     <td key={periods[i].id} className={styles.summaryValueCell}>
                       <div style={{
-                        fontSize: '11px',
-                        fontWeight: 600,
                         backgroundColor: DEMAND_COLOR,
                         color: getFteColor(dSum)?.color ?? tokens.colorNeutralForeground3,
                       }}>
-                        D: {dSum > 0 ? `${dSum}%` : '—'}
+                        <span style={{ fontSize: '11px', fontWeight: 400 }}>D: </span>
+                        <span style={{ fontSize: '13px', fontWeight: 600 }}>{dSum > 0 ? `${dSum}%` : '—'}</span>
                       </div>
                       <div style={{
-                        fontSize: '11px',
-                        fontWeight: 600,
                         backgroundColor: SUPPLY_COLOR,
                         color: getFteColor(sSum)?.color ?? tokens.colorNeutralForeground3,
                       }}>
-                        S: {sSum > 0 ? `${sSum}%` : '—'}
+                        <span style={{ fontSize: '11px', fontWeight: 400 }}>S: </span>
+                        <span style={{ fontSize: '13px', fontWeight: 600 }}>{sSum > 0 ? `${sSum}%` : '—'}</span>
                       </div>
                     </td>
                   ))}

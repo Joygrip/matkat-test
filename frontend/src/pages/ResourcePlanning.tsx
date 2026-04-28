@@ -20,6 +20,11 @@ import { ResourcePlanningMatrix } from '../components/ResourcePlanningMatrix';
 import { Period } from '../types/index';
 import { periodsApi } from '../api/periods';
 
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const fmtPeriodShort = (p: Period) => `${MONTH_ABBR[p.month - 1]} '${String(p.year).slice(2)}`;
+const fmtPeriodFull = (p: Period) => `${MONTH_FULL[p.month - 1]} ${p.year}`;
+
 const useStyles = makeStyles({
   container: {
     padding: tokens.spacingHorizontalXXL,
@@ -37,7 +42,7 @@ const useStyles = makeStyles({
   },
   kpiRow: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
     gap: tokens.spacingHorizontalM,
     marginBottom: tokens.spacingVerticalL,
   },
@@ -100,6 +105,73 @@ const useStyles = makeStyles({
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     overflowX: 'auto',
   },
+  periodSelectorWrap: {
+    marginBottom: tokens.spacingVerticalM,
+  },
+  periodSelectorLabel: {
+    display: 'block',
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    marginBottom: tokens.spacingVerticalXS,
+  },
+  periodPills: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalXS,
+    flexWrap: 'wrap' as const,
+    alignItems: 'center',
+  },
+  periodPill: {
+    padding: `4px 10px`,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase200,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground3,
+    },
+  },
+  periodPillActive: {
+    padding: `4px 10px`,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorBrandStroke1}`,
+    backgroundColor: tokens.colorBrandBackground,
+    color: tokens.colorNeutralForegroundOnBrand,
+    fontSize: tokens.fontSizeBase200,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  kpiShowingLabel: {
+    marginTop: tokens.spacingVerticalXS,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
+  kpiAvgRows: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+    marginTop: tokens.spacingVerticalXXS,
+  },
+  kpiAvgRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    gap: tokens.spacingHorizontalS,
+  },
+  kpiAvgRowLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
+  kpiAvgRowValue: {
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
 });
 
 export const ResourcePlanning: React.FC = () => {
@@ -124,6 +196,7 @@ export const ResourcePlanning: React.FC = () => {
   const [searchResource, setSearchResource] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
+  const [selectedKpiPeriodIndex, setSelectedKpiPeriodIndex] = useState(0);
 
   useEffect(() => {
     loadAll();
@@ -233,15 +306,35 @@ export const ResourcePlanning: React.FC = () => {
     });
   }, [supplyLines, isManager, managerCcId, selectedProjectId, selectedCostCenterId, searchResource]);
 
-  const totalDemand = useMemo(
-    () => filteredDemandLines.reduce((sum, d) => sum + (d.fte_percent ?? 0), 0),
-    [filteredDemandLines],
+  const selectedKpiPeriod = openPeriods[selectedKpiPeriodIndex] ?? null;
+
+  const kpiDemand = useMemo(
+    () => filteredDemandLines
+      .filter(d => selectedKpiPeriod && d.period_id === selectedKpiPeriod.id)
+      .reduce((sum, d) => sum + (d.fte_percent ?? 0), 0),
+    [filteredDemandLines, selectedKpiPeriod],
   );
-  const totalSupply = useMemo(
-    () => filteredSupplyLines.reduce((sum, s) => sum + (s.fte_percent ?? 0), 0),
-    [filteredSupplyLines],
+  const kpiSupply = useMemo(
+    () => filteredSupplyLines
+      .filter(s => selectedKpiPeriod && s.period_id === selectedKpiPeriod.id)
+      .reduce((sum, s) => sum + (s.fte_percent ?? 0), 0),
+    [filteredSupplyLines, selectedKpiPeriod],
   );
-  const balance = totalSupply - totalDemand;
+  const kpiBalance = kpiSupply - kpiDemand;
+
+  const avgDemand = useMemo(() => {
+    if (openPeriods.length === 0) return 0;
+    const total = filteredDemandLines.reduce((sum, d) => sum + (d.fte_percent ?? 0), 0);
+    return Math.round((total / openPeriods.length) * 10) / 10;
+  }, [filteredDemandLines, openPeriods]);
+
+  const avgSupply = useMemo(() => {
+    if (openPeriods.length === 0) return 0;
+    const total = filteredSupplyLines.reduce((sum, s) => sum + (s.fte_percent ?? 0), 0);
+    return Math.round((total / openPeriods.length) * 10) / 10;
+  }, [filteredSupplyLines, openPeriods]);
+
+  const avgBalance = Math.round((avgSupply - avgDemand) * 10) / 10;
 
   const activeProjectLabel = useMemo(() => {
     if (!selectedProjectId) return null;
@@ -279,26 +372,71 @@ export const ResourcePlanning: React.FC = () => {
         <Title3>Resource Planning</Title3>
       </div>
 
+      {/* Period selector */}
+      {openPeriods.length > 0 && (
+        <div className={styles.periodSelectorWrap}>
+          <span className={styles.periodSelectorLabel}>Period</span>
+          <div className={styles.periodPills}>
+            {openPeriods.map((p, i) => (
+              <button
+                key={p.id}
+                className={i === selectedKpiPeriodIndex ? styles.periodPillActive : styles.periodPill}
+                onClick={() => setSelectedKpiPeriodIndex(i)}
+              >
+                {fmtPeriodShort(p)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* KPI strip */}
       <div className={styles.kpiRow}>
         <div className={styles.kpiCard}>
           <span className={styles.kpiLabel}>Total Demand FTE%</span>
-          <span className={styles.kpiValue}>{totalDemand}</span>
+          <span className={styles.kpiValue}>{kpiDemand}</span>
         </div>
         <div className={styles.kpiCard}>
           <span className={styles.kpiLabel}>Total Supply FTE%</span>
-          <span className={styles.kpiValue}>{totalSupply}</span>
+          <span className={styles.kpiValue}>{kpiSupply}</span>
         </div>
         <div className={styles.kpiCard}>
           <span className={styles.kpiLabel}>Balance (Supply − Demand)</span>
           <span
             className={styles.kpiValue}
-            style={{ color: balance >= 0 ? tokens.colorPaletteGreenForeground2 : tokens.colorPaletteRedForeground2 }}
+            style={{ color: kpiBalance >= 0 ? tokens.colorPaletteGreenForeground2 : tokens.colorPaletteRedForeground2 }}
           >
-            {balance >= 0 ? '+' : ''}{balance}
+            {kpiBalance >= 0 ? '+' : ''}{kpiBalance}
           </span>
         </div>
+        <div className={styles.kpiCard}>
+          <span className={styles.kpiLabel}>Average Per Period</span>
+          <div className={styles.kpiAvgRows}>
+            <div className={styles.kpiAvgRow}>
+              <span className={styles.kpiAvgRowLabel}>Avg Demand</span>
+              <span className={styles.kpiAvgRowValue}>{avgDemand}</span>
+            </div>
+            <div className={styles.kpiAvgRow}>
+              <span className={styles.kpiAvgRowLabel}>Avg Supply</span>
+              <span className={styles.kpiAvgRowValue}>{avgSupply}</span>
+            </div>
+            <div className={styles.kpiAvgRow}>
+              <span className={styles.kpiAvgRowLabel}>Avg Balance</span>
+              <span
+                className={styles.kpiAvgRowValue}
+                style={{ color: avgBalance >= 0 ? tokens.colorPaletteGreenForeground2 : tokens.colorPaletteRedForeground2 }}
+              >
+                {avgBalance >= 0 ? '+' : ''}{avgBalance}
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
+      {selectedKpiPeriod && (
+        <div className={styles.kpiShowingLabel}>
+          Showing: {fmtPeriodFull(selectedKpiPeriod)}
+        </div>
+      )}
 
       {/* Filters */}
       <div className={styles.filters}>

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { flushSync } from 'react-dom';
 import {
   Button,
   Spinner,
@@ -15,6 +16,7 @@ import {
 } from '@fluentui/react-components';
 import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular } from '@fluentui/react-icons';
 import { planningApi, DemandLine, SupplyLine } from '../api/planning';
+import { useToast } from '../hooks/useToast';
 import { lookupsApi, Project, CostCenter, Resource, Placeholder } from '../api/lookups';
 import { Period } from '../types/index';
 
@@ -392,6 +394,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   allCostCenters,
 }) => {
   const styles = useStyles();
+  const { showApiError } = useToast();
 
   const [expandedCCs, setExpandedCCs] = useState<Set<string>>(new Set());
   const [editingCell, setEditingCell] = useState<string | null>(null);
@@ -610,11 +613,13 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         });
       }
       onReload();
+    } catch (err: any) {
+      showApiError(err, 'Failed to save demand');
     } finally {
       setSavingCells(prev => { const s = new Set(prev); s.delete(cellKey); return s; });
       setEditingCell(null);
     }
-  }, [onReload]);
+  }, [onReload, showApiError]);
 
   const saveSupplyCell = useCallback(async (
     cellKey: string,
@@ -640,11 +645,13 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         });
       }
       onReload();
+    } catch (err: any) {
+      showApiError(err, 'Failed to save supply');
     } finally {
       setSavingCells(prev => { const s = new Set(prev); s.delete(cellKey); return s; });
       setEditingCell(null);
     }
-  }, [onReload]);
+  }, [onReload, showApiError]);
 
   const handleAddDemandLine = useCallback(async (ccId: string, allRows: MergedMatrixRow[]) => {
     const { resOrPh, projectId } = addDemandForm;
@@ -704,7 +711,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
           setSelectedCells(new Set());
         }
       }
-      setIsDragging(false);
+      // flushSync ensures isDragging=false renders before the subsequent click event.
+      // Without this, canEdit stays stale (false) during click and the inline editor never opens.
+      flushSync(() => setIsDragging(false));
       isDraggingRef.current = false;
       hasDraggedRef.current = false;
     };
@@ -1785,16 +1794,22 @@ const CellEditor: React.FC<CellEditorProps> = ({
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [inputVal, setInputVal] = useState('');
+  // Prevents double-commit: when Enter is pressed, saveDemandCell queues a re-render
+  // that unmounts the input, firing onBlur which would call commit() a second time.
+  const committedRef = useRef(false);
 
   const handleStartEdit = () => {
+    committedRef.current = false;
     setInputVal(value > 0 ? String(value) : '');
     onStartEdit();
     setTimeout(() => inputRef.current?.select(), 0);
   };
 
   const commit = () => {
+    if (committedRef.current) return;
+    committedRef.current = true;
     const num = inputVal === '' ? 0 : parseInt(inputVal, 10);
-    if (isNaN(num)) { onCancel(); return; }
+    if (isNaN(num)) { committedRef.current = false; onCancel(); return; }
     onSave(num);
   };
 

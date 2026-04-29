@@ -1978,9 +1978,19 @@ export function Admin() {
                     <TableCell>{resource.initials ?? '—'}</TableCell>
                     <TableCell>{costCenters.find((cc) => cc.id === resource.cost_center_id)?.name || '—'}</TableCell>
                     <TableCell>
-                      <Badge color={resource.resource_type === 'Employee' ? 'brand' : 'warning'}>
-                        {resource.resource_type}
-                      </Badge>
+                      {resource.user_role ? (
+                        <Badge color={
+                          resource.user_role === 'Manager' ? 'warning' :
+                          resource.user_role === 'PM'      ? 'brand'   :
+                          resource.user_role === 'Finance' ? 'success'  :
+                          resource.user_role === 'Admin'   ? 'danger'   :
+                          'informative'
+                        }>
+                          {resource.user_role}
+                        </Badge>
+                      ) : (
+                        <Badge color="subtle">—</Badge>
+                      )}
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       {canManageMasterData && (
@@ -2370,19 +2380,6 @@ export function Admin() {
                 onChange={(_, d) => setFormData({ ...formData, email: d.value })}
               />
             </div>
-            <div className={styles.dialogField}>
-              <Label>Resource Type</Label>
-              <select
-                className={styles.nativeSelect}
-                value={String(formData.resource_type || 'Employee')}
-                onChange={(e) => setFormData({ ...formData, resource_type: e.target.value })}
-              >
-                <option value="Employee">Employee</option>
-                <option value="External">External</option>
-                <option value="Student">Student</option>
-                <option value="OOP">OOP</option>
-              </select>
-            </div>
           </>
         );
 
@@ -2577,7 +2574,21 @@ export function Admin() {
           <span className={styles.detailLabel}>Cost Center</span>
           <span>{costCenters.find((cc) => cc.id === r.cost_center_id)?.name ?? '—'}</span>
           <span className={styles.detailLabel}>Type</span>
-          <span><Badge color={r.resource_type === 'Employee' ? 'brand' : 'warning'}>{r.resource_type}</Badge></span>
+          <span>
+            {r.user_role ? (
+              <Badge color={
+                r.user_role === 'Manager' ? 'warning' :
+                r.user_role === 'PM'      ? 'brand'   :
+                r.user_role === 'Finance' ? 'success'  :
+                r.user_role === 'Admin'   ? 'danger'   :
+                'informative'
+              }>
+                {r.user_role}
+              </Badge>
+            ) : (
+              <Badge color="subtle">—</Badge>
+            )}
+          </span>
           <span className={styles.detailLabel}>Hourly Cost</span><span>{r.hourly_cost != null ? r.hourly_cost : '—'}</span>
           <span className={styles.detailLabel}>Status</span>
           <span><StatusPill status={resourceStatus(r.is_active)} /></span>

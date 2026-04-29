@@ -172,7 +172,8 @@ class Resource(Base):
     
     # Relationships
     cost_center: Mapped["CostCenter"] = relationship(back_populates="resources")
-    
+    user: Mapped[Optional["User"]] = relationship("User", foreign_keys=[user_id])
+
     __table_args__ = (
         Index("ix_resources_tenant_employee", "tenant_id", "employee_id", unique=True),
     )

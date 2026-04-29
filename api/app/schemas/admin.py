@@ -113,7 +113,8 @@ class ResourceResponse(ResourceBase):
     is_oop: bool  # Computed: resource_type != "Employee"
     created_at: datetime
     updated_at: datetime
-    
+    user_role: Optional[str] = None
+
     class Config:
         from_attributes = True
 

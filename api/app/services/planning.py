@@ -242,7 +242,15 @@ class DemandService:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail={"code": "NOT_FOUND", "message": "Resource not found"}
                 )
-        
+            if not resource.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "RESOURCE_INACTIVE",
+                        "message": "Cannot assign demand to an inactive resource. This person has left the organisation.",
+                    },
+                )
+
         if placeholder_id:
             placeholder = self.db.query(Placeholder).filter(
                 and_(
@@ -374,6 +382,14 @@ class DemandService:
                 ).first()
                 if not resource:
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "Resource not found"})
+                if not resource.is_active:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "code": "RESOURCE_INACTIVE",
+                            "message": "Cannot assign demand to an inactive resource. This person has left the organisation.",
+                        },
+                    )
             if new_placeholder_id:
                 placeholder = self.db.query(Placeholder).filter(
                     and_(Placeholder.id == new_placeholder_id, Placeholder.tenant_id == self.current_user.tenant_id)
@@ -626,6 +642,14 @@ class SupplyService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "NOT_FOUND", "message": "Resource not found"}
             )
+        if not resource.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "RESOURCE_INACTIVE",
+                    "message": "Cannot assign supply to an inactive resource. This person has left the organisation.",
+                },
+            )
 
         # Enforce RO scope: RO can only create supply for their own resources
         self._check_ro_resource_authorized(resource_id)
@@ -735,6 +759,14 @@ class SupplyService:
             ).first()
             if not resource:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "Resource not found"})
+            if not resource.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "RESOURCE_INACTIVE",
+                        "message": "Cannot assign supply to an inactive resource. This person has left the organisation.",
+                    },
+                )
 
             # Enforce manager scope on new resource
             self._check_ro_resource_authorized(new_resource_id)

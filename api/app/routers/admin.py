@@ -264,9 +264,29 @@ async def list_resources(
     current_user: CurrentUser = Depends(require_roles(*PLANNING_READ_ROLES)),
 ):
     """List all resources. Accessible to Admin, Finance, PM, RO."""
-    return db.query(Resource).filter(
+    resources = db.query(Resource).filter(
         Resource.tenant_id == current_user.tenant_id
     ).all()
+    result = []
+    for r in resources:
+        result.append({
+            "id": r.id,
+            "tenant_id": r.tenant_id,
+            "cost_center_id": r.cost_center_id,
+            "employee_id": r.employee_id,
+            "display_name": r.display_name,
+            "initials": r.initials,
+            "email": r.email,
+            "user_id": r.user_id,
+            "resource_type": r.resource_type,
+            "hourly_cost": r.hourly_cost,
+            "is_active": r.is_active,
+            "is_oop": r.is_oop,
+            "created_at": r.created_at,
+            "updated_at": r.updated_at,
+            "user_role": r.user.role.value if r.user and r.user.role else None,
+        })
+    return result
 
 
 @router.get("/resources/{resource_id}", response_model=ResourceResponse)
@@ -757,6 +777,16 @@ async def update_admin_user(
     old_values = {k: getattr(user, k) for k in update_data}
     for key, value in update_data.items():
         setattr(user, key, value)
+
+    if update_data.get("is_active") is False:
+        linked_resource = db.query(Resource).filter(
+            Resource.user_id == user.id,
+            Resource.tenant_id == user.tenant_id,
+            Resource.is_active == True,
+        ).first()
+        if linked_resource:
+            linked_resource.is_active = False
+
     db.commit()
     db.refresh(user)
     log_audit(db, current_user, "update", "User", user.id, old_values=old_values, new_values=update_data)

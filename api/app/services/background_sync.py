@@ -160,6 +160,18 @@ def _sync_user(
                 "(GRAPH_SYNC_DEACTIVATE_MISSING=true)",
                 oid,
             )
+            linked_resource = db.query(Resource).filter(
+                Resource.user_id == user.id,
+                Resource.tenant_id == user.tenant_id,
+                Resource.is_active == True,
+            ).first()
+            if linked_resource:
+                linked_resource.is_active = False
+                logger.info(
+                    "background_sync: deactivated linked resource id=%s for user object_id=%s",
+                    linked_resource.id,
+                    oid,
+                )
         return
 
     # User found — refresh profile fields
@@ -189,6 +201,18 @@ def _sync_user(
         logger.info(
             "background_sync: user object_id=%s is disabled in Entra — marking inactive", oid
         )
+        linked_resource = db.query(Resource).filter(
+            Resource.user_id == user.id,
+            Resource.tenant_id == user.tenant_id,
+            Resource.is_active == True,
+        ).first()
+        if linked_resource:
+            linked_resource.is_active = False
+            logger.info(
+                "background_sync: deactivated linked resource id=%s for user object_id=%s",
+                linked_resource.id,
+                oid,
+            )
 
     # --- Manager ---
     new_manager_oid = graph.get_user_manager_id(oid)

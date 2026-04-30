@@ -20,6 +20,23 @@ import { ResourcePlanningMatrix } from '../components/ResourcePlanningMatrix';
 import { Period } from '../types/index';
 import { periodsApi } from '../api/periods';
 
+// Module-level cache — persists across MSAL-triggered remounts so duplicate
+// fetches caused by acquireTokenPopup re-initializing the component are skipped.
+const _cache: {
+  demandLines: DemandLine[] | null
+  supplyLines: SupplyLine[] | null
+  projects: Project[] | null
+  costCenters: CostCenter[] | null
+  openPeriods: Period[] | null
+  loadedAt: number | null
+  tenantId: string | null
+} = {
+  demandLines: null, supplyLines: null, projects: null,
+  costCenters: null, openPeriods: null,
+  loadedAt: null, tenantId: null,
+}
+const CACHE_TTL_MS = 60_000
+
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const MONTH_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const fmtPeriodShort = (p: Period) => `${MONTH_ABBR[p.month - 1]} '${String(p.year).slice(2)}`;
@@ -185,7 +202,6 @@ export const ResourcePlanning: React.FC = () => {
 
   const [openPeriods, setOpenPeriods] = useState<Period[]>([]);
   const openPeriodsRef = useRef<Period[]>([]);
-  const hasLoaded = useRef(false);
   const [demandLines, setDemandLines] = useState<DemandLine[]>([]);
   const [supplyLines, setSupplyLines] = useState<SupplyLine[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -205,9 +221,9 @@ export const ResourcePlanning: React.FC = () => {
   // Keep ref in sync so reloadLines always has the latest periods without stale closure
   useEffect(() => { openPeriodsRef.current = openPeriods; }, [openPeriods]);
 
-  // When contextPeriods loads, derive open periods only if loadAll hasn't run yet
+  // When contextPeriods loads, derive open periods only if loadAll hasn't populated them yet
   useEffect(() => {
-    if (contextPeriods.length > 0 && openPeriods.length === 0 && !hasLoaded.current) {
+    if (contextPeriods.length > 0 && openPeriods.length === 0 && _cache.loadedAt === null) {
       const open = contextPeriods
         .filter(p => p.status === 'open')
         .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
@@ -218,8 +234,23 @@ export const ResourcePlanning: React.FC = () => {
   const isPM = user?.role === 'PM';
 
   const loadAll = async () => {
-    if (hasLoaded.current) return;
-    hasLoaded.current = true;
+    const now = Date.now();
+    const cacheValid =
+      _cache.tenantId === user?.tenant_id &&
+      _cache.loadedAt !== null &&
+      (now - _cache.loadedAt) < CACHE_TTL_MS &&
+      _cache.demandLines !== null;
+
+    if (cacheValid) {
+      setDemandLines(_cache.demandLines!);
+      setSupplyLines(_cache.supplyLines!);
+      setProjects(_cache.projects!);
+      setCostCenters(_cache.costCenters!);
+      setOpenPeriods(_cache.openPeriods!);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       // PMs only see their assigned projects; Finance/Admin see all via scoped too.
@@ -243,6 +274,13 @@ export const ResourcePlanning: React.FC = () => {
       if (open.length === 0) {
         setDemandLines([]);
         setSupplyLines([]);
+        _cache.demandLines = [];
+        _cache.supplyLines = [];
+        _cache.projects = projectsData;
+        _cache.costCenters = costCentersData;
+        _cache.openPeriods = open;
+        _cache.loadedAt = Date.now();
+        _cache.tenantId = user?.tenant_id ?? null;
         return;
       }
 
@@ -253,6 +291,14 @@ export const ResourcePlanning: React.FC = () => {
 
       setDemandLines(demandData);
       setSupplyLines(supplyData);
+
+      _cache.demandLines = demandData;
+      _cache.supplyLines = supplyData;
+      _cache.projects = projectsData;
+      _cache.costCenters = costCentersData;
+      _cache.openPeriods = open;
+      _cache.loadedAt = Date.now();
+      _cache.tenantId = user?.tenant_id ?? null;
     } catch (err: unknown) {
       setError(formatApiError(err, 'Failed to load resource planning data'));
     } finally {
@@ -260,7 +306,7 @@ export const ResourcePlanning: React.FC = () => {
     }
   };
 
-  // Lightweight reload: only re-fetches lines, no loading spinner
+  // Lightweight reload: only re-fetches lines, no loading spinner; always bypasses cache
   const reloadLines = useCallback(async () => {
     if (openPeriodsRef.current.length === 0) return;
     try {
@@ -270,6 +316,9 @@ export const ResourcePlanning: React.FC = () => {
       ]);
       setDemandLines(demandData);
       setSupplyLines(supplyData);
+      _cache.demandLines = demandData;
+      _cache.supplyLines = supplyData;
+      _cache.loadedAt = Date.now();
     } catch {
       // silent — the edited cell already reflects the change optimistically
     }

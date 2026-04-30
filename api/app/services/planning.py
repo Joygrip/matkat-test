@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 from typing import Optional
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_, or_
 
 from api.app.models.planning import DemandLine, SupplyLine
 from api.app.models.core import Period, Project, Resource, Placeholder, User, PeriodStatus, UserRole
@@ -117,10 +117,14 @@ class DemandService:
                     ids.append(rid)
         return ids
 
-    def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None, *, period_id: Optional[str] = None, open_periods_only: bool = False) -> list[DemandLine]:
-        """Get all demand lines, optionally filtered by period/year/month/project/resource."""
+    def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None, *, period_id: Optional[str] = None, open_periods_only: bool = False, cost_center_id: Optional[str] = None) -> list[DemandLine]:
+        """Get all demand lines, optionally filtered by period/year/month/project/resource/cost_center."""
         query = self.db.query(DemandLine).filter(
             DemandLine.tenant_id == self.current_user.tenant_id
+        ).options(
+            joinedload(DemandLine.resource).joinedload(Resource.cost_center),
+            joinedload(DemandLine.placeholder).joinedload(Placeholder.cost_center),
+            joinedload(DemandLine.project),
         )
         if open_periods_only:
             query = query.join(Period, DemandLine.period_id == Period.id).filter(
@@ -136,6 +140,15 @@ class DemandService:
             query = query.filter(DemandLine.project_id == project_id)
         if resource_id:
             query = query.filter(DemandLine.resource_id == resource_id)
+        if cost_center_id:
+            query = query.filter(or_(
+                DemandLine.resource_id.in_(
+                    self.db.query(Resource.id).filter(Resource.cost_center_id == cost_center_id)
+                ),
+                DemandLine.placeholder_id.in_(
+                    self.db.query(Placeholder.id).filter(Placeholder.cost_center_id == cost_center_id)
+                ),
+            ))
 
         # RO/Director: restrict to resources within their reporting line
         scoped_ids = self._get_scoped_resource_ids()
@@ -151,6 +164,10 @@ class DemandService:
                 DemandLine.id == demand_id,
                 DemandLine.tenant_id == self.current_user.tenant_id,
             )
+        ).options(
+            joinedload(DemandLine.resource).joinedload(Resource.cost_center),
+            joinedload(DemandLine.placeholder).joinedload(Placeholder.cost_center),
+            joinedload(DemandLine.project),
         ).first()
 
         if demand and demand.resource_id:
@@ -531,10 +548,13 @@ class SupplyService:
         
         return period
     
-    def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None, *, period_id: Optional[str] = None, open_periods_only: bool = False) -> list[SupplyLine]:
-        """Get all supply lines, optionally filtered by period/year/month/resource."""
+    def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None, *, period_id: Optional[str] = None, open_periods_only: bool = False, cost_center_id: Optional[str] = None) -> list[SupplyLine]:
+        """Get all supply lines, optionally filtered by period/year/month/resource/cost_center."""
         query = self.db.query(SupplyLine).filter(
             SupplyLine.tenant_id == self.current_user.tenant_id
+        ).options(
+            joinedload(SupplyLine.resource).joinedload(Resource.cost_center),
+            joinedload(SupplyLine.project),
         )
         if open_periods_only:
             query = query.join(Period, SupplyLine.period_id == Period.id).filter(
@@ -548,6 +568,12 @@ class SupplyService:
             query = query.filter(SupplyLine.month == month)
         if resource_id:
             query = query.filter(SupplyLine.resource_id == resource_id)
+        if cost_center_id:
+            query = query.filter(
+                SupplyLine.resource_id.in_(
+                    self.db.query(Resource.id).filter(Resource.cost_center_id == cost_center_id)
+                )
+            )
 
         # RO/Director: restrict to resources within their reporting line
         scoped_ids = self._get_scoped_resource_ids()
@@ -563,6 +589,9 @@ class SupplyService:
                 SupplyLine.id == supply_id,
                 SupplyLine.tenant_id == self.current_user.tenant_id,
             )
+        ).options(
+            joinedload(SupplyLine.resource).joinedload(Resource.cost_center),
+            joinedload(SupplyLine.project),
         ).first()
 
         if supply:

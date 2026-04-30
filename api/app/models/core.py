@@ -61,6 +61,8 @@ class User(Base):
     
     __table_args__ = (
         Index("ix_users_tenant_object", "tenant_id", "object_id", unique=True),
+        Index("ix_user_tenant_role", "tenant_id", "role"),
+        Index("ix_user_object_id", "object_id"),
     )
 
 
@@ -176,6 +178,9 @@ class Resource(Base):
 
     __table_args__ = (
         Index("ix_resources_tenant_employee", "tenant_id", "employee_id", unique=True),
+        Index("ix_resource_cost_center", "cost_center_id"),
+        Index("ix_resource_tenant_active", "tenant_id", "is_active"),
+        Index("ix_resource_user_id", "user_id"),
     )
     
     @property
@@ -201,6 +206,7 @@ class Period(Base):
     
     __table_args__ = (
         Index("ix_periods_tenant_year_month", "tenant_id", "year", "month", unique=True),
+        Index("ix_period_tenant_status", "tenant_id", "status"),
     )
 
 

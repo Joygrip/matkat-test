@@ -185,6 +185,7 @@ export const ResourcePlanning: React.FC = () => {
 
   const [openPeriods, setOpenPeriods] = useState<Period[]>([]);
   const openPeriodsRef = useRef<Period[]>([]);
+  const hasLoaded = useRef(false);
   const [demandLines, setDemandLines] = useState<DemandLine[]>([]);
   const [supplyLines, setSupplyLines] = useState<SupplyLine[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -204,9 +205,9 @@ export const ResourcePlanning: React.FC = () => {
   // Keep ref in sync so reloadLines always has the latest periods without stale closure
   useEffect(() => { openPeriodsRef.current = openPeriods; }, [openPeriods]);
 
-  // When contextPeriods loads, derive open periods if we haven't yet
+  // When contextPeriods loads, derive open periods only if loadAll hasn't run yet
   useEffect(() => {
-    if (contextPeriods.length > 0 && openPeriods.length === 0) {
+    if (contextPeriods.length > 0 && openPeriods.length === 0 && !hasLoaded.current) {
       const open = contextPeriods
         .filter(p => p.status === 'open')
         .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
@@ -217,6 +218,8 @@ export const ResourcePlanning: React.FC = () => {
   const isPM = user?.role === 'PM';
 
   const loadAll = async () => {
+    if (hasLoaded.current) return;
+    hasLoaded.current = true;
     try {
       setLoading(true);
       // PMs only see their assigned projects; Finance/Admin see all via scoped too.

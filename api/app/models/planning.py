@@ -68,6 +68,12 @@ class DemandLine(Base):
             postgresql_where=("placeholder_id IS NOT NULL"),  # Filtered index for PG
         ),
         Index('ix_demand_tenant_period', 'tenant_id', 'year', 'month'),
+        # Performance indexes for common filter patterns
+        Index('ix_demand_resource_id', 'resource_id'),
+        Index('ix_demand_project_id', 'project_id'),
+        Index('ix_demand_period_id', 'period_id'),
+        Index('ix_demand_tenant_resource', 'tenant_id', 'resource_id'),
+        Index('ix_demand_tenant_project', 'tenant_id', 'project_id'),
     )
 
 
@@ -103,6 +109,10 @@ class SupplyLine(Base):
             unique=True,
         ),
         Index('ix_supply_tenant_period', 'tenant_id', 'year', 'month'),
+        # Performance indexes for common filter patterns
+        Index('ix_supply_resource_id', 'resource_id'),
+        Index('ix_supply_period_id', 'period_id'),
+        Index('ix_supply_tenant_resource', 'tenant_id', 'resource_id'),
     )
 
 

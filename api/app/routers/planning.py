@@ -95,11 +95,8 @@ async def list_all_open_demand_lines(
 ):
     """Return all demand lines across every open period in a single query."""
     service = DemandService(db, current_user)
-    lines = service.get_all(project_id=project_id, open_periods_only=True)
-    result = [_enrich_demand(line) for line in lines]
-    if cost_center_id:
-        result = [r for r in result if r.cost_center_id == cost_center_id]
-    return result
+    lines = service.get_all(project_id=project_id, open_periods_only=True, cost_center_id=cost_center_id)
+    return [_enrich_demand(line) for line in lines]
 
 
 @router.get("/demand-lines", response_model=list[DemandLineResponse])
@@ -121,13 +118,8 @@ async def list_demand_lines(
     Accessible to: Admin, Finance, PM, RO, Director, Employee (read-only for dashboard).
     """
     service = DemandService(db, current_user)
-    lines = service.get_all(year, month, project_id, resource_id, period_id=period_id)
-    
-    result = [_enrich_demand(line) for line in lines]
-    if cost_center_id:
-        result = [r for r in result if r.cost_center_id == cost_center_id]
-    
-    return result
+    lines = service.get_all(year, month, project_id, resource_id, period_id=period_id, cost_center_id=cost_center_id)
+    return [_enrich_demand(line) for line in lines]
 
 
 @router.get("/demand-lines/{demand_id}", response_model=DemandLineResponse)
@@ -272,11 +264,8 @@ async def list_all_open_supply_lines(
 ):
     """Return all supply lines across every open period in a single query."""
     service = SupplyService(db, current_user)
-    lines = service.get_all(open_periods_only=True)
-    result = [_enrich_supply(line) for line in lines]
-    if cost_center_id:
-        result = [r for r in result if r.cost_center_id == cost_center_id]
-    return result
+    lines = service.get_all(open_periods_only=True, cost_center_id=cost_center_id)
+    return [_enrich_supply(line) for line in lines]
 
 
 @router.get("/supply-lines", response_model=list[SupplyLineResponse])
@@ -297,13 +286,8 @@ async def list_supply_lines(
     Accessible to: Admin, Finance, PM, RO, Director, Employee (read-only for dashboard).
     """
     service = SupplyService(db, current_user)
-    lines = service.get_all(year, month, None, resource_id, period_id=period_id)
-    
-    result = [_enrich_supply(line) for line in lines]
-    if cost_center_id:
-        result = [r for r in result if r.cost_center_id == cost_center_id]
-    
-    return result
+    lines = service.get_all(year, month, None, resource_id, period_id=period_id, cost_center_id=cost_center_id)
+    return [_enrich_supply(line) for line in lines]
 
 
 @router.get("/supply-lines/{supply_id}", response_model=SupplyLineResponse)

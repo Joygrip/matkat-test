@@ -265,7 +265,8 @@ async def list_resources(
 ):
     """List all resources. Accessible to Admin, Finance, PM, RO."""
     resources = db.query(Resource).filter(
-        Resource.tenant_id == current_user.tenant_id
+        Resource.tenant_id == current_user.tenant_id,
+        Resource.is_active == True,
     ).all()
     result = []
     for r in resources:

@@ -160,7 +160,7 @@ export const Finance: React.FC = () => {
   const canSeeStats = useHasRole('Finance', 'Manager', 'Admin');
   const canSeeCostReport = useHasRole('Finance', 'Admin');
   const canSeeSnapshots = useHasRole('Finance', 'Admin');
-  const canSeeProjectCosts = useHasRole('Finance', 'Admin', 'PM', 'Manager');
+  const canSeeProjectCosts = useHasRole('Finance', 'Admin', 'PM');
   const canManagePeriods = user?.role === 'Finance' || user?.role === 'Admin';
   const canPublishSnapshot = user?.role === 'Finance' || user?.role === 'Admin';
   const canDownloadCsv = user?.role === 'Finance';

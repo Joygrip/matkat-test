@@ -70,7 +70,21 @@ function parseCellKey(key: string): {
 }
 
 const useStyles = makeStyles({
-  wrapper: { overflowX: 'auto', width: '100%' },
+  headerWrap: {
+    position: 'sticky' as const,
+    top: 0,
+    zIndex: 10,
+    overflow: 'hidden' as const,
+    width: '100%',
+    backgroundColor: tokens.colorNeutralBackground1,
+    boxShadow: `0 1px 0 ${tokens.colorNeutralStroke1}`,
+  },
+  wrapper: {
+    overflowX: 'auto' as const,
+    width: '100%',
+    scrollbarWidth: 'none' as const,
+    '&::-webkit-scrollbar': { display: 'none' },
+  },
   table: {
     borderCollapse: 'collapse',
     minWidth: '100%',
@@ -82,12 +96,9 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
     borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground2,
+    backgroundColor: tokens.colorNeutralBackground1,
     textAlign: 'center' as const,
     whiteSpace: 'nowrap' as const,
-    position: 'sticky' as const,
-    top: 0,
-    zIndex: 2,
   },
   thResource: {
     position: 'sticky' as const,
@@ -118,7 +129,7 @@ const useStyles = makeStyles({
   summaryFixed: {
     fontWeight: tokens.fontWeightSemibold,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
     whiteSpace: 'nowrap' as const,
     position: 'sticky' as const,
     left: 0,
@@ -128,7 +139,7 @@ const useStyles = makeStyles({
   },
   summaryProject: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
     position: 'sticky' as const,
     left: RESOURCE_COL_PX,
     backgroundColor: tokens.colorNeutralBackground3,
@@ -137,7 +148,7 @@ const useStyles = makeStyles({
   },
   summaryType: {
     padding: `2px ${tokens.spacingHorizontalXS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
     position: 'sticky' as const,
     left: TYPE_LEFT_PX,
     backgroundColor: tokens.colorNeutralBackground3,
@@ -146,7 +157,7 @@ const useStyles = makeStyles({
   },
   summaryValueCell: {
     padding: `8px ${tokens.spacingHorizontalXS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
     textAlign: 'center' as const,
     width: PERIOD_COL_PX,
     minWidth: PERIOD_COL_PX,
@@ -416,6 +427,14 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const isDraggingRef = useRef(false);
   const hasDraggedRef = useRef(false);
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Refs for sticky header + synced horizontal scrollbar
+  const headerWrapRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const fixedBarRef = useRef<HTMLDivElement>(null);
+  const phantomRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const isSyncingScrollRef = useRef(false);
   const [dragStart, setDragStart] = useState<{
     cellKey: string;
     resourceId: string | null;
@@ -720,6 +739,47 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     window.addEventListener('mouseup', up);
     return () => window.removeEventListener('mouseup', up);
   }, []); // stable: only refs and stable state setters
+
+  // Sync horizontal scroll: body ↔ sticky header ↔ fixed bottom scrollbar
+  useEffect(() => {
+    const header = headerWrapRef.current;
+    const container = scrollContainerRef.current;
+    const fixedBar = fixedBarRef.current;
+    const phantom = phantomRef.current;
+    const table = tableRef.current;
+    if (!header || !container || !fixedBar || !phantom || !table) return;
+
+    const updatePhantomWidth = () => {
+      phantom.style.width = `${table.scrollWidth}px`;
+    };
+    updatePhantomWidth();
+
+    const ro = new ResizeObserver(updatePhantomWidth);
+    ro.observe(table);
+
+    const onContainerScroll = () => {
+      if (isSyncingScrollRef.current) return;
+      isSyncingScrollRef.current = true;
+      header.scrollLeft = container.scrollLeft;
+      fixedBar.scrollLeft = container.scrollLeft;
+      isSyncingScrollRef.current = false;
+    };
+    const onFixedBarScroll = () => {
+      if (isSyncingScrollRef.current) return;
+      isSyncingScrollRef.current = true;
+      container.scrollLeft = fixedBar.scrollLeft;
+      header.scrollLeft = fixedBar.scrollLeft;
+      isSyncingScrollRef.current = false;
+    };
+
+    container.addEventListener('scroll', onContainerScroll);
+    fixedBar.addEventListener('scroll', onFixedBarScroll);
+    return () => {
+      ro.disconnect();
+      container.removeEventListener('scroll', onContainerScroll);
+      fixedBar.removeEventListener('scroll', onFixedBarScroll);
+    };
+  }, []);
 
   // Click-outside closes popover
   useEffect(() => {
@@ -1112,7 +1172,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         )}
       </div>
     )}
-    <div style={{ padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`, borderBottom: `1px solid ${tokens.colorNeutralStroke2}`, display: 'flex', alignItems: 'center' }}>
+    <div style={{ padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`, borderBottom: `2px solid ${tokens.colorNeutralStroke2}`, display: 'flex', alignItems: 'center' }}>
       <Button
         size="small"
         appearance="primary"
@@ -1122,8 +1182,16 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         Add Line
       </Button>
     </div>
-    <div className={mergeClasses(styles.wrapper, isDragging && styles.matrixContainerSelecting)}>
-      <table className={styles.table}>
+    <div style={{ position: 'relative' }}>
+    {/* Sticky header — lives outside the overflow-x container so vertical sticky works */}
+    <div ref={headerWrapRef} className={styles.headerWrap}>
+      <table className={styles.table} style={{ tableLayout: 'fixed' }}>
+        <colgroup>
+          <col style={{ width: RESOURCE_COL_PX, minWidth: RESOURCE_COL_PX }} />
+          <col style={{ width: PROJECT_COL_PX, minWidth: PROJECT_COL_PX }} />
+          <col style={{ width: TYPE_COL_PX, minWidth: TYPE_COL_PX }} />
+          {periods.map(p => <col key={p.id} style={{ width: PERIOD_COL_PX, minWidth: PERIOD_COL_PX }} />)}
+        </colgroup>
         <thead>
           <tr>
             <th className={`${styles.th} ${styles.thResource}`} style={{ textAlign: 'left' }}>
@@ -1146,6 +1214,17 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
             ))}
           </tr>
         </thead>
+      </table>
+    </div>
+    {/* Body scroll container — overflow-x: auto without breaking vertical sticky */}
+    <div ref={scrollContainerRef} className={mergeClasses(styles.wrapper, isDragging && styles.matrixContainerSelecting)}>
+      <table ref={tableRef} className={styles.table} style={{ tableLayout: 'fixed' }}>
+        <colgroup>
+          <col style={{ width: RESOURCE_COL_PX, minWidth: RESOURCE_COL_PX }} />
+          <col style={{ width: PROJECT_COL_PX, minWidth: PROJECT_COL_PX }} />
+          <col style={{ width: TYPE_COL_PX, minWidth: TYPE_COL_PX }} />
+          {periods.map(p => <col key={p.id} style={{ width: PERIOD_COL_PX, minWidth: PERIOD_COL_PX }} />)}
+        </colgroup>
         <tbody>
           {groups.map(group => {
             const isExpanded = expandedCCs.has(group.ccId);
@@ -1197,147 +1276,292 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
                 {isExpanded && (
                   <>
-                    {/* Resource groups → data rows (2 per MatrixRow: demand + supply) */}
-                    {group.resourceGroups.map(rg => (
-                      rg.rows.map((row, rowIdx) => {
-                        const totalRowSpan = rg.rows.length * 2;
-                        const flatRowIndex = allRows.indexOf(row);
-                        const demandRowIndex = flatRowIndex * 2;
-                        const supplyRowIndex = flatRowIndex * 2 + 1;
+                    {/* Resource groups → data rows (2 per MatrixRow: demand + supply) + Total row */}
+                    {group.resourceGroups.map(rg => {
+                      const rgPeriodTotals = periods.map(p => {
+                        let dSum = 0, sSum = 0;
+                        for (const r of rg.rows) {
+                          dSum += r.demandByPeriod.get(p.id)?.fte_percent ?? 0;
+                          sSum += r.supplyByPeriod.get(p.id)?.fte_percent ?? 0;
+                        }
+                        return { dSum, sSum };
+                      });
 
-                        return (
-                          <React.Fragment key={row.key}>
-                            {/* Demand row */}
-                            <tr style={{ backgroundColor: DEMAND_COLOR }}>
-                              {rowIdx === 0 && (
-                                <td
-                                  className={styles.resourceCell}
-                                  rowSpan={totalRowSpan}
-                                  title={row.resourceName}
-                                  style={row.isPlaceholder ? { fontStyle: 'italic' } : undefined}
-                                >
-                                  {row.resourceName}
-                                  {row.isPlaceholder && (
-                                    <span style={{
-                                      display: 'block',
-                                      fontSize: tokens.fontSizeBase100,
-                                      color: tokens.colorNeutralForeground3,
-                                    }}>
-                                      [TBD]
-                                    </span>
-                                  )}
+                      return (
+                        <React.Fragment key={rg.resourceKey}>
+                          {rg.rows.map((row, rowIdx) => {
+                            const totalRowSpan = rg.rows.length * 2;
+                            const flatRowIndex = allRows.indexOf(row);
+                            const demandRowIndex = flatRowIndex * 2;
+                            const supplyRowIndex = flatRowIndex * 2 + 1;
+                            const isFirstRow = rowIdx === 0;
+                            const topBorder = isFirstRow ? `3px solid ${tokens.colorBrandBackground}` : undefined;
+                            const demandBorderTop = isFirstRow ? `3px solid ${tokens.colorBrandBackground}` : `2px solid #93c5fd`;
+
+                            return (
+                              <React.Fragment key={row.key}>
+                                {/* Demand row */}
+                                <tr style={{ backgroundColor: DEMAND_COLOR }}>
+                                  {isFirstRow && (() => {
+                                    const initials = row.isPlaceholder
+                                      ? '?'
+                                      : row.resourceName.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2);
+                                    return (
+                                      <td
+                                        className={styles.resourceCell}
+                                        rowSpan={totalRowSpan}
+                                        title={row.resourceName}
+                                        style={{
+                                          ...(row.isPlaceholder ? { fontStyle: 'italic' } : {}),
+                                          fontSize: '14px',
+                                          fontWeight: 600,
+                                          backgroundColor: tokens.colorNeutralBackground2,
+                                          borderTop: topBorder,
+                                          borderLeft: `3px solid ${tokens.colorBrandBackground}`,
+                                        }}
+                                      >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                          <div style={{
+                                            flexShrink: 0,
+                                            width: 28,
+                                            height: 28,
+                                            borderRadius: '50%',
+                                            backgroundColor: tokens.colorBrandBackground,
+                                            color: tokens.colorNeutralForegroundOnBrand,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            fontSize: '11px',
+                                            fontWeight: 700,
+                                          }}>
+                                            {initials}
+                                          </div>
+                                          <div style={{ minWidth: 0 }}>
+                                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                              {row.resourceName}
+                                            </div>
+                                            {row.isPlaceholder && (
+                                              <div style={{
+                                                fontSize: tokens.fontSizeBase100,
+                                                color: tokens.colorNeutralForeground3,
+                                              }}>
+                                                [TBD]
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </td>
+                                    );
+                                  })()}
+                                  <td
+                                    className={styles.projectCell}
+                                    rowSpan={2}
+                                    title={row.projectName}
+                                    style={{
+                                      ...(row.isGeneral ? { fontStyle: 'italic' } : {}),
+                                      paddingLeft: '16px',
+                                      color: tokens.colorNeutralForeground2,
+                                      fontSize: '13px',
+                                      fontWeight: 'normal',
+                                      borderBottom: `1.5px solid ${tokens.colorNeutralStroke1}`,
+                                      borderTop: demandBorderTop,
+                                      borderLeft: '3px solid #93c5fd',
+                                    }}
+                                  >
+                                    {row.projectName}
+                                    {row.isGeneral && ' *'}
+                                  </td>
+                                  <td className={styles.typeCellDemand} style={{ borderTop: demandBorderTop }}>Demand</td>
+                                  {periods.map((period, colIndex) => {
+                                    const dLine = row.demandByPeriod.get(period.id);
+                                    const sLine = row.supplyByPeriod.get(period.id);
+                                    const dVal = dLine?.fte_percent ?? 0;
+                                    const sVal = sLine?.fte_percent ?? 0;
+                                    const existingCellKey = `d-${row.key}-${period.id}`;
+                                    const dragCellKey = buildCellKey('demand', row.resourceId, row.placeholderId, row.projectId, period.id);
+                                    const isSelectable = canEditDemand && !row.isGeneral;
+                                    const canEdit = isSelectable && !isDragging;
+                                    const isSelected = selectedCells.has(dragCellKey);
+                                    const isDimmed = isDragging && dragType !== 'demand' && dragStart?.ccId === group.ccId;
+                                    return (
+                                      <td
+                                        key={period.id}
+                                        className={mergeClasses(
+                                          styles.valueCell,
+                                          isSelectable && styles.cellEditable,
+                                          isSelected && styles.cellSelected,
+                                          isDimmed && styles.cellDimmed,
+                                        )}
+                                        style={{ borderTop: demandBorderTop }}
+                                        data-row-index={demandRowIndex}
+                                        data-col-index={colIndex}
+                                        data-cell-key={dragCellKey}
+                                        data-type="demand"
+                                        onMouseDown={isSelectable
+                                          ? (e) => handleCellMouseDown(e, dragCellKey, 'demand', demandRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, group.ccId)
+                                          : undefined}
+                                        onMouseEnter={isDragging
+                                          ? () => handleCellMouseEnter(demandRowIndex, colIndex, allRows, group.ccId)
+                                          : undefined}
+                                      >
+                                        <CellEditor
+                                          value={dVal}
+                                          colorStyle={getFteColor(dVal)}
+                                          isEditing={editingCell === existingCellKey}
+                                          isSaving={savingCells.has(existingCellKey)}
+                                          canEdit={canEdit}
+                                          onStartEdit={() => canEdit && setEditingCell(existingCellKey)}
+                                          onCancel={() => setEditingCell(null)}
+                                          onSave={val => saveDemandCell(existingCellKey, dLine, row, period, val)}
+                                          styles={styles}
+                                        />
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                                {/* Supply row */}
+                                <tr style={{ backgroundColor: SUPPLY_COLOR }}>
+                                  {/* resource and project cells spanned by rowSpan above */}
+                                  <td className={styles.typeCellSupply} style={{ borderBottom: `1.5px solid ${tokens.colorNeutralStroke1}` }}>Supply</td>
+                                  {periods.map((period, colIndex) => {
+                                    const dLine = row.demandByPeriod.get(period.id);
+                                    const sLine = row.supplyByPeriod.get(period.id);
+                                    const dVal = dLine?.fte_percent ?? 0;
+                                    const sVal = sLine?.fte_percent ?? 0;
+                                    const existingCellKey = `s-${row.key}-${period.id}`;
+                                    const dragCellKey = buildCellKey('supply', row.resourceId, row.placeholderId, row.projectId, period.id);
+                                    const isSelectable = canEditSupply && !row.isPlaceholder;
+                                    const canEdit = isSelectable && !isDragging;
+                                    const isSelected = selectedCells.has(dragCellKey);
+                                    const isDimmed = isDragging && dragType !== 'supply' && dragStart?.ccId === group.ccId;
+                                    return (
+                                      <td
+                                        key={period.id}
+                                        className={mergeClasses(
+                                          styles.valueCell,
+                                          isSelectable && styles.cellEditable,
+                                          isSelected && styles.cellSelected,
+                                          isDimmed && styles.cellDimmed,
+                                        )}
+                                        style={{ borderBottom: `1.5px solid ${tokens.colorNeutralStroke1}` }}
+                                        data-row-index={supplyRowIndex}
+                                        data-col-index={colIndex}
+                                        data-cell-key={dragCellKey}
+                                        data-type="supply"
+                                        onMouseDown={isSelectable
+                                          ? (e) => handleCellMouseDown(e, dragCellKey, 'supply', supplyRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, group.ccId)
+                                          : undefined}
+                                        onMouseEnter={isDragging
+                                          ? () => handleCellMouseEnter(supplyRowIndex, colIndex, allRows, group.ccId)
+                                          : undefined}
+                                      >
+                                        <CellEditor
+                                          value={sVal}
+                                          colorStyle={getFteColor(sVal)}
+                                          isEditing={editingCell === existingCellKey}
+                                          isSaving={savingCells.has(existingCellKey)}
+                                          canEdit={canEdit}
+                                          onStartEdit={() => canEdit && setEditingCell(existingCellKey)}
+                                          onCancel={() => setEditingCell(null)}
+                                          onSave={val => saveSupplyCell(existingCellKey, sLine, row, period, val)}
+                                          styles={styles}
+                                        />
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              </React.Fragment>
+                            );
+                          })}
+
+                          {/* Resource Total row */}
+                          <tr style={{ backgroundColor: tokens.colorNeutralBackground3 }}>
+                            <td style={{
+                              position: 'sticky',
+                              left: 0,
+                              zIndex: 1,
+                              minWidth: RESOURCE_COL_PX,
+                              fontWeight: 600,
+                              fontSize: '12px',
+                              color: tokens.colorNeutralForeground2,
+                              paddingLeft: '8px',
+                              paddingTop: '6px',
+                              paddingBottom: '6px',
+                              backgroundColor: tokens.colorNeutralBackground3,
+                              borderBottom: `3px solid ${tokens.colorBrandBackground}`,
+                              borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
+                              borderLeft: `3px solid ${tokens.colorBrandBackground}`,
+                            }}>
+                              Total
+                            </td>
+                            <td style={{
+                              position: 'sticky',
+                              left: RESOURCE_COL_PX,
+                              zIndex: 1,
+                              minWidth: PROJECT_COL_PX,
+                              backgroundColor: tokens.colorNeutralBackground3,
+                              borderBottom: `3px solid ${tokens.colorBrandBackground}`,
+                              borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
+                            }} />
+                            <td style={{
+                              position: 'sticky',
+                              left: TYPE_LEFT_PX,
+                              zIndex: 1,
+                              minWidth: TYPE_COL_PX,
+                              backgroundColor: tokens.colorNeutralBackground3,
+                              borderBottom: `3px solid ${tokens.colorBrandBackground}`,
+                              fontSize: '11px',
+                              fontWeight: tokens.fontWeightSemibold,
+                              padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
+                              whiteSpace: 'nowrap' as const,
+                            }}>
+                              <div style={{ color: '#1a3a7a', fontSize: '10px', fontWeight: 600 }}>Demand</div>
+                              <div style={{ color: '#0a4a1a', fontSize: '10px', fontWeight: 600 }}>Supply</div>
+                            </td>
+                            {rgPeriodTotals.map(({ dSum, sSum }, i) => {
+                              const diff = sSum - dSum;
+                              const statusColor = (dSum === 0 && sSum === 0)
+                                ? tokens.colorNeutralStroke1
+                                : diff >= 0
+                                  ? '#22c55e'
+                                  : '#ef4444';
+
+                              return (
+                                <td key={periods[i].id} style={{
+                                  textAlign: 'center',
+                                  width: PERIOD_COL_PX,
+                                  minWidth: PERIOD_COL_PX,
+                                  padding: `4px ${tokens.spacingHorizontalXS}`,
+                                  borderTop: `3px solid ${statusColor}`,
+                                  borderBottom: `3px solid ${tokens.colorBrandBackground}`,
+                                  verticalAlign: 'middle',
+                                  backgroundColor: tokens.colorNeutralBackground3,
+                                }}>
+                                  <div style={{
+                                    backgroundColor: '#dbeafe',
+                                    color: '#1a3a7a',
+                                    borderRadius: 2,
+                                    padding: '1px 0',
+                                  }}>
+                                    <span style={{ fontSize: '10px', fontWeight: 400 }}>D: </span>
+                                    <span style={{ fontSize: '12px', fontWeight: 600 }}>{dSum > 0 ? `${dSum}%` : '—'}</span>
+                                  </div>
+                                  <div style={{
+                                    backgroundColor: '#dcfce7',
+                                    color: '#0a4a1a',
+                                    borderRadius: 2,
+                                    padding: '1px 0',
+                                  }}>
+                                    <span style={{ fontSize: '10px', fontWeight: 400 }}>S: </span>
+                                    <span style={{ fontSize: '12px', fontWeight: 600 }}>{sSum > 0 ? `${sSum}%` : '—'}</span>
+                                  </div>
                                 </td>
-                              )}
-                              <td
-                                className={styles.projectCell}
-                                rowSpan={2}
-                                title={row.projectName}
-                                style={row.isGeneral ? { fontStyle: 'italic' } : undefined}
-                              >
-                                {row.projectName}
-                                {row.isGeneral && ' *'}
-                              </td>
-                              <td className={styles.typeCellDemand}>Demand</td>
-                              {periods.map((period, colIndex) => {
-                                const dLine = row.demandByPeriod.get(period.id);
-                                const sLine = row.supplyByPeriod.get(period.id);
-                                const dVal = dLine?.fte_percent ?? 0;
-                                const sVal = sLine?.fte_percent ?? 0;
-                                const existingCellKey = `d-${row.key}-${period.id}`;
-                                const dragCellKey = buildCellKey('demand', row.resourceId, row.placeholderId, row.projectId, period.id);
-                                const isSelectable = canEditDemand && !row.isGeneral;
-                                const canEdit = isSelectable && !isDragging;
-                                const isSelected = selectedCells.has(dragCellKey);
-                                const isDimmed = isDragging && dragType !== 'demand' && dragStart?.ccId === group.ccId;
-                                return (
-                                  <td
-                                    key={period.id}
-                                    className={mergeClasses(
-                                      styles.valueCell,
-                                      isSelectable && styles.cellEditable,
-                                      isSelected && styles.cellSelected,
-                                      isDimmed && styles.cellDimmed,
-                                    )}
-                                    data-row-index={demandRowIndex}
-                                    data-col-index={colIndex}
-                                    data-cell-key={dragCellKey}
-                                    data-type="demand"
-                                    onMouseDown={isSelectable
-                                      ? (e) => handleCellMouseDown(e, dragCellKey, 'demand', demandRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, group.ccId)
-                                      : undefined}
-                                    onMouseEnter={isDragging
-                                      ? () => handleCellMouseEnter(demandRowIndex, colIndex, allRows, group.ccId)
-                                      : undefined}
-                                  >
-                                    <CellEditor
-                                      value={dVal}
-                                      colorStyle={getFteColor(dVal)}
-                                      isEditing={editingCell === existingCellKey}
-                                      isSaving={savingCells.has(existingCellKey)}
-                                      canEdit={canEdit}
-                                      onStartEdit={() => canEdit && setEditingCell(existingCellKey)}
-                                      onCancel={() => setEditingCell(null)}
-                                      onSave={val => saveDemandCell(existingCellKey, dLine, row, period, val)}
-                                      styles={styles}
-                                    />
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                            {/* Supply row */}
-                            <tr style={{ backgroundColor: SUPPLY_COLOR }}>
-                              {/* resource and project cells spanned by rowSpan above */}
-                              <td className={styles.typeCellSupply}>Supply</td>
-                              {periods.map((period, colIndex) => {
-                                const dLine = row.demandByPeriod.get(period.id);
-                                const sLine = row.supplyByPeriod.get(period.id);
-                                const dVal = dLine?.fte_percent ?? 0;
-                                const sVal = sLine?.fte_percent ?? 0;
-                                const existingCellKey = `s-${row.key}-${period.id}`;
-                                const dragCellKey = buildCellKey('supply', row.resourceId, row.placeholderId, row.projectId, period.id);
-                                const isSelectable = canEditSupply && !row.isPlaceholder;
-                                const canEdit = isSelectable && !isDragging;
-                                const isSelected = selectedCells.has(dragCellKey);
-                                const isDimmed = isDragging && dragType !== 'supply' && dragStart?.ccId === group.ccId;
-                                return (
-                                  <td
-                                    key={period.id}
-                                    className={mergeClasses(
-                                      styles.valueCell,
-                                      isSelectable && styles.cellEditable,
-                                      isSelected && styles.cellSelected,
-                                      isDimmed && styles.cellDimmed,
-                                    )}
-                                    data-row-index={supplyRowIndex}
-                                    data-col-index={colIndex}
-                                    data-cell-key={dragCellKey}
-                                    data-type="supply"
-                                    onMouseDown={isSelectable
-                                      ? (e) => handleCellMouseDown(e, dragCellKey, 'supply', supplyRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, group.ccId)
-                                      : undefined}
-                                    onMouseEnter={isDragging
-                                      ? () => handleCellMouseEnter(supplyRowIndex, colIndex, allRows, group.ccId)
-                                      : undefined}
-                                  >
-                                    <CellEditor
-                                      value={sVal}
-                                      colorStyle={getFteColor(sVal)}
-                                      isEditing={editingCell === existingCellKey}
-                                      isSaving={savingCells.has(existingCellKey)}
-                                      canEdit={canEdit}
-                                      onStartEdit={() => canEdit && setEditingCell(existingCellKey)}
-                                      onCancel={() => setEditingCell(null)}
-                                      onSave={val => saveSupplyCell(existingCellKey, sLine, row, period, val)}
-                                      styles={styles}
-                                    />
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          </React.Fragment>
-                        );
-                      })
-                    ))}
+                              );
+                            })}
+                          </tr>
+                        </React.Fragment>
+                      );
+                    })}
 
                     {/* Add demand line */}
                     {canEditDemand && (
@@ -1501,6 +1725,21 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
           )}
         </tbody>
       </table>
+    </div>
+    <div
+      ref={fixedBarRef}
+      style={{
+        position: 'sticky',
+        bottom: 0,
+        overflowX: 'auto',
+        overflowY: 'hidden',
+        height: '12px',
+        background: tokens.colorNeutralBackground2,
+        borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
+      }}
+    >
+      <div ref={phantomRef} style={{ height: '1px' }} />
+    </div>
     </div>
 
     {/* Add Line Dialog */}

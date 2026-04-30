@@ -103,7 +103,6 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusLarge,
     boxShadow: tokens.shadow4,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
-    overflowX: 'auto',
   },
   periodSelectorWrap: {
     marginBottom: tokens.spacingVerticalM,
@@ -515,7 +514,7 @@ export const ResourcePlanning: React.FC = () => {
 
       {error && <StatusBanner intent="error" title="Error" message={error} />}
 
-      <Card className={styles.matrixCard}>
+      <Card className={styles.matrixCard} style={{ overflow: 'visible' }}>
         <CardHeader
           header={
             <Body1>

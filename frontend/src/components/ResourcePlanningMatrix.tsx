@@ -316,6 +316,7 @@ interface MergedMatrixRow {
   key: string;
   resourceId: string | null;
   resourceName: string;
+  resourceInitials: string | null;
   placeholderId: string | null;
   projectId: string | null;
   projectName: string;
@@ -341,6 +342,7 @@ interface LocalRow {
   key: string;
   resourceId: string | null;
   resourceName: string;
+  resourceInitials: string | null;
   placeholderId: string | null;
   projectId: string | null;
   projectName: string;
@@ -488,6 +490,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
           key,
           resourceId: line.resource_id || null,
           resourceName: line.resource_name || line.resource_id || '—',
+          resourceInitials: line.resource_initials || null,
           placeholderId: line.placeholder_id || null,
           projectId: line.project_id,
           projectName: line.project_name || line.project_id,
@@ -510,6 +513,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
           key,
           resourceId: line.resource_id,
           resourceName: line.resource_name || line.resource_id,
+          resourceInitials: line.resource_initials || null,
           placeholderId: null,
           projectId: line.project_id || null,
           projectName: isGeneral ? 'General' : (line.project_name || line.project_id || '—'),
@@ -689,8 +693,11 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     const key = resourceId ? `r:${resourceId}|p:${projectId}` : `ph:${placeholderId}|p:${projectId}`;
 
     if (!allRows.find(r => r.key === key)) {
+      const resourceInitials = resourceId
+        ? (ccResources[ccId]?.find(r => r.id === resourceId)?.initials || null)
+        : null;
       const newRow: LocalRow = {
-        key, resourceId, resourceName, placeholderId,
+        key, resourceId, resourceName, resourceInitials, placeholderId,
         projectId, projectName, isGeneral: false, isPlaceholder: !!placeholderId,
       };
       setLocalDemandRows(prev => ({ ...prev, [ccId]: [...(prev[ccId] ?? []), newRow] }));
@@ -709,8 +716,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     const key = `r:${resourceId}|p:${projectId}`;
 
     if (!allRows.find(r => r.key === key)) {
+      const resourceInitials = ccResources[ccId]?.find(r => r.id === resourceId)?.initials || null;
       const newRow: LocalRow = {
-        key, resourceId, resourceName, placeholderId: null,
+        key, resourceId, resourceName, resourceInitials, placeholderId: null,
         projectId: projectId || null, projectName, isGeneral, isPlaceholder: false,
       };
       setLocalSupplyRows(prev => ({ ...prev, [ccId]: [...(prev[ccId] ?? []), newRow] }));
@@ -1305,7 +1313,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                   {isFirstRow && (() => {
                                     const initials = row.isPlaceholder
                                       ? '?'
-                                      : row.resourceName.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2);
+                                      : (row.resourceInitials || row.resourceName.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2));
                                     return (
                                       <td
                                         className={styles.resourceCell}

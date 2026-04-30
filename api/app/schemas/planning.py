@@ -60,8 +60,9 @@ class DemandLineResponse(DemandLineBase):
     # Include related names for display
     project_name: Optional[str] = None
     resource_name: Optional[str] = None
+    resource_initials: Optional[str] = None
     placeholder_name: Optional[str] = None
-    
+
     # Cost center context (resolved from resource or placeholder)
     cost_center_id: Optional[str] = None
     cost_center_name: Optional[str] = None
@@ -102,8 +103,9 @@ class SupplyLineResponse(SupplyLineBase):
     
     # Include related names for display
     resource_name: Optional[str] = None
+    resource_initials: Optional[str] = None
     project_name: Optional[str] = None
-    
+
     # Cost center context (resolved from resource)
     cost_center_id: Optional[str] = None
     cost_center_name: Optional[str] = None

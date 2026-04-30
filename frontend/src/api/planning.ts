@@ -18,6 +18,7 @@ export interface DemandLine {
   // Enriched fields
   project_name?: string;
   resource_name?: string;
+  resource_initials?: string;
   placeholder_name?: string;
   cost_center_id?: string;
   cost_center_name?: string;
@@ -36,6 +37,7 @@ export interface SupplyLine {
   created_at: string;
   // Enriched fields
   resource_name?: string;
+  resource_initials?: string;
   project_name?: string;
   cost_center_id?: string;
   cost_center_name?: string;

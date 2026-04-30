@@ -285,8 +285,10 @@ export const ResourcePlanning: React.FC = () => {
       if (selectedProjectId && d.project_id !== selectedProjectId) return false;
       if (selectedCostCenterId && d.cost_center_id !== selectedCostCenterId) return false;
       if (searchResource) {
+        const q = searchResource.toLowerCase();
         const name = (d.resource_name || d.placeholder_name || '').toLowerCase();
-        if (!name.includes(searchResource.toLowerCase())) return false;
+        const initials = (d.resource_initials || '').toLowerCase();
+        if (!name.includes(q) && !initials.includes(q)) return false;
       }
       return true;
     });
@@ -298,8 +300,10 @@ export const ResourcePlanning: React.FC = () => {
       if (selectedProjectId && s.project_id !== selectedProjectId) return false;
       if (selectedCostCenterId && s.cost_center_id !== selectedCostCenterId) return false;
       if (searchResource) {
+        const q = searchResource.toLowerCase();
         const name = (s.resource_name || '').toLowerCase();
-        if (!name.includes(searchResource.toLowerCase())) return false;
+        const initials = (s.resource_initials || '').toLowerCase();
+        if (!name.includes(q) && !initials.includes(q)) return false;
       }
       return true;
     });

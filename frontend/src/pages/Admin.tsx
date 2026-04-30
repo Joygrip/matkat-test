@@ -191,44 +191,22 @@ function DevSeedResetButton() {
 
 // ── Sync Panel ───────────────────────────────────────────────────────────────
 
-interface StepResult {
-  error?: string;
-  created?: number;
-  skipped?: number;
-  errors?: number;
-  synced?: number;
-  promoted?: number;
-  updated?: number;
+interface SyncStatusResponse {
+  last_sync_at: string | null;
+  status: 'never' | 'running' | 'completed' | 'failed';
+  sync_type: string | null;
 }
 
-interface FullSyncResult {
-  started_at: string;
-  finished_at: string;
-  duration_seconds: number;
-  steps: Record<string, StepResult>;
-  total_errors: number;
-}
-
-const STEP_LABELS: Record<string, string> = {
-  import_users: 'Import Users',
-  sync_profiles: 'Sync Profiles & Departments',
-  import_departments: 'Import Departments',
-  promote_managers: 'Promote Managers',
-  create_resources: 'Create Resources',
-  assign_cc_managers: 'Assign Cost Center Managers',
-};
-
-function getStepStats(key: string, step: StepResult): string {
-  if (step.error) return `Error: ${step.error}`;
-  switch (key) {
-    case 'import_users':      return `created: ${step.created ?? 0}, skipped: ${step.skipped ?? 0}`;
-    case 'sync_profiles':     return `synced: ${step.synced ?? 0}, errors: ${step.errors ?? 0}`;
-    case 'import_departments':return `created: ${step.created ?? 0}, skipped: ${step.skipped ?? 0}`;
-    case 'promote_managers':  return `promoted: ${step.promoted ?? 0}, skipped: ${step.skipped ?? 0}`;
-    case 'create_resources':  return `created: ${step.created ?? 0}, skipped: ${step.skipped ?? 0}`;
-    case 'assign_cc_managers':return `updated: ${step.updated ?? 0}, skipped: ${step.skipped ?? 0}`;
-    default: return JSON.stringify(step);
-  }
+function formatLastSync(s: SyncStatusResponse | null): string {
+  if (!s || s.status === 'never') return 'Never';
+  if (s.status === 'running') return 'Running now…';
+  if (!s.last_sync_at) return 'Unknown';
+  const diffMs = Date.now() - new Date(s.last_sync_at).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins} minute${mins !== 1 ? 's' : ''} ago`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs} hour${hrs !== 1 ? 's' : ''} ago`;
 }
 
 const useSyncPanelStyles = makeStyles({
@@ -278,18 +256,24 @@ const useSyncPanelStyles = makeStyles({
 function SyncPanel() {
   const syncStyles = useSyncPanelStyles();
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<FullSyncResult | null>(null);
+  const [syncStarted, setSyncStarted] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
+
+  useEffect(() => {
+    apiClient.get<SyncStatusResponse>('/admin/sync/status').then(setSyncStatus).catch(() => {});
+  }, []);
 
   const handleRunSync = async () => {
     setLoading(true);
-    setResult(null);
+    setSyncStarted(false);
     setSyncError(null);
     try {
-      const data = await apiClient.post<FullSyncResult>('/admin/sync/full');
-      setResult(data);
+      await apiClient.post('/admin/sync/full');
+      setSyncStarted(true);
+      setSyncStatus({ last_sync_at: null, status: 'running', sync_type: 'full' });
     } catch (err) {
-      setSyncError(err instanceof Error ? err.message : 'Sync failed');
+      setSyncError(err instanceof Error ? err.message : 'Failed to start sync');
     } finally {
       setLoading(false);
     }
@@ -301,11 +285,11 @@ function SyncPanel() {
         Synchronize users, departments, managers and resources from Microsoft Entra ID.
         This will import new users, update profiles, promote managers and assign cost centers.
       </Text>
-      <MessageBar intent="warning">
-        <MessageBarBody>
-          Full sync may take 1–2 minutes. Do not close this page while sync is running.
-        </MessageBarBody>
-      </MessageBar>
+      {syncStatus && (
+        <Text style={{ color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase200 }}>
+          Last synced: {formatLastSync(syncStatus)}
+        </Text>
+      )}
       <div>
         <Button
           appearance="primary"
@@ -313,7 +297,7 @@ function SyncPanel() {
           disabled={loading}
           onClick={handleRunSync}
         >
-          {loading ? 'Syncing...' : 'Run Full Sync'}
+          {loading ? 'Starting…' : 'Run Full Sync'}
         </Button>
       </div>
       {syncError && (
@@ -321,27 +305,19 @@ function SyncPanel() {
           <MessageBarBody>{syncError}</MessageBarBody>
         </MessageBar>
       )}
-      {result && (
-        <div className={syncStyles.resultCard}>
-          <Text weight="semibold">Sync completed in {result.duration_seconds}s</Text>
-          {Object.entries(result.steps).map(([key, step]) => (
-            <div key={key} className={syncStyles.stepRow}>
-              <Text weight="semibold">{STEP_LABELS[key] ?? key}</Text>
-              <Text className={step.error ? syncStyles.errorText : syncStyles.stepStats}>
-                {getStepStats(key, step)}
-              </Text>
-            </div>
-          ))}
-          <div className={syncStyles.totalRow}>
-            <Text weight="semibold">Total errors</Text>
-            <Text
-              weight="semibold"
-              className={result.total_errors > 0 ? syncStyles.errorText : syncStyles.successText}
-            >
-              {result.total_errors}
-            </Text>
+      {syncStarted && (
+        <>
+          <MessageBar intent="success">
+            <MessageBarBody>
+              Sync started — running in background. This may take 2–3 minutes. Refresh the page when done.
+            </MessageBarBody>
+          </MessageBar>
+          <div>
+            <Button appearance="outline" onClick={() => window.location.reload()}>
+              Refresh Page
+            </Button>
           </div>
-        </div>
+        </>
       )}
     </div>
   );

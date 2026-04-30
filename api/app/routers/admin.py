@@ -1,12 +1,77 @@
 """Admin CRUD endpoints for master data."""
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+import logging
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from typing import Optional
 
-from api.app.db.engine import get_db
+from api.app.db.engine import get_db, SessionLocal, _get_or_create_engine
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
 from api.app.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+# In-memory sync status — resets on restart, no DB needed
+_sync_status: dict = {
+    "last_sync_at": None,
+    "status": "never",
+    "sync_type": None,
+}
+
+
+def _run_sync_background(sync_type: str, tenant_id: str) -> None:
+    """Background worker: creates its own DB session and runs the requested sync."""
+    from api.app.services.background_sync import (
+        run_full_sync,
+        import_users_from_graph,
+        import_departments_from_graph,
+        promote_managers_from_graph,
+        create_resources_from_users,
+        assign_cost_center_managers,
+        run_graph_sync,
+    )
+
+    _sync_status["status"] = "running"
+    _sync_status["sync_type"] = sync_type
+
+    engine = _get_or_create_engine()
+    SessionLocal.configure(bind=engine)
+    db = SessionLocal()
+    settings = get_settings()
+
+    try:
+        logger.info("background_sync: starting %s sync for tenant %s", sync_type, tenant_id)
+        if sync_type == "full":
+            result = run_full_sync(db, settings, tenant_id)
+        elif sync_type == "users":
+            result = import_users_from_graph(db, settings, tenant_id)
+        elif sync_type == "departments":
+            result = import_departments_from_graph(db, settings, tenant_id)
+        elif sync_type == "managers":
+            result = promote_managers_from_graph(db, settings, tenant_id)
+        elif sync_type == "resources":
+            result = create_resources_from_users(db, settings, tenant_id)
+        elif sync_type == "cc-managers":
+            result = assign_cost_center_managers(db, settings, tenant_id)
+        elif sync_type == "graph-users":
+            from api.app.services.reporting import ReportingService
+            result = run_graph_sync(db, settings, tenant_id).as_dict()
+            ReportingService.rebuild_cache_for_tenant(tenant_id, db)
+        else:
+            result = {"error": f"Unknown sync type: {sync_type}"}
+        _sync_status["status"] = "completed"
+        _sync_status["last_sync_at"] = datetime.now(timezone.utc).isoformat()
+        logger.info("background_sync: %s sync completed: %s", sync_type, result)
+    except Exception as exc:
+        _sync_status["status"] = "failed"
+        _sync_status["last_sync_at"] = datetime.now(timezone.utc).isoformat()
+        logger.error("background_sync: %s sync failed: %s", sync_type, exc)
+    finally:
+        db.close()
+
+
 from api.app.models.core import (
     UserRole, User, CostCenter, Project, ProjectPM, Resource, Placeholder, Holiday, Settings,
     ApprovalDelegate,
@@ -691,96 +756,124 @@ async def delete_setting(
 
 # ============== GRAPH SYNC ==============
 
-@router.post("/sync/graph-users")
-async def trigger_graph_sync(
-    db: Session = Depends(get_db),
+@router.get("/sync/status")
+async def get_sync_status(
     current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN)),
 ):
-    """Trigger an on-demand Graph background sync for the current tenant.
+    """Return the current sync status (in-memory, resets on restart)."""
+    return _sync_status
 
-    Refreshes email, display_name, and manager_object_id for every user in the
-    tenant from Microsoft Graph using the client credentials (app-only) flow.
-    Requires the app registration to have User.Read.All application permission
-    with admin consent. (Admin only)
 
-    After syncing user profiles, rebuilds the reporting_cache so that
-    RO/Director scoped access reflects the latest org chart.
-    """
-    from api.app.services.reporting import ReportingService
+@router.post("/sync/graph-users")
+async def trigger_graph_sync(
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    """Trigger an on-demand Graph profile + reporting-cache sync in the background."""
+    background_tasks.add_task(_run_sync_background, "graph-users", current_user.tenant_id)
+    return {
+        "status": "started",
+        "message": "Graph user sync started in background.",
+        "hint": "Refresh the page in 1-2 minutes to see updated data.",
+    }
 
-    settings = get_settings()
-    result = run_graph_sync(db, settings, current_user.tenant_id)
 
-    # Rebuild reporting cache from fresh manager_object_id data
-    hierarchy_rows = ReportingService.rebuild_cache_for_tenant(current_user.tenant_id, db)
-
-    response = result.as_dict()
-    response["reporting_cache_rows"] = hierarchy_rows
-    return response
 @router.post("/sync/import-graph-users")
 async def import_users_from_graph_endpoint(
-    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Bulk import all enabled Entra users into the DB as Employee role. Admin only."""
-    from api.app.services.background_sync import import_users_from_graph
-    settings = get_settings()
-    result = import_users_from_graph(db, settings, current_user.tenant_id)
-    return result
+    background_tasks.add_task(_run_sync_background, "users", current_user.tenant_id)
+    return {
+        "status": "started",
+        "message": "User import started in background.",
+        "hint": "Refresh the page in 1-2 minutes to see updated data.",
+    }
+
 
 @router.post("/sync/import-departments")
 async def import_departments_endpoint(
-    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Import unique Graph departments as CostCenters. Code field left blank for admin to fill."""
-    from api.app.services.background_sync import import_departments_from_graph
-    return import_departments_from_graph(db, get_settings(), current_user.tenant_id)
+    background_tasks.add_task(_run_sync_background, "departments", current_user.tenant_id)
+    return {
+        "status": "started",
+        "message": "Department import started in background.",
+        "hint": "Refresh the page in 1-2 minutes to see updated data.",
+    }
+
 
 @router.post("/sync/assign-user-departments")
 async def assign_user_departments_endpoint(
-    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Re-run Graph sync to assign users to cost centers based on department name matching."""
-    from api.app.services.background_sync import assign_users_to_departments
-    return assign_users_to_departments(db, get_settings(), current_user.tenant_id)
+    background_tasks.add_task(_run_sync_background, "graph-users", current_user.tenant_id)
+    return {
+        "status": "started",
+        "message": "Department assignment started in background.",
+        "hint": "Refresh the page in 1-2 minutes to see updated data.",
+    }
+
 
 @router.post("/sync/promote-managers")
 async def promote_managers_endpoint(
-    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Promote users to Manager role if they manage at least one other user in Graph."""
-    from api.app.services.background_sync import promote_managers_from_graph
-    return promote_managers_from_graph(db, get_settings(), current_user.tenant_id)
+    background_tasks.add_task(_run_sync_background, "managers", current_user.tenant_id)
+    return {
+        "status": "started",
+        "message": "Manager promotion started in background.",
+        "hint": "Refresh the page in 1-2 minutes to see updated data.",
+    }
+
 
 @router.post("/sync/create-resources")
 async def create_resources_endpoint(
-    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Create Resource entries for all active Employee and Manager users that don't have one yet."""
-    from api.app.services.background_sync import create_resources_from_users
-    return create_resources_from_users(db, get_settings(), current_user.tenant_id)
+    background_tasks.add_task(_run_sync_background, "resources", current_user.tenant_id)
+    return {
+        "status": "started",
+        "message": "Resource creation started in background.",
+        "hint": "Refresh the page in 1-2 minutes to see updated data.",
+    }
+
 
 @router.post("/sync/assign-cost-center-managers")
 async def assign_cost_center_managers_endpoint(
-    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Assign RO (1st level) and Director (2nd level) managers to each cost center based on user hierarchy."""
-    from api.app.services.background_sync import assign_cost_center_managers
-    return assign_cost_center_managers(db, get_settings(), current_user.tenant_id)
+    background_tasks.add_task(_run_sync_background, "cc-managers", current_user.tenant_id)
+    return {
+        "status": "started",
+        "message": "Cost center manager assignment started in background.",
+        "hint": "Refresh the page in 1-2 minutes to see updated data.",
+    }
+
 
 @router.post("/sync/full")
 async def full_sync_endpoint(
-    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
-    """Run all Graph sync steps in sequence. Admin only."""
-    from api.app.services.background_sync import run_full_sync
-    return run_full_sync(db, get_settings(), current_user.tenant_id)
+    """Run all Graph sync steps in sequence in the background. Admin only."""
+    background_tasks.add_task(_run_sync_background, "full", current_user.tenant_id)
+    return {
+        "status": "started",
+        "message": "Full sync started in background. This may take a few minutes.",
+        "hint": "Refresh the page in 2-3 minutes to see updated data.",
+    }
 
 # ============== USERS ==============
 

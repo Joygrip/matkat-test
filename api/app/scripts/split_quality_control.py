@@ -74,7 +74,7 @@ def run():
                 UPDATE cost_centers
                 SET code = 'QC-PL',
                     name = 'Quality Control PL',
-                    graph_department_name = 'Quality Control PL',
+                    graph_department_name = 'Quality Control',
                     location = 'Poland'
                 WHERE id = :id
             """),

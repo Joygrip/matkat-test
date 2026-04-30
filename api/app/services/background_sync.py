@@ -472,6 +472,11 @@ def create_resources_from_users(db: Session, settings: Settings, tenant_id: str)
 
 def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str, force: bool = False) -> dict:
     """Assign RO (1st level) and Director (2nd level) managers to each cost center."""
+    graph = GraphAppClient(settings)
+    graph_configured = bool(
+        settings.graph_client_id and settings.graph_client_secret and settings.azure_tenant_id
+    )
+
     cost_centers: list[CostCenter] = (
         db.query(CostCenter)
         .filter(CostCenter.tenant_id == tenant_id, CostCenter.is_active == True)
@@ -515,6 +520,17 @@ def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str,
                             "assign_cc_managers: set ro_user_id=%s for cost_center=%s",
                             manager_user.id, cc.id,
                         )
+                        # Look up RO user's country from Graph and store as cc.location
+                        if graph_configured:
+                            graph_user = graph.get_user(manager_user.object_id)
+                            if graph_user and graph_user is not FETCH_FAILED:
+                                country = graph_user.get("country") or None
+                                if country:
+                                    cc.location = country
+                                    logger.info(
+                                        "assign_cc_managers: set location=%s for cost_center=%s",
+                                        country, cc.id,
+                                    )
                         break
 
             # Find Director (2nd level manager)

@@ -11,6 +11,7 @@ class CostCenterBase(BaseModel):
     graph_department_name: Optional[str] = None
     ro_user_id: Optional[str] = None
     director_user_id: Optional[str] = None
+    location: Optional[str] = None
 
 
 class CostCenterCreate(CostCenterBase):
@@ -23,6 +24,7 @@ class CostCenterUpdate(BaseModel):
     graph_department_name: Optional[str] = None
     ro_user_id: Optional[str] = None
     director_user_id: Optional[str] = None
+    location: Optional[str] = None
     is_active: Optional[bool] = None
 
 

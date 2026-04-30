@@ -140,6 +140,62 @@ async def delete_cost_center(
     return {"message": "Cost center deleted"}
 
 
+# ============== COST CENTER HIERARCHY ==============
+
+@router.get("/cost-centers/{cost_center_id}/hierarchy")
+async def get_cost_center_hierarchy(
+    cost_center_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(*READ_ROLES)),
+):
+    """Return the full management chain for a cost center, starting from the RO user."""
+    cc = db.query(CostCenter).filter(
+        and_(CostCenter.id == cost_center_id, CostCenter.tenant_id == current_user.tenant_id)
+    ).first()
+    if not cc:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Cost center not found"})
+
+    if not cc.ro_user_id:
+        return {"chain": []}
+
+    level_titles = {1: "RO / Manager", 2: "Director", 3: "VP", 4: "C-Suite"}
+    chain = []
+    visited: set[str] = set()
+
+    current = db.query(User).filter(User.id == cc.ro_user_id).first()
+    level = 1
+
+    while current and level <= 10:
+        if current.id in visited:
+            break
+        visited.add(current.id)
+
+        chain.append({
+            "level": level,
+            "title": level_titles.get(level, "Executive"),
+            "user_id": current.id,
+            "display_name": current.display_name,
+            "email": current.email,
+            "job_title": None,
+        })
+
+        if not current.manager_object_id:
+            break
+
+        next_user = db.query(User).filter(
+            User.object_id == current.manager_object_id,
+            User.tenant_id == current_user.tenant_id,
+        ).first()
+
+        if not next_user:
+            break
+
+        current = next_user
+        level += 1
+
+    return {"chain": chain}
+
+
 # ============== PROJECTS ==============
 
 def _enrich_project(project: Project) -> dict:

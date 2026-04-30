@@ -12,9 +12,23 @@ export interface CostCenter {
   name: string;
   ro_user_id: string | null;
   director_user_id: string | null;
+  location: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface HierarchyMember {
+  level: number;
+  title: string;
+  user_id: string;
+  display_name: string;
+  email: string;
+  job_title: string | null;
+}
+
+export interface CostCenterHierarchy {
+  chain: HierarchyMember[];
 }
 
 export interface Project {
@@ -108,12 +122,14 @@ export interface AdminUserDetail {
 export const adminApi = {
   // Cost Centers
   listCostCenters: () => apiClient.get<CostCenter[]>('/admin/cost-centers'),
-  createCostCenter: (data: { code: string; name: string; ro_user_id?: string; director_user_id?: string }) =>
+  createCostCenter: (data: { code: string; name: string; ro_user_id?: string; director_user_id?: string; location?: string }) =>
     apiClient.post<CostCenter>('/admin/cost-centers', data),
   updateCostCenter: (id: string, data: Partial<CostCenter>) =>
     apiClient.patch<CostCenter>(`/admin/cost-centers/${id}`, data),
   deleteCostCenter: (id: string) =>
     apiClient.delete<{ message: string }>(`/admin/cost-centers/${id}`),
+  getCostCenterHierarchy: (id: string) =>
+    apiClient.get<CostCenterHierarchy>(`/admin/cost-centers/${id}/hierarchy`),
 
   // Users (for PM assignment dropdowns)
   listUsers: (role?: string) =>

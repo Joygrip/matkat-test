@@ -53,6 +53,7 @@ import {
 import {
   adminApi,
   CostCenter,
+  CostCenterHierarchy,
   Project,
   Resource,
   Placeholder,
@@ -1505,6 +1506,8 @@ export function Admin() {
   const [detailType, setDetailType] = useState<'cost-center' | 'resource' | 'placeholder' | null>(null);
   const [detailResources, setDetailResources] = useState<Resource[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [ccHierarchy, setCcHierarchy] = useState<CostCenterHierarchy | null>(null);
+  const [hierarchyLoading, setHierarchyLoading] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -1594,14 +1597,21 @@ export function Admin() {
     setDetailItem(cc);
     setDetailType('cost-center');
     setDetailResources([]);
+    setCcHierarchy(null);
     setDetailLoading(true);
+    setHierarchyLoading(true);
     try {
-      const res = await adminApi.listResources();
+      const [res, hier] = await Promise.all([
+        adminApi.listResources(),
+        adminApi.getCostCenterHierarchy(cc.id).catch(() => null),
+      ]);
       setDetailResources(res.filter((r) => r.cost_center_id === cc.id));
+      setCcHierarchy(hier);
     } catch {
       setDetailResources([]);
     } finally {
       setDetailLoading(false);
+      setHierarchyLoading(false);
     }
   };
 
@@ -1813,13 +1823,14 @@ export function Admin() {
                 <TableRow>
                   <TableHeaderCell>Code</TableHeaderCell>
                   <TableHeaderCell>Name</TableHeaderCell>
+                  <TableHeaderCell>Location</TableHeaderCell>
                   <TableHeaderCell>Actions</TableHeaderCell>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredCostCenters.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={3}>
+                    <TableCell colSpan={4}>
                       <Text className={styles.emptyHint}>No cost centers match the current filter.</Text>
                     </TableCell>
                   </TableRow>
@@ -1837,6 +1848,7 @@ export function Admin() {
                         <ChevronRightRegular style={{ color: tokens.colorNeutralForeground3, fontSize: 14 }} />
                       </span>
                     </TableCell>
+                    <TableCell>{cc.location ?? '—'}</TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       {canManageMasterData && (
                         <>
@@ -2295,6 +2307,14 @@ export function Admin() {
                 ))}
               </Select>
             </div>
+            <div className={styles.dialogField}>
+              <Label>Location</Label>
+              <Input
+                value={String(formData.location || '')}
+                placeholder="e.g. Denmark, Poland"
+                onChange={(_, d) => setFormData({ ...formData, location: d.value || null })}
+              />
+            </div>
           </>
         );
 
@@ -2538,9 +2558,50 @@ export function Admin() {
           <div className={styles.detailGrid}>
             <span className={styles.detailLabel}>Code</span><span>{cc.code}</span>
             <span className={styles.detailLabel}>Name</span><span>{cc.name}</span>
+            {cc.location && (
+              <><span className={styles.detailLabel}>Location</span><span>{cc.location}</span></>
+            )}
             <span className={styles.detailLabel}>Status</span>
             <span><StatusPill status={resourceStatus(cc.is_active)} /></span>
           </div>
+
+          <div className={styles.sectionTitle}>Management Chain</div>
+          {hierarchyLoading ? (
+            <Spinner size="tiny" label="Loading hierarchy…" />
+          ) : !ccHierarchy || ccHierarchy.chain.length === 0 ? (
+            <Text className={styles.emptyHint}>No management chain configured for this cost center.</Text>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+              {ccHierarchy.chain.map((member, idx) => (
+                <div key={member.user_id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+                    <div style={{
+                      width: 32, height: 32, borderRadius: '50%',
+                      backgroundColor: idx === 0 ? tokens.colorBrandBackground : tokens.colorNeutralBackground4,
+                      color: idx === 0 ? tokens.colorNeutralForegroundOnBrand : tokens.colorNeutralForeground1,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: tokens.fontSizeBase200, fontWeight: 600, flexShrink: 0,
+                    }}>
+                      {member.display_name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: tokens.fontSizeBase300 }}>{member.display_name}</div>
+                      <div style={{ color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 }}>
+                        {member.title}{member.email ? ` · ${member.email}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                  {idx < ccHierarchy.chain.length - 1 && (
+                    <div style={{
+                      width: 2, height: 16, marginLeft: 15,
+                      backgroundColor: tokens.colorNeutralStroke1,
+                    }} />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className={styles.sectionTitle}>Resources in this cost center</div>
           {detailLoading ? (
             <Spinner size="tiny" label="Loading resources…" />

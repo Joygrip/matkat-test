@@ -215,8 +215,9 @@ export const ResourcePlanning: React.FC = () => {
   const [selectedKpiPeriodIndex, setSelectedKpiPeriodIndex] = useState(0);
 
   useEffect(() => {
+    if (!user?.tenant_id) return;
     loadAll();
-  }, []);
+  }, [user?.tenant_id]);
 
   // Keep ref in sync so reloadLines always has the latest periods without stale closure
   useEffect(() => { openPeriodsRef.current = openPeriods; }, [openPeriods]);
@@ -234,6 +235,7 @@ export const ResourcePlanning: React.FC = () => {
   const isPM = user?.role === 'PM';
 
   const loadAll = async () => {
+    if (!user?.tenant_id) return;
     const now = Date.now();
     const cacheValid =
       _cache.tenantId === user?.tenant_id &&
@@ -279,8 +281,8 @@ export const ResourcePlanning: React.FC = () => {
         _cache.projects = projectsData;
         _cache.costCenters = costCentersData;
         _cache.openPeriods = open;
-        _cache.loadedAt = Date.now();
         _cache.tenantId = user?.tenant_id ?? null;
+        _cache.loadedAt = _cache.tenantId ? Date.now() : null;
         return;
       }
 
@@ -297,8 +299,8 @@ export const ResourcePlanning: React.FC = () => {
       _cache.projects = projectsData;
       _cache.costCenters = costCentersData;
       _cache.openPeriods = open;
-      _cache.loadedAt = Date.now();
       _cache.tenantId = user?.tenant_id ?? null;
+      _cache.loadedAt = _cache.tenantId ? Date.now() : null;
     } catch (err: unknown) {
       setError(formatApiError(err, 'Failed to load resource planning data'));
     } finally {

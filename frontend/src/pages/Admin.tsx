@@ -695,10 +695,10 @@ function NotificationsPanel() {
       const data = await apiClient.get<SchedulePreviewData>(`/notification-schedules/${s.id}/preview`);
       setPreviewData(data);
       const initialSelected = new Set(
-        data.recipients.filter((r) => !r.already_notified && !r.excluded).map((r) => r.email),
+        data.recipients.filter((r) => !r.excluded).map((r) => r.email),
       );
       setSelectedEmails(initialSelected);
-      const firstChecked = data.recipients.find((r) => !r.already_notified && !r.excluded);
+      const firstChecked = data.recipients.find((r) => !r.excluded);
       if (firstChecked) setSelectedPreviewEmail(firstChecked.email);
     } catch (err) {
       showApiError(err as Error);
@@ -711,14 +711,16 @@ function NotificationsPanel() {
   const handleSendFromPreview = async () => {
     if (!previewSched) return;
     const emailList = [...selectedEmails];
+    const isResend = previewData?.recipients.some((r) => r.already_notified && selectedEmails.has(r.email)) ?? false;
     setSendLoading(true);
     setSendResult(null);
     try {
       await apiClient.post(`/notification-schedules/${previewSched.id}/run`, {
         recipient_emails: emailList,
+        force: isResend,
       });
       const n = emailList.length;
-      setSendResult({ ok: true, msg: `Sent to ${n} recipient${n !== 1 ? 's' : ''}` });
+      setSendResult({ ok: true, msg: `${isResend ? 'Resent' : 'Sent'} to ${n} recipient${n !== 1 ? 's' : ''}` });
       loadSchedules();
       loadLogs();
     } catch (err) {
@@ -909,7 +911,7 @@ function NotificationsPanel() {
                   ...recipients.filter((r) => !r.excluded),
                   ...recipients.filter((r) => r.excluded),
                 ];
-                const allCheckable = sortedRecipients.filter((r) => !r.already_notified && !r.excluded);
+                const allCheckable = sortedRecipients.filter((r) => !r.excluded);
                 const checkedCheckable = allCheckable.filter((r) => selectedEmails.has(r.email));
                 const headerCheckState: boolean | 'mixed' =
                   checkedCheckable.length === 0 ? false
@@ -972,11 +974,11 @@ function NotificationsPanel() {
                             </TableHeader>
                             <TableBody>
                               {sortedRecipients.map((r, idx) => (
-                                <TableRow key={idx} style={{ opacity: r.already_notified || r.excluded ? 0.5 : 1 }}>
+                                <TableRow key={idx} style={{ opacity: r.excluded ? 0.5 : 1 }}>
                                   <TableCell>
                                     <Checkbox
                                       checked={selectedEmails.has(r.email)}
-                                      disabled={r.already_notified || r.excluded}
+                                      disabled={r.excluded}
                                       onChange={() => toggleEmail(r.email)}
                                     />
                                   </TableCell>
@@ -1016,7 +1018,7 @@ function NotificationsPanel() {
                         </div>
                         <Text size={200} style={{ color: tokens.colorNeutralForeground2, display: 'block', marginBottom: tokens.spacingVerticalM }}>
                           {selectedCount} of {total_recipients} recipient{total_recipients !== 1 ? 's' : ''} selected
-                          {skipped > 0 ? ` (${skipped} already notified, excluded)` : ''}
+                          {skipped > 0 ? ` (${skipped} already notified)` : ''}
                         </Text>
                       </>
                     )}
@@ -1094,10 +1096,12 @@ function NotificationsPanel() {
                 {(() => {
                   if (!previewData) return 'Send Now';
                   const { total_recipients } = previewData;
-                  const n = previewData.recipients.filter((r) => !r.already_notified && !r.excluded && selectedEmails.has(r.email)).length;
-                  if (n === 0) return 'Send Now';
-                  if (n === total_recipients) return `Send Now (${n} recipient${n !== 1 ? 's' : ''})`;
-                  return `Send Now (${n} of ${total_recipients} recipient${total_recipients !== 1 ? 's' : ''})`;
+                  const n = previewData.recipients.filter((r) => !r.excluded && selectedEmails.has(r.email)).length;
+                  const hasResend = previewData.recipients.some((r) => r.already_notified && selectedEmails.has(r.email));
+                  const label = hasResend ? 'Resend' : 'Send Now';
+                  if (n === 0) return label;
+                  if (n === total_recipients) return `${label} (${n} recipient${n !== 1 ? 's' : ''})`;
+                  return `${label} (${n} of ${total_recipients} recipient${total_recipients !== 1 ? 's' : ''})`;
                 })()}
               </Button>
               <Button appearance="secondary" onClick={() => setPreviewOpen(false)}>Close</Button>

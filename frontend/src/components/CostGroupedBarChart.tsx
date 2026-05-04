@@ -1,6 +1,6 @@
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { makeStyles } from '@fluentui/react-components';
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { schemeCategory10, interpolateRainbow } from 'd3-scale-chromatic';
 import type { GroupedBarChartDatum } from './GroupedBarChart';
 
@@ -165,6 +165,21 @@ export interface CostGroupedBarChartProps {
 
 export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, entityNames, legendMap, onBarClick, hiddenCategories = [] }) => {
   const styles = useStyles();
+  const chartWrapperRef = useRef<HTMLDivElement>(null);
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | undefined>(undefined);
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!chartWrapperRef.current) return;
+    const rect = chartWrapperRef.current.getBoundingClientRect();
+    const relX = e.clientX - rect.left;
+    const TOOLTIP_WIDTH = 260;
+    if (relX > rect.width / 2) {
+      setTooltipPos({ x: 8, y: 20 });
+    } else {
+      setTooltipPos({ x: rect.width - TOOLTIP_WIDTH - 8, y: 20 });
+    }
+  };
+
   const colorMap: Record<string, string> = {};
   entityNames.forEach((name, i) => {
     colorMap[name] =
@@ -175,12 +190,13 @@ export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, 
 
   return (
     <div className={styles.wrapper}>
+      <div ref={chartWrapperRef} onMouseMove={handleMouseMove}>
       <ResponsiveContainer width="100%" height={400}>
         <BarChart data={data} margin={{ top: 16, right: 32, left: 8, bottom: 24 }}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="label" angle={0} textAnchor="middle" height={40} tick={{ fontSize: 13 }} minTickGap={8} />
           <YAxis tickFormatter={dkkCompact} width={72} />
-          <Tooltip content={<CustomTooltip />} wrapperStyle={{ pointerEvents: 'none' }} />
+          <Tooltip content={<CustomTooltip />} position={tooltipPos} wrapperStyle={{ pointerEvents: 'none' }} />
           {entityNames.flatMap((entity) =>
             SUFFIXES.filter((suffix) => !hiddenCategories.includes(suffix.slice(1) as any)).map((suffix, idx, visibleSuffixes) => (
               <Bar
@@ -198,6 +214,7 @@ export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, 
           )}
         </BarChart>
       </ResponsiveContainer>
+      </div>
       {/* Legend: Section A — entity color chips */}
       <div className={styles.legendEntities}>
         {entityNames.map((entity) => (

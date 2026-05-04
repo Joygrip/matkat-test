@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_
 
 from api.app.models.planning import DemandLine, SupplyLine
-from api.app.models.core import Period, Project, Resource, Placeholder, User, PeriodStatus, UserRole
+from api.app.models.core import Period, Project, ProjectPM, Resource, Placeholder, User, PeriodStatus, UserRole
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
 from api.app.schemas.common import ErrorCode
@@ -154,6 +154,25 @@ class DemandService:
         scoped_ids = self._get_scoped_resource_ids()
         if scoped_ids is not None:
             query = query.filter(DemandLine.resource_id.in_(scoped_ids))
+
+        # PM: restrict to projects they are assigned to
+        if self.current_user.role == UserRole.PM:
+            pm_user = self.db.query(User).filter(
+                and_(
+                    User.tenant_id == self.current_user.tenant_id,
+                    User.object_id == self.current_user.object_id,
+                )
+            ).first()
+            if pm_user:
+                pm_project_ids = [
+                    r.project_id
+                    for r in self.db.query(ProjectPM.project_id)
+                    .filter(ProjectPM.user_id == pm_user.id)
+                    .all()
+                ]
+                query = query.filter(DemandLine.project_id.in_(pm_project_ids))
+            else:
+                query = query.filter(False)
 
         return query.all()
 

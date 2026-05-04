@@ -226,8 +226,9 @@ export const Finance: React.FC = () => {
 
   // ── Initial loads ──
   useEffect(() => {
-    lookupsApi.listProjects().then(setProjects);
-  }, []);
+    const fetch = isPM ? lookupsApi.listProjectsScoped() : lookupsApi.listProjects();
+    fetch.then(setProjects);
+  }, [isPM]);
 
   // ── Reload when period changes ──
   useEffect(() => {

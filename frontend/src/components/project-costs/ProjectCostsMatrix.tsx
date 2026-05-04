@@ -411,8 +411,8 @@ export const ProjectCostsMatrix: React.FC = () => {
   const [addLineState, setAddLineState] = useState<{ projectId: string; type: 'oop'|'equip'; desc: string } | null>(null);
 
   // ── Load ──
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     try {
       const [periodsData, projectsData, extData, equipData] = await Promise.all([
         periodsApi.list(),
@@ -572,7 +572,7 @@ export const ProjectCostsMatrix: React.FC = () => {
       if (isLocal && cents > 0) {
         setLocalLines(prev => prev.filter(l => !(l.projectId === projectId && l.type === type && l.description === description)));
       }
-      await load();
+      await load(false);
     } catch (err) {
       showApiError(err as Error, 'saving cost');
     } finally {
@@ -598,7 +598,7 @@ export const ProjectCostsMatrix: React.FC = () => {
         }
       }
       await Promise.all(promises);
-      await load();
+      await load(false);
     } catch (err) {
       showApiError(err as Error, 'deleting line');
     }
@@ -697,7 +697,7 @@ export const ProjectCostsMatrix: React.FC = () => {
         }
       }
       await Promise.all(promises);
-      await load();
+      await load(false);
       setSelectedCells(new Set());
       setApplyValue('');
       setPopoverPos(null);

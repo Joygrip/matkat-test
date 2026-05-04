@@ -263,6 +263,7 @@ class NotificationsService:
         notify_finance: bool = True,
         recipient_emails: Optional[List[str]] = None,
         excluded_emails: Optional[List[str]] = None,
+        force: bool = False,
     ) -> Dict[str, Any]:
         """Detect demand > supply conflicts and send ONE consolidated email per recipient.
 
@@ -318,14 +319,15 @@ class NotificationsService:
             # Per-recipient idempotency (resource_id=None — one log per recipient per period)
             existing = self._get_existing_log(phase, year, month, None, uid)
             if existing is not None:
-                if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
-                    skipped_count += 1
-                    continue
-                if existing.retry_count >= existing.max_retries:
-                    skipped_count += 1
-                    continue
+                if not force:
+                    if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
+                        skipped_count += 1
+                        continue
+                    if existing.retry_count >= existing.max_retries:
+                        skipped_count += 1
+                        continue
                 existing.status = NotificationStatus.PENDING
-                existing.retry_count += 1
+                existing.retry_count = 0 if force else existing.retry_count + 1
                 existing.error = None
                 log = existing
             else:
@@ -424,14 +426,15 @@ class NotificationsService:
                         continue
                     existing = self._get_existing_log(phase, year, month, None, fu.id)
                     if existing is not None:
-                        if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
-                            skipped_count += 1
-                            continue
-                        if existing.retry_count >= existing.max_retries:
-                            skipped_count += 1
-                            continue
+                        if not force:
+                            if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
+                                skipped_count += 1
+                                continue
+                            if existing.retry_count >= existing.max_retries:
+                                skipped_count += 1
+                                continue
                         existing.status = NotificationStatus.PENDING
-                        existing.retry_count += 1
+                        existing.retry_count = 0 if force else existing.retry_count + 1
                         existing.error = None
                         log = existing
                     else:
@@ -460,7 +463,7 @@ class NotificationsService:
                     sent_count += 1
             else:
                 summary_msg = self._conflict_finance_summary(conflicts, year, month)
-                s, sk = self._send_summary_notifications(phase, year, month, run_id, finance_users, summary_msg)
+                s, sk = self._send_summary_notifications(phase, year, month, run_id, finance_users, summary_msg, force=force)
                 sent_count += s
                 skipped_count += sk
 
@@ -509,6 +512,7 @@ class NotificationsService:
         notify_finance: bool = True,
         recipient_emails: Optional[List[str]] = None,
         excluded_emails: Optional[List[str]] = None,
+        force: bool = False,
     ) -> Dict[str, Any]:
         """Find employees with unsigned/absent actuals and send reminders.
 
@@ -557,17 +561,15 @@ class NotificationsService:
                     phase, year, month, item.resource_id, recipient.id
                 )
                 if existing is not None:
-                    if existing.status == NotificationStatus.SENT:
-                        skipped_count += 1
-                        continue
-                    if existing.status == NotificationStatus.PENDING:
-                        skipped_count += 1
-                        continue
-                    if existing.retry_count >= existing.max_retries:
-                        skipped_count += 1
-                        continue
+                    if not force:
+                        if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
+                            skipped_count += 1
+                            continue
+                        if existing.retry_count >= existing.max_retries:
+                            skipped_count += 1
+                            continue
                     existing.status = NotificationStatus.PENDING
-                    existing.retry_count += 1
+                    existing.retry_count = 0 if force else existing.retry_count + 1
                     existing.error = None
                     log = existing
                 else:
@@ -630,7 +632,7 @@ class NotificationsService:
                 if excluded_set and ro.email in excluded_set:
                     continue
                 msg = self._missing_actuals_manager_summary(cc, cc_missing, year, month)
-                s, sk = self._send_summary_notifications(phase, year, month, run_id, [ro], msg)
+                s, sk = self._send_summary_notifications(phase, year, month, run_id, [ro], msg, force=force)
                 sent_count += s
                 skipped_count += sk
 
@@ -642,7 +644,7 @@ class NotificationsService:
             if excluded_set:
                 finance_users = [u for u in finance_users if not u.email or u.email not in excluded_set]
             msg = self._missing_actuals_finance_summary(missing, year, month)
-            s, sk = self._send_summary_notifications(phase, year, month, run_id, finance_users, msg)
+            s, sk = self._send_summary_notifications(phase, year, month, run_id, finance_users, msg, force=force)
             sent_count += s
             skipped_count += sk
 
@@ -691,6 +693,7 @@ class NotificationsService:
         notify_finance: bool = True,
         recipient_emails: Optional[List[str]] = None,
         excluded_emails: Optional[List[str]] = None,
+        force: bool = False,
     ) -> Dict[str, Any]:
         """Send planning reminders scoped to relevant recipients only.
 
@@ -727,7 +730,7 @@ class NotificationsService:
                 unique_recipients = [u for u in unique_recipients if u.email and u.email in email_set]
             if excluded_set:
                 unique_recipients = [u for u in unique_recipients if not u.email or u.email not in excluded_set]
-            s, sk = self._send_summary_notifications(phase, year, month, run_id, unique_recipients, message)
+            s, sk = self._send_summary_notifications(phase, year, month, run_id, unique_recipients, message, force=force)
             sent_count += s
             skipped_count += sk
 
@@ -740,7 +743,7 @@ class NotificationsService:
                 finance_users = [u for u in finance_users if u.email and u.email in email_set]
             if excluded_set:
                 finance_users = [u for u in finance_users if not u.email or u.email not in excluded_set]
-            s, sk = self._send_summary_notifications(phase_fin, year, month, run_id, finance_users, message_fin)
+            s, sk = self._send_summary_notifications(phase_fin, year, month, run_id, finance_users, message_fin, force=force)
             sent_count += s
             skipped_count += sk
 
@@ -778,6 +781,7 @@ class NotificationsService:
         notify_finance: bool = True,
         recipient_emails: Optional[List[str]] = None,
         excluded_emails: Optional[List[str]] = None,
+        force: bool = False,
     ) -> Dict[str, Any]:
         """Send approval reminders only to managers/finance with pending approvals.
 
@@ -820,14 +824,15 @@ class NotificationsService:
 
                 existing = self._get_existing_log(phase, year, month, None, uid)
                 if existing is not None:
-                    if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
-                        skipped_count += 1
-                        continue
-                    if existing.retry_count >= existing.max_retries:
-                        skipped_count += 1
-                        continue
+                    if not force:
+                        if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
+                            skipped_count += 1
+                            continue
+                        if existing.retry_count >= existing.max_retries:
+                            skipped_count += 1
+                            continue
                     existing.status = NotificationStatus.PENDING
-                    existing.retry_count += 1
+                    existing.retry_count = 0 if force else existing.retry_count + 1
                     existing.error = None
                     log = existing
                 else:
@@ -898,14 +903,15 @@ class NotificationsService:
                         continue
                     existing = self._get_existing_log(phase, year, month, None, fu.id)
                     if existing is not None:
-                        if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
-                            skipped_count += 1
-                            continue
-                        if existing.retry_count >= existing.max_retries:
-                            skipped_count += 1
-                            continue
+                        if not force:
+                            if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
+                                skipped_count += 1
+                                continue
+                            if existing.retry_count >= existing.max_retries:
+                                skipped_count += 1
+                                continue
                         existing.status = NotificationStatus.PENDING
-                        existing.retry_count += 1
+                        existing.retry_count = 0 if force else existing.retry_count + 1
                         existing.error = None
                         log = existing
                     else:
@@ -1457,12 +1463,16 @@ class NotificationsService:
         run_id: str,
         recipients: List[User],
         message: str,
+        force: bool = False,
     ) -> Tuple[int, int]:
         """Send a phase notification to a list of recipients without resource-level idempotency.
 
         Uses (phase, year, month, recipient_user_id, resource_id=NULL) as the
         unique combination, so one summary email per recipient per period.
         Returns (sent_count, skipped_count).
+
+        When force=True the already-sent / exhausted-retries guard is bypassed so
+        the notification is resent regardless of prior delivery status.
         """
         tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
         sent = skipped = 0
@@ -1473,14 +1483,15 @@ class NotificationsService:
 
             existing = self._get_existing_log(phase, year, month, None, recipient.id)
             if existing is not None:
-                if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
-                    skipped += 1
-                    continue
-                if existing.retry_count >= existing.max_retries:
-                    skipped += 1
-                    continue
+                if not force:
+                    if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
+                        skipped += 1
+                        continue
+                    if existing.retry_count >= existing.max_retries:
+                        skipped += 1
+                        continue
                 existing.status = NotificationStatus.PENDING
-                existing.retry_count += 1
+                existing.retry_count = 0 if force else existing.retry_count + 1
                 existing.error = None
                 log = existing
             else:

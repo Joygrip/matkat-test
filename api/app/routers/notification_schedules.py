@@ -53,6 +53,7 @@ class NotificationScheduleUpdate(BaseModel):
 
 class RunScheduleRequest(BaseModel):
     recipient_emails: Optional[list[str]] = None
+    force: bool = False
 
 
 class PreviewRecipient(BaseModel):
@@ -295,6 +296,7 @@ async def run_schedule_now(
     service = NotificationsService(db, current_user)
 
     recipient_emails = (body.recipient_emails or None) if body else None
+    force = body.force if body else False
 
     excluded = schedule.excluded_emails or []
     ntype = schedule.notification_type
@@ -306,6 +308,7 @@ async def run_schedule_now(
             notify_finance=schedule.notify_finance,
             recipient_emails=recipient_emails,
             excluded_emails=excluded,
+            force=force,
         )
     elif ntype == NotificationScheduleType.MISSING_ACTUALS:
         result = service.run_missing_actuals_alerts(
@@ -315,6 +318,7 @@ async def run_schedule_now(
             notify_finance=schedule.notify_finance,
             recipient_emails=recipient_emails,
             excluded_emails=excluded,
+            force=force,
         )
     elif ntype == NotificationScheduleType.PLANNING_REMINDER:
         result = service.run_planning_reminder(
@@ -324,6 +328,7 @@ async def run_schedule_now(
             notify_finance=schedule.notify_finance,
             recipient_emails=recipient_emails,
             excluded_emails=excluded,
+            force=force,
         )
     elif ntype == NotificationScheduleType.APPROVAL_REMINDER:
         result = service.run_approval_reminder(
@@ -332,6 +337,7 @@ async def run_schedule_now(
             notify_finance=schedule.notify_finance,
             recipient_emails=recipient_emails,
             excluded_emails=excluded,
+            force=force,
         )
     else:
         result = {}

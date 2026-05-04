@@ -287,7 +287,6 @@ def _build_conflict_alert_html(context: dict) -> str:
         f"{_esc(month_name)} {_esc(year)}. Please review and adjust demand or supply lines in MatKat."
         f"</p>"
         f"{table}"
-        f"{_cta_button('Review in MatKat →')}"
     )
 
     bg, border, title_color = _BANNER_CONFIGS["conflict_alert"]
@@ -375,14 +374,49 @@ def _build_approval_reminder_html(context: dict) -> str:
     year = context["year"]
     month_name = context["month_name"]
     deadline = context.get("deadline", "")
+    approvals = context.get("approvals", [])
+    total = context.get("total", len(approvals))
+
+    rows = ""
+    for i, a in enumerate(approvals):
+        row_bg = "#ffffff" if i % 2 == 0 else "#f9fafb"
+        rows += (
+            f"<tr style='background:{row_bg};'>"
+            f"<td style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+            f"color:#111827;border-bottom:1px solid #f3f4f6;'>{_esc(a['resource_name'])}</td>"
+            f"<td style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+            f"color:#111827;border-bottom:1px solid #f3f4f6;'>{_esc(a['project_name'])}</td>"
+            f"<td style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+            f"color:#111827;text-align:right;border-bottom:1px solid #f3f4f6;'>{_esc(a['fte_percent'])}%</td>"
+            f"<td style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+            f"color:#111827;border-bottom:1px solid #f3f4f6;'>{_esc(a['period'])}</td>"
+            f"</tr>"
+        )
+
+    table = (
+        "<table width='100%' cellpadding='0' cellspacing='0' "
+        "style='border-collapse:collapse;border:1px solid #e5e7eb;margin:16px 0;'>"
+        "<thead><tr style='background:#f9fafb;'>"
+        "<th style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        "font-weight:bold;color:#6b7280;text-align:left;"
+        "border-bottom:1px solid #e5e7eb;'>Employee</th>"
+        "<th style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        "font-weight:bold;color:#6b7280;text-align:left;"
+        "border-bottom:1px solid #e5e7eb;'>Project</th>"
+        "<th style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        "font-weight:bold;color:#6b7280;text-align:right;"
+        "border-bottom:1px solid #e5e7eb;'>FTE%</th>"
+        "<th style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        "font-weight:bold;color:#6b7280;text-align:left;"
+        "border-bottom:1px solid #e5e7eb;'>Period</th>"
+        f"</tr></thead><tbody>{rows}</tbody></table>"
+    )
 
     body_html = (
-        f"<p style='margin:0 0 12px;font-family:Arial,sans-serif;font-size:14px;color:#374151;'>"
-        f"Actuals for {_esc(month_name)} {_esc(year)} are awaiting your approval."
+        f"<p style='margin:0 0 16px;font-family:Arial,sans-serif;font-size:14px;color:#374151;'>"
+        f"The following approval{'s' if total != 1 else ''} require your action before {_esc(deadline)}."
         f"</p>"
-        f"<p style='margin:0 0 12px;font-family:Arial,sans-serif;font-size:14px;color:#374151;'>"
-        f"Please log in to MatKat and review the pending approvals before {_esc(deadline)}."
-        f"</p>"
+        f"{table}"
         f"{_cta_button('Review Approvals in MatKat →')}"
     )
 
@@ -391,8 +425,8 @@ def _build_approval_reminder_html(context: dict) -> str:
         banner_bg=bg,
         banner_border=border,
         banner_title_color=title_color,
-        banner_title="Approval Required",
-        banner_subtitle=f"{month_name} {year} — Review pending",
+        banner_title="Approvals Awaiting Your Action",
+        banner_subtitle=f"{total} approval{'s' if total != 1 else ''} pending for {month_name} {year}",
         body_html=body_html,
     )
 
@@ -435,6 +469,17 @@ def build_conflict_alert_html(context: dict) -> str:
         conflicts — list of dicts with resource_name, total_demand, total_supply, gap
     """
     return _build_conflict_alert_html(context)
+
+
+def build_approval_reminder_html(context: dict) -> str:
+    """Build rich card-style HTML for an approval reminder with a structured approval table.
+
+    context keys:
+        year, month, month_name, deadline — period and deadline info
+        approvals — list of dicts with resource_name, project_name, fte_percent, period
+        total — total number of pending approvals
+    """
+    return _build_approval_reminder_html(context)
 
 
 def build_phase_html(template_key: str, message: str, year: int, month: int) -> str:

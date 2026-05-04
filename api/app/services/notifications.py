@@ -21,16 +21,24 @@ from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 
-from api.app.models.core import User, Holiday, CostCenter
+from api.app.models.actuals import ActualLine
+from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalStatus, StepStatus
+from api.app.models.core import User, Holiday, CostCenter, Resource, Project, ProjectPM
 from api.app.models.notification_schedule import NotificationScheduleType
 from api.app.models.notifications import NotificationLog, NotificationPhase, NotificationStatus
+from api.app.models.planning import DemandLine
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
 from api.app.services.conflict_detection import ConflictDetectionService
-from api.app.services.graph_mail import GraphMailService, build_conflict_alert_html, build_phase_html
+from api.app.services.graph_mail import (
+    GraphMailService,
+    build_approval_reminder_html,
+    build_conflict_alert_html,
+    build_phase_html,
+)
 from api.app.services.missing_actuals import MissingActualsService
 from api.app.config import get_settings
 
@@ -524,6 +532,14 @@ class NotificationsService:
         sent_count = 0
         skipped_count = 0
 
+        # Scoping is correct as-is:
+        # - Employees: MissingActualsService.find_missing returns only resources with a
+        #   DemandLine this period whose actuals are not fully employee-signed. One email
+        #   per resource (= one per employee, since resource.user_id is unique per person).
+        # - Managers: iterates cost centers and only sends to the RO if ≥1 resource in
+        #   their CC is in the missing list — so ROs with no missing employees are skipped.
+        # - Finance: receives a full summary only when missing is non-empty.
+
         # ── Per-employee emails ──────────────────────────────────────────────
         if notify_employee:
             for item in missing:
@@ -676,12 +692,14 @@ class NotificationsService:
         recipient_emails: Optional[List[str]] = None,
         excluded_emails: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Send planning reminders scoped by role.
+        """Send planning reminders scoped to relevant recipients only.
 
         Args:
-            notify_pm: Send PM_RO reminder to all active PMs.
-            notify_manager: Send PM_RO reminder to all active Managers/ROs.
-            notify_finance: Send FINANCE reminder to Finance/Admin users.
+            notify_pm: Send to PMs with at least one active project that has a DemandLine
+                in the current open period.
+            notify_manager: Send to ROs whose cost center has at least one DemandLine
+                in the current open period.
+            notify_finance: Send to Finance/Admin users (always — full overview).
         """
         tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
         run_id = str(uuid.uuid4())
@@ -695,9 +713,9 @@ class NotificationsService:
             message = self._get_message_template(phase, year, month, deadline)
             pm_ro_recipients: List[User] = []
             if notify_pm:
-                pm_ro_recipients.extend(self._get_users_by_roles(tenant_id, ["PM"]))
+                pm_ro_recipients.extend(self._get_pm_users_with_demand(tenant_id, year, month))
             if notify_manager:
-                pm_ro_recipients.extend(self._get_users_by_roles(tenant_id, ["Manager"]))
+                pm_ro_recipients.extend(self._get_ro_users_with_demand(tenant_id, year, month))
             # Deduplicate (a user could appear in both role lists if multi-roled)
             seen: set = set()
             unique_recipients = []
@@ -761,11 +779,13 @@ class NotificationsService:
         recipient_emails: Optional[List[str]] = None,
         excluded_emails: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Send approval reminders scoped by role.
+        """Send approval reminders only to managers/finance with pending approvals.
 
         Args:
-            notify_manager: Send RO_DIRECTOR reminder to all active Managers/ROs.
-            notify_finance: Send RO_DIRECTOR reminder to Finance/Admin users.
+            notify_manager: Send to managers who have ≥1 pending ApprovalStep
+                (approver_id = user.id). Email shows a table of their pending approvals.
+            notify_finance: Send full pending-approval summary to Finance/Admin users.
+                Only sent when at least one approval is pending across the tenant.
         """
         tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
         run_id = str(uuid.uuid4())
@@ -773,26 +793,160 @@ class NotificationsService:
         email_set = set(recipient_emails) if recipient_emails else None
         excluded_set = set(excluded_emails) if excluded_emails else set()
         sent_count = skipped_count = 0
-
+        month_name = calendar.month_name[month]
         deadline = self.calculate_phase_deadline(phase, year, month)
-        message = self._get_message_template(phase, year, month, deadline)
 
-        recipients: List[User] = []
+        # ── Per-manager emails (only managers with pending approvals) ────────
         if notify_manager:
-            recipients.extend(self._get_users_by_roles(tenant_id, ["Manager"]))
+            manager_data = self._get_managers_with_pending_approvals(tenant_id)
+            for uid, data in manager_data.items():
+                user: User = data["user"]
+                approvals: List[Dict] = data["approvals"]
+                if not user.email:
+                    continue
+                if email_set and user.email not in email_set:
+                    continue
+                if excluded_set and user.email in excluded_set:
+                    continue
+
+                context = {
+                    "approvals": approvals,
+                    "total": len(approvals),
+                    "year": year,
+                    "month": month,
+                    "month_name": month_name,
+                    "deadline": str(deadline),
+                }
+
+                existing = self._get_existing_log(phase, year, month, None, uid)
+                if existing is not None:
+                    if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
+                        skipped_count += 1
+                        continue
+                    if existing.retry_count >= existing.max_retries:
+                        skipped_count += 1
+                        continue
+                    existing.status = NotificationStatus.PENDING
+                    existing.retry_count += 1
+                    existing.error = None
+                    log = existing
+                else:
+                    ikey = self._idempotency_key(tenant_id, phase, year, month, uid)
+                    n = len(approvals)
+                    message = (
+                        f"{n} pending approval{'s' if n != 1 else ''} awaiting your action "
+                        f"for {month_name} {year}."
+                    )
+                    log = self._create_entity_log(
+                        phase=phase, year=year, month=month, run_id=run_id,
+                        recipient_user_id=uid, recipient_email=user.email,
+                        message=message, idempotency_key=ikey,
+                    )
+                    try:
+                        with self.db.begin_nested():
+                            self.db.add(log)
+                            self.db.flush()
+                    except IntegrityError:
+                        logger.info(
+                            "run_approval_reminder: duplicate skipped for %s (concurrent run)",
+                            user.email,
+                        )
+                        skipped_count += 1
+                        continue
+
+                if self.settings.notify_mode == "graph":
+                    subject = self._subject_for_phase(phase)
+                    body_html = build_approval_reminder_html(context)
+                    success = self._get_mail_service().send_mail(user.email, subject, body_html)
+                    if success:
+                        log.status = NotificationStatus.SENT
+                        log.sent_at = datetime.utcnow()
+                    else:
+                        log.status = NotificationStatus.FAILED
+                        log.error = "GraphMailService returned an error — see application logs"
+                        logger.warning(
+                            "Mail dispatch failed: phase=%s recipient=%s", phase, user.email
+                        )
+                else:
+                    log.status = NotificationStatus.SENT
+                    log.sent_at = datetime.utcnow()
+
+                self.db.commit()
+                sent_count += 1
+
+        # ── Finance summary email (only when pending approvals exist) ────────
         if notify_finance:
-            recipients.extend(self._get_users_by_roles(tenant_id, ["Finance", "Admin"]))
+            all_approvals = self._get_all_pending_approvals(tenant_id)
+            if all_approvals:
+                finance_users = self._get_users_by_roles(tenant_id, ["Finance", "Admin"])
+                if email_set:
+                    finance_users = [u for u in finance_users if u.email and u.email in email_set]
+                if excluded_set:
+                    finance_users = [u for u in finance_users if not u.email or u.email not in excluded_set]
 
-        seen: set = set()
-        unique_recipients = [u for u in recipients if not (u.id in seen or seen.add(u.id))]  # type: ignore[func-returns-value]
-        if email_set:
-            unique_recipients = [u for u in unique_recipients if u.email and u.email in email_set]
-        if excluded_set:
-            unique_recipients = [u for u in unique_recipients if not u.email or u.email not in excluded_set]
+                finance_context = {
+                    "approvals": all_approvals,
+                    "total": len(all_approvals),
+                    "year": year,
+                    "month": month,
+                    "month_name": month_name,
+                    "deadline": str(deadline),
+                }
 
-        s, sk = self._send_summary_notifications(phase, year, month, run_id, unique_recipients, message)
-        sent_count += s
-        skipped_count += sk
+                for fu in finance_users:
+                    if not fu.email:
+                        continue
+                    existing = self._get_existing_log(phase, year, month, None, fu.id)
+                    if existing is not None:
+                        if existing.status in (NotificationStatus.SENT, NotificationStatus.PENDING):
+                            skipped_count += 1
+                            continue
+                        if existing.retry_count >= existing.max_retries:
+                            skipped_count += 1
+                            continue
+                        existing.status = NotificationStatus.PENDING
+                        existing.retry_count += 1
+                        existing.error = None
+                        log = existing
+                    else:
+                        ikey = self._idempotency_key(tenant_id, phase, year, month, fu.id)
+                        n = len(all_approvals)
+                        message = (
+                            f"Full approval summary for {month_name} {year}: "
+                            f"{n} pending approval{'s' if n != 1 else ''} across all cost centers."
+                        )
+                        log = self._create_entity_log(
+                            phase=phase, year=year, month=month, run_id=run_id,
+                            recipient_user_id=fu.id, recipient_email=fu.email,
+                            message=message, idempotency_key=ikey,
+                        )
+                        try:
+                            with self.db.begin_nested():
+                                self.db.add(log)
+                                self.db.flush()
+                        except IntegrityError:
+                            skipped_count += 1
+                            continue
+
+                    if self.settings.notify_mode == "graph":
+                        subject = self._subject_for_phase(phase)
+                        body_html = build_approval_reminder_html(finance_context)
+                        success = self._get_mail_service().send_mail(fu.email, subject, body_html)
+                        if success:
+                            log.status = NotificationStatus.SENT
+                            log.sent_at = datetime.utcnow()
+                        else:
+                            log.status = NotificationStatus.FAILED
+                            log.error = "GraphMailService returned an error — see application logs"
+                            logger.warning(
+                                "Mail dispatch failed: phase=%s recipient=%s", phase, fu.email
+                            )
+                    else:
+                        log.status = NotificationStatus.SENT
+                        log.sent_at = datetime.utcnow()
+
+                    self.db.commit()
+                    sent_count += 1
 
         if self.current_user:
             log_audit(
@@ -1080,9 +1234,9 @@ class NotificationsService:
 
             pm_ro: List[User] = []
             if notify_pm:
-                pm_ro.extend(self._get_users_by_roles(tenant_id, ["PM"]))
+                pm_ro.extend(self._get_pm_users_with_demand(tenant_id, year, month))
             if notify_manager:
-                pm_ro.extend(self._get_users_by_roles(tenant_id, ["Manager"]))
+                pm_ro.extend(self._get_ro_users_with_demand(tenant_id, year, month))
             seen: set = set()
             for u in pm_ro:
                 if u.id in seen or not u.email:
@@ -1138,37 +1292,74 @@ class NotificationsService:
         tenant_id = self.current_user.tenant_id if self.current_user else "unknown"
         phase = NotificationPhase.RO_DIRECTOR
         deadline = self.calculate_phase_deadline(phase, year, month)
-        msg = self._get_message_template(phase, year, month, deadline)
+        month_name = calendar.month_name[month]
         subj = self._subject_for_phase(phase)
-        reason = f"Approval deadline: {deadline}"
-
-        candidates: List[User] = []
-        if notify_manager:
-            candidates.extend(self._get_users_by_roles(tenant_id, ["Manager"]))
-        if notify_finance:
-            candidates.extend(self._get_users_by_roles(tenant_id, ["Finance", "Admin"]))
 
         result: List[Dict[str, Any]] = []
         skipped = 0
-        seen: set = set()
-        for u in candidates:
-            if u.id in seen or not u.email:
-                continue
-            seen.add(u.id)
-            existing = self._get_existing_log(phase, year, month, None, u.id)
-            already = existing is not None and existing.status == NotificationStatus.SENT
-            if already:
-                skipped += 1
-            result.append({
-                "email": u.email,
-                "display_name": u.display_name,
-                "role": u.role.value,
-                "reason": reason,
-                "email_subject": subj,
-                "email_body_html": self._card_html(phase, msg, year, month),
-                "already_notified": already,
-                "excluded": False,
-            })
+
+        if notify_manager:
+            manager_data = self._get_managers_with_pending_approvals(tenant_id)
+            for uid, data in manager_data.items():
+                user: User = data["user"]
+                approvals: List[Dict] = data["approvals"]
+                if not user.email:
+                    continue
+                existing = self._get_existing_log(phase, year, month, None, uid)
+                already = existing is not None and existing.status == NotificationStatus.SENT
+                if already:
+                    skipped += 1
+                n = len(approvals)
+                context = {
+                    "approvals": approvals,
+                    "total": n,
+                    "year": year,
+                    "month": month,
+                    "month_name": month_name,
+                    "deadline": str(deadline),
+                }
+                result.append({
+                    "email": user.email,
+                    "display_name": user.display_name,
+                    "role": user.role.value,
+                    "reason": f"{n} pending approval{'s' if n != 1 else ''} awaiting review",
+                    "email_subject": subj,
+                    "email_body_html": build_approval_reminder_html(context),
+                    "already_notified": already,
+                    "excluded": False,
+                })
+
+        if notify_finance:
+            all_approvals = self._get_all_pending_approvals(tenant_id)
+            if all_approvals:
+                n = len(all_approvals)
+                finance_context = {
+                    "approvals": all_approvals,
+                    "total": n,
+                    "year": year,
+                    "month": month,
+                    "month_name": month_name,
+                    "deadline": str(deadline),
+                }
+                body_html = build_approval_reminder_html(finance_context)
+                reason = f"Full summary — {n} pending approval{'s' if n != 1 else ''} across all cost centers"
+                for fu in self._get_users_by_roles(tenant_id, ["Finance", "Admin"]):
+                    if not fu.email:
+                        continue
+                    existing = self._get_existing_log(phase, year, month, None, fu.id)
+                    already = existing is not None and existing.status == NotificationStatus.SENT
+                    if already:
+                        skipped += 1
+                    result.append({
+                        "email": fu.email,
+                        "display_name": fu.display_name,
+                        "role": "Finance",
+                        "reason": reason,
+                        "email_subject": subj,
+                        "email_body_html": body_html,
+                        "already_notified": already,
+                        "excluded": False,
+                    })
 
         return result, skipped
 
@@ -1482,6 +1673,168 @@ class NotificationsService:
                 User.is_active == True,  # noqa: E712
             )
         ).all()
+
+    def _get_pm_users_with_demand(self, tenant_id: str, year: int, month: int) -> List[User]:
+        """Return PM users linked to active projects with DemandLines in the given period."""
+        demand_project_ids = (
+            self.db.query(DemandLine.project_id)
+            .filter(
+                and_(
+                    DemandLine.tenant_id == tenant_id,
+                    DemandLine.year == year,
+                    DemandLine.month == month,
+                )
+            )
+            .distinct()
+            .subquery()
+        )
+
+        pm_user_ids = (
+            self.db.query(ProjectPM.user_id)
+            .join(Project, Project.id == ProjectPM.project_id)
+            .filter(
+                and_(
+                    ProjectPM.tenant_id == tenant_id,
+                    Project.is_active == True,  # noqa: E712
+                    Project.id.in_(select(demand_project_ids.c.project_id)),
+                )
+            )
+            .distinct()
+            .subquery()
+        )
+
+        return (
+            self.db.query(User)
+            .filter(
+                and_(
+                    User.tenant_id == tenant_id,
+                    User.role == "PM",
+                    User.is_active == True,  # noqa: E712
+                    User.id.in_(select(pm_user_ids.c.user_id)),
+                )
+            )
+            .all()
+        )
+
+    def _get_ro_users_with_demand(self, tenant_id: str, year: int, month: int) -> List[User]:
+        """Return RO/Manager users whose cost center has DemandLines in the given period."""
+        cc_with_demand = (
+            self.db.query(Resource.cost_center_id)
+            .join(DemandLine, and_(
+                DemandLine.resource_id == Resource.id,
+                DemandLine.tenant_id == tenant_id,
+                DemandLine.year == year,
+                DemandLine.month == month,
+            ))
+            .filter(Resource.tenant_id == tenant_id)
+            .distinct()
+            .subquery()
+        )
+
+        return (
+            self.db.query(User)
+            .join(CostCenter, CostCenter.ro_user_id == User.id)
+            .filter(
+                and_(
+                    User.tenant_id == tenant_id,
+                    User.is_active == True,  # noqa: E712
+                    CostCenter.id.in_(select(cc_with_demand.c.cost_center_id)),
+                )
+            )
+            .distinct()
+            .all()
+        )
+
+    def _get_managers_with_pending_approvals(self, tenant_id: str) -> Dict[str, Dict]:
+        """Return {user_id: {"user": User, "approvals": [dict]}} for managers with pending steps."""
+        rows = (
+            self.db.query(ApprovalStep, ActualLine, Resource, Project)
+            .join(ApprovalInstance, ApprovalInstance.id == ApprovalStep.instance_id)
+            .join(ActualLine, ActualLine.id == ApprovalInstance.subject_id)
+            .join(Resource, Resource.id == ActualLine.resource_id)
+            .join(Project, Project.id == ActualLine.project_id)
+            .filter(
+                and_(
+                    ApprovalInstance.tenant_id == tenant_id,
+                    ApprovalInstance.subject_type == "actuals",
+                    ApprovalInstance.status == ApprovalStatus.PENDING,
+                    ApprovalStep.status == StepStatus.PENDING,
+                    ApprovalStep.approver_id.isnot(None),
+                )
+            )
+            .all()
+        )
+
+        if not rows:
+            return {}
+
+        approver_ids = {step.approver_id for step, *_ in rows}
+        users = (
+            self.db.query(User)
+            .filter(
+                and_(
+                    User.tenant_id == tenant_id,
+                    User.role == "Manager",
+                    User.is_active == True,  # noqa: E712
+                    User.id.in_(approver_ids),
+                )
+            )
+            .all()
+        )
+        user_map = {u.id: u for u in users}
+
+        result: Dict[str, Dict] = {}
+        for step, al, resource, project in rows:
+            if step.approver_id not in user_map:
+                continue
+            if step.approver_id not in result:
+                result[step.approver_id] = {"user": user_map[step.approver_id], "approvals": []}
+            period_month_name = calendar.month_name[al.month]
+            result[step.approver_id]["approvals"].append({
+                "resource_name": resource.display_name,
+                "project_name": project.name,
+                "fte_percent": al.actual_fte_percent,
+                "period": f"{period_month_name} {al.year}",
+            })
+
+        return result
+
+    def _get_all_pending_approvals(self, tenant_id: str) -> List[Dict]:
+        """Return all pending approval items across the tenant (deduplicated by ActualLine)."""
+        rows = (
+            self.db.query(ActualLine, Resource, Project)
+            .join(ApprovalInstance, and_(
+                ApprovalInstance.subject_id == ActualLine.id,
+                ApprovalInstance.subject_type == "actuals",
+            ))
+            .join(ApprovalStep, ApprovalStep.instance_id == ApprovalInstance.id)
+            .join(Resource, Resource.id == ActualLine.resource_id)
+            .join(Project, Project.id == ActualLine.project_id)
+            .filter(
+                and_(
+                    ApprovalInstance.tenant_id == tenant_id,
+                    ApprovalInstance.status == ApprovalStatus.PENDING,
+                    ApprovalStep.status == StepStatus.PENDING,
+                )
+            )
+            .all()
+        )
+
+        seen_al_ids: set = set()
+        approvals: List[Dict] = []
+        for al, resource, project in rows:
+            if al.id in seen_al_ids:
+                continue
+            seen_al_ids.add(al.id)
+            period_month_name = calendar.month_name[al.month]
+            approvals.append({
+                "resource_name": resource.display_name,
+                "project_name": project.name,
+                "fte_percent": al.actual_fte_percent,
+                "period": f"{period_month_name} {al.year}",
+            })
+
+        return approvals
 
     # ------------------------------------------------------------------
     # Private: deadline helpers

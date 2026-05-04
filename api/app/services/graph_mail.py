@@ -166,11 +166,11 @@ def _build_base_html(
     )
     return (
         "<!DOCTYPE html>"
-        "<html><body style='margin:0;padding:0;background:#f3f4f6;"
+        "<html><body style='margin:0;padding:0;background-color:#ffffff;"
         "font-family:Arial,sans-serif;'>"
         "<table width='100%' cellpadding='0' cellspacing='0' "
-        "style='background:#f3f4f6;padding:24px 0;'>"
-        "<tr><td align='center'>"
+        "style='background-color:#ffffff;'>"
+        "<tr><td align='center' style='padding:0;'>"
         "<table width='600' cellpadding='0' cellspacing='0' "
         "style='max-width:600px;background:#ffffff;border-radius:8px;overflow:hidden;"
         "border:1px solid #e0e0e0;'>"

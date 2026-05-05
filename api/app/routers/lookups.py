@@ -180,7 +180,7 @@ async def list_resources_scoped(
     )
     if cost_center_id:
         query = query.filter(Resource.cost_center_id == cost_center_id)
-    if current_user.role in _SCOPED_ROLES:
+    if current_user.role in _SCOPED_ROLES and not current_user.is_manager_reader:
         from api.app.services.reporting import ReportingService
         scoped_ids = list(ReportingService(db, current_user).get_accessible_resource_ids())
         # Also include the manager's own resource so they can enter their own actuals

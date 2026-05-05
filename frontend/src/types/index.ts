@@ -15,6 +15,7 @@ export interface MeResponse {
   email: string;
   display_name: string;
   role: UserRole;
+  secondary_role?: string;
   permissions: string[];
 }
 

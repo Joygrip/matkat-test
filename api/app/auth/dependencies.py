@@ -42,10 +42,22 @@ class CurrentUser(BaseModel):
     email: str
     display_name: str
     role: UserRole
+    secondary_role: Optional[str] = None
+
+    @property
+    def is_reader(self) -> bool:
+        return self.secondary_role == UserRole.READER.value
+
+    @property
+    def is_manager_reader(self) -> bool:
+        return self.role == UserRole.MANAGER and self.secondary_role == UserRole.READER.value
 
     def has_role(self, *roles: UserRole) -> bool:
-        """Check if user has any of the specified roles."""
-        return self.role in roles
+        """Check if user has any of the specified roles (primary or secondary)."""
+        return (
+            self.role in roles or
+            (self.secondary_role is not None and self.secondary_role in [r.value for r in roles])
+        )
 
     def require_role(self, *roles: UserRole) -> None:
         """Raise 403 if user doesn't have any of the specified roles."""
@@ -120,6 +132,7 @@ async def get_current_user(
             email=dev_email,
             display_name=dev_name,
             role=role,
+            secondary_role=db_user.secondary_role if db_user else None,
         )
 
     # ------------------------------------------------------------------
@@ -176,6 +189,7 @@ async def get_current_user(
         email=db_user.email,
         display_name=db_user.display_name,
         role=db_user.role,
+        secondary_role=db_user.secondary_role,
     )
 
 

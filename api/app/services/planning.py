@@ -99,8 +99,11 @@ class DemandService:
         Return the list of resource IDs the current user may access, or None
         if the user has unscoped (full-tenant) access.
         Includes resources accessible via active delegation grants.
+        Manager+Reader bypasses CC scoping for reads.
         """
         if self.current_user.role not in _SCOPED_ROLES:
+            return None
+        if self.current_user.is_manager_reader:
             return None
         from api.app.services.reporting import ReportingService
         svc = ReportingService(self.db, self.current_user)
@@ -502,11 +505,14 @@ class SupplyService:
         self.db = db
         self.current_user = current_user
 
-    def _get_scoped_resource_ids(self) -> Optional[list[str]]:
+    def _get_scoped_resource_ids(self, for_write: bool = False) -> Optional[list[str]]:
         """Return cost-center-scoped resource IDs for Manager, or None for full access.
         Includes resources accessible via active delegation grants.
+        Manager+Reader bypasses CC scoping for reads; for_write=True preserves write guards.
         """
         if self.current_user.role not in _SCOPED_ROLES:
+            return None
+        if not for_write and self.current_user.is_manager_reader:
             return None
         from api.app.services.reporting import ReportingService
         svc = ReportingService(self.db, self.current_user)
@@ -527,7 +533,7 @@ class SupplyService:
         """Raise 403 if the current user is a Manager but the resource is outside their cost center."""
         if self.current_user.role != UserRole.MANAGER:
             return
-        scoped_ids = self._get_scoped_resource_ids()
+        scoped_ids = self._get_scoped_resource_ids(for_write=True)
         if scoped_ids is not None and resource_id not in scoped_ids:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

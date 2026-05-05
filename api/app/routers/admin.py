@@ -885,6 +885,7 @@ def _enrich_user(user: User) -> dict:
         "email": user.email,
         "display_name": user.display_name,
         "role": user.role,
+        "secondary_role": user.secondary_role,
         "is_active": user.is_active,
         "cost_center_id": user.cost_center_id,
         "cost_center_name": user.cost_center.name if user.cost_center else None,
@@ -940,6 +941,33 @@ async def update_admin_user(
     db.commit()
     db.refresh(user)
     log_audit(db, current_user, "update", "User", user.id, old_values=old_values, new_values=update_data)
+    return _enrich_user(user)
+
+
+@router.patch("/users/{user_id}/secondary-role", response_model=UserAdminResponse)
+async def set_admin_user_secondary_role(
+    user_id: str,
+    data: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    """Set or clear a user's secondary role. Only 'Reader' or null is accepted. Admin only."""
+    secondary_role = data.get("secondary_role")
+    if secondary_role is not None and secondary_role != UserRole.READER.value:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_SECONDARY_ROLE", "message": "secondary_role must be 'Reader' or null"},
+        )
+    user = db.query(User).filter(
+        and_(User.id == user_id, User.tenant_id == current_user.tenant_id)
+    ).first()
+    if not user:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "User not found"})
+    old_secondary_role = user.secondary_role
+    user.secondary_role = secondary_role
+    db.commit()
+    db.refresh(user)
+    log_audit(db, current_user, "update", "User", user.id, old_values={"secondary_role": old_secondary_role}, new_values={"secondary_role": secondary_role})
     return _enrich_user(user)
 
 

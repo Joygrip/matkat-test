@@ -84,5 +84,6 @@ async def get_me(current_user: CurrentUser = Depends(get_current_user)):
         email=current_user.email,
         display_name=current_user.display_name,
         role=current_user.role.value,
+        secondary_role=current_user.secondary_role,
         permissions=get_permissions_for_role(current_user.role),
     )

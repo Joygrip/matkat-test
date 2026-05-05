@@ -111,6 +111,7 @@ export interface AdminUserDetail {
   email: string;
   display_name: string;
   role: UserRole;
+  secondary_role: string | null;
   is_active: boolean;
   cost_center_id: string | null;
   cost_center_name: string | null;
@@ -200,6 +201,8 @@ export const adminApi = {
     apiClient.get<AdminUserDetail[]>('/admin/users'),
   updateAdminUser: (id: string, data: { role?: UserRole; is_active?: boolean }) =>
     apiClient.patch<AdminUserDetail>(`/admin/users/${id}`, data),
+  updateAdminUserSecondaryRole: (id: string, secondary_role: string | null) =>
+    apiClient.patch<AdminUserDetail>(`/admin/users/${id}/secondary-role`, { secondary_role }),
 
   // Approval Delegates
   listDelegates: () =>

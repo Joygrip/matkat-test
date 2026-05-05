@@ -2175,6 +2175,7 @@ export function Admin() {
                   <TableHeaderCell>Name</TableHeaderCell>
                   <TableHeaderCell>Email</TableHeaderCell>
                   <TableHeaderCell>Role</TableHeaderCell>
+                  <TableHeaderCell>Secondary Role</TableHeaderCell>
                   <TableHeaderCell>Cost Center</TableHeaderCell>
                   <TableHeaderCell>Active</TableHeaderCell>
                 </TableRow>
@@ -2182,7 +2183,7 @@ export function Admin() {
               <TableBody>
                 {filteredAdminUsers.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5}>
+                    <TableCell colSpan={6}>
                       <Text className={styles.emptyHint}>No users match the current filter.</Text>
                     </TableCell>
                   </TableRow>
@@ -2212,6 +2213,35 @@ export function Admin() {
                           <option key={r} value={r}>{r}</option>
                         ))}
                       </select>
+                    </TableCell>
+                    <TableCell>
+                      {u.role === 'Manager' ? (
+                        <select
+                          className={styles.nativeSelect}
+                          value={u.secondary_role ?? ''}
+                          onChange={async (e) => {
+                            const val = e.target.value || null;
+                            try {
+                              const updated = await adminApi.updateAdminUserSecondaryRole(u.id, val);
+                              setAdminUsers((prev) => prev.map((x) => (x.id === u.id ? updated : x)));
+                              showSuccess('Secondary role updated');
+                            } catch (err) {
+                              showApiError(err as Error, 'Failed to update secondary role');
+                            }
+                          }}
+                        >
+                          <option value="">None</option>
+                          <option value="Reader">Reader</option>
+                        </select>
+                      ) : (
+                        u.secondary_role ? (
+                          <Badge appearance="filled" color="informative" style={{ fontSize: '11px' }}>
+                            {u.secondary_role}
+                          </Badge>
+                        ) : (
+                          <span style={{ color: 'var(--colorNeutralForeground3)' }}>—</span>
+                        )
+                      )}
                     </TableCell>
                     <TableCell>{u.cost_center_name || '—'}</TableCell>
                     <TableCell>

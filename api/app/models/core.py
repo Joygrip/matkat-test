@@ -29,6 +29,7 @@ class UserRole(str, enum.Enum):
     PM = "PM"
     MANAGER = "Manager"
     EMPLOYEE = "Employee"
+    READER = "Reader"
 
 
 class PeriodStatus(str, enum.Enum):
@@ -47,6 +48,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(SQLEnum(UserRole), nullable=False, default=UserRole.EMPLOYEE)
+    secondary_role: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     manager_object_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     cost_center_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("cost_centers.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

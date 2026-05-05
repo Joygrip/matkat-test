@@ -291,7 +291,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const visibleNavItems = navItems.filter((item) => {
     if (!item.roles) return true;
-    return user && item.roles.includes(user.role);
+    if (!user) return false;
+    if (item.roles.includes(user.role)) return true;
+    // Manager+Reader also gets Finance access
+    if (user.secondary_role === 'Reader' && item.path.startsWith('/finance')) return true;
+    return false;
   });
 
   const pageTitle = pageTitles[location.pathname] || 'MatKat 2.0';
@@ -405,6 +409,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Tooltip content={`Role: ${user?.role}`} relationship="description">
               <Badge appearance="outline" color="brand">{user?.role}</Badge>
             </Tooltip>
+            {user?.secondary_role && (
+              <Tooltip content={`Secondary role: ${user.secondary_role}`} relationship="description">
+                <Badge appearance="outline" color="informative">{user.secondary_role}</Badge>
+              </Tooltip>
+            )}
             {/* Period selector: searchable, year-grouped */}
             <PeriodSelector
               periods={visiblePeriods}

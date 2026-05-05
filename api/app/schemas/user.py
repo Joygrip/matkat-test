@@ -50,6 +50,7 @@ class MeResponse(BaseModel):
     email: str
     display_name: str
     role: str
+    secondary_role: Optional[str] = None
     permissions: list[str]
 
     class Config:
@@ -64,6 +65,7 @@ class UserAdminResponse(BaseModel):
     email: str
     display_name: str
     role: UserRole
+    secondary_role: Optional[str] = None
     is_active: bool
     cost_center_id: Optional[str] = None
     cost_center_name: Optional[str] = None
@@ -78,3 +80,4 @@ class UserAdminUpdate(BaseModel):
     """Fields an admin may update for another user."""
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+    secondary_role: Optional[str] = None

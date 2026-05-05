@@ -228,8 +228,9 @@ export const ResourcePlanning: React.FC = () => {
   const { user } = useAuth();
 
   const canEditDemand = user?.role === 'PM' || user?.role === 'Finance' || user?.role === 'Admin';
-  const canEditSupply = user?.role === 'Manager' || user?.role === 'Finance' || user?.role === 'Admin';
-  const isManager = user?.role === 'Manager';
+  const isManagerReader = user?.role === 'Manager' && user?.secondary_role === 'Reader';
+  const canEditSupply = (user?.role === 'Manager' && !isManagerReader) || user?.role === 'Finance' || user?.role === 'Admin';
+  const isManager = user?.role === 'Manager' && !isManagerReader;
 
   const { periods: contextPeriods } = usePeriod();
 

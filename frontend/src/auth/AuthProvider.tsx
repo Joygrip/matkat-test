@@ -189,3 +189,9 @@ export function useHasRole(...roles: UserRole[]) {
   const { user } = useAuth();
   return user ? roles.includes(user.role) : false;
 }
+
+// Hook to check if user is Manager with Reader secondary role
+export function useIsManagerReader() {
+  const { user } = useAuth();
+  return user?.role === 'Manager' && user?.secondary_role === 'Reader';
+}

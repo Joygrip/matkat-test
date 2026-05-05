@@ -37,6 +37,10 @@ import { adminApi } from '../api/admin';
 import type { Period } from '../types';
 import type { CostCenter, Project } from '../api/admin';
 import { GroupedBarChart } from '../components/GroupedBarChart';
+import {
+  ComposedChart, Line, Area, XAxis, YAxis,
+  CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts';
 
 /* ─── Styles ────────────────────────────────────────────────────── */
 
@@ -545,6 +549,50 @@ export function Dashboard() {
     deptLegendMap[`${name}_supply`] = `${name} Supply`;
   });
 
+  // Resource Planning Overview — total demand vs total supply per period
+  const overviewChartData = useMemo(() => {
+    // Choose the right aggregation based on which entity filter is active
+    let rows: Array<{ year: number; month: number; demand_fte: number; supply_fte: number }>;
+    if (selectedProjectId) {
+      rows = aggByProject.filter(r => r.project_id === selectedProjectId);
+    } else if (selectedCostCenterId) {
+      rows = aggByCostCenter.filter(r => r.cost_center_id === selectedCostCenterId);
+    } else {
+      rows = aggByProject;
+    }
+
+    // Apply period filter
+    if (selectedPeriodIds.length > 0) {
+      rows = rows.filter(r => selectedPeriodIds.includes(`${r.year}-${r.month}`));
+    }
+
+    // Sum per period
+    const totals = new Map<string, { year: number; month: number; demand: number; supply: number }>();
+    rows.forEach(r => {
+      const key = `${r.year}-${r.month}`;
+      const existing = totals.get(key) ?? { year: r.year, month: r.month, demand: 0, supply: 0 };
+      existing.demand += r.demand_fte;
+      existing.supply += r.supply_fte;
+      totals.set(key, existing);
+    });
+
+    const shortMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return Array.from(totals.values())
+      .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month)
+      .map(({ year, month, demand, supply }) => {
+        const label = `${shortMonths[month - 1]} '${String(year).slice(2)}`;
+        const base = Math.min(demand, supply);
+        return {
+          label,
+          demand: Math.round(demand * 10) / 10,
+          supply: Math.round(supply * 10) / 10,
+          base: Math.round(base * 10) / 10,
+          gap_under: demand > supply ? Math.round((demand - supply) * 10) / 10 : 0,
+          gap_over:  supply > demand ? Math.round((supply - demand) * 10) / 10 : 0,
+        };
+      });
+  }, [aggByProject, aggByCostCenter, selectedProjectId, selectedCostCenterId, selectedPeriodIds]);
+
   // Active filter labels for chips
   const activePeriodLabel = useMemo(() => {
     if (!selectedPeriodIds.length) return null;
@@ -851,6 +899,106 @@ export function Dashboard() {
             )}
           </div>
         )}
+      </div>
+
+      {/* ── Resource Planning Overview line chart ── */}
+      <div className={styles.section}>
+        <Card className={styles.chartCard}>
+          <div className={styles.chartCardHeader}>
+            <div className={styles.chartCardHeaderRow}>
+              <Title3 style={{ margin: 0 }}>Resource Planning Overview</Title3>
+            </div>
+          </div>
+          <div className={styles.chartCardBody}>
+            {aggLoading ? (
+              <Skeleton style={{ height: 300 }}><SkeletonItem /></Skeleton>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <ComposedChart data={overviewChartData} margin={{ top: 8, right: 24, left: 0, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} unit="%" />
+                  <Tooltip
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload) return null;
+                      const demand = payload.find(p => p.dataKey === 'demand');
+                      const supply = payload.find(p => p.dataKey === 'supply');
+                      if (!demand && !supply) return null;
+                      const gap = (demand?.value as number) - (supply?.value as number);
+                      const gapAbs = Math.abs(Math.round(gap * 10) / 10);
+                      const isUnder = gap > 0;
+                      return (
+                        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, padding: '8px 12px', fontSize: 13 }}>
+                          <p style={{ margin: '0 0 6px', fontWeight: 600, color: '#111827' }}>{label}</p>
+                          {demand && <p style={{ margin: '2px 0', color: '#1e3a5f' }}>Total Demand: {demand.value}%</p>}
+                          {supply && <p style={{ margin: '2px 0', color: '#16a34a' }}>Total Supply: {supply.value}%</p>}
+                          {gapAbs > 0 && (
+                            <p style={{ margin: '4px 0 0', color: isUnder ? '#b91c1c' : '#15803d', fontWeight: 600 }}>
+                              {isUnder ? `Understaffed: ${gapAbs}%` : `Overstaffed: ${gapAbs}%`}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    }}
+                  />
+                  <Legend />
+                  {/* Shaded gap areas — stacked so they fill between the two lines */}
+                  <Area
+                    type="monotone"
+                    dataKey="base"
+                    stackId="gap"
+                    fill="transparent"
+                    stroke="none"
+                    legendType="none"
+                    tooltipType="none"
+                    isAnimationActive={false}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="gap_under"
+                    stackId="gap"
+                    fill="#fee2e2"
+                    fillOpacity={0.7}
+                    stroke="none"
+                    legendType="none"
+                    name="Understaffed gap"
+                    isAnimationActive={false}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="gap_over"
+                    stackId="gap"
+                    fill="#dcfce7"
+                    fillOpacity={0.7}
+                    stroke="none"
+                    legendType="none"
+                    name="Overstaffed gap"
+                    isAnimationActive={false}
+                  />
+                  {/* Lines on top */}
+                  <Line
+                    type="monotone"
+                    dataKey="demand"
+                    stroke="#1e3a5f"
+                    strokeWidth={2.5}
+                    dot={false}
+                    name="Total Demand"
+                    unit="%"
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="supply"
+                    stroke="#16a34a"
+                    strokeWidth={2.5}
+                    dot={false}
+                    name="Total Supply"
+                    unit="%"
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </Card>
       </div>
 
       {/* ── Grouped Bar Chart ── */}

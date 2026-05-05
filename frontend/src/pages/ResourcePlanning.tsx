@@ -19,6 +19,10 @@ import { StatusBanner } from '../components/StatusBanner';
 import { ResourcePlanningMatrix } from '../components/ResourcePlanningMatrix';
 import { Period } from '../types/index';
 import { periodsApi } from '../api/periods';
+import {
+  ComposedChart, Line, Area, XAxis, YAxis,
+  CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea,
+} from 'recharts';
 
 // Module-level cache — persists across MSAL-triggered remounts so duplicate
 // fetches caused by acquireTokenPopup re-initializing the component are skipped.
@@ -120,6 +124,21 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusLarge,
     boxShadow: tokens.shadow4,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  overviewCard: {
+    marginBottom: tokens.spacingVerticalL,
+    borderRadius: tokens.borderRadiusLarge,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    overflow: 'hidden',
+  },
+  overviewCardHeader: {
+    padding: '12px 20px',
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  overviewCardBody: {
+    padding: '16px 20px',
   },
   periodSelectorWrap: {
     marginBottom: tokens.spacingVerticalM,
@@ -432,6 +451,32 @@ export const ResourcePlanning: React.FC = () => {
 
   const hasActiveFilters = !!(searchResource || activeProjectLabel || activeCostCenterLabel);
 
+  const overviewChartData = useMemo(() => {
+    const demandByPeriod = new Map<string, number>();
+    const supplyByPeriod = new Map<string, number>();
+    filteredDemandLines.forEach(d => {
+      demandByPeriod.set(d.period_id, (demandByPeriod.get(d.period_id) ?? 0) + (d.fte_percent ?? 0));
+    });
+    filteredSupplyLines.forEach(s => {
+      supplyByPeriod.set(s.period_id, (supplyByPeriod.get(s.period_id) ?? 0) + (s.fte_percent ?? 0));
+    });
+    return openPeriods.map(p => {
+      const label = fmtPeriodShort(p);
+      const demand = Math.round((demandByPeriod.get(p.id) ?? 0) * 10) / 10;
+      const supply = Math.round((supplyByPeriod.get(p.id) ?? 0) * 10) / 10;
+      const base = Math.min(demand, supply);
+      return {
+        label,
+        periodId: p.id,
+        demand,
+        supply,
+        base: Math.round(base * 10) / 10,
+        gap_under: demand > supply ? Math.round((demand - supply) * 10) / 10 : 0,
+        gap_over: supply > demand ? Math.round((supply - demand) * 10) / 10 : 0,
+      };
+    });
+  }, [filteredDemandLines, filteredSupplyLines, openPeriods]);
+
   // Managers always see their own CC even if empty.
   // All other roles only see CCs that have at least one demand or supply line
   // (matching any active filters), so the matrix never shows empty rows.
@@ -549,6 +594,70 @@ export const ResourcePlanning: React.FC = () => {
           </div>
         );
       })()}
+
+      {/* Resource Planning Overview chart */}
+      {openPeriods.length > 0 && (
+        <div className={styles.overviewCard}>
+          <div className={styles.overviewCardHeader}>
+            <strong style={{ fontSize: tokens.fontSizeBase400, color: tokens.colorNeutralForeground1 }}>
+              Resource Planning Overview
+            </strong>
+          </div>
+          <div className={styles.overviewCardBody}>
+            <ResponsiveContainer width="100%" height={220}>
+              <ComposedChart data={overviewChartData} margin={{ top: 8, right: 24, left: 0, bottom: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} unit="%" />
+                <Tooltip
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload) return null;
+                    const demandEntry = payload.find(p => p.dataKey === 'demand');
+                    const supplyEntry = payload.find(p => p.dataKey === 'supply');
+                    if (!demandEntry && !supplyEntry) return null;
+                    const gap = ((demandEntry?.value as number) ?? 0) - ((supplyEntry?.value as number) ?? 0);
+                    const gapAbs = Math.abs(Math.round(gap * 10) / 10);
+                    const isUnder = gap > 0;
+                    return (
+                      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, padding: '8px 12px', fontSize: 13 }}>
+                        <p style={{ margin: '0 0 6px', fontWeight: 600, color: '#111827' }}>{label}</p>
+                        {demandEntry && <p style={{ margin: '2px 0', color: '#1e3a5f' }}>Total Demand: {demandEntry.value}%</p>}
+                        {supplyEntry && <p style={{ margin: '2px 0', color: '#16a34a' }}>Total Supply: {supplyEntry.value}%</p>}
+                        {gapAbs > 0 && (
+                          <p style={{ margin: '4px 0 0', color: isUnder ? '#b91c1c' : '#15803d', fontWeight: 600 }}>
+                            {isUnder ? `Understaffed: ${gapAbs}%` : `Overstaffed: ${gapAbs}%`}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  }}
+                />
+                <Legend />
+                {/* Selected period highlight bands */}
+                {openPeriods
+                  .filter(p => selectedPeriodIds.has(p.id))
+                  .map(p => (
+                    <ReferenceArea
+                      key={p.id}
+                      x1={fmtPeriodShort(p)}
+                      x2={fmtPeriodShort(p)}
+                      fill="#1e3a5f"
+                      fillOpacity={0.08}
+                    />
+                  ))
+                }
+                {/* Shaded gap areas — stacked to fill between lines */}
+                <Area type="monotone" dataKey="base" stackId="gap" fill="transparent" stroke="none" legendType="none" tooltipType="none" isAnimationActive={false} />
+                <Area type="monotone" dataKey="gap_under" stackId="gap" fill="#fee2e2" fillOpacity={0.4} stroke="none" legendType="none" name="Understaffed gap" isAnimationActive={false} />
+                <Area type="monotone" dataKey="gap_over" stackId="gap" fill="#dcfce7" fillOpacity={0.4} stroke="none" legendType="none" name="Overstaffed gap" isAnimationActive={false} />
+                {/* Lines on top */}
+                <Line type="monotone" dataKey="demand" stroke="#1e3a5f" strokeWidth={2.5} dot={false} name="Total Demand" unit="%" />
+                <Line type="monotone" dataKey="supply" stroke="#16a34a" strokeWidth={2.5} dot={false} name="Total Supply" unit="%" />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className={styles.filters}>

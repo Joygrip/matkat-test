@@ -185,7 +185,7 @@ async def get_snapshot(
 async def download_snapshot_csv(
     snapshot_id: str,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE)),
 ):
     """
     Download a published snapshot as a CSV file.

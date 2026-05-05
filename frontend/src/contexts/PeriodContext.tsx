@@ -14,6 +14,7 @@ interface PeriodContextValue {
   /** The full Period object for the selected ID (undefined while loading or if not found) */
   selectedPeriod: Period | undefined;
   loading: boolean;
+  refreshPeriods: () => void;
 }
 
 const PeriodContext = createContext<PeriodContextValue | null>(null);
@@ -23,12 +24,12 @@ export function PeriodProvider({ children }: { children: ReactNode }) {
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const loadPeriods = () => {
     periodsApi
       .list()
       .then((data) => {
         setPeriods(data);
-        if (data.length > 0) {
+        if (data.length > 0 && !selectedPeriodId) {
           const openPeriods = data.filter((p: Period) => p.status === 'open');
           const earliestOpen = openPeriods[openPeriods.length - 1];
           setSelectedPeriodId(earliestOpen?.id || data[0].id);
@@ -38,13 +39,17 @@ export function PeriodProvider({ children }: { children: ReactNode }) {
         console.error('PeriodProvider: failed to load periods', err);
       })
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadPeriods();
   }, []);
 
   const selectedPeriod = periods.find((p) => p.id === selectedPeriodId);
 
   return (
     <PeriodContext.Provider
-      value={{ periods, selectedPeriodId, setSelectedPeriodId, selectedPeriod, loading }}
+      value={{ periods, selectedPeriodId, setSelectedPeriodId, selectedPeriod, loading, refreshPeriods: loadPeriods }}
     >
       {children}
     </PeriodContext.Provider>

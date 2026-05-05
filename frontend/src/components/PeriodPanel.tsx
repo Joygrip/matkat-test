@@ -28,6 +28,7 @@ import { Period } from '../types';
 import { periodsApi } from '../api/periods';
 import { useToast } from '../hooks/useToast';
 import { useAuth } from '../auth/AuthProvider';
+import { usePeriod } from '../contexts/PeriodContext';
 
 const monthNames = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -133,6 +134,7 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
   const styles = useStyles();
   const { showSuccess, showApiError } = useToast();
   const { user } = useAuth();
+  const { refreshPeriods: refreshContextPeriods } = usePeriod();
 
   const currentYear = new Date().getFullYear();
 
@@ -247,6 +249,7 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
       await periodsApi.lock(periodToLock.id);
       showSuccess('Period Locked', `${monthNames[periodToLock.month - 1]} ${periodToLock.year} has been locked.`);
       loadPeriods();
+      refreshContextPeriods();
     } catch (error) {
       showApiError(error as Error, 'Failed to lock period');
     } finally {
@@ -269,6 +272,7 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
       await periodsApi.unlock(selectedPeriod.id, unlockReason);
       showSuccess('Period Unlocked', `${monthNames[selectedPeriod.month - 1]} ${selectedPeriod.year} has been unlocked.`);
       loadPeriods();
+      refreshContextPeriods();
     } catch (error) {
       showApiError(error as Error, 'Failed to unlock period');
     } finally {

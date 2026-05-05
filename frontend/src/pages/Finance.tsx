@@ -163,7 +163,7 @@ export const Finance: React.FC = () => {
   const canSeeProjectCosts = useHasRole('Finance', 'Admin', 'PM');
   const canManagePeriods = user?.role === 'Finance' || user?.role === 'Admin';
   const canPublishSnapshot = user?.role === 'Finance' || user?.role === 'Admin';
-  const canDownloadCsv = user?.role === 'Finance';
+  const canDownloadCsv = user?.role === 'Finance' || user?.role === 'Admin';
   const isPM = user?.role === 'PM';
 
   // ── Period ──

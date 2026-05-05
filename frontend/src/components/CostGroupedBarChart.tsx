@@ -165,19 +165,19 @@ export interface CostGroupedBarChartProps {
 
 export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, entityNames, legendMap, onBarClick, hiddenCategories = [] }) => {
   const styles = useStyles();
-  const chartWrapperRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | undefined>(undefined);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!chartWrapperRef.current) return;
-    const rect = chartWrapperRef.current.getBoundingClientRect();
+    if (!wrapperRef.current) return;
+    const rect = wrapperRef.current.getBoundingClientRect();
     const relX = e.clientX - rect.left;
     const TOOLTIP_WIDTH = 260;
-    if (relX > rect.width / 2) {
-      setTooltipPos({ x: 8, y: 20 });
-    } else {
-      setTooltipPos({ x: rect.width - TOOLTIP_WIDTH - 8, y: 20 });
-    }
+    setTooltipPos(
+      relX > rect.width / 2
+        ? { x: 8, y: 20 }
+        : { x: rect.width - TOOLTIP_WIDTH - 8, y: 20 }
+    );
   };
 
   const colorMap: Record<string, string> = {};
@@ -190,7 +190,7 @@ export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, 
 
   return (
     <div className={styles.wrapper}>
-      <div ref={chartWrapperRef} onMouseMove={handleMouseMove}>
+      <div ref={wrapperRef} onMouseMove={handleMouseMove} onMouseLeave={() => setTooltipPos(undefined)}>
       <ResponsiveContainer width="100%" height={400}>
         <BarChart data={data} margin={{ top: 16, right: 32, left: 8, bottom: 24 }}>
           <CartesianGrid strokeDasharray="3 3" />

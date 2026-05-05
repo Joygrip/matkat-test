@@ -815,7 +815,25 @@ class FinanceService:
         if not period_ids:
             return ConsolidatedCostResponse(data=[], monthly_fte_cost=monthly_fte_cost)
 
-        # 3. PM role restriction — only their own projects
+        # 3a. Manager role restriction — scope to accessible resources via reporting hierarchy
+        scoped_resource_ids: Optional[set] = None
+        if self.current_user.role == "Manager":
+            from api.app.services.reporting import ReportingService
+            rs = ReportingService(self.db, self.current_user)
+            ids = list(rs.get_accessible_resource_ids())
+            cur_user = self.db.query(User).filter(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            ).first()
+            if cur_user:
+                for rid in rs.get_delegated_resource_ids(cur_user.id):
+                    if rid not in ids:
+                        ids.append(rid)
+            if not ids:
+                return ConsolidatedCostResponse(data=[], monthly_fte_cost=monthly_fte_cost)
+            scoped_resource_ids = set(ids)
+
+        # 3b. PM role restriction — only their own projects
         pm_project_ids: Optional[set] = None
         if self.current_user.role == "PM":
             pm_user = self.db.query(User).filter(
@@ -871,6 +889,8 @@ class FinanceService:
             demand_q = demand_q.filter(DemandLine.project_id == project_id)
         if cost_center_id:
             demand_q = demand_q.filter(Resource.cost_center_id == cost_center_id)
+        if scoped_resource_ids is not None:
+            demand_q = demand_q.filter(Resource.id.in_(scoped_resource_ids))
         for line, cc_id in demand_q.all():
             if not _pm_allowed(line.project_id):
                 continue
@@ -892,6 +912,8 @@ class FinanceService:
             actuals_q = actuals_q.filter(ActualLine.project_id == project_id)
         if cost_center_id:
             actuals_q = actuals_q.filter(Resource.cost_center_id == cost_center_id)
+        if scoped_resource_ids is not None:
+            actuals_q = actuals_q.filter(Resource.id.in_(scoped_resource_ids))
         for line, cc_id in actuals_q.all():
             if not _pm_allowed(line.project_id):
                 continue
@@ -911,6 +933,8 @@ class FinanceService:
             ext_q = ext_q.filter(ProjectExternalLine.project_id == project_id)
         if cost_center_id:
             ext_q = ext_q.filter(Resource.cost_center_id == cost_center_id)
+        if scoped_resource_ids is not None:
+            ext_q = ext_q.filter(Resource.id.in_(scoped_resource_ids))
         for line, cc_id in ext_q.all():
             if not _pm_allowed(line.project_id):
                 continue

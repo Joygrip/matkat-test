@@ -460,7 +460,11 @@ export const ResourcePlanning: React.FC = () => {
     filteredSupplyLines.forEach(s => {
       supplyByPeriod.set(s.period_id, (supplyByPeriod.get(s.period_id) ?? 0) + (s.fte_percent ?? 0));
     });
-    return openPeriods.map(p => {
+    // Show all periods for 0 or 1 selected; zoom to selection when 2+
+    const periodsToShow = selectedPeriodIds.size > 1
+      ? openPeriods.filter(p => selectedPeriodIds.has(p.id))
+      : openPeriods;
+    return periodsToShow.map(p => {
       const label = fmtPeriodShort(p);
       const demand = Math.round((demandByPeriod.get(p.id) ?? 0) * 10) / 10;
       const supply = Math.round((supplyByPeriod.get(p.id) ?? 0) * 10) / 10;
@@ -475,7 +479,7 @@ export const ResourcePlanning: React.FC = () => {
         gap_over: supply > demand ? Math.round((supply - demand) * 10) / 10 : 0,
       };
     });
-  }, [filteredDemandLines, filteredSupplyLines, openPeriods]);
+  }, [filteredDemandLines, filteredSupplyLines, openPeriods, selectedPeriodIds]);
 
   // Managers always see their own CC even if empty.
   // All other roles only see CCs that have at least one demand or supply line
@@ -633,8 +637,8 @@ export const ResourcePlanning: React.FC = () => {
                   }}
                 />
                 <Legend />
-                {/* Selected period highlight bands */}
-                {openPeriods
+                {/* Highlight the single selected period when showing all periods */}
+                {selectedPeriodIds.size === 1 && openPeriods
                   .filter(p => selectedPeriodIds.has(p.id))
                   .map(p => (
                     <ReferenceArea

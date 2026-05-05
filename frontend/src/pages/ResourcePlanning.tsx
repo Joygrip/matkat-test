@@ -147,6 +147,7 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     cursor: 'pointer',
     fontFamily: 'inherit',
+    userSelect: 'none' as const,
     ':hover': {
       backgroundColor: tokens.colorNeutralBackground3,
     },
@@ -154,13 +155,26 @@ const useStyles = makeStyles({
   periodPillActive: {
     padding: `4px 10px`,
     borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorBrandStroke1}`,
-    backgroundColor: tokens.colorBrandBackground,
-    color: tokens.colorNeutralForegroundOnBrand,
+    border: '1px solid #1e3a5f',
+    backgroundColor: '#1e3a5f',
+    color: '#ffffff',
     fontSize: tokens.fontSizeBase200,
     cursor: 'pointer',
     fontFamily: 'inherit',
     fontWeight: tokens.fontWeightSemibold,
+    userSelect: 'none' as const,
+  },
+  periodPillInRange: {
+    padding: `4px 10px`,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid #4a90d9`,
+    backgroundColor: '#d0e3f7',
+    color: '#1e3a5f',
+    fontSize: tokens.fontSizeBase200,
+    cursor: 'grabbing',
+    fontFamily: 'inherit',
+    fontWeight: tokens.fontWeightSemibold,
+    userSelect: 'none' as const,
   },
   kpiShowingLabel: {
     marginTop: tokens.spacingVerticalXS,
@@ -212,7 +226,9 @@ export const ResourcePlanning: React.FC = () => {
   const [searchResource, setSearchResource] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
-  const [selectedKpiPeriodIndex, setSelectedKpiPeriodIndex] = useState(0);
+  const [selectedPeriodIds, setSelectedPeriodIds] = useState<Set<string>>(new Set());
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStartIdx, setDragStartIdx] = useState<number | null>(null);
 
   useEffect(() => {
     if (!user?.tenant_id) return;
@@ -231,6 +247,20 @@ export const ResourcePlanning: React.FC = () => {
       setOpenPeriods(open);
     }
   }, [contextPeriods]);
+
+  // Default KPI selection: earliest open period
+  useEffect(() => {
+    if (openPeriods.length > 0 && selectedPeriodIds.size === 0) {
+      setSelectedPeriodIds(new Set([openPeriods[0].id]));
+    }
+  }, [openPeriods]);
+
+  // End drag on mouseup anywhere in the document
+  useEffect(() => {
+    const handleMouseUp = () => { setIsDragging(false); setDragStartIdx(null); };
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => document.removeEventListener('mouseup', handleMouseUp);
+  }, []);
 
   const isPM = user?.role === 'PM';
 
@@ -363,34 +393,31 @@ export const ResourcePlanning: React.FC = () => {
     });
   }, [supplyLines, isManager, managerCcId, selectedProjectId, selectedCostCenterId, searchResource]);
 
-  const selectedKpiPeriod = openPeriods[selectedKpiPeriodIndex] ?? null;
-
-  const kpiDemand = useMemo(
-    () => filteredDemandLines
-      .filter(d => selectedKpiPeriod && d.period_id === selectedKpiPeriod.id)
-      .reduce((sum, d) => sum + (d.fte_percent ?? 0), 0),
-    [filteredDemandLines, selectedKpiPeriod],
+  const selectedDemandLines = useMemo(
+    () => filteredDemandLines.filter(d => selectedPeriodIds.has(d.period_id)),
+    [filteredDemandLines, selectedPeriodIds],
   );
-  const kpiSupply = useMemo(
-    () => filteredSupplyLines
-      .filter(s => selectedKpiPeriod && s.period_id === selectedKpiPeriod.id)
-      .reduce((sum, s) => sum + (s.fte_percent ?? 0), 0),
-    [filteredSupplyLines, selectedKpiPeriod],
+
+  const selectedSupplyLines = useMemo(
+    () => filteredSupplyLines.filter(s => selectedPeriodIds.has(s.period_id)),
+    [filteredSupplyLines, selectedPeriodIds],
   );
-  const kpiBalance = kpiSupply - kpiDemand;
 
-  const avgDemand = useMemo(() => {
-    if (openPeriods.length === 0) return 0;
-    const total = filteredDemandLines.reduce((sum, d) => sum + (d.fte_percent ?? 0), 0);
-    return Math.round((total / openPeriods.length) * 10) / 10;
-  }, [filteredDemandLines, openPeriods]);
+  const totalDemand = useMemo(
+    () => selectedDemandLines.reduce((sum, d) => sum + (d.fte_percent ?? 0), 0),
+    [selectedDemandLines],
+  );
 
-  const avgSupply = useMemo(() => {
-    if (openPeriods.length === 0) return 0;
-    const total = filteredSupplyLines.reduce((sum, s) => sum + (s.fte_percent ?? 0), 0);
-    return Math.round((total / openPeriods.length) * 10) / 10;
-  }, [filteredSupplyLines, openPeriods]);
+  const totalSupply = useMemo(
+    () => selectedSupplyLines.reduce((sum, s) => sum + (s.fte_percent ?? 0), 0),
+    [selectedSupplyLines],
+  );
 
+  const balance = totalSupply - totalDemand;
+
+  const selectedCount = selectedPeriodIds.size;
+  const avgDemand = selectedCount > 0 ? Math.round((totalDemand / selectedCount) * 10) / 10 : 0;
+  const avgSupply = selectedCount > 0 ? Math.round((totalSupply / selectedCount) * 10) / 10 : 0;
   const avgBalance = Math.round((avgSupply - avgDemand) * 10) / 10;
 
   const activeProjectLabel = useMemo(() => {
@@ -433,16 +460,36 @@ export const ResourcePlanning: React.FC = () => {
       {openPeriods.length > 0 && (
         <div className={styles.periodSelectorWrap}>
           <span className={styles.periodSelectorLabel}>Period</span>
-          <div className={styles.periodPills}>
-            {openPeriods.map((p, i) => (
-              <button
-                key={p.id}
-                className={i === selectedKpiPeriodIndex ? styles.periodPillActive : styles.periodPill}
-                onClick={() => setSelectedKpiPeriodIndex(i)}
-              >
-                {fmtPeriodShort(p)}
-              </button>
-            ))}
+          <div
+            className={styles.periodPills}
+            style={{ cursor: isDragging ? 'grabbing' : 'default' }}
+          >
+            {openPeriods.map((p, i) => {
+              const isSelected = selectedPeriodIds.has(p.id);
+              const pillClass = isSelected
+                ? (isDragging ? styles.periodPillInRange : styles.periodPillActive)
+                : styles.periodPill;
+              return (
+                <button
+                  key={p.id}
+                  className={pillClass}
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                    setDragStartIdx(i);
+                    setSelectedPeriodIds(new Set([p.id]));
+                  }}
+                  onMouseEnter={() => {
+                    if (!isDragging || dragStartIdx === null) return;
+                    const lo = Math.min(dragStartIdx, i);
+                    const hi = Math.max(dragStartIdx, i);
+                    setSelectedPeriodIds(new Set(openPeriods.slice(lo, hi + 1).map(x => x.id)));
+                  }}
+                >
+                  {fmtPeriodShort(p)}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -451,23 +498,25 @@ export const ResourcePlanning: React.FC = () => {
       <div className={styles.kpiRow}>
         <div className={styles.kpiCard}>
           <span className={styles.kpiLabel}>Total Demand FTE%</span>
-          <span className={styles.kpiValue}>{kpiDemand}</span>
+          <span className={styles.kpiValue}>{totalDemand}</span>
         </div>
         <div className={styles.kpiCard}>
           <span className={styles.kpiLabel}>Total Supply FTE%</span>
-          <span className={styles.kpiValue}>{kpiSupply}</span>
+          <span className={styles.kpiValue}>{totalSupply}</span>
         </div>
         <div className={styles.kpiCard}>
           <span className={styles.kpiLabel}>Balance (Supply − Demand)</span>
           <span
             className={styles.kpiValue}
-            style={{ color: kpiBalance >= 0 ? tokens.colorPaletteGreenForeground2 : tokens.colorPaletteRedForeground2 }}
+            style={{ color: balance >= 0 ? tokens.colorPaletteGreenForeground2 : tokens.colorPaletteRedForeground2 }}
           >
-            {kpiBalance >= 0 ? '+' : ''}{kpiBalance}
+            {balance >= 0 ? '+' : ''}{balance}
           </span>
         </div>
         <div className={styles.kpiCard}>
-          <span className={styles.kpiLabel}>Average Per Period</span>
+          <span className={styles.kpiLabel}>
+            {selectedCount > 1 ? `Avg of ${selectedCount} Periods` : 'Average Per Period'}
+          </span>
           <div className={styles.kpiAvgRows}>
             <div className={styles.kpiAvgRow}>
               <span className={styles.kpiAvgRowLabel}>Avg Demand</span>
@@ -489,11 +538,17 @@ export const ResourcePlanning: React.FC = () => {
           </div>
         </div>
       </div>
-      {selectedKpiPeriod && (
-        <div className={styles.kpiShowingLabel}>
-          Showing: {fmtPeriodFull(selectedKpiPeriod)}
-        </div>
-      )}
+      {selectedCount > 0 && (() => {
+        const selPeriods = openPeriods.filter(p => selectedPeriodIds.has(p.id));
+        if (selPeriods.length === 1) {
+          return <div className={styles.kpiShowingLabel}>Showing: {fmtPeriodFull(selPeriods[0])}</div>;
+        }
+        return (
+          <div className={styles.kpiShowingLabel}>
+            Showing: {fmtPeriodFull(selPeriods[0])} – {fmtPeriodFull(selPeriods[selPeriods.length - 1])} ({selPeriods.length} periods)
+          </div>
+        );
+      })()}
 
       {/* Filters */}
       <div className={styles.filters}>

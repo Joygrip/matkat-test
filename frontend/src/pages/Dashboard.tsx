@@ -171,8 +171,6 @@ export function Dashboard() {
 
       {user.role === 'Employee' && (
         <EmployeeView
-          demandLines={allDemandLines}
-          supplyLines={allSupplyLines}
           periods={periods}
           user={user}
         />

@@ -8,6 +8,7 @@ from sqlalchemy import and_, func
 from api.app.models.actuals import ActualLine
 from api.app.models.approvals import ApprovalInstance, ApprovalAction, ApprovalStep, ApprovalStatus, StepStatus
 from api.app.models.core import Period, Project, Resource, PeriodStatus, User, UserRole
+from api.app.models.planning import SupplyLine
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
 from api.app.schemas.common import ErrorCode
@@ -373,7 +374,32 @@ class ActualsService:
         
         # Check 100% limit
         self._check_100_percent_limit(resource_id, year, month, actual_fte_percent)
-        
+
+        # Auto-populate planned_fte_percent from supply line if not provided
+        if planned_fte_percent is None:
+            supply = self.db.query(SupplyLine).filter(
+                and_(
+                    SupplyLine.tenant_id == self.current_user.tenant_id,
+                    SupplyLine.resource_id == resource_id,
+                    SupplyLine.project_id == project_id,
+                    SupplyLine.year == year,
+                    SupplyLine.month == month,
+                )
+            ).first()
+            if supply is None:
+                # Fall back to general supply (no specific project)
+                supply = self.db.query(SupplyLine).filter(
+                    and_(
+                        SupplyLine.tenant_id == self.current_user.tenant_id,
+                        SupplyLine.resource_id == resource_id,
+                        SupplyLine.project_id == None,
+                        SupplyLine.year == year,
+                        SupplyLine.month == month,
+                    )
+                ).first()
+            if supply:
+                planned_fte_percent = supply.fte_percent
+
         # Create actual line
         actual = ActualLine(
             tenant_id=self.current_user.tenant_id,

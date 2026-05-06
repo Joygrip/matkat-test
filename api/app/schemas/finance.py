@@ -33,11 +33,20 @@ class FinanceCostCenterStatsResponse(BaseModel):
     actuals_fte: float
 
 
+class ProjectBreakdownItem(BaseModel):
+    project_id: str
+    project_name: str
+    demand_fte: float
+    actuals_fte: float
+
+
 class FinanceEmployeeStatsResponse(BaseModel):
     resource_id: str
     employee_name: str
     demand_fte: float
+    supply_fte: float
     actuals_fte: float
+    projects: List[ProjectBreakdownItem] = []
 
 
 class FinanceSettingResponse(BaseModel):

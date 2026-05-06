@@ -8,11 +8,20 @@ export interface CostCenterStats {
   actuals_fte: number;
 }
 
+export interface ProjectBreakdown {
+  project_id: string;
+  project_name: string;
+  demand_fte: number;
+  actuals_fte: number;
+}
+
 export interface EmployeeStats {
   resource_id: string;
   employee_name: string;
   demand_fte: number;
+  supply_fte: number;
   actuals_fte: number;
+  projects: ProjectBreakdown[];
 }
 
 export async function getCostCenterStats(year: number, month: number, costCenterId?: string): Promise<CostCenterStats[]> {

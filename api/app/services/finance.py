@@ -12,6 +12,7 @@ from api.app.schemas.finance import (
     FinanceActualsDashboardResponse,
     FinanceCostCenterStatsResponse,
     FinanceEmployeeStatsResponse,
+    ProjectBreakdownItem,
     FinanceSettingResponse,
     ConsolidatedCostByProject,
     ConsolidatedCostResponse,
@@ -379,8 +380,9 @@ class FinanceService:
         project_id: Optional[str] = None,
     ) -> List[FinanceEmployeeStatsResponse]:
         """Get demand vs actuals per employee for a given period."""
-        from api.app.models.planning import DemandLine
-        from api.app.models.core import Resource
+        from collections import defaultdict
+        from api.app.models.planning import DemandLine, SupplyLine
+        from api.app.models.core import Resource, Project as ProjectModel
         from sqlalchemy import func
 
         # Manager restriction: scope to accessible resources via reporting hierarchy
@@ -416,6 +418,14 @@ class FinanceService:
         if project_id:
             actuals_filters.append(ActualLine.project_id == project_id)
 
+        supply_filters = [
+            SupplyLine.tenant_id == self.current_user.tenant_id,
+            SupplyLine.year == year,
+            SupplyLine.month == month,
+        ]
+        if scoped_resource_ids_emp is not None:
+            supply_filters.append(SupplyLine.resource_id.in_(scoped_resource_ids_emp))
+
         demand_subq = (
             self.db.query(
                 DemandLine.resource_id.label("resource_id"),
@@ -434,15 +444,26 @@ class FinanceService:
             .group_by(ActualLine.resource_id)
             .subquery()
         )
+        supply_subq = (
+            self.db.query(
+                SupplyLine.resource_id.label("resource_id"),
+                func.sum(SupplyLine.fte_percent).label("supply_fte"),
+            )
+            .filter(*supply_filters)
+            .group_by(SupplyLine.resource_id)
+            .subquery()
+        )
 
         q = (
             self.db.query(
                 Resource.id.label("resource_id"),
                 Resource.display_name.label("employee_name"),
                 func.coalesce(demand_subq.c.demand_fte, 0).label("demand_fte"),
+                func.coalesce(supply_subq.c.supply_fte, 0).label("supply_fte"),
                 func.coalesce(actuals_subq.c.actuals_fte, 0).label("actuals_fte"),
             )
             .outerjoin(demand_subq, Resource.id == demand_subq.c.resource_id)
+            .outerjoin(supply_subq, Resource.id == supply_subq.c.resource_id)
             .outerjoin(actuals_subq, Resource.id == actuals_subq.c.resource_id)
             .filter(*resource_filters)
             .filter(
@@ -453,12 +474,79 @@ class FinanceService:
             )
         )
         rows = q.distinct().all()
+
+        # Per-project breakdown — scope to only the resources in the result
+        result_resource_ids = [r.resource_id for r in rows]
+        proj_map: dict = defaultdict(list)
+
+        if result_resource_ids:
+            proj_demand_filters = [
+                DemandLine.tenant_id == self.current_user.tenant_id,
+                DemandLine.year == year,
+                DemandLine.month == month,
+                DemandLine.resource_id.isnot(None),
+                DemandLine.resource_id.in_(result_resource_ids),
+            ]
+            if project_id:
+                proj_demand_filters.append(DemandLine.project_id == project_id)
+
+            proj_actuals_filters = [
+                ActualLine.tenant_id == self.current_user.tenant_id,
+                ActualLine.year == year,
+                ActualLine.month == month,
+                ActualLine.id.in_(approved_subq_emp),
+                ActualLine.resource_id.in_(result_resource_ids),
+            ]
+            if project_id:
+                proj_actuals_filters.append(ActualLine.project_id == project_id)
+
+            proj_demand_rows = (
+                self.db.query(
+                    DemandLine.resource_id.label("resource_id"),
+                    DemandLine.project_id.label("project_id"),
+                    ProjectModel.name.label("project_name"),
+                    func.sum(DemandLine.fte_percent).label("demand_fte"),
+                )
+                .join(ProjectModel, DemandLine.project_id == ProjectModel.id)
+                .filter(*proj_demand_filters)
+                .group_by(DemandLine.resource_id, DemandLine.project_id, ProjectModel.name)
+                .all()
+            )
+
+            proj_actuals_rows = (
+                self.db.query(
+                    ActualLine.resource_id.label("resource_id"),
+                    ActualLine.project_id.label("project_id"),
+                    func.sum(ActualLine.actual_fte_percent).label("actuals_fte"),
+                )
+                .filter(*proj_actuals_filters)
+                .group_by(ActualLine.resource_id, ActualLine.project_id)
+                .all()
+            )
+
+            proj_actuals_by = {
+                (r.resource_id, r.project_id): float(r.actuals_fte or 0)
+                for r in proj_actuals_rows
+            }
+
+            for r in proj_demand_rows:
+                proj_map[r.resource_id].append(
+                    ProjectBreakdownItem(
+                        project_id=r.project_id,
+                        project_name=r.project_name,
+                        demand_fte=float(r.demand_fte or 0),
+                        actuals_fte=proj_actuals_by.get((r.resource_id, r.project_id), 0.0),
+                    )
+                )
+
         return [
             FinanceEmployeeStatsResponse(
                 resource_id=row.resource_id,
                 employee_name=row.employee_name,
                 demand_fte=float(row.demand_fte or 0),
+                supply_fte=float(row.supply_fte or 0),
                 actuals_fte=float(row.actuals_fte or 0),
+                projects=proj_map.get(row.resource_id, []),
             )
             for row in rows
         ]

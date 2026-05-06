@@ -49,7 +49,7 @@ import { useAuth, useHasRole } from '../auth/AuthProvider';
 
 // Tab components
 import { OverviewTab } from '../components/finance/OverviewTab';
-import { ActualsTab, FinanceActualRow } from '../components/finance/ActualsTab';
+import type { FinanceActualRow } from '../components/finance/ActualsTab';
 import { SnapshotsTab } from '../components/finance/SnapshotsTab';
 import { CostReportTab } from '../components/finance/CostReportTab';
 import { ConsolidatedCostChart } from '../components/finance/ConsolidatedCostChart';
@@ -59,15 +59,8 @@ import { ProjectCostsMatrix } from '../components/project-costs/ProjectCostsMatr
 
 interface LookupProject { id: string; name: string; }
 
-const approvalStatusOptions = [
-  { value: '', label: 'All Statuses' },
-  { value: 'PENDING', label: 'Pending' },
-  { value: 'APPROVED', label: 'Approved' },
-  { value: 'REJECTED', label: 'Rejected' },
-  { value: 'N/A', label: 'N/A (Unsigned)' },
-];
 
-type ActiveTab = 'overview' | 'actuals' | 'snapshots' | 'costreport' | 'costoverview' | 'projectcosts';
+type ActiveTab = 'overview' | 'snapshots' | 'costreport' | 'costoverview' | 'projectcosts';
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
@@ -183,12 +176,9 @@ export const Finance: React.FC = () => {
   const [dashboard, setDashboard] = useState<ConsolidationDashboard | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(false);
 
-  // ── Actuals (shared: ActualsTab + CostReportTab) ──
+  // ── Actuals (used by CostReportTab) ──
   const [actualsData, setActualsData] = useState<FinanceActualRow[]>([]);
   const [actualsLoading, setActualsLoading] = useState(false);
-  const [actualsError, setActualsError] = useState<string | null>(null);
-  const [actualsProjectId, setActualsProjectId] = useState<string>('');
-  const [actualsApprovalStatus, setActualsApprovalStatus] = useState<string>('');
 
   // ── Overview filters ──
   const [overviewProjectId, setOverviewProjectId] = useState<string>('');
@@ -207,14 +197,6 @@ export const Finance: React.FC = () => {
   // ── Period modal ──
   const [isPeriodModalOpen, setIsPeriodModalOpen] = useState(false);
 
-  // ── Period/month for charts (passed to ActualsTab) ──
-  const periodFromActuals = actualsData.length > 0
-    ? { year: actualsData[0].year, month: actualsData[0].month }
-    : null;
-  const firstOpenPeriod = periods.find(p => p.status === 'open');
-  const chartPeriod = currentPeriod ?? firstOpenPeriod ?? periods[0];
-  const year = periodFromActuals?.year ?? chartPeriod?.year ?? 0;
-  const month = periodFromActuals?.month ?? chartPeriod?.month ?? 0;
 
   const latestSnapshot = useMemo(() =>
     snapshots.length > 0
@@ -241,11 +223,6 @@ export const Finance: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPeriodId]);
 
-  // ── Reload actuals when filters change ──
-  useEffect(() => {
-    if (selectedPeriodId && !isPM) loadActuals(selectedPeriodId);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actualsProjectId, actualsApprovalStatus]);
 
   // ── Data loaders ──
 
@@ -277,19 +254,17 @@ export const Finance: React.FC = () => {
     const pid = periodId || selectedPeriodId;
     if (!currentPeriod || !pid) return;
     setActualsLoading(true);
-    setActualsError(null);
     try {
       const params = new URLSearchParams();
       params.append('year', String(currentPeriod.year));
       params.append('month', String(currentPeriod.month));
-      if (actualsProjectId) params.append('project_id', actualsProjectId);
-      if (actualsApprovalStatus) params.append('approval_status', actualsApprovalStatus.toLowerCase());
+
       const result = await apiClient.get<FinanceActualRow[]>(
         `/finance/actuals-dashboard?${params.toString()}`
       );
       setActualsData(result);
     } catch {
-      setActualsError('Failed to load actuals data');
+      // non-fatal: CostReportTab handles empty state
     } finally {
       setActualsLoading(false);
     }
@@ -439,7 +414,7 @@ export const Finance: React.FC = () => {
             onTabSelect={(_, data) => setActiveTab(data.value as ActiveTab)}
           >
             <Tab value="overview">Overview</Tab>
-            {isPM ? null : <Tab value="actuals">Actuals</Tab>}
+
             {canSeeSnapshots && <Tab value="snapshots">Snapshots</Tab>}
             {!isPM && canSeeCostReport && <Tab value="costreport">Cost Report</Tab>}
             <Tab value="costoverview">Cost Overview</Tab>
@@ -480,36 +455,6 @@ export const Finance: React.FC = () => {
             </div>
           )}
 
-          {/* Actuals-only filters */}
-          {activeTab === 'actuals' && (
-            <>
-              <div className={styles.filterGroup}>
-                <span className={styles.filterLabel}>Project</span>
-                <Select
-                  value={actualsProjectId}
-                  onChange={(_, data) => setActualsProjectId(data.value ?? '')}
-                  style={{ minWidth: 140 }}
-                >
-                  <option value="">All projects</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </Select>
-              </div>
-              <div className={styles.filterGroup}>
-                <span className={styles.filterLabel}>Approval</span>
-                <Select
-                  value={actualsApprovalStatus}
-                  onChange={(_, data) => setActualsApprovalStatus(data.value ?? '')}
-                  style={{ minWidth: 130 }}
-                >
-                  {approvalStatusOptions.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </Select>
-              </div>
-            </>
-          )}
         </div>
       </div>
 
@@ -522,20 +467,6 @@ export const Finance: React.FC = () => {
           </MessageBar>
           <OverviewTab dashboard={dashboard} loading={dashboardLoading} projectId={overviewProjectId} onDashboardChanged={() => selectedPeriodId && loadDashboard(selectedPeriodId)} />
         </>
-      )}
-      {!isPM && activeTab === 'actuals' && (
-        <ActualsTab
-          actualsData={actualsData}
-          actualsLoading={actualsLoading}
-          actualsError={actualsError}
-          projects={projects}
-          actualsProjectId={actualsProjectId}
-          actualsApprovalStatus={actualsApprovalStatus}
-          year={year}
-          month={month}
-          canSeeStats={canSeeStats}
-          onActualsReload={() => loadActuals(selectedPeriodId)}
-        />
       )}
       {canSeeSnapshots && activeTab === 'snapshots' && (
         <SnapshotsTab

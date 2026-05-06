@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   makeStyles,
   tokens,
@@ -29,8 +29,6 @@ import {
 import { SearchRegular, MoneyRegular, CheckmarkCircle24Regular, DismissCircle24Regular, ArrowForward24Regular } from '@fluentui/react-icons';
 import { approvalsApi } from '../../api/approvals';
 import { EmptyState } from '../EmptyState';
-import { LoadingState } from '../LoadingState';
-import { DemandVsActualsBarChart } from '../DemandVsActualsBarChart';
 import { useWorkQueueSort } from '../../hooks/useWorkQueueSort';
 import { useFinanceSortState } from '../../hooks/useFinanceSortState';
 import { useEmployeeStats } from '../../hooks/useEmployeeStats';
@@ -72,7 +70,7 @@ export interface ActualsTabProps {
   actualsError: string | null;
   projects: LookupProject[];
   actualsProjectId: string;
-  actualsApprovalStatus: string;
+  actualsApprovalStatus?: string;
   year: number;
   month: number;
   canSeeStats: boolean;
@@ -80,6 +78,7 @@ export interface ActualsTabProps {
 }
 
 type CcSortKey = 'name' | 'fte' | 'pending';
+type EmpSortKey = 'name' | 'demand' | 'actuals' | 'status';
 
 const CC_SORT_OPTIONS: { key: CcSortKey; label: string }[] = [
   { key: 'fte', label: 'FTE' },
@@ -173,10 +172,45 @@ const useStyles = makeStyles({
   },
   chartCard: {
     marginTop: tokens.spacingVerticalL,
-    minHeight: '360px',
     borderRadius: tokens.borderRadiusLarge,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     boxShadow: tokens.shadow4,
+  },
+  empCard: {
+    background: 'white',
+    border: '0.5px solid #e5e7eb',
+    borderRadius: '8px',
+    padding: '16px 20px',
+    marginBottom: '8px',
+    cursor: 'pointer',
+    '&:hover': {
+      backgroundColor: '#f9fafb',
+    },
+  },
+  empCardSortBar: {
+    display: 'flex',
+    gap: '4px',
+    alignItems: 'center',
+  },
+  empCardSortBtn: {
+    fontSize: '12px',
+    padding: '2px 8px',
+    borderRadius: '12px',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    background: 'transparent',
+    cursor: 'pointer',
+    color: tokens.colorNeutralForeground2,
+    '&:hover': {
+      background: tokens.colorNeutralBackground1Hover,
+    },
+  },
+  empCardSortBtnActive: {
+    background: tokens.colorBrandBackground2,
+    color: tokens.colorBrandForeground1,
+    borderTopColor: tokens.colorBrandStroke1,
+    borderRightColor: tokens.colorBrandStroke1,
+    borderBottomColor: tokens.colorBrandStroke1,
+    borderLeftColor: tokens.colorBrandStroke1,
   },
 });
 
@@ -276,6 +310,16 @@ export function ActualsTab({
     }
   };
 
+  // Employee card expand state
+  const [expandedEmployees, setExpandedEmployees] = useState<Set<string>>(new Set());
+  const toggleEmployee = useCallback((resourceId: string) => {
+    setExpandedEmployees(prev => {
+      const next = new Set(prev);
+      next.has(resourceId) ? next.delete(resourceId) : next.add(resourceId);
+      return next;
+    });
+  }, []);
+
   // Work queue state
   const [selectedCcId, setSelectedCcId] = useState<string | null>(null);
   const [ccSearch, setCcSearch] = useState('');
@@ -283,6 +327,10 @@ export function ActualsTab({
 
   // Scoreboard filter state
   const [scoreboardFilter, setScoreboardFilter] = useState<'none' | 'pending' | 'approved'>('none');
+
+  // Employee comparison table sort state
+  const [empSort, setEmpSort] = useState<EmpSortKey>('status');
+  const [empSortDir, setEmpSortDir] = useState<'asc' | 'desc'>('asc');
 
   // Table sort
   const { handleSort, sortIndicator, comparator } = useFinanceSortState();
@@ -382,7 +430,7 @@ export function ActualsTab({
     [filteredActuals, comparator]
   );
 
-  // Chart
+  // Employee stats for the comparison table
   const { data: empStats, loading: empStatsLoading, error: empStatsError } = useEmployeeStats(
     year,
     month,
@@ -390,6 +438,55 @@ export function ActualsTab({
     actualsProjectId || undefined,
     year > 0 && month > 0
   );
+
+  // Join email + cost center from actualsData by employee name
+  const empMetaByName = useMemo(() => {
+    const map = new Map<string, { email: string; cost_center_name: string }>();
+    for (const row of actualsData) {
+      if (!map.has(row.employee_name)) {
+        map.set(row.employee_name, { email: row.employee_email, cost_center_name: row.cost_center_name });
+      }
+    }
+    return map;
+  }, [actualsData]);
+
+  const getEmpStatusOrder = (demand: number, actuals: number): number => {
+    if (demand === 0) return 3;
+    if (actuals >= demand) return 2;
+    if (actuals > 0) return 1;
+    return 0;
+  };
+
+  const handleEmpSort = (key: EmpSortKey) => {
+    if (empSort === key) setEmpSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setEmpSort(key); setEmpSortDir('asc'); }
+  };
+
+  const empSortIndicator = (key: EmpSortKey) =>
+    empSort === key ? (empSortDir === 'asc' ? ' ↑' : ' ↓') : ' ↕';
+
+  const sortedEmpStats = useMemo(() => {
+    if (!empStats) return [];
+    return [...empStats].sort((a, b) => {
+      let cmp = 0;
+      if (empSort === 'name') cmp = a.employee_name.localeCompare(b.employee_name);
+      else if (empSort === 'demand') cmp = a.demand_fte - b.demand_fte;
+      else if (empSort === 'actuals') cmp = a.actuals_fte - b.actuals_fte;
+      else cmp = getEmpStatusOrder(a.demand_fte, a.actuals_fte) - getEmpStatusOrder(b.demand_fte, b.actuals_fte);
+      return empSortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [empStats, empSort, empSortDir]);
+
+  const nameColor = (name: string): string => {
+    const palette = ['#7c3aed','#2563eb','#059669','#d97706','#dc2626','#0891b2','#4f46e5','#9333ea'];
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+    return palette[Math.abs(h) % palette.length];
+  };
+
+  const nameInitials = (name: string): string =>
+    name.split(' ').map(w => w[0] ?? '').join('').toUpperCase().slice(0, 2);
+
 
   return (
     <>
@@ -676,24 +773,198 @@ export function ActualsTab({
         </DialogSurface>
       </Dialog>
 
-      {/* Chart — visible when stats enabled */}
+      {/* Actuals vs Demand by Employee — expandable card view */}
       {canSeeStats && year > 0 && month > 0 && (
-        <Card className={styles.chartCard}>
-          <CardHeader header={<Body1><strong>Actuals vs Demand by Employee</strong></Body1>} />
+        <div className={styles.chartCard} style={{ padding: '20px' }}>
+          {/* Section header with sort controls */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <Body1><strong>Actuals vs Demand by Employee</strong></Body1>
+            <div className={styles.empCardSortBar}>
+              <span style={{ fontSize: '11px', color: '#9ca3af', marginRight: 4 }}>Sort:</span>
+              {([
+                { key: 'status' as EmpSortKey, label: 'Status' },
+                { key: 'name' as EmpSortKey, label: 'Name' },
+                { key: 'demand' as EmpSortKey, label: 'Demand' },
+                { key: 'actuals' as EmpSortKey, label: 'Actuals' },
+              ] as { key: EmpSortKey; label: string }[]).map(({ key, label }) => (
+                <button
+                  key={key}
+                  className={`${styles.empCardSortBtn} ${empSort === key ? styles.empCardSortBtnActive : ''}`}
+                  onClick={() => handleEmpSort(key)}
+                >
+                  {label}{empSortIndicator(key)}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {empStatsLoading ? (
-            <LoadingState message="Loading employee stats..." />
+            <Body1 style={{ display: 'block', padding: tokens.spacingVerticalL, color: tokens.colorNeutralForeground3 }}>
+              Loading...
+            </Body1>
           ) : empStatsError ? (
             <MessageBar intent="error"><MessageBarBody>{empStatsError}</MessageBarBody></MessageBar>
-          ) : empStats && empStats.length > 0 ? (
-            <div style={{ width: '100%', minHeight: 320 }}>
-              <DemandVsActualsBarChart data={empStats} height={320} />
-            </div>
+          ) : sortedEmpStats.length === 0 ? (
+            <Body1 style={{ display: 'block', padding: tokens.spacingVerticalL, color: tokens.colorNeutralForeground3 }}>
+              No demand data found for this period.
+            </Body1>
           ) : (
-            <MessageBar intent="info" style={{ margin: tokens.spacingVerticalM }}>
-              <MessageBarBody>No employee demand or actuals for this period.</MessageBarBody>
-            </MessageBar>
+            <>
+              {/* Bar legend */}
+              <div style={{ display: 'flex', gap: '16px', marginBottom: '12px', fontSize: '11px', color: '#6b7280' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ display: 'inline-block', width: 10, height: 10, background: '#16a34a', borderRadius: 2, opacity: 0.4 }} />
+                  Supply
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ display: 'inline-block', width: 10, height: 10, background: '#3b82f6', borderRadius: 2, opacity: 0.5 }} />
+                  Demand
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ display: 'inline-block', width: 10, height: 10, background: '#1e3a5f', borderRadius: 2 }} />
+                  Actuals
+                </span>
+              </div>
+
+              {/* Employee cards */}
+              {sortedEmpStats.map(row => {
+                const supply = row.supply_fte;
+                const demand = row.demand_fte;
+                const actuals = row.actuals_fte;
+                const maxVal = Math.max(supply, demand, actuals, 100);
+                const isExpanded = expandedEmployees.has(row.resource_id);
+                const meta = empMetaByName.get(row.employee_name);
+                const statusOrder = getEmpStatusOrder(demand, actuals);
+
+                return (
+                  <div
+                    key={row.resource_id}
+                    className={styles.empCard}
+                    onClick={() => toggleEmployee(row.resource_id)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={e => e.key === 'Enter' && toggleEmployee(row.resource_id)}
+                  >
+                    {/* Card header row */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                      {/* Initials circle */}
+                      <div style={{
+                        width: 36, height: 36, borderRadius: '50%',
+                        background: nameColor(row.employee_name),
+                        color: 'white', display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', fontSize: '13px', fontWeight: 600,
+                        flexShrink: 0, userSelect: 'none',
+                      }}>
+                        {nameInitials(row.employee_name)}
+                      </div>
+
+                      {/* Name + email + CC */}
+                      <div style={{ flex: '1 1 120px', minWidth: 0 }}>
+                        <div style={{ fontSize: '14px', fontWeight: 600, lineHeight: '1.2' }}>{row.employee_name}</div>
+                        {(meta?.email || meta?.cost_center_name) && (
+                          <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '1px' }}>
+                            {meta?.email}
+                            {meta?.email && meta?.cost_center_name && <span style={{ margin: '0 4px' }}>·</span>}
+                            {meta?.cost_center_name}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Metric pills */}
+                      <div style={{ display: 'flex', gap: '6px', flexShrink: 0, flexWrap: 'wrap' }}>
+                        <span style={{ background: '#dcfce7', color: '#166534', fontSize: '12px', padding: '2px 8px', borderRadius: '12px', whiteSpace: 'nowrap' }}>
+                          Supply: {supply}%
+                        </span>
+                        <span style={{ background: '#dbeafe', color: '#1e40af', fontSize: '12px', padding: '2px 8px', borderRadius: '12px', whiteSpace: 'nowrap' }}>
+                          Demand: {demand}%
+                        </span>
+                        <span style={{ background: '#e0e7ff', color: '#3730a3', fontSize: '12px', padding: '2px 8px', borderRadius: '12px', whiteSpace: 'nowrap' }}>
+                          Actuals: {actuals}%
+                        </span>
+                      </div>
+
+                      {/* Status badge + chevron */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                        {statusOrder === 2 && <Badge appearance="filled" color="success" size="small">On Track</Badge>}
+                        {statusOrder === 1 && <Badge appearance="filled" color="warning" size="small">Partial</Badge>}
+                        {statusOrder === 0 && <Badge appearance="filled" color="danger" size="small">Missing</Badge>}
+                        {statusOrder === 3 && <Badge appearance="outline" size="small">No Demand</Badge>}
+                        <span style={{ fontSize: '11px', color: '#9ca3af', userSelect: 'none' }}>
+                          {isExpanded ? '▼' : '▶'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Stacked visual bar */}
+                    <div style={{ position: 'relative', height: '8px', background: '#f3f4f6', borderRadius: '4px' }}>
+                      <div style={{ position: 'absolute', left: 0, top: 0, height: '8px', width: `${Math.min(100, maxVal > 0 ? (supply / maxVal) * 100 : 0)}%`, background: '#16a34a', borderRadius: '4px', opacity: 0.4 }} />
+                      <div style={{ position: 'absolute', left: 0, top: 0, height: '8px', width: `${Math.min(100, maxVal > 0 ? (demand / maxVal) * 100 : 0)}%`, background: '#3b82f6', borderRadius: '4px', opacity: 0.5 }} />
+                      <div style={{ position: 'absolute', left: 0, top: 0, height: '8px', width: `${Math.min(100, maxVal > 0 ? (actuals / maxVal) * 100 : 0)}%`, background: '#1e3a5f', borderRadius: '4px' }} />
+                    </div>
+
+                    {/* Expanded section */}
+                    {isExpanded && (
+                      <div
+                        style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f3f4f6' }}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <div style={{ fontSize: '11px', textTransform: 'uppercase', color: '#9ca3af', letterSpacing: '0.5px', marginBottom: '8px' }}>
+                          Project breakdown
+                        </div>
+                        {row.projects.length === 0 ? (
+                          <div style={{ fontSize: '13px', color: '#9ca3af', fontStyle: 'italic', padding: '4px 0' }}>
+                            No project breakdown available.
+                          </div>
+                        ) : (
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                            <thead>
+                              <tr>
+                                <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, color: '#6b7280', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.3px', borderBottom: '1px solid #f3f4f6' }}>Project</th>
+                                <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: '#6b7280', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.3px', borderBottom: '1px solid #f3f4f6' }}>Demand</th>
+                                <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: '#6b7280', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.3px', borderBottom: '1px solid #f3f4f6' }}>Actuals</th>
+                                <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: '#6b7280', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.3px', borderBottom: '1px solid #f3f4f6' }}>Gap</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {row.projects.map((proj, pi) => {
+                                const gap = proj.actuals_fte - proj.demand_fte;
+                                return (
+                                  <tr key={proj.project_id} style={{ background: pi % 2 === 0 ? 'white' : '#f9fafb' }}>
+                                    <td style={{ padding: '8px 10px' }}>{proj.project_name}</td>
+                                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6', display: 'inline-block', flexShrink: 0 }} />
+                                        {proj.demand_fte}%
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                                      {proj.actuals_fte > 0 ? (
+                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#1e3a5f', display: 'inline-block', flexShrink: 0 }} />
+                                          {proj.actuals_fte}%
+                                        </span>
+                                      ) : <span style={{ color: '#9ca3af' }}>—</span>}
+                                    </td>
+                                    <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: gap >= 0 ? '#16a34a' : '#dc2626' }}>
+                                      {gap >= 0 ? `+${gap}%` : `${gap}%`}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        )}
+                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>
+                          Total supply allocated: {supply}% FTE
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </>
           )}
-        </Card>
+        </div>
       )}
     </>
   );

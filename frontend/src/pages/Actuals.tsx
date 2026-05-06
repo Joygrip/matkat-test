@@ -1,10 +1,10 @@
 /**
- * Actuals Entry Page
- * 
- * Employee: Enter and sign actuals
- * RO: View and proxy sign for absent employees
+ * Actuals Page — unified entry, signing, and approval workflow
+ *
+ * Employee: enter and sign their own actuals (flat table)
+ * Manager / Finance / Admin: CC sidebar, KPI cards, approve/reject workflow (ActualsTab)
  */
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Title1,
   Body1,
@@ -43,13 +43,9 @@ import {
 import {
   Add24Regular,
   Delete24Regular,
-  Signature24Regular,
   CheckmarkCircle24Regular,
   ClipboardTaskRegular,
   ArrowUndo24Regular,
-  ChevronDown24Regular,
-  ChevronRight24Regular,
-  Person24Regular,
 } from '@fluentui/react-icons';
 import { actualsApi, ActualLine, ActualApprovalStatus, CreateActualLine } from '../api/actuals';
 import { lookupsApi, Project, Resource } from '../api/lookups';
@@ -60,7 +56,10 @@ import { formatApiError } from '../utils/errors';
 import { config } from '../config';
 import { ApiError } from '../types';
 import { EmptyState } from '../components/EmptyState';
-import { useAuth } from '../auth/AuthProvider';
+import { useAuth, useHasRole } from '../auth/AuthProvider';
+import { apiClient } from '../api/client';
+import { ActualsTab, FinanceActualRow } from '../components/finance/ActualsTab';
+import { SearchableFilter } from '../components/SearchableFilter';
 
 const useStyles = makeStyles({
   container: {
@@ -203,16 +202,30 @@ const useStyles = makeStyles({
     paddingTop: tokens.spacingVerticalXS,
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
   },
+  filterLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.5px',
+  },
 });
 
 const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
 
 export const Actuals: React.FC = () => {
   const styles = useStyles();
   const { showSuccess, showError, showApiError } = useToast();
   const { user } = useAuth();
-  
+  const canSeeStats = useHasRole('Finance', 'Manager', 'Admin');
+
   const { selectedPeriodId, selectedPeriod: ctxPeriod } = usePeriod();
+
+  const isEmployee = user?.role === 'Employee';
+  const isManager = user?.role === 'Manager';
+
+  // ── Employee-view state ──────────────────────────────────────────────────────
 
   const [actuals, setActuals] = useState<ActualLine[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -222,10 +235,7 @@ export const Actuals: React.FC = () => {
   const [overLimitIds, setOverLimitIds] = useState<string[]>([]);
   const [demandLines, setDemandLines] = useState<DemandLine[]>([]);
   const [supplyLines, setSupplyLines] = useState<SupplyLine[]>([]);
-  
-  const isEmployee = user?.role === 'Employee';
-  const isManager = user?.role === 'Manager';
-  
+
   // Form state
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [resourceSearch, setResourceSearch] = useState('');
@@ -239,8 +249,8 @@ export const Actuals: React.FC = () => {
   });
   const [myResourceId, setMyResourceId] = useState<string | null>(null);
   const [myResourceLoading, setMyResourceLoading] = useState(false);
-  
-  // Add state for edit dialog
+
+  // Edit dialog state
   const [editActual, setEditActual] = useState<ActualLine | null>(null);
   const [editFte, setEditFte] = useState<number | undefined>(undefined);
   const [editPlannedFte, setEditPlannedFte] = useState<number | undefined>(undefined);
@@ -253,42 +263,28 @@ export const Actuals: React.FC = () => {
   const [linesDrawerType, setLinesDrawerType] = useState<'demand' | 'supply' | 'project'>('demand');
   const [linesDrawerProjectId, setLinesDrawerProjectId] = useState<string | null>(null);
 
-  // Manager team grouping: collapse/expand per employee
-  const [collapsedEmployees, setCollapsedEmployees] = useState<Set<string>>(new Set());
+  // ── Non-employee (Manager / Finance / Admin) view state ──────────────────────
 
-  const teamGroups = useMemo(() => {
-    if (!isManager) return null;
-    const map = new Map<string, { resourceName: string; lines: ActualLine[]; totalFte: number; anyUnsigned: boolean; anySigned: boolean }>();
-    for (const line of actuals) {
-      const name = line.resource_name ?? resources.find(r => r.id === line.resource_id)?.display_name ?? line.resource_id;
-      if (!map.has(line.resource_id)) {
-        map.set(line.resource_id, { resourceName: name, lines: [], totalFte: 0, anyUnsigned: false, anySigned: false });
-      }
-      const group = map.get(line.resource_id)!;
-      group.lines.push(line);
-      group.totalFte += line.actual_fte_percent;
-      if (line.employee_signed_at) group.anySigned = true;
-      else group.anyUnsigned = true;
-    }
-    return Array.from(map.entries())
-      .map(([resourceId, g]) => ({ resourceId, ...g }))
-      .sort((a, b) => a.resourceName.localeCompare(b.resourceName));
-  }, [actuals, isManager, resources]);
+  const [actualsData, setActualsData] = useState<FinanceActualRow[]>([]);
+  const [actualsLoading, setActualsLoading] = useState(false);
+  const [actualsError, setActualsError] = useState<string | null>(null);
+  const [actualsProjectId, setActualsProjectId] = useState<string>('');
 
-  const toggleEmployeeCollapse = (resourceId: string) => {
-    setCollapsedEmployees(prev => {
-      const next = new Set(prev);
-      if (next.has(resourceId)) next.delete(resourceId);
-      else next.add(resourceId);
-      return next;
-    });
-  };
+
+  // year/month for chart (derived from finance actuals or period context)
+  const periodFromActuals = actualsData.length > 0
+    ? { year: actualsData[0].year, month: actualsData[0].month }
+    : null;
+  const year = periodFromActuals?.year ?? ctxPeriod?.year ?? 0;
+  const month = periodFromActuals?.month ?? ctxPeriod?.month ?? 0;
+
+  // ── Initial data load (projects + resources for Add Actual dialog) ───────────
 
   useEffect(() => {
     loadInitialData();
   }, []);
-  
-  // Load current user's resource ID (employees: identity from login; managers: to detect self-entry)
+
+  // Load current user's resource ID (employees: identity; managers: detect self-entry)
   useEffect(() => {
     if (isEmployee || isManager) {
       setMyResourceLoading(true);
@@ -298,13 +294,21 @@ export const Actuals: React.FC = () => {
         .finally(() => setMyResourceLoading(false));
     }
   }, [isEmployee, isManager]);
-  
+
+  // Employee: load own actuals when period or resource changes
   useEffect(() => {
-    if (selectedPeriodId) {
-      loadActuals();
+    if (isEmployee && selectedPeriodId) {
+      loadMyActuals();
     }
-  }, [selectedPeriodId, myResourceId]);
-  
+  }, [selectedPeriodId, myResourceId, isEmployee]);
+
+  // Non-employee: load finance actuals dashboard when period or filters change
+  useEffect(() => {
+    if (!isEmployee && selectedPeriodId && ctxPeriod) {
+      loadFinanceActuals();
+    }
+  }, [selectedPeriodId, isEmployee, actualsProjectId]);
+
   const loadInitialData = async () => {
     try {
       setLoading(true);
@@ -312,7 +316,6 @@ export const Actuals: React.FC = () => {
         lookupsApi.listProjects(),
         isManager ? lookupsApi.listResourcesScoped() : lookupsApi.listResources(),
       ]);
-      
       setProjects(projectsData);
       setResources(resourcesData);
     } catch (err: unknown) {
@@ -321,23 +324,17 @@ export const Actuals: React.FC = () => {
       setLoading(false);
     }
   };
-  
-  const loadActuals = async () => {
+
+  const loadMyActuals = async () => {
     try {
-      // Employee role uses /actuals/my to see their own lines (filtered by year/month if period selected)
-      // Other roles (RO, Finance, Admin) use /actuals?year=X&month=Y to see all lines
-      const data = isEmployee 
-        ? await actualsApi.getMyActuals(ctxPeriod?.year, ctxPeriod?.month)
-        : await actualsApi.getActualLines(undefined, ctxPeriod?.year, ctxPeriod?.month);
+      const data = await actualsApi.getMyActuals(ctxPeriod?.year, ctxPeriod?.month);
       setActuals(data);
       setOverLimitIds([]);
 
-      // Load approval statuses for all roles (employees get own, managers/admins get team)
       actualsApi.getApprovalStatuses(ctxPeriod?.year, ctxPeriod?.month)
         .then(statuses => setApprovalStatuses(statuses))
         .catch(() => { /* non-blocking */ });
 
-      // For employees, also load demand and supply lines for their resource only
       if (isEmployee && selectedPeriodId && myResourceId) {
         try {
           const [demands, supplies] = await Promise.all([
@@ -359,13 +356,35 @@ export const Actuals: React.FC = () => {
       showApiError(err as Error, 'Failed to load actuals');
     }
   };
-  
+
+  const loadFinanceActuals = async () => {
+    if (!ctxPeriod) return;
+    setActualsLoading(true);
+    setActualsError(null);
+    try {
+      const params = new URLSearchParams();
+      params.append('year', String(ctxPeriod.year));
+      params.append('month', String(ctxPeriod.month));
+      if (actualsProjectId) params.append('project_id', actualsProjectId);
+
+      const result = await apiClient.get<FinanceActualRow[]>(
+        `/finance/actuals-dashboard?${params.toString()}`
+      );
+      setActualsData(result);
+    } catch {
+      setActualsError('Failed to load actuals data');
+    } finally {
+      setActualsLoading(false);
+    }
+  };
+
+  // ── Employee actions ─────────────────────────────────────────────────────────
+
   const handleCreate = async () => {
     if (!selectedPeriodId || !ctxPeriod) {
       showError('No period selected', 'Please select a period first.');
       return;
     }
-    // For employees, use their own resource
     const resourceId = isEmployee && myResourceId ? myResourceId : formData.resource_id;
     if (!resourceId) {
       showError('Missing resource', 'Please select a resource.');
@@ -375,7 +394,6 @@ export const Actuals: React.FC = () => {
       showError('Missing project', 'Please select a project.');
       return;
     }
-    // Managers entering actuals for another employee must provide a reason
     const isManagerEnteringForOther = isManager && resourceId !== myResourceId;
     if (isManagerEnteringForOther && !dialogProxyReason.trim()) {
       showError('Reason required', 'Please provide a reason for entering actuals on behalf of this employee.');
@@ -389,14 +407,15 @@ export const Actuals: React.FC = () => {
         year: ctxPeriod.year,
         month: ctxPeriod.month,
         actual_fte_percent: formData.actual_fte_percent,
-        // planned_fte_percent is omitted - backend will calculate it automatically
         ...(isManagerEnteringForOther ? { proxy_sign_reason: dialogProxyReason.trim() } : {}),
       });
       showSuccess('Actual line created');
       setIsDialogOpen(false);
-      loadActuals();
-
-      // Reset form
+      if (isEmployee) {
+        loadMyActuals();
+      } else {
+        loadFinanceActuals();
+      }
       setFormData({
         period_id: selectedPeriodId,
         resource_id: '',
@@ -415,47 +434,33 @@ export const Actuals: React.FC = () => {
       showApiError(err as Error, 'Create actual line');
     }
   };
-  
+
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this actual line?')) return;
-    
     try {
       await actualsApi.deleteActualLine(id);
       showSuccess('Actual line deleted');
-      loadActuals();
+      loadMyActuals();
     } catch (err: unknown) {
       showApiError(err as Error, 'Failed to delete actual line');
     }
   };
-  
+
   const handleUnsign = async (actualId: string) => {
     if (!window.confirm('Remove your signature? You will be able to edit and re-submit this actual for approval.')) return;
     try {
       await actualsApi.unsignActual(actualId);
       showSuccess('Signature removed. You can now edit and re-submit.');
-      await reloadActuals();
+      await reloadMyActuals();
     } catch (err) {
       showApiError(err as Error, 'Failed to unsign actual');
     }
   };
 
-  const handleManagerSign = async (actualId: string) => {
-    try {
-      await actualsApi.signActuals(actualId);
-      showSuccess('Signed successfully');
-      await reloadActuals();
-    } catch (err) {
-      showApiError(err as Error, 'Failed to sign actuals');
-    }
-  };
-
-  // New function to reload actuals after edit/save
-  const reloadActuals = async () => {
+  const reloadMyActuals = async () => {
     try {
       setLoading(true);
-      const data = isEmployee
-        ? await actualsApi.getMyActuals(ctxPeriod?.year, ctxPeriod?.month)
-        : await actualsApi.getActualLines(undefined, ctxPeriod?.year, ctxPeriod?.month);
+      const data = await actualsApi.getMyActuals(ctxPeriod?.year, ctxPeriod?.month);
       setActuals(data);
       setOverLimitIds([]);
       actualsApi.getApprovalStatuses(ctxPeriod?.year, ctxPeriod?.month)
@@ -467,7 +472,7 @@ export const Actuals: React.FC = () => {
       setLoading(false);
     }
   };
-  
+
   const openEditDialog = (actual: ActualLine) => {
     setEditActual(actual);
     setEditFte(actual.actual_fte_percent);
@@ -475,7 +480,7 @@ export const Actuals: React.FC = () => {
     setEditProjectId(actual.project_id);
     setIsEditDialogOpen(true);
   };
-  
+
   const handleEditSave = async () => {
     if (!editActual) return;
     try {
@@ -487,19 +492,19 @@ export const Actuals: React.FC = () => {
       showSuccess('Actual line updated');
       setIsEditDialogOpen(false);
       setEditActual(null);
-      await reloadActuals();
+      await reloadMyActuals();
     } catch (err) {
       showApiError(err as Error, 'Failed to update actual line');
     }
   };
-  
+
   const getProjectName = (id: string) => projects.find(p => p.id === id)?.name || 'Unknown';
   const getResourceName = (id: string) => resources.find(r => r.id === id)?.display_name || 'Unknown';
-  
+
   const currentPeriod = ctxPeriod;
   const isLocked = currentPeriod?.status === 'locked';
   const hasRejectedActuals = isEmployee && Object.values(approvalStatuses).some(s => s.status === 'rejected');
-  
+
   if (loading) {
     return (
       <div className={styles.loading}>
@@ -507,9 +512,11 @@ export const Actuals: React.FC = () => {
       </div>
     );
   }
-  
+
   return (
     <div className={styles.container}>
+
+      {/* ── Header: alerts, Add Actual button, and (non-employee) filters ── */}
       <div className={styles.header}>
         <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center', flexWrap: 'wrap' }}>
           {isLocked && (
@@ -557,7 +564,7 @@ export const Actuals: React.FC = () => {
                         </Body1>
                       </div>
                     )}
-                    
+
                     <div className={styles.formField}>
                       <label>Resource</label>
                       {isEmployee ? (
@@ -628,7 +635,7 @@ export const Actuals: React.FC = () => {
                         ))}
                       </Select>
                     </div>
-                    
+
                     <div className={styles.formField} style={{ marginTop: tokens.spacingVerticalM }}>
                       <label>Actual FTE %</label>
                       <Input
@@ -643,7 +650,7 @@ export const Actuals: React.FC = () => {
                         Planned FTE will be automatically calculated from demand lines for this project.
                       </Body1>
                     </div>
-                    
+
                     <MessageBar intent="warning" style={{ marginTop: tokens.spacingVerticalM }}>
                       <MessageBarBody>Total actuals per resource cannot exceed 100%</MessageBarBody>
                     </MessageBar>
@@ -668,392 +675,282 @@ export const Actuals: React.FC = () => {
             </Dialog>
           )}
         </div>
+
+        {/* Filters — visible to Manager / Finance / Admin */}
+        {!isEmployee && (
+          <div style={{ display: 'flex', gap: tokens.spacingHorizontalL, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS }}>
+              <span className={styles.filterLabel}>Project</span>
+              <SearchableFilter
+                options={projects.map(p => ({ id: p.id, label: p.name }))}
+                value={actualsProjectId}
+                onChange={setActualsProjectId}
+                placeholder="Search projects..."
+                allLabel="All projects"
+                style={{ minWidth: 180 }}
+              />
+            </div>
+          </div>
+        )}
       </div>
-      
+
       {isLocked && (
         <MessageBar intent="warning" style={{ marginBottom: tokens.spacingVerticalM }}>
           <MessageBarBody>Period is locked. Editing is disabled.</MessageBarBody>
         </MessageBar>
       )}
-      
+
       {error && (
         <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
           <MessageBarBody>{error}</MessageBarBody>
         </MessageBar>
       )}
-      
-      {/* Demand and Supply Summary for Employees */}
-      {isEmployee && selectedPeriodId && (demandLines.length > 0 || supplyLines.length > 0) && (
-        <Card className={styles.card} style={{ marginBottom: tokens.spacingVerticalL }}>
-          <CardHeader header={<Title1>Planning Summary</Title1>} />
-          <div className={styles.planningSummary}>
-            <div className={styles.summaryGrid}>
-              <div
-                className={styles.summaryCard}
-                role="button"
-                tabIndex={0}
-                onClick={() => {
-                  setLinesDrawerType('demand');
-                  setLinesDrawerProjectId(null);
-                  setLinesDrawerOpen(true);
-                }}
-                onKeyDown={(e) => { if (e.key === 'Enter') { setLinesDrawerType('demand'); setLinesDrawerProjectId(null); setLinesDrawerOpen(true); } }}
-              >
-                <div className={styles.summaryLabel}>Total Demand</div>
-                <div className={styles.summaryValue} style={{ color: tokens.colorPaletteBlueForeground2 }}>
-                  {demandLines.reduce((sum, d) => sum + (d.fte_percent || 0), 0)}%
-                </div>
-                <div className={styles.summarySubtitle}>
-                  {demandLines.length} demand line{demandLines.length !== 1 ? 's' : ''} across {new Set(demandLines.map(d => d.project_id)).size} project{new Set(demandLines.map(d => d.project_id)).size !== 1 ? 's' : ''}
-                </div>
-              </div>
-              <div
-                className={styles.summaryCard}
-                role="button"
-                tabIndex={0}
-                onClick={() => {
-                  setLinesDrawerType('supply');
-                  setLinesDrawerProjectId(null);
-                  setLinesDrawerOpen(true);
-                }}
-                onKeyDown={(e) => e.key === 'Enter' && (setLinesDrawerType('supply'), setLinesDrawerProjectId(null), setLinesDrawerOpen(true))}
-              >
-                <div className={styles.summaryLabel}>Total Supply</div>
-                <div className={styles.summaryValue} style={{ color: tokens.colorPaletteGreenForeground1 }}>
-                  {supplyLines.reduce((sum, s) => sum + (s.fte_percent || 0), 0)}%
-                </div>
-                <div className={styles.summarySubtitle}>
-                  {supplyLines.length} supply line{supplyLines.length !== 1 ? 's' : ''}
-                </div>
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
 
-      {/* Lines Detail Drawer */}
-      <Drawer
-        open={linesDrawerOpen}
-        onOpenChange={(_, data) => setLinesDrawerOpen(data.open)}
-        position="end"
-      >
-        <DrawerHeader>
-          <DrawerHeaderTitle>
-            {linesDrawerType === 'demand' && 'Demand Lines'}
-            {linesDrawerType === 'supply' && 'Supply Lines'}
-            {linesDrawerType === 'project' && `Demand: ${projects.find(p => p.id === linesDrawerProjectId)?.name || 'Project'}`}
-          </DrawerHeaderTitle>
-        </DrawerHeader>
-        <DrawerBody>
-          {linesDrawerType === 'demand' && (
-            <Table className={styles.table}>
-              <TableHeader>
-                <TableRow>
-                  <TableHeaderCell>Project</TableHeaderCell>
-                  <TableHeaderCell>Resource</TableHeaderCell>
-                  <TableHeaderCell>FTE %</TableHeaderCell>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {demandLines.map((d) => (
-                  <TableRow key={d.id}>
-                    <TableCell>{d.project_name ?? projects.find(p => p.id === d.project_id)?.name ?? d.project_id}</TableCell>
-                    <TableCell>{d.resource_name ?? d.placeholder_name ?? '-'}</TableCell>
-                    <TableCell>{d.fte_percent ?? 0}%</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-          {linesDrawerType === 'supply' && (
-            <Table className={styles.table}>
-              <TableHeader>
-                <TableRow>
-                  <TableHeaderCell>Project</TableHeaderCell>
-                  <TableHeaderCell>Resource</TableHeaderCell>
-                  <TableHeaderCell>FTE %</TableHeaderCell>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {supplyLines.map((s) => (
-                  <TableRow key={s.id}>
-                    <TableCell>{s.project_name ?? projects.find(p => p.id === s.project_id)?.name ?? s.project_id ?? '-'}</TableCell>
-                    <TableCell>{s.resource_name ?? resources.find(r => r.id === s.resource_id)?.display_name ?? s.resource_id}</TableCell>
-                    <TableCell>{s.fte_percent ?? 0}%</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-          {linesDrawerType === 'project' && linesDrawerProjectId && (
-            <Table className={styles.table}>
-              <TableHeader>
-                <TableRow>
-                  <TableHeaderCell>Project</TableHeaderCell>
-                  <TableHeaderCell>Resource</TableHeaderCell>
-                  <TableHeaderCell>FTE %</TableHeaderCell>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {demandLines.filter(d => d.project_id === linesDrawerProjectId).map((d) => (
-                  <TableRow key={d.id}>
-                    <TableCell>{d.project_name ?? projects.find(p => p.id === d.project_id)?.name ?? d.project_id}</TableCell>
-                    <TableCell>{d.resource_name ?? d.placeholder_name ?? '-'}</TableCell>
-                    <TableCell>{d.fte_percent ?? 0}%</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </DrawerBody>
-      </Drawer>
-      
-      {/* Manager: grouped by employee */}
-      {isManager && teamGroups !== null ? (
-        <div>
-          {teamGroups.length === 0 ? (
-            <Card className={styles.card}>
-              <EmptyState
-                icon={<ClipboardTaskRegular style={{ fontSize: 48 }} />}
-                title="No actuals"
-                message="No actual lines found for your team this period."
-              />
-            </Card>
-          ) : (
-            teamGroups.map(group => {
-              const isCollapsed = collapsedEmployees.has(group.resourceId);
-              const allSigned = !group.anyUnsigned && group.anySigned;
-              const allUnsigned = group.anyUnsigned && !group.anySigned;
-              return (
-                <Card key={group.resourceId} className={styles.card}>
-                  {/* Employee section header */}
+      {/* ── Employee view ──────────────────────────────────────────────────── */}
+
+      {isEmployee && (
+        <>
+          {/* Demand and Supply Summary */}
+          {selectedPeriodId && (demandLines.length > 0 || supplyLines.length > 0) && (
+            <Card className={styles.card} style={{ marginBottom: tokens.spacingVerticalL }}>
+              <CardHeader header={<Title1>Planning Summary</Title1>} />
+              <div className={styles.planningSummary}>
+                <div className={styles.summaryGrid}>
                   <div
+                    className={styles.summaryCard}
                     role="button"
                     tabIndex={0}
-                    onClick={() => toggleEmployeeCollapse(group.resourceId)}
-                    onKeyDown={(e) => e.key === 'Enter' && toggleEmployeeCollapse(group.resourceId)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: tokens.spacingHorizontalM,
-                      padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
-                      cursor: 'pointer',
-                      userSelect: 'none',
-                    }}
+                    onClick={() => { setLinesDrawerType('demand'); setLinesDrawerProjectId(null); setLinesDrawerOpen(true); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { setLinesDrawerType('demand'); setLinesDrawerProjectId(null); setLinesDrawerOpen(true); } }}
                   >
-                    {isCollapsed ? <ChevronRight24Regular /> : <ChevronDown24Regular />}
-                    <Person24Regular />
-                    <Body1 style={{ fontWeight: tokens.fontWeightSemibold, flex: 1 }}>{group.resourceName}</Body1>
-                    <Badge appearance="filled" color="informative" style={{ marginRight: tokens.spacingHorizontalS }}>
-                      {group.totalFte}% total
-                    </Badge>
-                    {allSigned && <Badge appearance="filled" color="warning">All Submitted</Badge>}
-                    {allUnsigned && <Badge appearance="outline" color="warning">Unsigned</Badge>}
-                    {!allSigned && !allUnsigned && <Badge appearance="filled" color="warning">Partial</Badge>}
-                    <Body1 style={{ color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200, marginLeft: tokens.spacingHorizontalS }}>
-                      {group.lines.length} line{group.lines.length !== 1 ? 's' : ''}
-                    </Body1>
-                    {!isLocked && (
-                      <Button
-                        icon={<Add24Regular />}
-                        appearance="subtle"
-                        size="small"
-                        title={`Add actual for ${group.resourceName}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setFormData(prev => ({ ...prev, resource_id: group.resourceId, project_id: '' }));
-                          setResourceSearch(group.resourceName);
-                          setDialogProxyReason('');
-                          setIsDialogOpen(true);
-                        }}
-                      >
-                        Add
-                      </Button>
-                    )}
+                    <div className={styles.summaryLabel}>Total Demand</div>
+                    <div className={styles.summaryValue} style={{ color: tokens.colorPaletteBlueForeground2 }}>
+                      {demandLines.reduce((sum, d) => sum + (d.fte_percent || 0), 0)}%
+                    </div>
+                    <div className={styles.summarySubtitle}>
+                      {demandLines.length} demand line{demandLines.length !== 1 ? 's' : ''} across {new Set(demandLines.map(d => d.project_id)).size} project{new Set(demandLines.map(d => d.project_id)).size !== 1 ? 's' : ''}
+                    </div>
                   </div>
-
-                  {/* Employee rows (collapsible) */}
-                  {!isCollapsed && (
-                    <Table className={styles.table}>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHeaderCell>Project</TableHeaderCell>
-                          <TableHeaderCell>Period</TableHeaderCell>
-                          <TableHeaderCell>Planned</TableHeaderCell>
-                          <TableHeaderCell>Actual</TableHeaderCell>
-                          <TableHeaderCell>Status</TableHeaderCell>
-                          <TableHeaderCell>Actions</TableHeaderCell>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {group.lines.map(a => (
-                          <TableRow
-                            key={a.id}
-                            className={overLimitIds.includes(a.id) ? styles.overLimitRow : undefined}
-                          >
-                            <TableCell>{a.project_name ?? getProjectName(a.project_id)}</TableCell>
-                            <TableCell>{a.year}-{String(a.month).padStart(2, '0')}</TableCell>
-                            <TableCell>
-                              {a.planned_fte_percent !== null && a.planned_fte_percent !== undefined
-                                ? `${a.planned_fte_percent}%`
-                                : <span style={{ color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>No plan</span>}
-                            </TableCell>
-                            <TableCell>
-                              <Badge appearance="filled" color="informative">{a.actual_fte_percent}%</Badge>
-                            </TableCell>
-                            <TableCell>
-                              {a.employee_signed_at ? (() => {
-                                const apStatus = approvalStatuses[a.id];
-                                if (apStatus?.status === 'approved') {
-                                  return <Badge appearance="filled" color="success" icon={<CheckmarkCircle24Regular />}>Approved</Badge>;
-                                }
-                                if (apStatus?.status === 'rejected') {
-                                  return <Badge appearance="filled" color="danger" title={apStatus.rejection_comment ?? 'Rejected by approver'}>Rejected</Badge>;
-                                }
-                                return <Badge appearance="filled" color="warning">Pending Approval</Badge>;
-                              })() : (
-                                <Badge appearance="outline" color="warning">Unsigned</Badge>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
-                                {!isLocked && !a.employee_signed_at && group.resourceId === myResourceId && (
-                                  <Button
-                                    icon={<Signature24Regular />}
-                                    appearance="subtle"
-                                    size="small"
-                                    title="Sign"
-                                    onClick={() => handleManagerSign(a.id)}
-                                  />
-                                )}
-                                {!isLocked && (
-                                  <Button
-                                    icon={<Delete24Regular />}
-                                    appearance="subtle"
-                                    size="small"
-                                    onClick={() => handleDelete(a.id)}
-                                  />
-                                )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  )}
-                </Card>
-              );
-            })
-          )}
-        </div>
-      ) : !isManager ? (
-        /* Employee / Finance / Admin: flat table */
-        <Card className={styles.card}>
-          <CardHeader header={<Body1><strong>Actual Lines ({actuals.length})</strong></Body1>} />
-          <Table className={styles.table}>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell>Resource</TableHeaderCell>
-                <TableHeaderCell>Project</TableHeaderCell>
-                <TableHeaderCell>Period</TableHeaderCell>
-                <TableHeaderCell>Planned</TableHeaderCell>
-                <TableHeaderCell>Actual</TableHeaderCell>
-                <TableHeaderCell>Status</TableHeaderCell>
-                <TableHeaderCell>Actions</TableHeaderCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {actuals.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} style={{ padding: tokens.spacingVerticalXXL }}>
-                    <EmptyState
-                      icon={<ClipboardTaskRegular style={{ fontSize: 48 }} />}
-                      title="No actuals"
-                      message="No actual lines found for this period. Create one to start logging time."
-                    />
-                  </TableCell>
-                </TableRow>
-              ) : (
-                actuals.map(a => (
-                  <TableRow
-                    key={a.id}
-                    className={overLimitIds.includes(a.id) ? styles.overLimitRow : undefined}
+                  <div
+                    className={styles.summaryCard}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => { setLinesDrawerType('supply'); setLinesDrawerProjectId(null); setLinesDrawerOpen(true); }}
+                    onKeyDown={(e) => e.key === 'Enter' && (setLinesDrawerType('supply'), setLinesDrawerProjectId(null), setLinesDrawerOpen(true))}
                   >
-                    <TableCell>{a.resource_name ?? getResourceName(a.resource_id)}</TableCell>
-                    <TableCell>{a.project_name ?? getProjectName(a.project_id)}</TableCell>
-                    <TableCell>{a.year}-{String(a.month).padStart(2, '0')}</TableCell>
-                    <TableCell>
-                      {a.planned_fte_percent !== null && a.planned_fte_percent !== undefined
-                        ? `${a.planned_fte_percent}%`
-                        : <span style={{ color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>No plan</span>}
-                    </TableCell>
-                    <TableCell>
-                      <Badge appearance="filled" color="informative">{a.actual_fte_percent}%</Badge>
-                    </TableCell>
-                    <TableCell>
-                      {a.employee_signed_at ? (() => {
-                        const apStatus = approvalStatuses[a.id];
-                        if (apStatus?.status === 'approved') {
-                          return <Badge appearance="filled" color="success" icon={<CheckmarkCircle24Regular />}>Approved</Badge>;
-                        }
-                        if (apStatus?.status === 'rejected') {
-                          return (
-                            <Badge
-                              appearance="filled"
-                              color="danger"
-                              title={apStatus.rejection_comment ?? 'Rejected by approver'}
-                            >
-                              Rejected
-                            </Badge>
-                          );
-                        }
-                        if (apStatus?.status === 'pending') {
-                          return <Badge appearance="filled" color="warning">Pending Approval</Badge>;
-                        }
-                        return (
-                          <Badge appearance="filled" color="warning">Pending Approval</Badge>
-                        );
-                      })() : (
-                        <Badge appearance="outline" color="warning">Unsigned</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
-                        {!isLocked && isEmployee && approvalStatuses[a.id]?.status !== 'approved' && (
-                          <Button
-                            icon={<ClipboardTaskRegular />}
-                            appearance="subtle"
-                            title="Edit"
-                            onClick={() => openEditDialog(a)}
-                          />
-                        )}
-                        {isEmployee && a.employee_signed_at && approvalStatuses[a.id]?.status === 'rejected' && !isLocked && (
-                          <Button
-                            icon={<ArrowUndo24Regular />}
-                            appearance="subtle"
-                            title="Unsign — remove signature to edit and re-submit"
-                            style={{ color: tokens.colorPaletteRedForeground1 }}
-                            onClick={() => handleUnsign(a.id)}
-                          />
-                        )}
-                        {!isLocked && approvalStatuses[a.id]?.status !== 'approved' && (
-                          <Button
-                            icon={<Delete24Regular />}
-                            appearance="subtle"
-                            onClick={() => handleDelete(a.id)}
-                          />
-                        )}
-                      </div>
+                    <div className={styles.summaryLabel}>Total Supply</div>
+                    <div className={styles.summaryValue} style={{ color: tokens.colorPaletteGreenForeground1 }}>
+                      {supplyLines.reduce((sum, s) => sum + (s.fte_percent || 0), 0)}%
+                    </div>
+                    <div className={styles.summarySubtitle}>
+                      {supplyLines.length} supply line{supplyLines.length !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Lines Detail Drawer */}
+          <Drawer
+            open={linesDrawerOpen}
+            onOpenChange={(_, data) => setLinesDrawerOpen(data.open)}
+            position="end"
+          >
+            <DrawerHeader>
+              <DrawerHeaderTitle>
+                {linesDrawerType === 'demand' && 'Demand Lines'}
+                {linesDrawerType === 'supply' && 'Supply Lines'}
+                {linesDrawerType === 'project' && `Demand: ${projects.find(p => p.id === linesDrawerProjectId)?.name || 'Project'}`}
+              </DrawerHeaderTitle>
+            </DrawerHeader>
+            <DrawerBody>
+              {linesDrawerType === 'demand' && (
+                <Table className={styles.table}>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHeaderCell>Project</TableHeaderCell>
+                      <TableHeaderCell>Resource</TableHeaderCell>
+                      <TableHeaderCell>FTE %</TableHeaderCell>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {demandLines.map((d) => (
+                      <TableRow key={d.id}>
+                        <TableCell>{d.project_name ?? projects.find(p => p.id === d.project_id)?.name ?? d.project_id}</TableCell>
+                        <TableCell>{d.resource_name ?? d.placeholder_name ?? '-'}</TableCell>
+                        <TableCell>{d.fte_percent ?? 0}%</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+              {linesDrawerType === 'supply' && (
+                <Table className={styles.table}>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHeaderCell>Project</TableHeaderCell>
+                      <TableHeaderCell>Resource</TableHeaderCell>
+                      <TableHeaderCell>FTE %</TableHeaderCell>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {supplyLines.map((s) => (
+                      <TableRow key={s.id}>
+                        <TableCell>{s.project_name ?? projects.find(p => p.id === s.project_id)?.name ?? s.project_id ?? '-'}</TableCell>
+                        <TableCell>{s.resource_name ?? resources.find(r => r.id === s.resource_id)?.display_name ?? s.resource_id}</TableCell>
+                        <TableCell>{s.fte_percent ?? 0}%</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+              {linesDrawerType === 'project' && linesDrawerProjectId && (
+                <Table className={styles.table}>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHeaderCell>Project</TableHeaderCell>
+                      <TableHeaderCell>Resource</TableHeaderCell>
+                      <TableHeaderCell>FTE %</TableHeaderCell>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {demandLines.filter(d => d.project_id === linesDrawerProjectId).map((d) => (
+                      <TableRow key={d.id}>
+                        <TableCell>{d.project_name ?? projects.find(p => p.id === d.project_id)?.name ?? d.project_id}</TableCell>
+                        <TableCell>{d.resource_name ?? d.placeholder_name ?? '-'}</TableCell>
+                        <TableCell>{d.fte_percent ?? 0}%</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </DrawerBody>
+          </Drawer>
+
+          {/* Employee flat table */}
+          <Card className={styles.card}>
+            <CardHeader header={<Body1><strong>Actual Lines ({actuals.length})</strong></Body1>} />
+            <Table className={styles.table}>
+              <TableHeader>
+                <TableRow>
+                  <TableHeaderCell>Resource</TableHeaderCell>
+                  <TableHeaderCell>Project</TableHeaderCell>
+                  <TableHeaderCell>Period</TableHeaderCell>
+                  <TableHeaderCell>Planned</TableHeaderCell>
+                  <TableHeaderCell>Actual</TableHeaderCell>
+                  <TableHeaderCell>Status</TableHeaderCell>
+                  <TableHeaderCell>Actions</TableHeaderCell>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {actuals.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} style={{ padding: tokens.spacingVerticalXXL }}>
+                      <EmptyState
+                        icon={<ClipboardTaskRegular style={{ fontSize: 48 }} />}
+                        title="No actuals"
+                        message="No actual lines found for this period. Create one to start logging time."
+                      />
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </Card>
-      ) : null}
-      
-      {/* Edit Dialog */}
+                ) : (
+                  actuals.map(a => (
+                    <TableRow
+                      key={a.id}
+                      className={overLimitIds.includes(a.id) ? styles.overLimitRow : undefined}
+                    >
+                      <TableCell>{a.resource_name ?? getResourceName(a.resource_id)}</TableCell>
+                      <TableCell>{a.project_name ?? getProjectName(a.project_id)}</TableCell>
+                      <TableCell>{a.year}-{String(a.month).padStart(2, '0')}</TableCell>
+                      <TableCell>
+                        {a.planned_fte_percent !== null && a.planned_fte_percent !== undefined
+                          ? `${a.planned_fte_percent}%`
+                          : <span style={{ color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>No plan</span>}
+                      </TableCell>
+                      <TableCell>
+                        <Badge appearance="filled" color="informative">{a.actual_fte_percent}%</Badge>
+                      </TableCell>
+                      <TableCell>
+                        {a.employee_signed_at ? (() => {
+                          const apStatus = approvalStatuses[a.id];
+                          if (apStatus?.status === 'approved') {
+                            return <Badge appearance="filled" color="success" icon={<CheckmarkCircle24Regular />}>Approved</Badge>;
+                          }
+                          if (apStatus?.status === 'rejected') {
+                            return (
+                              <Badge
+                                appearance="filled"
+                                color="danger"
+                                title={apStatus.rejection_comment ?? 'Rejected by approver'}
+                              >
+                                Rejected
+                              </Badge>
+                            );
+                          }
+                          if (apStatus?.status === 'pending') {
+                            return <Badge appearance="filled" color="warning">Pending Approval</Badge>;
+                          }
+                          return <Badge appearance="filled" color="warning">Pending Approval</Badge>;
+                        })() : (
+                          <Badge appearance="outline" color="warning">Unsigned</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
+                          {!isLocked && approvalStatuses[a.id]?.status !== 'approved' && (
+                            <Button
+                              icon={<ClipboardTaskRegular />}
+                              appearance="subtle"
+                              title="Edit"
+                              onClick={() => openEditDialog(a)}
+                            />
+                          )}
+                          {a.employee_signed_at && approvalStatuses[a.id]?.status === 'rejected' && !isLocked && (
+                            <Button
+                              icon={<ArrowUndo24Regular />}
+                              appearance="subtle"
+                              title="Unsign — remove signature to edit and re-submit"
+                              style={{ color: tokens.colorPaletteRedForeground1 }}
+                              onClick={() => handleUnsign(a.id)}
+                            />
+                          )}
+                          {!isLocked && approvalStatuses[a.id]?.status !== 'approved' && (
+                            <Button
+                              icon={<Delete24Regular />}
+                              appearance="subtle"
+                              onClick={() => handleDelete(a.id)}
+                            />
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </Card>
+        </>
+      )}
+
+      {/* ── Manager / Finance / Admin view: KPI cards + CC sidebar + approval table + chart ── */}
+
+      {!isEmployee && (
+        <ActualsTab
+          actualsData={actualsData}
+          actualsLoading={actualsLoading}
+          actualsError={actualsError}
+          projects={projects}
+          actualsProjectId={actualsProjectId}
+          year={year}
+          month={month}
+          canSeeStats={canSeeStats}
+          onActualsReload={loadFinanceActuals}
+        />
+      )}
+
+      {/* ── Edit dialog (employee only) ────────────────────────────────────── */}
+
       <Dialog open={isEditDialogOpen} onOpenChange={(_e: unknown, data: { open: boolean }) => setIsEditDialogOpen(data.open)}>
         <DialogSurface>
           <DialogBody>

@@ -294,35 +294,8 @@ export const Finance: React.FC = () => {
   }
 
   return (
-    <div className={styles.container}>
 
-      {/* ── Action bar ── */}
-      <div className={styles.header}>
-        <div className={styles.headerTitle}>
-          <ChartMultiple24Regular style={{ fontSize: 24, color: tokens.colorBrandForeground1 }} />
-          <Title3>Finance</Title3>
-        </div>
-        <div className={styles.headerActions}>
-          {canManagePeriods && (
-            <Button
-              appearance="secondary"
-              icon={<CalendarLtr24Regular />}
-              onClick={() => setIsPeriodModalOpen(true)}
-            >
-              Manage Periods
-            </Button>
-          )}
-          {canPublishSnapshot && (
-            <Button
-              appearance="primary"
-              icon={<ArrowDownload24Regular />}
-              onClick={() => setIsPublishDialogOpen(true)}
-            >
-              Publish Snapshot
-            </Button>
-          )}
-        </div>
-      </div>
+    <div className={styles.container}>
 
       {/* ── Publish dialog ── */}
       {canPublishSnapshot && (

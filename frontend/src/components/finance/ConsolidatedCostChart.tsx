@@ -454,21 +454,9 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
   // ── JSX ───────────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-      {/* Section 1 — Page header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: C.ink1 }}>Cost Overview</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: C.ink3 }}>{periodRangeLabel}</p>
-        </div>
-        {latestSnapshot && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: C.ink3 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.pos, display: 'inline-block', flexShrink: 0 }} />
-            Last snapshot: {new Date(latestSnapshot.published_at).toLocaleDateString('da-DK')}
-          </div>
-        )}
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Info banner and filter bar will now be at the top. Preserve 'Last snapshot' indicator below filter bar if needed. */}
 
       {/* Section 2 — Filter bar */}
       <div style={{

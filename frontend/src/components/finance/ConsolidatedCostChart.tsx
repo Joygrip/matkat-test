@@ -27,6 +27,7 @@ const C = {
   oop: '#8a6a3b', oopSoft: '#ece1cd',
   equip: '#5b6b3a', equipSoft: '#e3e7d3',
   pos: '#0e7a3a', neg: '#b1391a',
+  periodHeader: '#eceae8',
 } as const;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -144,12 +145,13 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
   const [showPlanned, setShowPlanned] = useState(true);
   const [showAllProjects, setShowAllProjects] = useState(false);
 
-  // Drawer
+  // Modal (formerly drawer)
   const [drawer, setDrawer] = useState<DrawerState | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
-  const [drawerDetail, setDrawerDetail] = useState<ConsolidatedCostDetail | null>(null);
+  const [drawerDetail, setDrawerDetail] = useState<ConsolidatedCostDetail[] | null>(null);
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [drawerTab, setDrawerTab] = useState<'bymonth' | 'planned' | 'actual' | 'oop' | 'equipment'>('bymonth');
+  const [collapsedPeriods, setCollapsedPeriods] = useState<Set<string>>(new Set());
 
   // ── Loaders ──────────────────────────────────────────────────────────────────
 
@@ -200,8 +202,6 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     return m;
   }, [rawData]);
 
-  // Derive project and cost-center filter options from already-scoped rawData
-  // so dropdowns only show what the current user can see (PM → own projects, Manager → own CC resources, etc.)
   const projectOptions = useMemo(() => {
     const seen = new Set<string>();
     const result: { id: string; name: string }[] = [];
@@ -273,6 +273,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     };
   }, [rawData, selectedPeriodIds, openPeriods, selectedProjectId, selectedCostCenterId]);
 
+  // projectRows: total and monthlyTotals use Planned + OoP + Equipment only (not Actual)
   const projectRows = useMemo((): EntityRow[] => {
     const map = new Map<string, EntityRow>();
     filteredData.forEach(r => {
@@ -288,16 +289,17 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     });
     const rows = Array.from(map.values());
     rows.forEach(row => {
-      row.total = row.planned + row.actual + row.oop + row.equip;
+      row.total = row.planned + row.oop + row.equip;
       row.monthlyTotals = sortedMonths.map(({ year, month }) =>
         filteredData
           .filter(r => r.project_id === row.id && r.year === year && r.month === month)
-          .reduce((s, r) => s + r.demand_cost + r.actuals_cost + r.externals_cost / 100 + r.equipment_cost / 100, 0)
+          .reduce((s, r) => s + r.demand_cost + r.externals_cost / 100 + r.equipment_cost / 100, 0)
       );
     });
     return rows.sort((a, b) => b.total - a.total);
   }, [filteredData, sortedMonths]);
 
+  // ccRows: total and monthlyTotals use Planned + OoP + Equipment only (not Actual)
   const ccRows = useMemo((): EntityRow[] => {
     const map = new Map<string, EntityRow>();
     filteredData.forEach(r => {
@@ -314,11 +316,11 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     });
     const rows = Array.from(map.values());
     rows.forEach(row => {
-      row.total = row.planned + row.actual + row.oop + row.equip;
+      row.total = row.planned + row.oop + row.equip;
       row.monthlyTotals = sortedMonths.map(({ year, month }) =>
         filteredData
           .filter(r => (r.cost_center_name ?? 'Unassigned') === row.name && r.year === year && r.month === month)
-          .reduce((s, r) => s + r.demand_cost + r.actuals_cost + r.externals_cost / 100 + r.equipment_cost / 100, 0)
+          .reduce((s, r) => s + r.demand_cost + r.externals_cost / 100 + r.equipment_cost / 100, 0)
       );
     });
     return rows.sort((a, b) => b.total - a.total);
@@ -350,7 +352,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     return `${MS[first.month - 1]} ${first.year} – ${MS[last.month - 1]} ${last.year}`;
   }, [selectedPeriodIds, openPeriods]);
 
-  // ── Drawer ────────────────────────────────────────────────────────────────────
+  // ── Modal ─────────────────────────────────────────────────────────────────────
 
   const buildMonthlyBuckets = useCallback((filter: (r: ConsolidatedCostRow) => boolean): MonthlyBucket[] =>
     sortedMonths.map(({ year, month }) => {
@@ -367,7 +369,16 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
 
   const closeDrawer = useCallback(() => {
     setDrawerVisible(false);
-    setTimeout(() => { setDrawer(null); setDrawerDetail(null); }, 300);
+    setTimeout(() => { setDrawer(null); setDrawerDetail(null); }, 200);
+  }, []);
+
+  const togglePeriod = useCallback((key: string) => {
+    setCollapsedPeriods(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }, []);
 
   const openDrawerFor = useCallback((
@@ -397,18 +408,30 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     });
     setDrawerTab('bymonth');
     setDrawerDetail(null);
+    setCollapsedPeriods(new Set());
     requestAnimationFrame(() => setDrawerVisible(true));
 
     const ccId = mode === 'cc' ? ccNameToId.get(row.name) : undefined;
     if (mode === 'project' || ccId) {
       setDrawerLoading(true);
-      const params = mode === 'project' ? { project_id: row.id, year, month } : { cost_center_id: ccId!, year, month };
-      getConsolidatedCostDetail(params)
-        .then(setDrawerDetail).catch(() => setDrawerDetail(null)).finally(() => setDrawerLoading(false));
+      const baseParams = mode === 'project' ? { project_id: row.id } : { cost_center_id: ccId! };
+
+      const periodsToFetch = targetYear !== undefined
+        ? [{ year: targetYear, month: targetMonth! }]
+        : Array.from(
+            new Map(entityData.map(r => [`${r.year}-${r.month}`, { year: r.year, month: r.month }])).values()
+          ).sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+
+      Promise.all(
+        periodsToFetch.map(p => getConsolidatedCostDetail({ ...baseParams, year: p.year, month: p.month }))
+      ).then(details => {
+        if (details.length === 0) { setDrawerDetail(null); return; }
+        setDrawerDetail(details);
+      }).catch(() => setDrawerDetail(null)).finally(() => setDrawerLoading(false));
     }
   }, [filteredData, buildMonthlyBuckets, ccNameToId]);
 
-  // ── CSV export (preserved from original) ─────────────────────────────────────
+  // ── CSV export ────────────────────────────────────────────────────────────────
 
   const downloadDrillDownCsv = () => {
     if (!drawerDetail || !drawer) return;
@@ -418,16 +441,16 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     let header: string[], rows: string[][];
     if (drawerTab === 'planned') {
       header = [...(isCc ? ['Project'] : []), 'Employee', 'FTE %', 'Cost (DKK)'];
-      rows = drawerDetail.demand_lines.map(l => [...(isCc ? [l.project_name ?? ''] : []), l.resource_name, String(l.fte_percent), String(l.cost)]);
+      rows = drawerDetail.flatMap(d => d.demand_lines).map(l => [...(isCc ? [l.project_name ?? ''] : []), l.resource_name, String(l.fte_percent), String(l.cost)]);
     } else if (drawerTab === 'actual') {
       header = [...(isCc ? ['Project'] : []), 'Employee', 'FTE %', 'Cost (DKK)'];
-      rows = drawerDetail.actual_lines.map(l => [...(isCc ? [l.project_name ?? ''] : []), l.resource_name, String(l.fte_percent), String(l.cost)]);
+      rows = drawerDetail.flatMap(d => d.actual_lines).map(l => [...(isCc ? [l.project_name ?? ''] : []), l.resource_name, String(l.fte_percent), String(l.cost)]);
     } else if (drawerTab === 'oop') {
       header = ['OoP Resource', 'Notes', 'Total (DKK)'];
-      rows = drawerDetail.external_lines.map(l => [l.resource_name ?? l.description ?? '', l.notes ?? '', String(l.total_cost / 100)]);
+      rows = drawerDetail.flatMap(d => d.external_lines).map(l => [l.resource_name ?? l.description ?? '', l.notes ?? '', String(l.total_cost / 100)]);
     } else {
       header = ['Description', 'Cost (DKK)'];
-      rows = drawerDetail.equipment_lines.map(l => [l.description ?? '', String(l.cost / 100)]);
+      rows = drawerDetail.flatMap(d => d.equipment_lines).map(l => [l.description ?? '', String(l.cost / 100)]);
     }
     const csv = [header, ...rows].map(r => r.map(esc).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -453,7 +476,6 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
   return (
 
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Info banner and filter bar will now be at the top. Preserve 'Last snapshot' indicator below filter bar if needed. */}
 
       {/* Section 2 — Filter bar */}
       <div style={{
@@ -513,13 +535,27 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
         }}>Clear filters</button>
       </div>
 
-      {/* Section 3 — KPI strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+      {/* Section 3 — KPI strip (6 cards) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
         {[
           { label: 'Planned Labor', accent: C.accent, curr: kpis.planned, prev: prevKpis?.planned, display: kpis.planned },
           { label: 'Actual Labor', accent: C.planned, curr: kpis.actual, prev: prevKpis?.actual, display: kpis.actual },
           { label: 'Out-of-Pocket', accent: C.oop, curr: kpis.oop, prev: prevKpis?.oop, display: kpis.oop / 100 },
           { label: 'Equipment', accent: C.equip, curr: kpis.equipment, prev: prevKpis?.equipment, display: kpis.equipment / 100 },
+          {
+            label: 'Planned Total',
+            accent: C.planned,
+            curr: kpis.planned + kpis.oop / 100 + kpis.equipment / 100,
+            prev: prevKpis ? prevKpis.planned + prevKpis.oop / 100 + prevKpis.equipment / 100 : undefined,
+            display: kpis.planned + kpis.oop / 100 + kpis.equipment / 100,
+          },
+          {
+            label: 'Actual Total',
+            accent: C.actual,
+            curr: kpis.actual + kpis.oop / 100 + kpis.equipment / 100,
+            prev: prevKpis ? prevKpis.actual + prevKpis.oop / 100 + prevKpis.equipment / 100 : undefined,
+            display: kpis.actual + kpis.oop / 100 + kpis.equipment / 100,
+          },
         ].map(({ label, accent, curr, prev, display }) => {
           const d = calcDelta(curr, prev);
           return (
@@ -558,7 +594,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
           <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
             <div style={{ padding: '14px 20px', borderBottom: `1px solid ${C.border}` }}>
               <div style={{ fontSize: 15, fontWeight: 600, color: C.ink1 }}>Costs by Project</div>
-              <div style={{ fontSize: 12, color: C.ink4, marginTop: 2 }}>Ranked by total cost across selected period</div>
+              <div style={{ fontSize: 12, color: C.ink4, marginTop: 2 }}>Ranked by planned total across selected period</div>
             </div>
             <div style={{ padding: 20 }}>
               {/* Legend */}
@@ -600,7 +636,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
               {/* Ranked table */}
               <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr 72px 90px 88px 20px', gap: 8, padding: '0 6px 8px', ...label11 }}>
-                  <div>#</div><div>Name</div><div>Breakdown</div><div style={{ textAlign: 'right' }}>Total</div><div>Trend</div><div />
+                  <div>#</div><div>Name</div><div>Breakdown</div><div style={{ textAlign: 'right' }}>Planned Total</div><div>Trend</div><div />
                 </div>
                 {projectRows.map((row, i) => (
                   <div key={row.id}
@@ -673,7 +709,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
               {/* Ranked CC table */}
               <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr 72px 90px 88px 20px', gap: 8, padding: '0 6px 8px', ...label11 }}>
-                  <div>#</div><div>Name</div><div>Breakdown</div><div style={{ textAlign: 'right' }}>Total</div><div>Trend</div><div />
+                  <div>#</div><div>Name</div><div>Breakdown</div><div style={{ textAlign: 'right' }}>Planned Total</div><div>Trend</div><div />
                 </div>
                 {ccRows.map((row, i) => (
                   <div key={row.id}
@@ -696,25 +732,37 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
         </div>
       )}
 
-      {/* Section 5 — Drill-down drawer */}
+      {/* Section 5 — Centered modal drill-down */}
       {drawer && (
         <>
+          {/* Backdrop */}
           <div
             onClick={closeDrawer}
             style={{
-              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 1000,
-              opacity: drawerVisible ? 1 : 0, transition: 'opacity 0.25s ease', cursor: 'pointer',
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.40)', zIndex: 1000,
+              opacity: drawerVisible ? 1 : 0,
+              transition: 'opacity 0.2s ease',
+              cursor: 'pointer',
             }}
           />
+
+          {/* Modal box — centered, 900px wide, 80vh tall */}
           <div style={{
-            position: 'fixed', right: 0, top: 0, bottom: 0, width: 560,
-            background: C.surface, zIndex: 1001,
-            boxShadow: '-4px 0 32px rgba(0,0,0,0.18)',
-            transform: drawerVisible ? 'translateX(0)' : 'translateX(100%)',
-            transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1)',
+            position: 'fixed',
+            top: '50%', left: '50%',
+            transform: `translate(-50%, -50%) scale(${drawerVisible ? 1 : 0.96})`,
+            opacity: drawerVisible ? 1 : 0,
+            transition: 'opacity 0.2s ease, transform 0.2s ease',
+            width: 900,
+            maxWidth: 'calc(100vw - 40px)',
+            height: '80vh',
+            background: C.surface,
+            zIndex: 1001,
+            borderRadius: 10,
+            boxShadow: '0 8px 48px rgba(0,0,0,0.22)',
             display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}>
-            {/* Drawer header */}
+            {/* Modal header */}
             <div style={{ padding: '20px 24px 16px', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
@@ -734,9 +782,10 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                   { label: 'Actual', val: drawer.kpis.actual },
                   { label: 'OoP', val: drawer.kpis.oop },
                   { label: 'Equipment', val: drawer.kpis.equip },
-                  { label: 'Total', val: drawer.kpis.planned + drawer.kpis.actual + drawer.kpis.oop + drawer.kpis.equip },
+                  { label: 'Planned Total', val: drawer.kpis.planned + drawer.kpis.oop + drawer.kpis.equip },
+                  { label: 'Actual Total', val: drawer.kpis.actual + drawer.kpis.oop + drawer.kpis.equip },
                 ].map((k, i, arr) => (
-                  <div key={k.label} style={{ flex: 1, padding: '10px 10px', borderRight: i < arr.length - 1 ? `1px solid ${C.border}` : 'none', background: i === arr.length - 1 ? C.bg : C.surface }}>
+                  <div key={k.label} style={{ flex: 1, padding: '10px 10px', borderRight: i < arr.length - 1 ? `1px solid ${C.border}` : 'none', background: i >= arr.length - 2 ? C.bg : C.surface }}>
                     <div style={{ fontSize: 10, fontWeight: 600, color: C.ink4, textTransform: 'uppercase', letterSpacing: '0.4px' }}>{k.label}</div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: C.ink1, marginTop: 3 }}>{dkk(k.val)}</div>
                   </div>
@@ -744,18 +793,18 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
               </div>
             </div>
 
-            {/* Drawer tabs */}
+            {/* Modal tabs */}
             <div style={{ padding: '0 24px', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
               <TabList selectedValue={drawerTab} onTabSelect={(_, d) => setDrawerTab(d.value as typeof drawerTab)}>
                 <Tab value="bymonth">By month</Tab>
-                <Tab value="planned">Planned ({drawerDetail?.demand_lines.length ?? '…'})</Tab>
-                <Tab value="actual">Actual ({drawerDetail?.actual_lines.length ?? '…'})</Tab>
-                {drawer.mode !== 'cc' && <Tab value="oop">OoP ({drawerDetail?.external_lines.length ?? '…'})</Tab>}
-                {drawer.mode !== 'cc' && <Tab value="equipment">Equipment ({drawerDetail?.equipment_lines.length ?? '…'})</Tab>}
+                <Tab value="planned">Planned ({drawerDetail ? drawerDetail.reduce((s, d) => s + d.demand_lines.length, 0) : '…'})</Tab>
+                <Tab value="actual">Actual ({drawerDetail ? drawerDetail.reduce((s, d) => s + d.actual_lines.length, 0) : '…'})</Tab>
+                {drawer.mode !== 'cc' && <Tab value="oop">OoP ({drawerDetail ? drawerDetail.reduce((s, d) => s + d.external_lines.length, 0) : '…'})</Tab>}
+                {drawer.mode !== 'cc' && <Tab value="equipment">Equipment ({drawerDetail ? drawerDetail.reduce((s, d) => s + d.equipment_lines.length, 0) : '…'})</Tab>}
               </TabList>
             </div>
 
-            {/* Drawer body */}
+            {/* Modal body */}
             <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
 
               {/* By month */}
@@ -787,7 +836,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                       })}
                     </div>
 
-                    {/* Monthly table */}
+                    {/* Monthly table — Planned Total and Actual Total columns */}
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                       <thead>
                         <tr>
@@ -796,7 +845,8 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                           <th style={{ ...thStyle, textAlign: 'right' }}>Actual</th>
                           <th style={{ ...thStyle, textAlign: 'right' }}>OoP</th>
                           <th style={{ ...thStyle, textAlign: 'right' }}>Equipment</th>
-                          <th style={{ ...thStyle, textAlign: 'right' }}>Total</th>
+                          <th style={{ ...thStyle, textAlign: 'right' }}>Planned Total</th>
+                          <th style={{ ...thStyle, textAlign: 'right' }}>Actual Total</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -807,7 +857,8 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                             <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.actual)}</td>
                             <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.oop)}</td>
                             <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.equip)}</td>
-                            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: C.ink1 }}>{dkk(m.planned + m.actual + m.oop + m.equip)}</td>
+                            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: C.ink1 }}>{dkk(m.planned + m.oop + m.equip)}</td>
+                            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: C.ink1 }}>{dkk(m.actual + m.oop + m.equip)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -821,88 +872,150 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}><Spinner /></div>
               )}
 
-              {/* Planned labor */}
+              {/* Planned labor — grouped by period */}
               {drawerTab === 'planned' && !drawerLoading && (() => {
-                if (!drawerDetail) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No detail available. Data shown is for {MF[drawer.month - 1]} {drawer.year}.</div>;
-                if (drawerDetail.demand_lines.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No planned labor for {MF[drawer.month - 1]} {drawer.year}.</div>;
+                if (!drawerDetail || drawerDetail.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No detail available.</div>;
+                const allLines = drawerDetail.flatMap(d => d.demand_lines);
+                if (allLines.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No planned labor for the selected period(s).</div>;
+                const isCc = drawer.mode === 'cc';
+                const colSpan = isCc ? 4 : 3;
+                const grandTotal = allLines.reduce((s, l) => s + l.cost, 0);
                 return (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead><tr>
-                      {drawer.mode === 'cc' && <th style={{ ...thStyle, textAlign: 'left' }}>Project</th>}
+                      {isCc && <th style={{ ...thStyle, textAlign: 'left' }}>Project</th>}
                       <th style={{ ...thStyle, textAlign: 'left' }}>Employee</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>FTE %</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Cost</th>
                     </tr></thead>
                     <tbody>
-                      {drawerDetail.demand_lines.map((l, i) => (
-                        <tr key={i}>
-                          {drawer.mode === 'cc' && <td style={{ ...tdStyle, color: C.ink3 }}>{l.project_name ?? '—'}</td>}
-                          <td style={{ ...tdStyle, color: C.ink1 }}>{l.resource_name}</td>
-                          <td style={{ ...tdStyle, textAlign: 'right' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-                              <div style={{ width: 50, height: 5, borderRadius: 3, background: C.plannedSoft, overflow: 'hidden' }}>
-                                <div style={{ width: `${Math.min(100, l.fte_percent)}%`, height: '100%', background: C.planned }} />
-                              </div>
-                              <span style={{ color: C.ink2 }}>{l.fte_percent}%</span>
-                            </div>
-                          </td>
-                          <td style={{ ...tdStyle, textAlign: 'right', color: C.ink1 }}>{dkkD(l.cost)}</td>
-                        </tr>
-                      ))}
+                      {drawerDetail.map(period => {
+                        const key = `planned-${period.year}-${period.month}`;
+                        const isCollapsed = collapsedPeriods.has(key);
+                        const periodTotal = period.demand_lines.reduce((s, l) => s + l.cost, 0);
+                        return (
+                          <React.Fragment key={key}>
+                            <tr style={{ background: C.periodHeader, cursor: 'pointer' }} onClick={() => togglePeriod(key)}>
+                              <td colSpan={colSpan} style={{ padding: '7px 10px', fontWeight: 700, color: C.ink1, fontSize: 13 }}>
+                                <span style={{ marginRight: 8, fontSize: 11 }}>{isCollapsed ? '▶' : '▼'}</span>
+                                {MF[period.month - 1]} {period.year}
+                                <span style={{ float: 'right', fontWeight: 600, color: C.ink2 }}>
+                                  {period.demand_lines.length} line{period.demand_lines.length !== 1 ? 's' : ''} · {dkk(periodTotal)}
+                                </span>
+                              </td>
+                            </tr>
+                            {!isCollapsed && period.demand_lines.map((l, i) => (
+                              <tr key={i}>
+                                {isCc && <td style={{ ...tdStyle, color: C.ink3 }}>{l.project_name ?? '—'}</td>}
+                                <td style={{ ...tdStyle, color: C.ink1 }}>{l.resource_name}</td>
+                                <td style={{ ...tdStyle, textAlign: 'right' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                                    <div style={{ width: 50, height: 5, borderRadius: 3, background: C.plannedSoft, overflow: 'hidden' }}>
+                                      <div style={{ width: `${Math.min(100, l.fte_percent)}%`, height: '100%', background: C.planned }} />
+                                    </div>
+                                    <span style={{ color: C.ink2 }}>{l.fte_percent}%</span>
+                                  </div>
+                                </td>
+                                <td style={{ ...tdStyle, textAlign: 'right', color: C.ink1 }}>{dkkD(l.cost)}</td>
+                              </tr>
+                            ))}
+                            {!isCollapsed && period.demand_lines.length > 0 && (
+                              <tr style={{ background: C.bg, fontWeight: 600 }}>
+                                {isCc && <td style={{ padding: '6px 10px' }} />}
+                                <td style={{ padding: '6px 10px', color: C.ink2 }}>Period subtotal</td>
+                                <td />
+                                <td style={{ padding: '6px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(periodTotal)}</td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
                       <tr style={{ background: C.bg, fontWeight: 700 }}>
-                        {drawer.mode === 'cc' && <td style={{ padding: '8px 10px' }} />}
+                        {isCc && <td style={{ padding: '8px 10px' }} />}
                         <td style={{ padding: '8px 10px', color: C.ink1 }}>Total</td>
                         <td />
-                        <td style={{ padding: '8px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(drawerDetail.demand_lines.reduce((s, l) => s + l.cost, 0))}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(grandTotal)}</td>
                       </tr>
                     </tbody>
                   </table>
                 );
               })()}
 
-              {/* Actual labor */}
+              {/* Actual labor — grouped by period */}
               {drawerTab === 'actual' && !drawerLoading && (() => {
-                if (!drawerDetail) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No detail available.</div>;
-                if (drawerDetail.actual_lines.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No actuals booked for {MF[drawer.month - 1]} {drawer.year} yet.</div>;
+                if (!drawerDetail || drawerDetail.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No detail available.</div>;
+                const allLines = drawerDetail.flatMap(d => d.actual_lines);
+                if (allLines.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No actuals booked for the selected period(s) yet.</div>;
+                const isCc = drawer.mode === 'cc';
+                const colSpan = isCc ? 4 : 3;
+                const grandTotal = allLines.reduce((s, l) => s + l.cost, 0);
                 return (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead><tr>
-                      {drawer.mode === 'cc' && <th style={{ ...thStyle, textAlign: 'left' }}>Project</th>}
+                      {isCc && <th style={{ ...thStyle, textAlign: 'left' }}>Project</th>}
                       <th style={{ ...thStyle, textAlign: 'left' }}>Employee</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>FTE %</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Cost</th>
                     </tr></thead>
                     <tbody>
-                      {drawerDetail.actual_lines.map((l, i) => (
-                        <tr key={i}>
-                          {drawer.mode === 'cc' && <td style={{ ...tdStyle, color: C.ink3 }}>{l.project_name ?? '—'}</td>}
-                          <td style={{ ...tdStyle, color: C.ink1 }}>{l.resource_name}</td>
-                          <td style={{ ...tdStyle, textAlign: 'right' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-                              <div style={{ width: 50, height: 5, borderRadius: 3, background: C.actualSoft, overflow: 'hidden' }}>
-                                <div style={{ width: `${Math.min(100, l.fte_percent)}%`, height: '100%', background: C.actual }} />
-                              </div>
-                              <span style={{ color: C.ink2 }}>{l.fte_percent}%</span>
-                            </div>
-                          </td>
-                          <td style={{ ...tdStyle, textAlign: 'right', color: C.ink1 }}>{dkkD(l.cost)}</td>
-                        </tr>
-                      ))}
+                      {drawerDetail.map(period => {
+                        const key = `actual-${period.year}-${period.month}`;
+                        const isCollapsed = collapsedPeriods.has(key);
+                        const periodTotal = period.actual_lines.reduce((s, l) => s + l.cost, 0);
+                        return (
+                          <React.Fragment key={key}>
+                            <tr style={{ background: C.periodHeader, cursor: 'pointer' }} onClick={() => togglePeriod(key)}>
+                              <td colSpan={colSpan} style={{ padding: '7px 10px', fontWeight: 700, color: C.ink1, fontSize: 13 }}>
+                                <span style={{ marginRight: 8, fontSize: 11 }}>{isCollapsed ? '▶' : '▼'}</span>
+                                {MF[period.month - 1]} {period.year}
+                                <span style={{ float: 'right', fontWeight: 600, color: C.ink2 }}>
+                                  {period.actual_lines.length} line{period.actual_lines.length !== 1 ? 's' : ''} · {dkk(periodTotal)}
+                                </span>
+                              </td>
+                            </tr>
+                            {!isCollapsed && period.actual_lines.map((l, i) => (
+                              <tr key={i}>
+                                {isCc && <td style={{ ...tdStyle, color: C.ink3 }}>{l.project_name ?? '—'}</td>}
+                                <td style={{ ...tdStyle, color: C.ink1 }}>{l.resource_name}</td>
+                                <td style={{ ...tdStyle, textAlign: 'right' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                                    <div style={{ width: 50, height: 5, borderRadius: 3, background: C.actualSoft, overflow: 'hidden' }}>
+                                      <div style={{ width: `${Math.min(100, l.fte_percent)}%`, height: '100%', background: C.actual }} />
+                                    </div>
+                                    <span style={{ color: C.ink2 }}>{l.fte_percent}%</span>
+                                  </div>
+                                </td>
+                                <td style={{ ...tdStyle, textAlign: 'right', color: C.ink1 }}>{dkkD(l.cost)}</td>
+                              </tr>
+                            ))}
+                            {!isCollapsed && period.actual_lines.length > 0 && (
+                              <tr style={{ background: C.bg, fontWeight: 600 }}>
+                                {isCc && <td style={{ padding: '6px 10px' }} />}
+                                <td style={{ padding: '6px 10px', color: C.ink2 }}>Period subtotal</td>
+                                <td />
+                                <td style={{ padding: '6px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(periodTotal)}</td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
                       <tr style={{ background: C.bg, fontWeight: 700 }}>
-                        {drawer.mode === 'cc' && <td style={{ padding: '8px 10px' }} />}
+                        {isCc && <td style={{ padding: '8px 10px' }} />}
                         <td style={{ padding: '8px 10px', color: C.ink1 }}>Total</td>
                         <td />
-                        <td style={{ padding: '8px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(drawerDetail.actual_lines.reduce((s, l) => s + l.cost, 0))}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(grandTotal)}</td>
                       </tr>
                     </tbody>
                   </table>
                 );
               })()}
 
-              {/* OoP */}
+              {/* OoP — grouped by period */}
               {drawerTab === 'oop' && drawer.mode !== 'cc' && !drawerLoading && (() => {
-                if (!drawerDetail) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No detail available.</div>;
-                if (drawerDetail.external_lines.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No OoP lines for {MF[drawer.month - 1]} {drawer.year}.</div>;
+                if (!drawerDetail || drawerDetail.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No detail available.</div>;
+                const allLines = drawerDetail.flatMap(d => d.external_lines);
+                if (allLines.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No OoP lines for the selected period(s).</div>;
+                const grandTotal = allLines.reduce((s, l) => s + l.total_cost, 0) / 100;
                 return (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead><tr>
@@ -911,26 +1024,54 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                       <th style={{ ...thStyle, textAlign: 'right' }}>Total</th>
                     </tr></thead>
                     <tbody>
-                      {drawerDetail.external_lines.map((l, i) => (
-                        <tr key={i}>
-                          <td style={{ ...tdStyle, color: C.ink1 }}>{l.resource_name ?? l.description ?? '—'}</td>
-                          <td style={{ ...tdStyle, color: C.ink3 }}>{l.notes ?? '—'}</td>
-                          <td style={{ ...tdStyle, textAlign: 'right', color: C.ink1 }}>{dkk(l.total_cost / 100)}</td>
-                        </tr>
-                      ))}
+                      {drawerDetail.map(period => {
+                        const key = `oop-${period.year}-${period.month}`;
+                        const isCollapsed = collapsedPeriods.has(key);
+                        const periodTotal = period.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100;
+                        return (
+                          <React.Fragment key={key}>
+                            <tr style={{ background: C.periodHeader, cursor: 'pointer' }} onClick={() => togglePeriod(key)}>
+                              <td colSpan={3} style={{ padding: '7px 10px', fontWeight: 700, color: C.ink1, fontSize: 13 }}>
+                                <span style={{ marginRight: 8, fontSize: 11 }}>{isCollapsed ? '▶' : '▼'}</span>
+                                {MF[period.month - 1]} {period.year}
+                                <span style={{ float: 'right', fontWeight: 600, color: C.ink2 }}>
+                                  {period.external_lines.length} line{period.external_lines.length !== 1 ? 's' : ''} · {dkk(periodTotal)}
+                                </span>
+                              </td>
+                            </tr>
+                            {!isCollapsed && period.external_lines.map((l, i) => (
+                              <tr key={i}>
+                                <td style={{ ...tdStyle, color: C.ink1 }}>{l.resource_name ?? l.description ?? '—'}</td>
+                                <td style={{ ...tdStyle, color: C.ink3 }}>{l.notes ?? '—'}</td>
+                                <td style={{ ...tdStyle, textAlign: 'right', color: C.ink1 }}>{dkk(l.total_cost / 100)}</td>
+                              </tr>
+                            ))}
+                            {!isCollapsed && period.external_lines.length > 0 && (
+                              <tr style={{ background: C.bg, fontWeight: 600 }}>
+                                <td style={{ padding: '6px 10px', color: C.ink2 }}>Period subtotal</td>
+                                <td />
+                                <td style={{ padding: '6px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(periodTotal)}</td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
                       <tr style={{ background: C.bg, fontWeight: 700 }}>
-                        <td style={{ padding: '8px 10px', color: C.ink1 }}>Total</td><td />
-                        <td style={{ padding: '8px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(drawerDetail.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100)}</td>
+                        <td style={{ padding: '8px 10px', color: C.ink1 }}>Total</td>
+                        <td />
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(grandTotal)}</td>
                       </tr>
                     </tbody>
                   </table>
                 );
               })()}
 
-              {/* Equipment */}
+              {/* Equipment — grouped by period */}
               {drawerTab === 'equipment' && drawer.mode !== 'cc' && !drawerLoading && (() => {
-                if (!drawerDetail) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No detail available.</div>;
-                if (drawerDetail.equipment_lines.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No equipment lines for {MF[drawer.month - 1]} {drawer.year}.</div>;
+                if (!drawerDetail || drawerDetail.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No detail available.</div>;
+                const allLines = drawerDetail.flatMap(d => d.equipment_lines);
+                if (allLines.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No equipment lines for the selected period(s).</div>;
+                const grandTotal = allLines.reduce((s, l) => s + l.cost, 0) / 100;
                 return (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead><tr>
@@ -938,15 +1079,39 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                       <th style={{ ...thStyle, textAlign: 'right' }}>Cost</th>
                     </tr></thead>
                     <tbody>
-                      {drawerDetail.equipment_lines.map((l, i) => (
-                        <tr key={i}>
-                          <td style={{ ...tdStyle, color: C.ink1 }}>{l.description ?? '—'}</td>
-                          <td style={{ ...tdStyle, textAlign: 'right', color: C.ink1 }}>{dkkD(l.cost / 100)}</td>
-                        </tr>
-                      ))}
+                      {drawerDetail.map(period => {
+                        const key = `equip-${period.year}-${period.month}`;
+                        const isCollapsed = collapsedPeriods.has(key);
+                        const periodTotal = period.equipment_lines.reduce((s, l) => s + l.cost, 0) / 100;
+                        return (
+                          <React.Fragment key={key}>
+                            <tr style={{ background: C.periodHeader, cursor: 'pointer' }} onClick={() => togglePeriod(key)}>
+                              <td colSpan={2} style={{ padding: '7px 10px', fontWeight: 700, color: C.ink1, fontSize: 13 }}>
+                                <span style={{ marginRight: 8, fontSize: 11 }}>{isCollapsed ? '▶' : '▼'}</span>
+                                {MF[period.month - 1]} {period.year}
+                                <span style={{ float: 'right', fontWeight: 600, color: C.ink2 }}>
+                                  {period.equipment_lines.length} line{period.equipment_lines.length !== 1 ? 's' : ''} · {dkk(periodTotal)}
+                                </span>
+                              </td>
+                            </tr>
+                            {!isCollapsed && period.equipment_lines.map((l, i) => (
+                              <tr key={i}>
+                                <td style={{ ...tdStyle, color: C.ink1 }}>{l.description ?? '—'}</td>
+                                <td style={{ ...tdStyle, textAlign: 'right', color: C.ink1 }}>{dkkD(l.cost / 100)}</td>
+                              </tr>
+                            ))}
+                            {!isCollapsed && period.equipment_lines.length > 0 && (
+                              <tr style={{ background: C.bg, fontWeight: 600 }}>
+                                <td style={{ padding: '6px 10px', color: C.ink2 }}>Period subtotal</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(periodTotal)}</td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
                       <tr style={{ background: C.bg, fontWeight: 700 }}>
                         <td style={{ padding: '8px 10px', color: C.ink1 }}>Total</td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(drawerDetail.equipment_lines.reduce((s, l) => s + l.cost, 0) / 100)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(grandTotal)}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -954,7 +1119,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
               })()}
             </div>
 
-            {/* Drawer footer */}
+            {/* Modal footer */}
             <div style={{ padding: '14px 24px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', flexShrink: 0, gap: 12 }}>
               {drawerDetail && drawerTab !== 'bymonth' ? (
                 <button onClick={downloadDrillDownCsv} style={{

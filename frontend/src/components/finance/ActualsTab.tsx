@@ -3,18 +3,10 @@ import {
   makeStyles,
   tokens,
   Body1,
-  Card,
-  CardHeader,
   Input,
   Badge,
   MessageBar,
   MessageBarBody,
-  Table,
-  TableHeader,
-  TableRow,
-  TableHeaderCell,
-  TableBody,
-  TableCell,
   Skeleton,
   SkeletonItem,
   Button,
@@ -25,16 +17,45 @@ import {
   DialogContent,
   DialogActions,
   Textarea,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItemCheckbox,
 } from '@fluentui/react-components';
-import { SearchRegular, MoneyRegular, CheckmarkCircle24Regular, DismissCircle24Regular, ArrowForward24Regular } from '@fluentui/react-icons';
+import {
+  SearchRegular,
+  MoneyRegular,
+  CheckmarkCircle24Regular,
+  DismissCircle24Regular,
+  ArrowForward24Regular,
+  FilterRegular,
+} from '@fluentui/react-icons';
 import { approvalsApi } from '../../api/approvals';
 import { EmptyState } from '../EmptyState';
-import { useWorkQueueSort } from '../../hooks/useWorkQueueSort';
-import { useFinanceSortState } from '../../hooks/useFinanceSortState';
 import { useEmployeeStats } from '../../hooks/useEmployeeStats';
-import { FinanceSortBar } from './FinanceSortBar';
-import { FinanceKpiStrip, KpiTile } from './FinanceKpiStrip';
-import { ApprovalBadge } from './FinanceBadges';
+// ApprovalBadge available if needed for future use
+
+// ─── Design palette ──────────────────────────────────────────────────────────
+
+const C = {
+  bg:         '#faf9f7',
+  surface:    '#ffffff',
+  surface2:   '#f6f5f2',
+  ink:        '#1b1b1a',
+  ink2:       '#424242',
+  ink3:       '#707070',
+  line:       '#e5e4e0',
+  accent:     '#2a4f3f',
+  good:       '#2a6f4d',
+  goodSoft:   '#e3efe7',
+  warn:       '#9a5b00',
+  warnSoft:   '#fbe8cf',
+  bad:        '#a32f2a',
+  badSoft:    '#f6dad7',
+  pending:    '#5b4892',
+  pendingSoft:'#e7e1f3',
+} as const;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -77,99 +98,212 @@ export interface ActualsTabProps {
   onActualsReload?: () => void;
 }
 
-type CcSortKey = 'name' | 'fte' | 'pending';
+type SortBy = 'attention' | 'name' | 'gap';
 type EmpSortKey = 'name' | 'demand' | 'actuals' | 'status';
 
-const CC_SORT_OPTIONS: { key: CcSortKey; label: string }[] = [
-  { key: 'fte', label: 'FTE' },
-  { key: 'name', label: 'Name' },
-  { key: 'pending', label: 'Pending' },
-];
+interface EmployeeGroup {
+  employee_name: string;
+  employee_email: string;
+  cost_center_id: string;
+  cost_center_name: string;
+  rows: FinanceActualRow[];
+  isMissingOnly?: boolean; // true = employee has demand but no actual lines
+}
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
-  workQueueLayout: {
+  // KPI row
+  kpiRow: {
     display: 'grid',
-    gridTemplateColumns: '280px 1fr',
-    gap: tokens.spacingHorizontalL,
-    minHeight: '400px',
+    gridTemplateColumns: 'repeat(5, 1fr)',
+    gap: '12px',
+    marginBottom: '16px',
   },
-  workQueueLeft: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: tokens.spacingVerticalM,
-    borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
-    paddingRight: tokens.spacingHorizontalL,
+  kpiCard: {
+    background: C.surface,
+    border: `1px solid ${C.line}`,
+    borderRadius: '10px',
+    padding: '14px 16px',
+    cursor: 'default',
+    transition: 'box-shadow 0.15s',
+    ':hover': { boxShadow: '0 2px 8px rgba(0,0,0,0.08)' },
   },
-  workQueueList: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: tokens.spacingVerticalXS,
-    overflowY: 'auto' as const,
-    maxHeight: 'calc(100vh - 380px)',
-    minHeight: '200px',
-  },
-  workQueueRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    borderRadius: tokens.borderRadiusMedium,
+  kpiCardClickable: {
     cursor: 'pointer',
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground1,
-    '&:hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
-  workQueueRowSelected: {
-    borderTopColor: tokens.colorBrandStroke1,
-    borderRightColor: tokens.colorBrandStroke1,
-    borderBottomColor: tokens.colorBrandStroke1,
-    borderLeftColor: tokens.colorBrandStroke1,
-    backgroundColor: tokens.colorNeutralBackground1Selected,
+  kpiCardActive: {
+    outline: `2px solid ${C.accent}`,
+    outlineOffset: '2px',
   },
-  workQueueDetails: {
+  kpiCardBad: {
+    background: C.badSoft,
+    border: `1px solid ${C.bad}33`,
+  },
+  kpiCardWarn: {
+    background: C.warnSoft,
+    border: `1px solid ${C.warn}33`,
+  },
+  kpiLabel: {
+    fontSize: '11px',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    color: C.ink3,
+    marginBottom: '4px',
+  },
+  kpiValue: {
+    fontSize: '26px',
+    fontWeight: '700',
+    lineHeight: '1.1',
+    fontVariantNumeric: 'tabular-nums',
+    color: C.ink,
+  },
+  kpiSubtitle: {
+    fontSize: '11px',
+    color: C.ink3,
+    marginTop: '4px',
+  },
+  progressBar: {
+    height: '3px',
+    background: C.line,
+    borderRadius: '2px',
+    marginTop: '6px',
+    overflow: 'hidden',
+  },
+  // Toolbar
+  toolbar: {
     display: 'flex',
-    flexDirection: 'column' as const,
-    gap: tokens.spacingVerticalM,
-    minWidth: 0,
+    alignItems: 'center',
+    gap: '8px',
+    marginBottom: '12px',
+    flexWrap: 'wrap',
   },
-  sortableTable: {
+  sortSegment: {
+    display: 'flex',
+    border: `1px solid ${C.line}`,
+    borderRadius: '8px',
+    overflow: 'hidden',
+  },
+  sortBtn: {
+    padding: '5px 12px',
+    fontSize: '12px',
+    fontWeight: '500',
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
+    color: C.ink3,
+    borderRight: `1px solid ${C.line}`,
+    ':last-child': { borderRight: 'none' },
+  },
+  sortBtnActive: {
+    background: C.accent,
+    color: '#fff',
+  },
+  toggleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '12px',
+    color: C.ink2,
+    cursor: 'pointer',
+    userSelect: 'none',
+    padding: '0 4px',
+    whiteSpace: 'nowrap',
+  },
+  // Table
+  tableWrapper: {
+    background: C.surface,
+    border: `1px solid ${C.line}`,
+    borderRadius: '10px',
+    overflow: 'hidden',
+    marginBottom: '16px',
+  },
+  table: {
     width: '100%',
-    '& thead': {
-      backgroundColor: tokens.colorNeutralBackground2,
-      position: 'sticky' as const,
-      top: 0,
-      zIndex: 1,
-    },
-    '& th': {
-      fontWeight: tokens.fontWeightSemibold,
-      fontSize: tokens.fontSizeBase300,
-      color: tokens.colorNeutralForeground2,
-      padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
-      textTransform: 'uppercase',
-      letterSpacing: '0.5px',
-      borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
-      cursor: 'pointer',
-      userSelect: 'none' as const,
-      '&:hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
-    },
-    '& td': {
-      padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
-      borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    },
-    '& tbody tr:hover': { backgroundColor: tokens.colorNeutralBackground2 },
+    borderCollapse: 'collapse',
+    fontSize: '13px',
   },
-  card: {
-    borderRadius: tokens.borderRadiusLarge,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    boxShadow: tokens.shadow4,
+  thead: {
+    background: C.surface2,
+    position: 'sticky',
+    top: '0',
+    zIndex: '1',
   },
-  ccRowMeta: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    marginTop: tokens.spacingVerticalXXS,
+  th: {
+    padding: '10px 12px',
+    textAlign: 'left',
+    fontSize: '11px',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: '0.4px',
+    color: C.ink3,
+    borderBottom: `1px solid ${C.line}`,
+    whiteSpace: 'nowrap',
   },
+  td: {
+    padding: '10px 12px',
+    borderBottom: `1px solid ${C.line}`,
+    verticalAlign: 'middle',
+  },
+  // Row states via inline border-left on the <tr>
+  tableFooter: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '10px 16px',
+    borderTop: `1px solid ${C.line}`,
+    background: C.surface2,
+    fontSize: '11px',
+    color: C.ink3,
+  },
+  legend: {
+    display: 'flex',
+    gap: '14px',
+    alignItems: 'center',
+  },
+  legendItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px',
+  },
+  // Employee avatar
+  avatar: {
+    width: '30px',
+    height: '30px',
+    borderRadius: '50%',
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '11px',
+    fontWeight: '700',
+    flexShrink: 0,
+    userSelect: 'none',
+  },
+  // Sub-table for expanded rows
+  subTable: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    fontSize: '12px',
+    background: C.bg,
+  },
+  subTh: {
+    padding: '6px 12px',
+    textAlign: 'left',
+    fontSize: '10px',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: '0.4px',
+    color: C.ink3,
+    borderBottom: `1px solid ${C.line}`,
+  },
+  subTd: {
+    padding: '7px 12px',
+    borderBottom: `1px solid ${C.line}`,
+    verticalAlign: 'middle',
+  },
+  // Employee card section (bottom)
   chartCard: {
     marginTop: tokens.spacingVerticalL,
     borderRadius: tokens.borderRadiusLarge,
@@ -183,9 +317,7 @@ const useStyles = makeStyles({
     padding: '16px 20px',
     marginBottom: '8px',
     cursor: 'pointer',
-    '&:hover': {
-      backgroundColor: '#f9fafb',
-    },
+    ':hover': { backgroundColor: '#f9fafb' },
   },
   empCardSortBar: {
     display: 'flex',
@@ -200,9 +332,7 @@ const useStyles = makeStyles({
     background: 'transparent',
     cursor: 'pointer',
     color: tokens.colorNeutralForeground2,
-    '&:hover': {
-      background: tokens.colorNeutralBackground1Hover,
-    },
+    ':hover': { background: tokens.colorNeutralBackground1Hover },
   },
   empCardSortBtnActive: {
     background: tokens.colorBrandBackground2,
@@ -213,6 +343,123 @@ const useStyles = makeStyles({
     borderLeftColor: tokens.colorBrandStroke1,
   },
 });
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function nameColor(name: string): string {
+  const palette = ['#7c3aed','#2563eb','#059669','#d97706','#dc2626','#0891b2','#4f46e5','#9333ea'];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+  return palette[Math.abs(h) % palette.length];
+}
+
+function nameInitials(name: string): string {
+  return name.split(' ').map(w => w[0] ?? '').join('').toUpperCase().slice(0, 2);
+}
+
+function getOverallStatus(rows: FinanceActualRow[]): string {
+  const statuses = rows.map(r => (r.approval_status ?? '').toUpperCase());
+  if (statuses.some(s => s === 'REJECTED')) return 'REJECTED';
+  if (statuses.some(s => s === 'PENDING')) return 'PENDING';
+  if (statuses.length > 0 && statuses.every(s => s === 'APPROVED')) return 'APPROVED';
+  return 'PENDING';
+}
+
+function getAttentionOrder(status: string, hasDemand: boolean, actuals: number, demand: number): number {
+  if (hasDemand && actuals === 0) return 0; // Missing
+  if (status === 'REJECTED') return 1;
+  if (status === 'PENDING') return 2;
+  if (actuals < demand) return 3; // Partial
+  return 4; // Approved / OK
+}
+
+// ─── Status badge — dot style ────────────────────────────────────────────────
+
+function StatusBadge({ status }: { status: string }) {
+  const s = status.toUpperCase();
+  const dot = (color: string) => (
+    <span style={{ width:7, height:7, borderRadius:'50%', background:color, display:'inline-block', flexShrink:0 }} />
+  );
+  const wrap = (color: string, dotColor: string, label: string, bg?: string) => (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:11, fontWeight:600, color, background: bg ?? 'transparent', border: bg ? 'none' : `1px solid ${color}33`, padding:'2px 7px', borderRadius:4 }}>
+      {dot(dotColor)}{label}
+    </span>
+  );
+  if (s === 'APPROVED')  return wrap(C.good,    C.good,    'Approved',  C.goodSoft);
+  if (s === 'REJECTED')  return wrap(C.bad,     C.bad,     'Rejected',  C.badSoft);
+  if (s === 'PENDING')   return wrap(C.pending, C.pending, 'Pending',   C.pendingSoft);
+  if (s === 'MISSING')   return wrap(C.ink3,    C.ink3,    'Missing');
+  return wrap(C.warn, C.warn, 'Partial', C.warnSoft);
+}
+
+// ─── Actual vs Demand bar ─────────────────────────────────────────────────────
+
+function ActualDemandBar({ actual, demand }: { actual: number; demand: number }) {
+  // Scale so that the larger of actual or demand fills ~80% of the track,
+  // leaving headroom for over-delivery. Never compress below 100 as baseline.
+  const scale = Math.max(actual, demand, 100);
+  const demandW = demand > 0 ? Math.min(100, (demand / scale) * 100) : 0;
+  const actualW = actual > 0 ? Math.min(100, (actual / scale) * 100) : 0;
+
+  const fillColor = demand === 0 ? C.ink3
+    : actual >= demand          ? C.good   // on/over plan → green
+    : actual >= demand * 0.75   ? C.warn   // within 25% short → amber
+    : C.bad;                               // significantly short → red
+
+  const label = demand > 0
+    ? `${actual}% of ${demand}%`
+    : `${actual}%`;
+  const pct = demand > 0 ? Math.round((actual / demand) * 100) : null;
+
+  return (
+    <div style={{ minWidth: 140 }}>
+      {/* Text row */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:5, fontSize:11, fontVariantNumeric:'tabular-nums' }}>
+        <span style={{ color: C.ink3 }}>{label}</span>
+        {pct !== null && (
+          <span style={{ fontWeight:700, fontSize:11, color: fillColor }}>{pct}%</span>
+        )}
+      </div>
+      {/* Bar */}
+      <div style={{ height:10, background:'#f0efec', borderRadius:5, overflow:'hidden', position:'relative' }}>
+        {/* Demand zone — muted grey fill showing the target */}
+        {demandW > 0 && (
+          <div style={{
+            position:'absolute', left:0, top:0, bottom:0,
+            width:`${demandW}%`,
+            background: '#d6d4cf',
+            borderRadius:5,
+          }} />
+        )}
+        {/* Actual fill — colored, overlaid on demand zone */}
+        {actualW > 0 && (
+          <div style={{
+            position:'absolute', left:0, top:0, bottom:0,
+            width:`${actualW}%`,
+            background: fillColor,
+            borderRadius:5,
+            opacity: 0.85,
+            transition:'width 0.3s',
+          }} />
+        )}
+        {/* Demand target marker — prominent dark tick */}
+        {demandW > 0 && demandW < 99 && (
+          <div style={{
+            position:'absolute', top:0, bottom:0,
+            left:`calc(${demandW}% - 1px)`,
+            width:2,
+            background: C.ink2,
+          }} />
+        )}
+      </div>
+      {/* Legend hints */}
+      <div style={{ display:'flex', gap:8, marginTop:3, fontSize:10, color: C.ink3 }}>
+        {demand > 0 && <span style={{ display:'flex', alignItems:'center', gap:3 }}><span style={{ width:8, height:8, borderRadius:2, background:'#d6d4cf', display:'inline-block' }} />demand</span>}
+        {actual > 0 && <span style={{ display:'flex', alignItems:'center', gap:3 }}><span style={{ width:8, height:8, borderRadius:2, background:fillColor, opacity:0.85, display:'inline-block' }} />actual</span>}
+      </div>
+    </div>
+  );
+}
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -228,20 +475,44 @@ export function ActualsTab({
 }: ActualsTabProps) {
   const styles = useStyles();
 
-
-  // Inline approval action state
+  // ── Approval action state (preserved exactly) ──────────────────────────────
   const [approvalDialogRow, setApprovalDialogRow] = useState<FinanceActualRow | null>(null);
   const [approvalAction, setApprovalAction] = useState<'approve' | 'reject' | null>(null);
   const [approvalComment, setApprovalComment] = useState('');
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
 
-  // Proxy approve step 1 state
+  // ── Proxy approve step 1 state (preserved exactly) ─────────────────────────
   const [proxyStep1Row, setProxyStep1Row] = useState<FinanceActualRow | null>(null);
   const [proxyStep1Comment, setProxyStep1Comment] = useState('');
   const [proxyStep1Submitting, setProxyStep1Submitting] = useState(false);
   const [proxyStep1Error, setProxyStep1Error] = useState<string | null>(null);
 
+  // ── Employee card expand state (preserved for bottom section) ──────────────
+  const [expandedEmployees, setExpandedEmployees] = useState<Set<string>>(new Set());
+  const toggleEmployee = useCallback((resourceId: string) => {
+    setExpandedEmployees(prev => {
+      const next = new Set(prev);
+      next.has(resourceId) ? next.delete(resourceId) : next.add(resourceId);
+      return next;
+    });
+  }, []);
+
+  // ── Employee sort state (preserved for bottom section) ─────────────────────
+  const [empSort, setEmpSort] = useState<EmpSortKey>('status');
+  const [empSortDir, setEmpSortDir] = useState<'asc' | 'desc'>('asc');
+
+  // ── New toolbar / table state ──────────────────────────────────────────────
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [sortBy, setSortBy] = useState<SortBy>('attention');
+  const [onlyNeedsAction, setOnlyNeedsAction] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCcIds, setSelectedCcIds] = useState<Set<string>>(new Set());
+  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
+  const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(new Set());
+  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
+
+  // ── Approval handlers (preserved exactly) ──────────────────────────────────
   const handleProxyStep1Submit = async () => {
     if (!proxyStep1Row?.approval_instance_id || !proxyStep1Row?.step1_id) return;
     if (!proxyStep1Comment.trim()) { setProxyStep1Error('A reason is required.'); return; }
@@ -310,146 +581,131 @@ export function ActualsTab({
     }
   };
 
-  // Employee card expand state
-  const [expandedEmployees, setExpandedEmployees] = useState<Set<string>>(new Set());
-  const toggleEmployee = useCallback((resourceId: string) => {
-    setExpandedEmployees(prev => {
-      const next = new Set(prev);
-      next.has(resourceId) ? next.delete(resourceId) : next.add(resourceId);
-      return next;
-    });
-  }, []);
-
-  // Work queue state
-  const [selectedCcId, setSelectedCcId] = useState<string | null>(null);
-  const [ccSearch, setCcSearch] = useState('');
-  const { sort: ccSort, sortDir: ccSortDir, handleSortClick: handleCcSort, sortItems: sortCcItems } = useWorkQueueSort<CcSortKey>('fte');
-
-  // Scoreboard filter state
-  const [scoreboardFilter, setScoreboardFilter] = useState<'none' | 'pending' | 'approved'>('none');
-
-  // Employee comparison table sort state
-  const [empSort, setEmpSort] = useState<EmpSortKey>('status');
-  const [empSortDir, setEmpSortDir] = useState<'asc' | 'desc'>('asc');
-
-  // Table sort
-  const { handleSort, sortIndicator, comparator } = useFinanceSortState();
-
-  // ── Derived values ──
-
-  const totalLines = actualsData.length;
-  const totalFte = actualsData.reduce((s, d) => s + d.fte_percent, 0);
-  const pendingCount = actualsData.filter(d => d.approval_status?.toUpperCase() === 'PENDING').length;
-  const approvedCount = actualsData.filter(d => d.approval_status?.toUpperCase() === 'APPROVED').length;
-
-  const kpiTiles = useMemo((): KpiTile[] => [
-    { label: 'Lines', value: totalLines, subtitle: 'total actuals' },
-    { label: 'Total FTE', value: `${totalFte}%`, subtitle: `across ${totalLines} line${totalLines !== 1 ? 's' : ''}` },
-    {
-      label: 'Pending',
-      value: pendingCount,
-      subtitle: pendingCount > 0 ? 'awaiting approval' : 'all clear',
-      color: pendingCount > 0 ? 'warning' : 'default',
-      onClick: () => setScoreboardFilter(f => f === 'pending' ? 'none' : 'pending'),
-      active: scoreboardFilter === 'pending',
-    },
-    {
-      label: 'Approved',
-      value: approvedCount,
-      subtitle: approvedCount > 0 ? 'approved entries' : 'none yet',
-      color: approvedCount > 0 ? 'success' : 'default',
-      onClick: () => setScoreboardFilter(f => f === 'approved' ? 'none' : 'approved'),
-      active: scoreboardFilter === 'approved',
-    },
-  ], [totalLines, totalFte, pendingCount, approvedCount, scoreboardFilter]);
-
-  // Build CC summary list
-  const ccList = useMemo(() => {
-    const byCc = new Map<string, {
-      cost_center_id: string;
-      cost_center_name: string;
-      totalFte: number;
-      lineCount: number;
-      pendingCount: number;
-    }>();
-    for (const row of actualsData) {
-      const id = row.cost_center_id;
-      const existing = byCc.get(id);
-      const isPending = row.approval_status?.toUpperCase() === 'PENDING' ? 1 : 0;
-      if (existing) {
-        existing.totalFte += row.fte_percent;
-        existing.lineCount += 1;
-        existing.pendingCount += isPending;
-      } else {
-        byCc.set(id, {
-          cost_center_id: id,
-          cost_center_name: row.cost_center_name,
-          totalFte: row.fte_percent,
-          lineCount: 1,
-          pendingCount: isPending,
-        });
-      }
-    }
-    return Array.from(byCc.values());
-  }, [actualsData]);
-
-  const filteredCcList = useMemo(() => {
-    let list = ccList;
-    if (ccSearch.trim()) {
-      const q = ccSearch.toLowerCase();
-      list = list.filter(cc => cc.cost_center_name.toLowerCase().includes(q));
-    }
-    return list;
-  }, [ccList, ccSearch]);
-
-  const sortedCcList = useMemo(() =>
-    sortCcItems(filteredCcList, (cc, key) => {
-      switch (key) {
-        case 'name': return cc.cost_center_name;
-        case 'fte': return cc.totalFte;
-        case 'pending': return cc.pendingCount;
-        default: return cc.totalFte;
-      }
-    }),
-    [filteredCcList, sortCcItems]
-  );
-
-  // Filter actuals by scoreboard and selected CC
-  const filteredActuals = useMemo(() => {
-    let out = actualsData;
-    if (scoreboardFilter === 'pending') out = out.filter(d => d.approval_status?.toUpperCase() === 'PENDING');
-    if (scoreboardFilter === 'approved') out = out.filter(d => d.approval_status?.toUpperCase() === 'APPROVED');
-    if (selectedCcId) out = out.filter(d => d.cost_center_id === selectedCcId);
-    return out;
-  }, [actualsData, scoreboardFilter, selectedCcId]);
-
-  const sortedActuals = useMemo(() =>
-    [...filteredActuals].sort((a, b) =>
-      comparator(a as unknown as Record<string, unknown>, b as unknown as Record<string, unknown>)
-    ),
-    [filteredActuals, comparator]
-  );
-
-  // Employee stats for the comparison table
+  // ── Employee stats (preserved for bottom section + demand bar data) ─────────
   const { data: empStats, loading: empStatsLoading, error: empStatsError } = useEmployeeStats(
     year,
     month,
-    selectedCcId ?? undefined,
+    undefined,
     actualsProjectId || undefined,
-    year > 0 && month > 0
+    year > 0 && month > 0,
   );
 
-  // Join email + cost center from actualsData by employee name
-  const empMetaByName = useMemo(() => {
-    const map = new Map<string, { email: string; cost_center_name: string }>();
-    for (const row of actualsData) {
-      if (!map.has(row.employee_name)) {
-        map.set(row.employee_name, { email: row.employee_email, cost_center_name: row.cost_center_name });
-      }
-    }
+  const empStatsByName = useMemo(() => {
+    const map = new Map<string, NonNullable<typeof empStats>[0]>();
+    for (const s of empStats ?? []) map.set(s.employee_name, s);
     return map;
+  }, [empStats]);
+
+  // ── Derived filter options ─────────────────────────────────────────────────
+  const ccOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const r of actualsData) map.set(r.cost_center_id, r.cost_center_name);
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [actualsData]);
 
+  const projectOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const r of actualsData) map.set(r.project_id, r.project_name);
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [actualsData]);
+
+  // ── Filtered actuals ───────────────────────────────────────────────────────
+  const filteredActuals = useMemo(() => {
+    let out = actualsData;
+    if (selectedCcIds.size > 0) out = out.filter(d => selectedCcIds.has(d.cost_center_id));
+    if (selectedProjectIds.size > 0) out = out.filter(d => selectedProjectIds.has(d.project_id));
+    if (selectedStatuses.size > 0) out = out.filter(d => selectedStatuses.has((d.approval_status ?? '').toUpperCase()));
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      out = out.filter(d =>
+        d.employee_name.toLowerCase().includes(q) ||
+        d.employee_email.toLowerCase().includes(q) ||
+        d.project_name.toLowerCase().includes(q) ||
+        d.cost_center_name.toLowerCase().includes(q),
+      );
+    }
+    if (onlyNeedsAction) out = out.filter(d => d.can_action || d.can_proxy_approve_step1);
+    return out;
+  }, [actualsData, selectedCcIds, selectedProjectIds, selectedStatuses, searchQuery, onlyNeedsAction]);
+
+  // ── Group by employee (employees with actuals) ────────────────────────────
+  const groupedEmployees = useMemo((): EmployeeGroup[] => {
+    const map = new Map<string, EmployeeGroup>();
+    for (const row of filteredActuals) {
+      const existing = map.get(row.employee_name);
+      if (existing) {
+        existing.rows.push(row);
+      } else {
+        map.set(row.employee_name, {
+          employee_name: row.employee_name,
+          employee_email: row.employee_email,
+          cost_center_id: row.cost_center_id,
+          cost_center_name: row.cost_center_name,
+          rows: [row],
+        });
+      }
+    }
+    return Array.from(map.values());
+  }, [filteredActuals]);
+
+  // ── Missing employees: have demand but zero actuals (from empStats only) ──
+  const missingGroups = useMemo((): EmployeeGroup[] => {
+    if (!empStats) return [];
+    // Only show MISSING status if not filtering to other statuses exclusively
+    if (selectedStatuses.size > 0 && !selectedStatuses.has('MISSING')) return [];
+    const nameSet = new Set(groupedEmployees.map(g => g.employee_name));
+    const q = searchQuery.trim().toLowerCase();
+    return empStats
+      .filter(s => s.demand_fte > 0 && s.actuals_fte === 0 && !nameSet.has(s.employee_name))
+      .filter(s => !q || s.employee_name.toLowerCase().includes(q))
+      .filter(s => {
+        if (selectedProjectIds.size === 0) return true;
+        return s.projects.some(p => selectedProjectIds.has(p.project_id));
+      })
+      .map(s => ({
+        employee_name: s.employee_name,
+        employee_email: '',
+        cost_center_id: '',
+        cost_center_name: '',
+        rows: [],
+        isMissingOnly: true,
+      }));
+  }, [empStats, groupedEmployees, selectedStatuses, selectedProjectIds, searchQuery]);
+
+  const sortedGroups = useMemo(() => {
+    const combined = [...groupedEmployees, ...missingGroups];
+    return combined.sort((a, b) => {
+      const aS = empStatsByName.get(a.employee_name);
+      const bS = empStatsByName.get(b.employee_name);
+      if (sortBy === 'name') return a.employee_name.localeCompare(b.employee_name);
+      if (sortBy === 'gap') {
+        const aGap = (aS?.actuals_fte ?? 0) - (aS?.demand_fte ?? 0);
+        const bGap = (bS?.actuals_fte ?? 0) - (bS?.demand_fte ?? 0);
+        return aGap - bGap;
+      }
+      // attention sort: missing rows come first (order 0)
+      const aStatus = a.isMissingOnly ? 'MISSING' : getOverallStatus(a.rows);
+      const bStatus = b.isMissingOnly ? 'MISSING' : getOverallStatus(b.rows);
+      const aOrder = getAttentionOrder(aStatus, (aS?.demand_fte ?? 0) > 0, aS?.actuals_fte ?? 0, aS?.demand_fte ?? 0);
+      const bOrder = getAttentionOrder(bStatus, (bS?.demand_fte ?? 0) > 0, bS?.actuals_fte ?? 0, bS?.demand_fte ?? 0);
+      return aOrder - bOrder;
+    });
+  }, [groupedEmployees, missingGroups, sortBy, empStatsByName]);
+
+  // ── KPI values ─────────────────────────────────────────────────────────────
+  const kpi = useMemo(() => {
+    const totalWithDemand = empStats?.filter(s => s.demand_fte > 0).length ?? 0;
+    const submitted = empStats?.filter(s => s.demand_fte > 0 && s.actuals_fte > 0).length ?? 0;
+    const missingCount = empStats?.filter(s => s.demand_fte > 0 && s.actuals_fte === 0).length ?? 0;
+    const pendingLines = actualsData.filter(d => (d.approval_status ?? '').toUpperCase() === 'PENDING');
+    const rejectedLines = actualsData.filter(d => (d.approval_status ?? '').toUpperCase() === 'REJECTED');
+    const approvedLines = actualsData.filter(d => (d.approval_status ?? '').toUpperCase() === 'APPROVED');
+    const pendingPeople = new Set(pendingLines.map(d => d.employee_name)).size;
+    const submittedPct = totalWithDemand > 0 ? Math.round((submitted / totalWithDemand) * 100) : 0;
+    return { totalWithDemand, submitted, submittedPct, missingCount, pendingLines: pendingLines.length, pendingPeople, rejectedLines: rejectedLines.length, approvedLines: approvedLines.length };
+  }, [actualsData, empStats]);
+
+  // ── Employee sort helpers (preserved for bottom section) ───────────────────
   const getEmpStatusOrder = (demand: number, actuals: number): number => {
     if (demand === 0) return 3;
     if (actuals >= demand) return 2;
@@ -477,216 +733,565 @@ export function ActualsTab({
     });
   }, [empStats, empSort, empSortDir]);
 
-  const nameColor = (name: string): string => {
-    const palette = ['#7c3aed','#2563eb','#059669','#d97706','#dc2626','#0891b2','#4f46e5','#9333ea'];
-    let h = 0;
-    for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
-    return palette[Math.abs(h) % palette.length];
+  // ── Toggle helpers ──────────────────────────────────────────────────────────
+  const toggleRow = (key: string) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
   };
 
-  const nameInitials = (name: string): string =>
-    name.split(' ').map(w => w[0] ?? '').join('').toUpperCase().slice(0, 2);
+  const toggleSetItem = (set: Set<string>, id: string): Set<string> => {
+    const next = new Set(set);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  };
 
+  const getRowBorderColor = (status: string): string => {
+    const s = status.toUpperCase();
+    if (s === 'REJECTED') return C.bad;
+    if (s === 'PENDING') return C.pending;
+    if (s === 'MISSING') return C.ink3;
+    return 'transparent';
+  };
+
+  const getRowBg = (status: string, hovered: boolean): string => {
+    const s = status.toUpperCase();
+    if (hovered) return '#f5f4f0';
+    if (s === 'REJECTED') return '#fff8f7';
+    if (s === 'PENDING') return '#fefcff';
+    return C.surface;
+  };
+
+  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
     <>
       {actualsError && (
-        <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
+        <MessageBar intent="error" style={{ marginBottom: 12 }}>
           <MessageBarBody>{actualsError}</MessageBarBody>
         </MessageBar>
       )}
 
-      <FinanceKpiStrip tiles={kpiTiles} loading={actualsLoading} />
-
-      {actualsLoading ? (
-        <div className={styles.workQueueLayout}>
-          <div className={styles.workQueueLeft}>
-            <Skeleton style={{ height: 32 }}><SkeletonItem /></Skeleton>
-            <Skeleton style={{ height: 300 }}><SkeletonItem /></Skeleton>
+      {/* ── KPI Row ─────────────────────────────────────────────────────── */}
+      <div className={styles.kpiRow}>
+        {/* 1. Submission progress */}
+        <div className={styles.kpiCard}>
+          <div className={styles.kpiLabel}>Submission progress</div>
+          <div className={styles.kpiValue} style={{ fontSize: 22 }}>
+            {kpi.submittedPct}%
+            <span style={{ fontSize: 13, fontWeight: 400, color: C.ink3, marginLeft: 6 }}>
+              {kpi.submitted} / {kpi.totalWithDemand}
+            </span>
           </div>
-          <Skeleton style={{ height: 300 }}><SkeletonItem /></Skeleton>
+          <div className={styles.progressBar}>
+            <div style={{ height: '100%', width: `${kpi.submittedPct}%`, background: C.good, borderRadius: 2, transition: 'width 0.4s' }} />
+          </div>
+          <div className={styles.kpiSubtitle}>{kpi.totalWithDemand - kpi.submitted} employees still owe submissions</div>
         </div>
-      ) : (
-        <div className={styles.workQueueLayout}>
-          {/* Left: CC list */}
-          <div className={styles.workQueueLeft}>
-            <Input
-              contentBefore={<SearchRegular />}
-              placeholder="Search cost centers..."
-              value={ccSearch}
-              onChange={(_, d) => setCcSearch(d.value)}
-            />
-            <FinanceSortBar
-              options={CC_SORT_OPTIONS}
-              sortKey={ccSort}
-              sortDir={ccSortDir}
-              onSort={handleCcSort}
-            />
-            <div className={styles.workQueueList}>
-              {/* All cost centers row */}
-              <div
-                className={`${styles.workQueueRow} ${selectedCcId === null ? styles.workQueueRowSelected : ''}`}
-                onClick={() => setSelectedCcId(null)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={e => e.key === 'Enter' && setSelectedCcId(null)}
-              >
-                <div>
-                  <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>All cost centers</Body1>
-                  <div className={styles.ccRowMeta}>{totalFte}% FTE · {totalLines} lines</div>
-                </div>
-              </div>
 
-              {sortedCcList.map(cc => (
-                <div
-                  key={cc.cost_center_id}
-                  className={`${styles.workQueueRow} ${selectedCcId === cc.cost_center_id ? styles.workQueueRowSelected : ''}`}
-                  onClick={() => setSelectedCcId(cc.cost_center_id)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={e => e.key === 'Enter' && setSelectedCcId(cc.cost_center_id)}
-                >
-                  <div>
-                    <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>{cc.cost_center_name}</Body1>
-                    <div className={styles.ccRowMeta}>{cc.totalFte}% FTE · {cc.lineCount} lines</div>
-                  </div>
-                  {cc.pendingCount > 0 && (
-                    <Badge appearance="outline" color="warning" size="small">{cc.pendingCount} pending</Badge>
-                  )}
-                </div>
+        {/* 2. Missing */}
+        <div
+          className={`${styles.kpiCard} ${styles.kpiCardClickable} ${selectedStatuses.has('MISSING') ? styles.kpiCardActive : ''} ${styles.kpiCardBad}`}
+          onClick={() => setSelectedStatuses(prev => toggleSetItem(prev, 'MISSING'))}
+        >
+          <div className={styles.kpiLabel} style={{ color: C.bad }}>Missing</div>
+          <div className={styles.kpiValue} style={{ color: C.bad }}>{kpi.missingCount}</div>
+          <div className={styles.kpiSubtitle} style={{ color: C.bad }}>overdue submissions · click to filter</div>
+        </div>
+
+        {/* 3. Pending */}
+        <div
+          className={`${styles.kpiCard} ${styles.kpiCardClickable} ${selectedStatuses.has('PENDING') ? styles.kpiCardActive : ''} ${styles.kpiCardWarn}`}
+          onClick={() => setSelectedStatuses(prev => toggleSetItem(prev, 'PENDING'))}
+        >
+          <div className={styles.kpiLabel} style={{ color: C.warn }}>Pending approval</div>
+          <div className={styles.kpiValue} style={{ color: C.warn }}>{kpi.pendingLines}</div>
+          <div className={styles.kpiSubtitle} style={{ color: C.warn }}>across {kpi.pendingPeople} people</div>
+        </div>
+
+        {/* 4. Rejected */}
+        <div
+          className={`${styles.kpiCard} ${styles.kpiCardClickable} ${selectedStatuses.has('REJECTED') ? styles.kpiCardActive : ''}`}
+          onClick={() => setSelectedStatuses(prev => toggleSetItem(prev, 'REJECTED'))}
+        >
+          <div className={styles.kpiLabel}>Rejected</div>
+          <div className={styles.kpiValue} style={{ color: C.bad }}>{kpi.rejectedLines}</div>
+          <div className={styles.kpiSubtitle}>returned for rework</div>
+        </div>
+
+        {/* 5. Approved */}
+        <div
+          className={`${styles.kpiCard} ${styles.kpiCardClickable} ${selectedStatuses.has('APPROVED') ? styles.kpiCardActive : ''}`}
+          onClick={() => setSelectedStatuses(prev => toggleSetItem(prev, 'APPROVED'))}
+        >
+          <div className={styles.kpiLabel}>Approved</div>
+          <div className={styles.kpiValue} style={{ color: C.good }}>{kpi.approvedLines}</div>
+          <div className={styles.kpiSubtitle}>finalized entries</div>
+        </div>
+      </div>
+
+      {/* ── Toolbar ─────────────────────────────────────────────────────── */}
+      <div className={styles.toolbar}>
+        {/* Search */}
+        <Input
+          contentBefore={<SearchRegular />}
+          placeholder="Search employee, project, cost center..."
+          value={searchQuery}
+          onChange={(_, d) => setSearchQuery(d.value)}
+          style={{ minWidth: 260 }}
+          size="small"
+        />
+
+        {/* CC filter */}
+        <Menu>
+          <MenuTrigger>
+            <Button size="small" appearance="outline" icon={<FilterRegular />}>
+              Cost center
+              <Badge size="tiny" appearance="filled" color="brand" style={{ marginLeft: 4, visibility: selectedCcIds.size > 0 ? 'visible' : 'hidden' }}>
+                {selectedCcIds.size || 1}
+              </Badge>
+            </Button>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList
+              checkedValues={{ cc: Array.from(selectedCcIds) }}
+              onCheckedValueChange={(_, data) => { if (data.name === 'cc') setSelectedCcIds(new Set(data.checkedItems)); }}
+            >
+              {ccOptions.map(cc => (
+                <MenuItemCheckbox key={cc.id} name="cc" value={cc.id}>
+                  {cc.name}
+                </MenuItemCheckbox>
               ))}
+              {ccOptions.length === 0 && <div style={{ padding: '8px 12px', fontSize: 12, color: C.ink3 }}>No options</div>}
+            </MenuList>
+          </MenuPopover>
+        </Menu>
 
-              {ccList.length === 0 && (
-                <Body1 style={{ color: tokens.colorNeutralForeground3, padding: tokens.spacingVerticalM }}>
-                  No actuals for this period.
-                </Body1>
-              )}
-            </div>
+        {/* Project filter */}
+        <Menu>
+          <MenuTrigger>
+            <Button size="small" appearance="outline" icon={<FilterRegular />}>
+              Project
+              <Badge size="tiny" appearance="filled" color="brand" style={{ marginLeft: 4, visibility: selectedProjectIds.size > 0 ? 'visible' : 'hidden' }}>
+                {selectedProjectIds.size || 1}
+              </Badge>
+            </Button>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList
+              checkedValues={{ proj: Array.from(selectedProjectIds) }}
+              onCheckedValueChange={(_, data) => { if (data.name === 'proj') setSelectedProjectIds(new Set(data.checkedItems)); }}
+            >
+              {projectOptions.map(p => (
+                <MenuItemCheckbox key={p.id} name="proj" value={p.id}>
+                  {p.name}
+                </MenuItemCheckbox>
+              ))}
+              {projectOptions.length === 0 && <div style={{ padding: '8px 12px', fontSize: 12, color: C.ink3 }}>No options</div>}
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+
+        {/* Status filter */}
+        <Menu>
+          <MenuTrigger>
+            <Button size="small" appearance="outline" icon={<FilterRegular />}>
+              Status
+              <Badge size="tiny" appearance="filled" color="brand" style={{ marginLeft: 4, visibility: selectedStatuses.size > 0 ? 'visible' : 'hidden' }}>
+                {selectedStatuses.size || 1}
+              </Badge>
+            </Button>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList
+              checkedValues={{ status: Array.from(selectedStatuses) }}
+              onCheckedValueChange={(_, data) => { if (data.name === 'status') setSelectedStatuses(new Set(data.checkedItems)); }}
+            >
+              {['PENDING','APPROVED','REJECTED'].map(s => (
+                <MenuItemCheckbox key={s} name="status" value={s}>
+                  {s.charAt(0) + s.slice(1).toLowerCase()}
+                </MenuItemCheckbox>
+              ))}
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+
+        {/* Only needs action toggle */}
+        <div className={styles.toggleRow} onClick={() => setOnlyNeedsAction(v => !v)}>
+          <div style={{
+            width: 32, height: 18, borderRadius: 9, flexShrink: 0,
+            background: onlyNeedsAction ? C.accent : C.surface2,
+            border: `1.5px solid ${onlyNeedsAction ? C.accent : C.line}`,
+            display: 'flex', alignItems: 'center',
+            padding: '2px 3px',
+            justifyContent: onlyNeedsAction ? 'flex-end' : 'flex-start',
+            transition: 'background 0.15s, border-color 0.15s',
+            boxSizing: 'border-box',
+          }}>
+            <div style={{ width: 12, height: 12, borderRadius: '50%', background: 'white', boxShadow: '0 1px 2px rgba(0,0,0,0.25)', flexShrink: 0 }} />
           </div>
+          Only needs action
+        </div>
 
-          {/* Right: actuals table */}
-          <div className={styles.workQueueDetails}>
-            <Card className={styles.card}>
-              <CardHeader header={<Body1><strong>Employee actuals</strong></Body1>} />
-              {sortedActuals.length === 0 ? (
-                <EmptyState
-                  icon={<MoneyRegular style={{ fontSize: 48 }} />}
-                  title="No actuals data"
-                  message="No actuals found for this period. Adjust the filters or select a different period."
-                />
-              ) : (
-                <Table className={styles.sortableTable}>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHeaderCell onClick={() => handleSort('employee_name')}>
-                        Employee{sortIndicator('employee_name')}
-                      </TableHeaderCell>
-                      <TableHeaderCell onClick={() => handleSort('project_name')}>
-                        Project{sortIndicator('project_name')}
-                      </TableHeaderCell>
-                      <TableHeaderCell onClick={() => handleSort('cost_center_name')}>
-                        Cost Center{sortIndicator('cost_center_name')}
-                      </TableHeaderCell>
-                      <TableHeaderCell onClick={() => handleSort('year')}>
-                        Period{sortIndicator('year')}
-                      </TableHeaderCell>
-                      <TableHeaderCell onClick={() => handleSort('fte_percent')}>
-                        FTE %{sortIndicator('fte_percent')}
-                      </TableHeaderCell>
-                      <TableHeaderCell onClick={() => handleSort('approval_status')}>
-                        Approval{sortIndicator('approval_status')}
-                      </TableHeaderCell>
-                      <TableHeaderCell onClick={() => handleSort('current_approval_step')}>
-                        Current Step{sortIndicator('current_approval_step')}
-                      </TableHeaderCell>
-                      <TableHeaderCell onClick={() => handleSort('current_approver_name')}>
-                        Approver{sortIndicator('current_approver_name')}
-                      </TableHeaderCell>
-                      <TableHeaderCell>Actions</TableHeaderCell>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sortedActuals.map(row => {
-                      const canAction =
-                        row.approval_status?.toUpperCase() === 'PENDING' &&
-                        row.approval_instance_id &&
-                        row.current_step_id &&
-                        row.can_action;
-                      return (
-                        <TableRow key={row.actual_id}>
-                          <TableCell>
+        {/* Spacer */}
+        <div style={{ flex: 1 }} />
+
+        {/* Sort segmented control */}
+        <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:11, color:C.ink3 }}>
+          <span>Sort:</span>
+          <div className={styles.sortSegment}>
+            {(['attention','name','gap'] as SortBy[]).map(s => (
+              <button
+                key={s}
+                className={`${styles.sortBtn} ${sortBy === s ? styles.sortBtnActive : ''}`}
+                onClick={() => setSortBy(s)}
+              >
+                {s.charAt(0).toUpperCase() + s.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Unified Table ────────────────────────────────────────────────── */}
+      {actualsLoading ? (
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          {[1,2,3,4].map(i => <Skeleton key={i} style={{ height: 54 }}><SkeletonItem /></Skeleton>)}
+        </div>
+      ) : sortedGroups.length === 0 ? (
+        <EmptyState
+          icon={<MoneyRegular style={{ fontSize: 48 }} />}
+          title="No actuals data"
+          message="No actuals found for this period. Adjust the filters or select a different period."
+        />
+      ) : (
+        <div className={styles.tableWrapper}>
+          <table className={styles.table}>
+            <thead className={styles.thead}>
+              <tr>
+                <th className={styles.th} style={{ width: 32 }} />
+                <th className={styles.th}>Employee</th>
+                <th className={styles.th}>Project · Cost Center</th>
+                <th className={styles.th} style={{ minWidth: 160 }}>Actual vs Demand</th>
+                <th className={styles.th} style={{ width: 70 }}>Gap</th>
+                <th className={styles.th} style={{ width: 110 }}>Status</th>
+                <th className={styles.th}>Approver · Step</th>
+                <th className={styles.th} style={{ width: 130 }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedGroups.map(group => {
+                const stat = empStatsByName.get(group.employee_name);
+                const actual = group.isMissingOnly ? 0 : (stat?.actuals_fte ?? group.rows.reduce((s, r) => s + r.fte_percent, 0));
+                const demand = stat?.demand_fte ?? 0;
+                const gap = actual - demand;
+                const overallStatus = group.isMissingOnly ? 'MISSING' : getOverallStatus(group.rows);
+                const isExpanded = expandedRows.has(group.employee_name);
+                const isHovered = hoveredRow === group.employee_name;
+                const firstPending = group.rows.find(r => r.can_action);
+                const firstProxy = group.rows.find(r => r.can_proxy_approve_step1 && r.approval_instance_id && r.step1_id);
+                const firstProject = group.rows[0] ?? null;
+                // For missing-only employees, derive project name from empStats
+                const firstProjectName = firstProject?.project_name
+                  ?? stat?.projects?.[0]?.project_name
+                  ?? '—';
+                const borderColor = getRowBorderColor(overallStatus);
+                const rowBg = getRowBg(overallStatus, isHovered);
+
+                return [
+                  <tr
+                    key={group.employee_name}
+                    style={{ borderLeft: `3px solid ${borderColor}`, background: rowBg, cursor:'pointer' }}
+                    onMouseEnter={() => setHoveredRow(group.employee_name)}
+                    onMouseLeave={() => setHoveredRow(null)}
+                    onClick={e => {
+                      if ((e.target as HTMLElement).closest('button')) return;
+                      toggleRow(group.employee_name);
+                    }}
+                  >
+                    {/* Chevron */}
+                    <td className={styles.td} style={{ padding:'10px 8px 10px 10px', color: C.ink3 }}>
+                      <span style={{ display:'inline-block', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition:'transform 0.15s', fontSize:11, lineHeight:1 }}>▶</span>
+                    </td>
+
+                    {/* Employee */}
+                    <td className={styles.td}>
+                      <div style={{ display:'flex', alignItems:'center', gap:9 }}>
+                        <div className={styles.avatar} style={{ background: nameColor(group.employee_name) }}>
+                          {nameInitials(group.employee_name)}
+                        </div>
+                        <div style={{ minWidth:0 }}>
+                          <div style={{ fontWeight:600, fontSize:13, color:C.ink, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                            {group.employee_name}
+                          </div>
+                          <div style={{ fontSize:11, color:C.ink3 }}>{group.employee_email}</div>
+                          <div style={{ fontSize:10, color:C.ink3 }}>{group.cost_center_name}</div>
+                        </div>
+                      </div>
+                      {group.rows.some(r => r.is_delegated && r.delegated_for) && (
+                        <div style={{ marginTop:3 }}>
+                          <Badge appearance="filled" color="warning" size="small">
+                            Delegate for {group.rows.find(r => r.delegated_for)?.delegated_for}
+                          </Badge>
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Project · CC */}
+                    <td className={styles.td}>
+                      <div style={{ fontWeight:600, fontSize:13, color:C.ink }}>{firstProjectName}</div>
+                      <div style={{ fontSize:11, color:C.ink3, marginTop:2, display:'flex', alignItems:'center', gap:5 }}>
+                        {group.cost_center_name || (stat?.projects?.length ? 'Demand only' : '—')}
+                        {!group.isMissingOnly && group.rows.length > 1 && (
+                          <span style={{ background:C.surface2, border:`1px solid ${C.line}`, borderRadius:10, padding:'0 6px', fontSize:10, color:C.ink3 }}>
+                            +{group.rows.length - 1} more
+                          </span>
+                        )}
+                        {group.isMissingOnly && (stat?.projects?.length ?? 0) > 1 && (
+                          <span style={{ background:C.surface2, border:`1px solid ${C.line}`, borderRadius:10, padding:'0 6px', fontSize:10, color:C.ink3 }}>
+                            +{(stat?.projects?.length ?? 1) - 1} more
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Actual vs Demand bar */}
+                    <td className={styles.td}>
+                      <ActualDemandBar actual={actual} demand={demand} />
+                    </td>
+
+                    {/* Gap */}
+                    <td className={styles.td}>
+                      <span style={{ display:'inline-flex', alignItems:'center', gap:3, fontVariantNumeric:'tabular-nums', fontSize:13, fontWeight:700, color: gap > 0 ? C.good : gap < 0 ? C.bad : C.ink3 }}>
+                        {gap > 0 ? '▲' : gap < 0 ? '▼' : null}
+                        {gap > 0 ? `+${gap}%` : gap < 0 ? `${gap}%` : '0%'}
+                      </span>
+                    </td>
+
+                    {/* Status */}
+                    <td className={styles.td}>
+                      <StatusBadge status={overallStatus} />
+                    </td>
+
+                    {/* Approver · Step */}
+                    <td className={styles.td}>
+                      {(() => {
+                        const approverRow = group.rows.find(r => r.current_approver_name || r.current_approval_step);
+                        if (approverRow) {
+                          return (
                             <div>
-                              <strong>{row.employee_name}</strong>
-                              {row.is_delegated && row.delegated_for && (
-                                <div style={{ marginTop: tokens.spacingVerticalXXS }}>
-                                  <Badge appearance="filled" color="warning" style={{ fontSize: tokens.fontSizeBase100, fontWeight: 600 }}>
-                                    Delegate for {row.delegated_for}
-                                  </Badge>
-                                </div>
-                              )}
-                              <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-                                {row.employee_email}
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>{row.project_name}</TableCell>
-                          <TableCell>{row.cost_center_name}</TableCell>
-                          <TableCell>{row.year}-{String(row.month).padStart(2, '0')}</TableCell>
-                          <TableCell>
-                            <Badge appearance="filled" color="informative">{row.fte_percent}%</Badge>
-                          </TableCell>
-                          <TableCell><ApprovalBadge status={row.approval_status} /></TableCell>
-                          <TableCell>{row.current_approval_step || '—'}</TableCell>
-                          <TableCell>{row.current_approver_name || '—'}</TableCell>
-                          <TableCell>
-                            <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
-                              {canAction && (
-                                <>
-                                  <Button
-                                    icon={<CheckmarkCircle24Regular />}
-                                    appearance="subtle"
-                                    size="small"
-                                    title="Approve"
-                                    style={{ color: tokens.colorPaletteGreenForeground1 }}
-                                    onClick={() => openApprovalDialog(row, 'approve')}
-                                  />
-                                  <Button
-                                    icon={<DismissCircle24Regular />}
-                                    appearance="subtle"
-                                    size="small"
-                                    title="Reject"
-                                    style={{ color: tokens.colorPaletteRedForeground1 }}
-                                    onClick={() => openApprovalDialog(row, 'reject')}
-                                  />
-                                </>
-                              )}
-                              {row.can_proxy_approve_step1 && row.approval_instance_id && row.step1_id && (
-                                <Button
-                                  icon={<ArrowForward24Regular />}
-                                  appearance="subtle"
-                                  size="small"
-                                  title="Proxy approve step 1 on behalf of direct manager"
-                                  onClick={() => {
-                                    setProxyStep1Row(row);
-                                    setProxyStep1Comment('');
-                                    setProxyStep1Error(null);
-                                  }}
-                                />
+                              <div style={{ fontSize:12, color:C.ink2 }}>{approverRow.current_approver_name || '—'}</div>
+                              {approverRow.current_approval_step && (
+                                <span style={{ background:C.pendingSoft, color:C.pending, fontSize:10, fontWeight:600, padding:'1px 6px', borderRadius:10, marginTop:2, display:'inline-block' }}>
+                                  {approverRow.current_approval_step}
+                                </span>
                               )}
                             </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              )}
-            </Card>
+                          );
+                        }
+                        if (overallStatus === 'APPROVED') {
+                          return <span style={{ color:C.good, fontSize:11, fontWeight:600 }}>Approved</span>;
+                        }
+                        if (overallStatus === 'MISSING') {
+                          return <span style={{ color:C.ink3, fontSize:11 }}>—</span>;
+                        }
+                        return <span style={{ color:C.ink3, fontSize:11 }}>— not yet routed</span>;
+                      })()}
+                    </td>
+
+                    {/* Actions (shown on hover) */}
+                    <td className={styles.td}>
+                      <div style={{ display:'flex', gap:4, opacity: isHovered ? 1 : 0, transition:'opacity 0.15s' }}>
+                        {firstPending && (
+                          <>
+                            <Button
+                              icon={<CheckmarkCircle24Regular />}
+                              appearance="primary"
+                              size="small"
+                              title="Approve"
+                              style={{ background: C.good, border:'none', minWidth:0, padding:'0 8px' }}
+                              onClick={e => { e.stopPropagation(); openApprovalDialog(firstPending, 'approve'); }}
+                            />
+                            <Button
+                              icon={<DismissCircle24Regular />}
+                              appearance="outline"
+                              size="small"
+                              title="Reject"
+                              style={{ color: C.bad, borderColor: C.bad, minWidth:0, padding:'0 8px' }}
+                              onClick={e => { e.stopPropagation(); openApprovalDialog(firstPending, 'reject'); }}
+                            />
+                          </>
+                        )}
+                        {firstProxy && (
+                          <Button
+                            icon={<ArrowForward24Regular />}
+                            appearance="subtle"
+                            size="small"
+                            title="Proxy approve step 1"
+                            onClick={e => { e.stopPropagation(); setProxyStep1Row(firstProxy); setProxyStep1Comment(''); setProxyStep1Error(null); }}
+                          />
+                        )}
+                      </div>
+                    </td>
+                  </tr>,
+
+                  /* Expanded row */
+                  isExpanded && (
+                    <tr key={`${group.employee_name}-expanded`} style={{ background: C.bg }}>
+                      <td colSpan={8} style={{ padding:0, borderLeft: `3px solid ${borderColor}`, borderBottom: `1px solid ${C.line}` }}>
+
+                        {/* Meta strip */}
+                        <div style={{ background: C.surface2, borderBottom: `1px solid ${C.line}`, padding:'7px 16px 7px 52px', display:'flex', gap:28, fontSize:11, color:C.ink3, flexWrap:'wrap' }}>
+                          <span>PERIOD <strong style={{ color:C.ink, marginLeft:4 }}>{group.rows[0] ? `${group.rows[0].year}-${String(group.rows[0].month).padStart(2,'0')}` : (year > 0 ? `${year}-${String(month).padStart(2,'0')}` : '—')}</strong></span>
+                          <span>COST CENTER <strong style={{ color:C.ink, marginLeft:4 }}>{group.cost_center_name}</strong></span>
+                          <span>SUPPLY <strong style={{ color:C.ink, marginLeft:4 }}>{stat?.supply_fte != null ? `${stat.supply_fte}%` : '—'}</strong></span>
+                          <span>DEMAND <strong style={{ color:C.ink, marginLeft:4 }}>{demand > 0 ? `${demand}%` : '—'}</strong></span>
+                          <span>ACTUAL <strong style={{ color:C.ink, marginLeft:4 }}>{actual > 0 ? `${actual}%` : '0%'}</strong></span>
+                          <span>GAP <strong style={{ color: gap < 0 ? C.bad : gap > 0 ? C.good : C.ink3, marginLeft:4 }}>{gap >= 0 ? `+${gap}%` : `${gap}%`}</strong></span>
+                        </div>
+
+                        {/* Sub-header */}
+                        <div style={{ padding:'8px 16px 4px 52px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.6px', color:C.ink3 }}>
+                          Project Breakdown · {group.rows.length} {group.rows.length === 1 ? 'line' : 'lines'}
+                        </div>
+
+                        {/* Sub-table — for missing-only employees use empStats.projects; otherwise use actual rows */}
+                        {(() => {
+                          // Build rows: missing employees use demand project breakdown; others use actual rows
+                          type SubRow = {
+                            key: string;
+                            projectName: string;
+                            costCenterName: string;
+                            rowDemand: number;
+                            rowActual: number;
+                            row?: FinanceActualRow;
+                          };
+                          const subRows: SubRow[] = group.isMissingOnly
+                            ? (stat?.projects ?? []).map(p => ({
+                                key: p.project_id,
+                                projectName: p.project_name,
+                                costCenterName: '',
+                                rowDemand: p.demand_fte,
+                                rowActual: 0,
+                              }))
+                            : group.rows.map(row => {
+                                const projStat = stat?.projects?.find(p => p.project_id === row.project_id);
+                                return {
+                                  key: row.actual_id,
+                                  projectName: row.project_name,
+                                  costCenterName: row.cost_center_name,
+                                  rowDemand: projStat?.demand_fte ?? 0,
+                                  rowActual: row.fte_percent,
+                                  row,
+                                };
+                              });
+
+                          return (
+                            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                              <thead>
+                                <tr style={{ background: C.surface2 }}>
+                                  <th style={{ padding:'5px 12px 5px 52px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'26%' }}>Project</th>
+                                  <th style={{ padding:'5px 12px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'22%' }}>Allocation</th>
+                                  <th style={{ padding:'5px 12px', textAlign:'right', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'10%' }}>Demand</th>
+                                  <th style={{ padding:'5px 12px', textAlign:'right', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'10%' }}>Actual</th>
+                                  <th style={{ padding:'5px 12px', textAlign:'right', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'10%' }}>Gap</th>
+                                  <th style={{ padding:'5px 12px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}` }}>Status</th>
+                                  <th style={{ padding:'5px 12px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}` }} />
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {subRows.map(sr => {
+                                  const rowGap = sr.rowActual - sr.rowDemand;
+                                  const maxAlloc = Math.max(sr.rowDemand, sr.rowActual, 100);
+                                  const allocBarW = maxAlloc > 0 ? Math.min(100, (sr.rowDemand / maxAlloc) * 100) : 0;
+                                  const rowCanAction = sr.row && sr.row.approval_status?.toUpperCase() === 'PENDING' && sr.row.approval_instance_id && sr.row.current_step_id && sr.row.can_action;
+
+                                  return (
+                                    <tr key={sr.key} style={{ background: C.surface, borderBottom: `1px solid ${C.line}` }}>
+                                      <td style={{ padding:'10px 12px 10px 52px', verticalAlign:'middle' }}>
+                                        <div style={{ fontWeight:600, color:C.ink }}>{sr.projectName}</div>
+                                        {sr.costCenterName && <div style={{ fontSize:11, color:C.ink3 }}>{sr.costCenterName}</div>}
+                                      </td>
+                                      <td style={{ padding:'10px 12px', verticalAlign:'middle' }}>
+                                        <div style={{ flex:1, height:5, background:C.line, borderRadius:3, minWidth:80 }}>
+                                          <div style={{ width:`${allocBarW}%`, height:5, background:C.ink3, borderRadius:3 }} />
+                                        </div>
+                                      </td>
+                                      <td style={{ padding:'10px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:C.ink3, verticalAlign:'middle' }}>
+                                        {sr.rowDemand > 0 ? `${sr.rowDemand}%` : '—'}
+                                      </td>
+                                      <td style={{ padding:'10px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:C.ink, verticalAlign:'middle' }}>
+                                        {sr.rowActual > 0 ? `${sr.rowActual}%` : '—'}
+                                      </td>
+                                      <td style={{ padding:'10px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:700, color: sr.rowDemand > 0 ? (rowGap >= 0 ? C.good : C.bad) : C.ink3, verticalAlign:'middle' }}>
+                                        {sr.rowDemand > 0 ? (rowGap >= 0 ? `+${rowGap}%` : `${rowGap}%`) : '—'}
+                                      </td>
+                                      <td style={{ padding:'10px 12px', verticalAlign:'middle' }}>
+                                        <StatusBadge status={sr.row ? sr.row.approval_status : 'MISSING'} />
+                                      </td>
+                                      <td style={{ padding:'10px 12px', verticalAlign:'middle' }}>
+                                        {sr.row && (
+                                          <div style={{ display:'flex', gap:4 }}>
+                                            {rowCanAction && (
+                                              <>
+                                                <Button appearance="subtle" size="small" icon={<CheckmarkCircle24Regular />} title="Approve" style={{ color:C.good }} onClick={e => { e.stopPropagation(); openApprovalDialog(sr.row!, 'approve'); }} />
+                                                <Button appearance="subtle" size="small" icon={<DismissCircle24Regular />} title="Reject" style={{ color:C.bad }} onClick={e => { e.stopPropagation(); openApprovalDialog(sr.row!, 'reject'); }} />
+                                              </>
+                                            )}
+                                            {sr.row.can_proxy_approve_step1 && sr.row.approval_instance_id && sr.row.step1_id && (
+                                              <Button appearance="subtle" size="small" icon={<ArrowForward24Regular />} title="Proxy approve step 1" onClick={e => { e.stopPropagation(); setProxyStep1Row(sr.row!); setProxyStep1Comment(''); setProxyStep1Error(null); }} />
+                                            )}
+                                          </div>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          );
+                        })()}
+
+                      </td>
+                    </tr>
+                  ),
+                ];
+              })}
+            </tbody>
+          </table>
+
+          {/* Table footer */}
+          <div className={styles.tableFooter}>
+            <div className={styles.legend}>
+              <div className={styles.legendItem}>
+                <div style={{ width:10, height:8, background:C.line, borderRadius:2 }} />
+                <span>Demand track</span>
+              </div>
+              <div className={styles.legendItem}>
+                <div style={{ width:10, height:8, background:C.good, borderRadius:2 }} />
+                <span>On / over plan</span>
+              </div>
+              <div className={styles.legendItem}>
+                <div style={{ width:10, height:8, background:C.warn, borderRadius:2 }} />
+                <span>Under plan</span>
+              </div>
+              <div className={styles.legendItem}>
+                <div style={{ width:10, height:8, background:C.bad, borderRadius:2 }} />
+                <span>Significantly over</span>
+              </div>
+              <div className={styles.legendItem}>
+                <div style={{ width:2, height:10, background:C.ink2, borderRadius:1 }} />
+                <span>Demand target</span>
+              </div>
+            </div>
+            <span>Showing {sortedGroups.length} of {(new Set(actualsData.map(d => d.employee_name)).size) + (empStats?.filter(s => s.demand_fte > 0 && s.actuals_fte === 0).length ?? 0)} employees</span>
           </div>
         </div>
       )}
 
-      {/* Inline approval action dialog */}
+      {/* ── Approval dialog (preserved exactly) ──────────────────────────── */}
       <Dialog open={!!approvalDialogRow} onOpenChange={(_, d) => { if (!d.open) closeApprovalDialog(); }}>
         <DialogSurface>
           <DialogBody>
@@ -733,7 +1338,7 @@ export function ActualsTab({
         </DialogSurface>
       </Dialog>
 
-      {/* Proxy Approve Step 1 dialog */}
+      {/* ── Proxy Approve Step 1 dialog (preserved exactly) ───────────────── */}
       <Dialog open={!!proxyStep1Row} onOpenChange={(_, d) => { if (!d.open) { setProxyStep1Row(null); setProxyStep1Comment(''); setProxyStep1Error(null); } }}>
         <DialogSurface>
           <DialogBody>
@@ -773,10 +1378,9 @@ export function ActualsTab({
         </DialogSurface>
       </Dialog>
 
-      {/* Actuals vs Demand by Employee — expandable card view */}
-      {canSeeStats && year > 0 && month > 0 && (
+      {/* Bottom employee card section removed */}
+      {false && canSeeStats && year > 0 && month > 0 && (
         <div className={styles.chartCard} style={{ padding: '20px' }}>
-          {/* Section header with sort controls */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <Body1><strong>Actuals vs Demand by Employee</strong></Body1>
             <div className={styles.empCardSortBar}>
@@ -786,7 +1390,7 @@ export function ActualsTab({
                 { key: 'name' as EmpSortKey, label: 'Name' },
                 { key: 'demand' as EmpSortKey, label: 'Demand' },
                 { key: 'actuals' as EmpSortKey, label: 'Actuals' },
-              ] as { key: EmpSortKey; label: string }[]).map(({ key, label }) => (
+              ]).map(({ key, label }) => (
                 <button
                   key={key}
                   className={`${styles.empCardSortBtn} ${empSort === key ? styles.empCardSortBtnActive : ''}`}
@@ -799,41 +1403,35 @@ export function ActualsTab({
           </div>
 
           {empStatsLoading ? (
-            <Body1 style={{ display: 'block', padding: tokens.spacingVerticalL, color: tokens.colorNeutralForeground3 }}>
-              Loading...
-            </Body1>
+            <Body1 style={{ display: 'block', padding: tokens.spacingVerticalL, color: tokens.colorNeutralForeground3 }}>Loading...</Body1>
           ) : empStatsError ? (
             <MessageBar intent="error"><MessageBarBody>{empStatsError}</MessageBarBody></MessageBar>
           ) : sortedEmpStats.length === 0 ? (
-            <Body1 style={{ display: 'block', padding: tokens.spacingVerticalL, color: tokens.colorNeutralForeground3 }}>
-              No demand data found for this period.
-            </Body1>
+            <Body1 style={{ display: 'block', padding: tokens.spacingVerticalL, color: tokens.colorNeutralForeground3 }}>No demand data found for this period.</Body1>
           ) : (
             <>
-              {/* Bar legend */}
               <div style={{ display: 'flex', gap: '16px', marginBottom: '12px', fontSize: '11px', color: '#6b7280' }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ display: 'inline-block', width: 10, height: 10, background: '#16a34a', borderRadius: 2, opacity: 0.4 }} />
-                  Supply
+                  <span style={{ display: 'inline-block', width: 10, height: 10, background: '#16a34a', borderRadius: 2, opacity: 0.4 }} />Supply
                 </span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ display: 'inline-block', width: 10, height: 10, background: '#3b82f6', borderRadius: 2, opacity: 0.5 }} />
-                  Demand
+                  <span style={{ display: 'inline-block', width: 10, height: 10, background: '#3b82f6', borderRadius: 2, opacity: 0.5 }} />Demand
                 </span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ display: 'inline-block', width: 10, height: 10, background: '#1e3a5f', borderRadius: 2 }} />
-                  Actuals
+                  <span style={{ display: 'inline-block', width: 10, height: 10, background: '#1e3a5f', borderRadius: 2 }} />Actuals
                 </span>
               </div>
 
-              {/* Employee cards */}
               {sortedEmpStats.map(row => {
                 const supply = row.supply_fte;
                 const demand = row.demand_fte;
                 const actuals = row.actuals_fte;
                 const maxVal = Math.max(supply, demand, actuals, 100);
                 const isExpanded = expandedEmployees.has(row.resource_id);
-                const meta = empMetaByName.get(row.employee_name);
+                const meta = (() => {
+                  for (const r of actualsData) if (r.employee_name === row.employee_name) return { email: r.employee_email, cost_center_name: r.cost_center_name };
+                  return null;
+                })();
                 const statusOrder = getEmpStatusOrder(demand, actuals);
 
                 return (
@@ -845,108 +1443,75 @@ export function ActualsTab({
                     tabIndex={0}
                     onKeyDown={e => e.key === 'Enter' && toggleEmployee(row.resource_id)}
                   >
-                    {/* Card header row */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px', flexWrap: 'wrap' }}>
-                      {/* Initials circle */}
-                      <div style={{
-                        width: 36, height: 36, borderRadius: '50%',
-                        background: nameColor(row.employee_name),
-                        color: 'white', display: 'flex', alignItems: 'center',
-                        justifyContent: 'center', fontSize: '13px', fontWeight: 600,
-                        flexShrink: 0, userSelect: 'none',
-                      }}>
+                      <div style={{ width:36, height:36, borderRadius:'50%', background:nameColor(row.employee_name), color:'white', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', fontWeight:600, flexShrink:0, userSelect:'none' }}>
                         {nameInitials(row.employee_name)}
                       </div>
-
-                      {/* Name + email + CC */}
-                      <div style={{ flex: '1 1 120px', minWidth: 0 }}>
-                        <div style={{ fontSize: '14px', fontWeight: 600, lineHeight: '1.2' }}>{row.employee_name}</div>
+                      <div style={{ flex:'1 1 120px', minWidth:0 }}>
+                        <div style={{ fontSize:'14px', fontWeight:600, lineHeight:'1.2' }}>{row.employee_name}</div>
                         {(meta?.email || meta?.cost_center_name) && (
-                          <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '1px' }}>
+                          <div style={{ fontSize:'12px', color:'#6b7280', marginTop:'1px' }}>
                             {meta?.email}
-                            {meta?.email && meta?.cost_center_name && <span style={{ margin: '0 4px' }}>·</span>}
+                            {meta?.email && meta?.cost_center_name && <span style={{ margin:'0 4px' }}>·</span>}
                             {meta?.cost_center_name}
                           </div>
                         )}
                       </div>
-
-                      {/* Metric pills */}
-                      <div style={{ display: 'flex', gap: '6px', flexShrink: 0, flexWrap: 'wrap' }}>
-                        <span style={{ background: '#dcfce7', color: '#166534', fontSize: '12px', padding: '2px 8px', borderRadius: '12px', whiteSpace: 'nowrap' }}>
-                          Supply: {supply}%
-                        </span>
-                        <span style={{ background: '#dbeafe', color: '#1e40af', fontSize: '12px', padding: '2px 8px', borderRadius: '12px', whiteSpace: 'nowrap' }}>
-                          Demand: {demand}%
-                        </span>
-                        <span style={{ background: '#e0e7ff', color: '#3730a3', fontSize: '12px', padding: '2px 8px', borderRadius: '12px', whiteSpace: 'nowrap' }}>
-                          Actuals: {actuals}%
-                        </span>
+                      <div style={{ display:'flex', gap:'6px', flexShrink:0, flexWrap:'wrap' }}>
+                        <span style={{ background:'#dcfce7', color:'#166534', fontSize:'12px', padding:'2px 8px', borderRadius:'12px', whiteSpace:'nowrap' }}>Supply: {supply}%</span>
+                        <span style={{ background:'#dbeafe', color:'#1e40af', fontSize:'12px', padding:'2px 8px', borderRadius:'12px', whiteSpace:'nowrap' }}>Demand: {demand}%</span>
+                        <span style={{ background:'#e0e7ff', color:'#3730a3', fontSize:'12px', padding:'2px 8px', borderRadius:'12px', whiteSpace:'nowrap' }}>Actuals: {actuals}%</span>
                       </div>
-
-                      {/* Status badge + chevron */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:'8px', flexShrink:0 }}>
                         {statusOrder === 2 && <Badge appearance="filled" color="success" size="small">On Track</Badge>}
                         {statusOrder === 1 && <Badge appearance="filled" color="warning" size="small">Partial</Badge>}
                         {statusOrder === 0 && <Badge appearance="filled" color="danger" size="small">Missing</Badge>}
                         {statusOrder === 3 && <Badge appearance="outline" size="small">No Demand</Badge>}
-                        <span style={{ fontSize: '11px', color: '#9ca3af', userSelect: 'none' }}>
-                          {isExpanded ? '▼' : '▶'}
-                        </span>
+                        <span style={{ fontSize:'11px', color:'#9ca3af', userSelect:'none' }}>{isExpanded ? '▼' : '▶'}</span>
                       </div>
                     </div>
 
-                    {/* Stacked visual bar */}
-                    <div style={{ position: 'relative', height: '8px', background: '#f3f4f6', borderRadius: '4px' }}>
-                      <div style={{ position: 'absolute', left: 0, top: 0, height: '8px', width: `${Math.min(100, maxVal > 0 ? (supply / maxVal) * 100 : 0)}%`, background: '#16a34a', borderRadius: '4px', opacity: 0.4 }} />
-                      <div style={{ position: 'absolute', left: 0, top: 0, height: '8px', width: `${Math.min(100, maxVal > 0 ? (demand / maxVal) * 100 : 0)}%`, background: '#3b82f6', borderRadius: '4px', opacity: 0.5 }} />
-                      <div style={{ position: 'absolute', left: 0, top: 0, height: '8px', width: `${Math.min(100, maxVal > 0 ? (actuals / maxVal) * 100 : 0)}%`, background: '#1e3a5f', borderRadius: '4px' }} />
+                    <div style={{ position:'relative', height:'8px', background:'#f3f4f6', borderRadius:'4px' }}>
+                      <div style={{ position:'absolute', left:0, top:0, height:'8px', width:`${Math.min(100, maxVal > 0 ? (supply/maxVal)*100 : 0)}%`, background:'#16a34a', borderRadius:'4px', opacity:0.4 }} />
+                      <div style={{ position:'absolute', left:0, top:0, height:'8px', width:`${Math.min(100, maxVal > 0 ? (demand/maxVal)*100 : 0)}%`, background:'#3b82f6', borderRadius:'4px', opacity:0.5 }} />
+                      <div style={{ position:'absolute', left:0, top:0, height:'8px', width:`${Math.min(100, maxVal > 0 ? (actuals/maxVal)*100 : 0)}%`, background:'#1e3a5f', borderRadius:'4px' }} />
                     </div>
 
-                    {/* Expanded section */}
                     {isExpanded && (
-                      <div
-                        style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f3f4f6' }}
-                        onClick={e => e.stopPropagation()}
-                      >
-                        <div style={{ fontSize: '11px', textTransform: 'uppercase', color: '#9ca3af', letterSpacing: '0.5px', marginBottom: '8px' }}>
-                          Project breakdown
-                        </div>
+                      <div style={{ marginTop:'12px', paddingTop:'12px', borderTop:'1px solid #f3f4f6' }} onClick={e => e.stopPropagation()}>
+                        <div style={{ fontSize:'11px', textTransform:'uppercase', color:'#9ca3af', letterSpacing:'0.5px', marginBottom:'8px' }}>Project breakdown</div>
                         {row.projects.length === 0 ? (
-                          <div style={{ fontSize: '13px', color: '#9ca3af', fontStyle: 'italic', padding: '4px 0' }}>
-                            No project breakdown available.
-                          </div>
+                          <div style={{ fontSize:'13px', color:'#9ca3af', fontStyle:'italic', padding:'4px 0' }}>No project breakdown available.</div>
                         ) : (
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'13px' }}>
                             <thead>
                               <tr>
-                                <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, color: '#6b7280', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.3px', borderBottom: '1px solid #f3f4f6' }}>Project</th>
-                                <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: '#6b7280', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.3px', borderBottom: '1px solid #f3f4f6' }}>Demand</th>
-                                <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: '#6b7280', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.3px', borderBottom: '1px solid #f3f4f6' }}>Actuals</th>
-                                <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: '#6b7280', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.3px', borderBottom: '1px solid #f3f4f6' }}>Gap</th>
+                                <th style={{ padding:'6px 10px', textAlign:'left', fontWeight:600, color:'#6b7280', fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.3px', borderBottom:'1px solid #f3f4f6' }}>Project</th>
+                                <th style={{ padding:'6px 10px', textAlign:'right', fontWeight:600, color:'#6b7280', fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.3px', borderBottom:'1px solid #f3f4f6' }}>Demand</th>
+                                <th style={{ padding:'6px 10px', textAlign:'right', fontWeight:600, color:'#6b7280', fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.3px', borderBottom:'1px solid #f3f4f6' }}>Actuals</th>
+                                <th style={{ padding:'6px 10px', textAlign:'right', fontWeight:600, color:'#6b7280', fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.3px', borderBottom:'1px solid #f3f4f6' }}>Gap</th>
                               </tr>
                             </thead>
                             <tbody>
                               {row.projects.map((proj, pi) => {
-                                const gap = proj.actuals_fte - proj.demand_fte;
+                                const gap2 = proj.actuals_fte - proj.demand_fte;
                                 return (
                                   <tr key={proj.project_id} style={{ background: pi % 2 === 0 ? 'white' : '#f9fafb' }}>
-                                    <td style={{ padding: '8px 10px' }}>{proj.project_name}</td>
-                                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6', display: 'inline-block', flexShrink: 0 }} />
-                                        {proj.demand_fte}%
+                                    <td style={{ padding:'8px 10px' }}>{proj.project_name}</td>
+                                    <td style={{ padding:'8px 10px', textAlign:'right' }}>
+                                      <span style={{ display:'inline-flex', alignItems:'center', gap:'4px' }}>
+                                        <span style={{ width:6, height:6, borderRadius:'50%', background:'#3b82f6', display:'inline-block', flexShrink:0 }} />{proj.demand_fte}%
                                       </span>
                                     </td>
-                                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                                    <td style={{ padding:'8px 10px', textAlign:'right' }}>
                                       {proj.actuals_fte > 0 ? (
-                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#1e3a5f', display: 'inline-block', flexShrink: 0 }} />
-                                          {proj.actuals_fte}%
+                                        <span style={{ display:'inline-flex', alignItems:'center', gap:'4px' }}>
+                                          <span style={{ width:6, height:6, borderRadius:'50%', background:'#1e3a5f', display:'inline-block', flexShrink:0 }} />{proj.actuals_fte}%
                                         </span>
-                                      ) : <span style={{ color: '#9ca3af' }}>—</span>}
+                                      ) : <span style={{ color:'#9ca3af' }}>—</span>}
                                     </td>
-                                    <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: gap >= 0 ? '#16a34a' : '#dc2626' }}>
-                                      {gap >= 0 ? `+${gap}%` : `${gap}%`}
+                                    <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:600, color: gap2 >= 0 ? '#16a34a' : '#dc2626' }}>
+                                      {gap2 >= 0 ? `+${gap2}%` : `${gap2}%`}
                                     </td>
                                   </tr>
                                 );
@@ -954,7 +1519,7 @@ export function ActualsTab({
                             </tbody>
                           </table>
                         )}
-                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>
+                        <div style={{ marginTop:'8px', fontSize:'12px', color:'#9ca3af', fontStyle:'italic' }}>
                           Total supply allocated: {supply}% FTE
                         </div>
                       </div>

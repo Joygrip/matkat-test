@@ -59,14 +59,71 @@ import { EmptyState } from '../components/EmptyState';
 import { useAuth, useHasRole } from '../auth/AuthProvider';
 import { apiClient } from '../api/client';
 import { ActualsTab, FinanceActualRow } from '../components/finance/ActualsTab';
-import { SearchableFilter } from '../components/SearchableFilter';
+
+const C_PAGE = {
+  bg:      '#faf9f7',
+  surface: '#ffffff',
+  line:    '#e5e4e0',
+  ink:     '#1b1b1a',
+  ink2:    '#424242',
+  ink3:    '#707070',
+  accent:  '#2a4f3f',
+  good:    '#2a6f4d',
+  goodSoft:'#e3efe7',
+  warn:    '#9a5b00',
+  warnSoft:'#fbe8cf',
+} as const;
 
 const useStyles = makeStyles({
   container: {
-    padding: tokens.spacingHorizontalXXL,
+    padding: `0 ${tokens.spacingHorizontalXXL} ${tokens.spacingHorizontalXXL}`,
     maxWidth: '1600px',
     margin: '0 auto',
     minHeight: 'calc(100vh - 80px)',
+    backgroundColor: C_PAGE.bg,
+  },
+  topbar: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: `${tokens.spacingVerticalL} 0`,
+    marginBottom: tokens.spacingVerticalL,
+    borderBottom: `1px solid ${C_PAGE.line}`,
+    gap: tokens.spacingHorizontalM,
+    flexWrap: 'wrap',
+  },
+  breadcrumb: {
+    fontSize: tokens.fontSizeBase200,
+    color: C_PAGE.ink3,
+    marginBottom: '2px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  pageTitle: {
+    fontSize: '22px',
+    fontWeight: '700',
+    color: C_PAGE.ink,
+    lineHeight: '1.2',
+  },
+  topbarRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    flexWrap: 'wrap',
+  },
+  periodPill: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '4px 12px',
+    borderRadius: '20px',
+    fontSize: '12px',
+    fontWeight: '600',
+    border: `1px solid ${C_PAGE.line}`,
+    background: C_PAGE.surface,
+    color: C_PAGE.ink2,
+    whiteSpace: 'nowrap',
   },
   header: {
     display: 'flex',
@@ -268,7 +325,7 @@ export const Actuals: React.FC = () => {
   const [actualsData, setActualsData] = useState<FinanceActualRow[]>([]);
   const [actualsLoading, setActualsLoading] = useState(false);
   const [actualsError, setActualsError] = useState<string | null>(null);
-  const [actualsProjectId, setActualsProjectId] = useState<string>('');
+  const [actualsProjectId] = useState<string>('');
 
 
   // year/month for chart (derived from finance actuals or period context)
@@ -513,190 +570,174 @@ export const Actuals: React.FC = () => {
     );
   }
 
+  // Add Actual dialog
+  const addActualDialog = !isLocked ? (
+    <Dialog
+      open={isDialogOpen}
+      onOpenChange={(_, data) => {
+        setIsDialogOpen(data.open);
+        if (data.open && isEmployee && myResourceId) {
+          setFormData(prev => ({ ...prev, resource_id: myResourceId }));
+        }
+        if (!data.open) {
+          setResourceSearch('');
+          setDialogProxyReason('');
+        }
+      }}
+    >
+      <DialogTrigger>
+        <Button
+          appearance="primary"
+          icon={<Add24Regular />}
+          style={{ backgroundColor: C_PAGE.accent, borderColor: C_PAGE.accent }}
+        >
+          Add Actual
+        </Button>
+      </DialogTrigger>
+      <DialogSurface>
+        <DialogBody>
+          <DialogTitle>Add Actual Line</DialogTitle>
+          <DialogContent>
+            {currentPeriod && (
+              <div className={styles.formField} style={{ marginBottom: tokens.spacingVerticalM }}>
+                <label>Period</label>
+                <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
+                  {monthNames[currentPeriod.month - 1]} {currentPeriod.year} ({currentPeriod.status})
+                </Body1>
+              </div>
+            )}
+
+            <div className={styles.formField}>
+              <label>Resource</label>
+              {isEmployee ? (
+                myResourceLoading ? (
+                  <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
+                    Identifying your resource...
+                  </Body1>
+                ) : myResourceId ? (
+                  <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground1, fontWeight: tokens.fontWeightSemibold }}>
+                    {resources.find(r => r.id === myResourceId)?.display_name || 'You'}
+                  </Body1>
+                ) : (
+                  <>
+                    <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorPaletteRedForeground1 }}>
+                      No resource linked to your account. Contact your administrator.
+                    </Body1>
+                    {config.devAuthBypass && (
+                      <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3, fontSize: '12px' }}>
+                        In dev: use Dev Login and sign in as an Employee (e.g. Dev User or Alice Developer), or run Seed to create linked users.
+                      </Body1>
+                    )}
+                  </>
+                )
+              ) : (
+                <Combobox
+                  value={resourceSearch}
+                  onChange={(e) => {
+                    setResourceSearch(e.target.value);
+                    setFormData(prev => ({ ...prev, resource_id: '' }));
+                  }}
+                  selectedOptions={formData.resource_id ? [formData.resource_id] : []}
+                  onOptionSelect={(_, data) => {
+                    setFormData(prev => ({ ...prev, resource_id: data.optionValue ?? '' }));
+                    setResourceSearch(data.optionText ?? '');
+                  }}
+                  placeholder="Search resource..."
+                  freeform={false}
+                >
+                  {resources
+                    .filter(r => !resourceSearch || r.display_name.toLowerCase().includes(resourceSearch.toLowerCase()))
+                    .map(r => (
+                      <Option key={r.id} value={r.id}>{r.display_name}</Option>
+                    ))}
+                </Combobox>
+              )}
+            </div>
+
+            {isManager && formData.resource_id && formData.resource_id !== myResourceId && (
+              <div className={styles.formField}>
+                <label className={styles.formLabel}>Reason for entering actuals on behalf of employee (required)</label>
+                <Textarea
+                  value={dialogProxyReason}
+                  onChange={(_, data) => setDialogProxyReason(data.value)}
+                  placeholder="e.g., Employee on extended leave"
+                />
+              </div>
+            )}
+
+            <div className={styles.formField} style={{ marginTop: tokens.spacingVerticalM }}>
+              <label>Project</label>
+              <Select
+                value={formData.project_id}
+                onChange={(_, data) => setFormData({ ...formData, project_id: data.value })}
+              >
+                <option value="">Select project...</option>
+                {projects.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </Select>
+            </div>
+
+            <div className={styles.formField} style={{ marginTop: tokens.spacingVerticalM }}>
+              <label>Actual FTE %</label>
+              <Input
+                type="number"
+                min={5}
+                max={100}
+                step={5}
+                value={String(formData.actual_fte_percent)}
+                onChange={(_, data) => setFormData({ ...formData, actual_fte_percent: parseInt(data.value) })}
+              />
+              <Body1 style={{ marginTop: tokens.spacingVerticalXS, color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 }}>
+                Planned FTE will be automatically calculated from demand lines for this project.
+              </Body1>
+            </div>
+
+            <MessageBar intent="warning" style={{ marginTop: tokens.spacingVerticalM }}>
+              <MessageBarBody>Total actuals per resource cannot exceed 100%</MessageBarBody>
+            </MessageBar>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setIsDialogOpen(false)}>Cancel</Button>
+            <Button
+              appearance="primary"
+              onClick={handleCreate}
+              disabled={
+                (isEmployee && !myResourceId) ||
+                (!isEmployee && !formData.resource_id) ||
+                !formData.project_id ||
+                (isManager && !!formData.resource_id && formData.resource_id !== myResourceId && !dialogProxyReason.trim())
+              }
+            >
+              Create
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+  ) : null;
+
   return (
     <div className={styles.container}>
 
-      {/* ── Header: alerts, Add Actual button, and (non-employee) filters ── */}
-      <div className={styles.header}>
-        <div style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center', flexWrap: 'wrap' }}>
-          {isLocked && (
-            <MessageBar intent="warning" style={{ flex: '1 1 100%' }}>
-              <MessageBarBody>
-                This period is locked. Select an open period in the dropdown above, or ask Finance to unlock this period.
-              </MessageBarBody>
-            </MessageBar>
-          )}
-          {hasRejectedActuals && !isLocked && (
-            <MessageBar intent="error" style={{ flex: '1 1 100%' }}>
-              <MessageBarBody>
-                One or more of your actuals were rejected. Click <strong>Unsign</strong> on the rejected line to make corrections and re-submit for approval.
-              </MessageBarBody>
-            </MessageBar>
-          )}
-          {!isLocked && (
-            <Dialog
-              open={isDialogOpen}
-              onOpenChange={(_, data) => {
-                setIsDialogOpen(data.open);
-                if (data.open && isEmployee && myResourceId) {
-                  setFormData(prev => ({ ...prev, resource_id: myResourceId }));
-                }
-                if (!data.open) {
-                  setResourceSearch('');
-                  setDialogProxyReason('');
-                }
-              }}
-            >
-              <DialogTrigger>
-                <Button appearance="primary" icon={<Add24Regular />}>
-                  Add Actual
-                </Button>
-              </DialogTrigger>
-              <DialogSurface>
-                <DialogBody>
-                  <DialogTitle>Add Actual Line</DialogTitle>
-                  <DialogContent>
-                    {currentPeriod && (
-                      <div className={styles.formField} style={{ marginBottom: tokens.spacingVerticalM }}>
-                        <label>Period</label>
-                        <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
-                          {monthNames[currentPeriod.month - 1]} {currentPeriod.year} ({currentPeriod.status})
-                        </Body1>
-                      </div>
-                    )}
-
-                    <div className={styles.formField}>
-                      <label>Resource</label>
-                      {isEmployee ? (
-                        myResourceLoading ? (
-                          <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
-                            Identifying your resource...
-                          </Body1>
-                        ) : myResourceId ? (
-                          <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground1, fontWeight: tokens.fontWeightSemibold }}>
-                            {resources.find(r => r.id === myResourceId)?.display_name || 'You'}
-                          </Body1>
-                        ) : (
-                          <>
-                            <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorPaletteRedForeground1 }}>
-                              No resource linked to your account. Contact your administrator.
-                            </Body1>
-                            {config.devAuthBypass && (
-                              <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3, fontSize: '12px' }}>
-                                In dev: use Dev Login and sign in as an Employee (e.g. Dev User or Alice Developer), or run Seed to create linked users.
-                              </Body1>
-                            )}
-                          </>
-                        )
-                      ) : (
-                        <Combobox
-                          value={resourceSearch}
-                          onChange={(e) => {
-                            setResourceSearch(e.target.value);
-                            setFormData(prev => ({ ...prev, resource_id: '' }));
-                          }}
-                          selectedOptions={formData.resource_id ? [formData.resource_id] : []}
-                          onOptionSelect={(_, data) => {
-                            setFormData(prev => ({ ...prev, resource_id: data.optionValue ?? '' }));
-                            setResourceSearch(data.optionText ?? '');
-                          }}
-                          placeholder="Search resource..."
-                          freeform={false}
-                        >
-                          {resources
-                            .filter(r => !resourceSearch || r.display_name.toLowerCase().includes(resourceSearch.toLowerCase()))
-                            .map(r => (
-                              <Option key={r.id} value={r.id}>{r.display_name}</Option>
-                            ))}
-                        </Combobox>
-                      )}
-                    </div>
-
-                    {isManager && formData.resource_id && formData.resource_id !== myResourceId && (
-                      <div className={styles.formField}>
-                        <label className={styles.formLabel}>Reason for entering actuals on behalf of employee (required)</label>
-                        <Textarea
-                          value={dialogProxyReason}
-                          onChange={(_, data) => setDialogProxyReason(data.value)}
-                          placeholder="e.g., Employee on extended leave"
-                        />
-                      </div>
-                    )}
-
-                    <div className={styles.formField} style={{ marginTop: tokens.spacingVerticalM }}>
-                      <label>Project</label>
-                      <Select
-                        value={formData.project_id}
-                        onChange={(_, data) => setFormData({ ...formData, project_id: data.value })}
-                      >
-                        <option value="">Select project...</option>
-                        {projects.map(p => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </Select>
-                    </div>
-
-                    <div className={styles.formField} style={{ marginTop: tokens.spacingVerticalM }}>
-                      <label>Actual FTE %</label>
-                      <Input
-                        type="number"
-                        min={5}
-                        max={100}
-                        step={5}
-                        value={String(formData.actual_fte_percent)}
-                        onChange={(_, data) => setFormData({ ...formData, actual_fte_percent: parseInt(data.value) })}
-                      />
-                      <Body1 style={{ marginTop: tokens.spacingVerticalXS, color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 }}>
-                        Planned FTE will be automatically calculated from demand lines for this project.
-                      </Body1>
-                    </div>
-
-                    <MessageBar intent="warning" style={{ marginTop: tokens.spacingVerticalM }}>
-                      <MessageBarBody>Total actuals per resource cannot exceed 100%</MessageBarBody>
-                    </MessageBar>
-                  </DialogContent>
-                  <DialogActions>
-                    <Button onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-                    <Button
-                      appearance="primary"
-                      onClick={handleCreate}
-                      disabled={
-                        (isEmployee && !myResourceId) ||
-                        (!isEmployee && !formData.resource_id) ||
-                        !formData.project_id ||
-                        (isManager && !!formData.resource_id && formData.resource_id !== myResourceId && !dialogProxyReason.trim())
-                      }
-                    >
-                      Create
-                    </Button>
-                  </DialogActions>
-                </DialogBody>
-              </DialogSurface>
-            </Dialog>
-          )}
-        </div>
-
-        {/* Filters — visible to Manager / Finance / Admin */}
-        {!isEmployee && (
-          <div style={{ display: 'flex', gap: tokens.spacingHorizontalL, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS }}>
-              <span className={styles.filterLabel}>Project</span>
-              <SearchableFilter
-                options={projects.map(p => ({ id: p.id, label: p.name }))}
-                value={actualsProjectId}
-                onChange={setActualsProjectId}
-                placeholder="Search projects..."
-                allLabel="All projects"
-                style={{ minWidth: 180 }}
-              />
-            </div>
-          </div>
-        )}
+      {/* ── Topbar: Add Actual button only ───────────────────────────────── */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: `${tokens.spacingVerticalM} 0`, marginBottom: tokens.spacingVerticalM }}>
+        {addActualDialog}
       </div>
 
+      {/* Alerts */}
       {isLocked && (
         <MessageBar intent="warning" style={{ marginBottom: tokens.spacingVerticalM }}>
-          <MessageBarBody>Period is locked. Editing is disabled.</MessageBarBody>
+          <MessageBarBody>
+            This period is locked. Select an open period in the dropdown above, or ask Finance to unlock this period.
+          </MessageBarBody>
+        </MessageBar>
+      )}
+      {hasRejectedActuals && !isLocked && (
+        <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
+          <MessageBarBody>
+            One or more of your actuals were rejected. Click <strong>Unsign</strong> on the rejected line to make corrections and re-submit for approval.
+          </MessageBarBody>
         </MessageBar>
       )}
 

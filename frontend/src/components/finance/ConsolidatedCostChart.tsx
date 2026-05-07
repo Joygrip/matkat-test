@@ -1,36 +1,11 @@
 /**
- * ConsolidatedCostChart
- *
- * Grouped bar chart combining planned labor, actual labor, external contractor,
- * and equipment costs per project and cost center, filterable by period, project,
- * and cost center. Follows Dashboard's filter toolbar and chart card patterns.
+ * ConsolidatedCostChart — Cost Overview redesign
+ * API: /finance/consolidated-costs + /finance/consolidated-costs/detail
+ * All demand_cost / actuals_cost are in DKK; externals_cost / equipment_cost are in cents.
  */
-import React, { useState, useEffect, useMemo } from 'react';
-import {
-  makeStyles,
-  tokens,
-  Card,
-  Button,
-  Select,
-  Combobox,
-  Option,
-  Spinner,
-  Body1,
-  Dialog,
-  DialogSurface,
-  DialogBody,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Tab,
-  TabList,
-  Table,
-  TableHeader,
-  TableRow,
-  TableHeaderCell,
-  TableBody,
-  TableCell,
-} from '@fluentui/react-components';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Spinner, Select, Tab, TabList, Combobox, Option } from '@fluentui/react-components';
+import { ChevronRight20Regular, Dismiss20Regular, ArrowDownloadRegular } from '@fluentui/react-icons';
 import {
   getConsolidatedCosts,
   getConsolidatedCostDetail,
@@ -40,1063 +15,1008 @@ import {
 import { usePeriod } from '../../contexts/PeriodContext';
 import { lookupsApi } from '../../api/lookups';
 import type { Project, CostCenter } from '../../api/admin';
-import { CostGroupedBarChart } from '../CostGroupedBarChart';
-import type { GroupedBarChartDatum } from '../GroupedBarChart';
-import { ArrowDownloadRegular } from '@fluentui/react-icons';
+import type { Snapshot } from '../../api/consolidation';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Design tokens ────────────────────────────────────────────────────────────
 
-const monthNames = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
+const C = {
+  bg: '#faf9f8', surface: '#ffffff', border: '#edebe9', borderStrong: '#d2d0ce',
+  ink1: '#201f1e', ink2: '#424241', ink3: '#605e5c', ink4: '#8a8886',
+  rowHover: '#f3f2f1', accent: '#0f6cbd', accentSoft: '#eaf2fb',
+  planned: '#6b7c93', plannedSoft: '#d6dbe3',
+  actual: '#0f6cbd', actualSoft: '#cfe1f2',
+  oop: '#8a6a3b', oopSoft: '#ece1cd',
+  equip: '#5b6b3a', equipSoft: '#e3e7d3',
+  pos: '#0e7a3a', neg: '#b1391a',
+} as const;
 
-const dkk = (val: number) =>
-  new Intl.NumberFormat('da-DK', {
-    style: 'currency',
-    currency: 'DKK',
-    maximumFractionDigits: 0,
-  }).format(val);
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-const dkkDetail = (val: number) =>
-  new Intl.NumberFormat('da-DK', {
-    style: 'currency',
-    currency: 'DKK',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(val);
+const MS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MF = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
+// ─── Formatters ───────────────────────────────────────────────────────────────
 
-const useStyles = makeStyles({
-  root: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
-  },
+const dkk = (v: number) =>
+  new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', maximumFractionDigits: 0 }).format(v);
 
-  // Filter toolbar (mirrors Dashboard)
-  filtersToolbar: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-  },
-  filtersToolbarCard: {
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-    boxShadow: tokens.shadow2,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-  },
-  filtersToolbarHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalM,
-  },
-  filtersToolbarTitle: {
-    color: tokens.colorNeutralForeground2,
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.5px',
-  },
-  filtersRow: {
-    display: 'flex',
-    flexWrap: 'wrap' as const,
-    gap: tokens.spacingHorizontalM,
-    alignItems: 'flex-end',
-  },
-  filterGroup: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: tokens.spacingVerticalXXS,
-    minWidth: '160px',
-  },
-  filterLabel: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground2,
-  },
-  periodPresetRow: {
-    display: 'flex',
-    flexWrap: 'wrap' as const,
-    gap: tokens.spacingHorizontalXS,
-    marginBottom: tokens.spacingVerticalXXS,
-  },
-  filtersChipsRow: {
-    display: 'flex',
-    flexWrap: 'wrap' as const,
-    gap: tokens.spacingHorizontalXS,
-    marginTop: tokens.spacingVerticalXXS,
-  },
+const dkkD = (v: number) =>
+  new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
 
-  // KPI strip
-  kpiRow: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
-    gap: tokens.spacingHorizontalM,
-  },
-  kpiCard: {
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
-    borderRadius: tokens.borderRadiusLarge,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground1,
-    boxShadow: tokens.shadow2,
-  },
-  kpiLabel: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground3,
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.5px',
-    marginBottom: tokens.spacingVerticalXXS,
-  },
-  kpiValue: {
-    fontSize: tokens.fontSizeHero700,
-    fontWeight: tokens.fontWeightBold,
-    color: tokens.colorNeutralForeground1,
-    lineHeight: '1.2',
-  },
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
-  // Chart card (mirrors Dashboard)
-  chartCard: {
-    borderRadius: tokens.borderRadiusLarge,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    boxShadow: tokens.shadow4,
-    overflow: 'hidden',
-  },
-  chartCardHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  chartCardTitle: {
-    fontSize: tokens.fontSizeBase400,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
-  chartCardBody: {
-    padding: tokens.spacingHorizontalL,
-  },
-  chartsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
-    gap: tokens.spacingHorizontalL,
-  },
-  emptyState: {
-    padding: `${tokens.spacingVerticalXXL} 0`,
-    textAlign: 'center' as const,
-    color: tokens.colorNeutralForeground3,
-  },
-  loadingWrap: {
-    display: 'flex',
-    justifyContent: 'center',
-    padding: tokens.spacingVerticalXXL,
-  },
+function Sparkline({ data, width = 44, height = 18, color = C.accent }: {
+  data: number[]; width?: number; height?: number; color?: string;
+}) {
+  if (!data || data.length < 2) return null;
+  const max = Math.max(...data), min = Math.min(...data);
+  const range = max - min || 1;
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * width;
+    const y = height - ((v - min) / range) * (height - 2) - 1;
+    return `${x},${y}`;
+  }).join(' ');
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
-  // Drill-down dialog
-  dialogSurface: {
-    maxWidth: '860px',
-    width: '90vw',
-    height: '80vh',
-  },
-  dialogBody: {
-    height: '100%',
-    display: 'flex',
-    flexDirection: 'column' as const,
-  },
-  dialogContent: {
-    flex: 1,
-    overflowY: 'auto' as const,
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: tokens.spacingVerticalM,
-    paddingTop: tokens.spacingVerticalS,
-  },
-  detailKpiRow: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(5, 1fr)',
-    gap: tokens.spacingHorizontalS,
-  },
-  detailKpiCard: {
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  detailKpiLabel: {
-    fontSize: tokens.fontSizeBase100,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground3,
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.5px',
-  },
-  detailKpiValue: {
-    fontSize: tokens.fontSizeBase400,
-    fontWeight: tokens.fontWeightBold,
-    color: tokens.colorNeutralForeground1,
-  },
-  tableWrap: {
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusMedium,
-    overflow: 'hidden',
-    width: '100%',
-  },
-  tableHeaderRow: {
-    backgroundColor: tokens.colorNeutralBackground3,
-    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  totalRow: {
-    fontWeight: tokens.fontWeightBold,
-    backgroundColor: tokens.colorNeutralBackground3,
-    borderTop: `2px solid ${tokens.colorNeutralStroke2}`,
-  },
-});
+function MiniBar({ planned, actual, oop, equip, max, height = 12 }: {
+  planned: number; actual: number; oop: number; equip: number; max: number; height?: number;
+}) {
+  const total = planned + actual + oop + equip;
+  if (total === 0 || max === 0) return <div style={{ height }} />;
+  const pct = Math.min(100, (total / max) * 100);
+  const segs = [
+    { val: planned, color: C.planned },
+    { val: actual, color: C.actual },
+    { val: oop, color: C.oop },
+    { val: equip, color: C.equip },
+  ].filter(s => s.val > 0);
+  return (
+    <div style={{ width: '100%', height, display: 'flex', alignItems: 'center' }}>
+      <div style={{ width: `${pct}%`, height, display: 'flex', borderRadius: 2, overflow: 'hidden' }}>
+        {segs.map((s, i) => <div key={i} style={{ flex: s.val, background: s.color, minWidth: 2 }} />)}
+      </div>
+    </div>
+  );
+}
 
-// ─── Component ───────────────────────────────────────────────────────────────
+function TrendCell({ data, color }: { data: number[]; color?: string }) {
+  if (data.length < 2) return <span style={{ color: C.ink4, fontSize: 12 }}>—</span>;
+  const first = data[0], last = data[data.length - 1];
+  if (first === 0) return <span style={{ color: C.ink4, fontSize: 12 }}>—</span>;
+  const delta = ((last - first) / first) * 100;
+  const flat = Math.abs(delta) < 0.5;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+      <Sparkline data={data} color={color ?? C.accent} />
+      {!flat && (
+        <span style={{
+          fontSize: 10, fontWeight: 600, padding: '2px 5px', borderRadius: 8,
+          background: delta > 0 ? '#fde8e4' : '#e3f4ea',
+          color: delta > 0 ? C.neg : C.pos,
+        }}>
+          {delta > 0 ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}%
+        </span>
+      )}
+    </div>
+  );
+}
 
-export const ConsolidatedCostChart: React.FC = () => {
-  const styles = useStyles();
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface EntityRow {
+  id: string; name: string;
+  planned: number; actual: number; oop: number; equip: number; total: number;
+  monthlyTotals: number[];
+}
+
+interface MonthlyBucket {
+  year: number; month: number;
+  planned: number; actual: number; oop: number; equip: number;
+}
+
+interface DrawerState {
+  mode: 'project' | 'cc';
+  title: string; id: string;
+  year: number; month: number;
+  monthlyData: MonthlyBucket[];
+  kpis: { planned: number; actual: number; oop: number; equip: number };
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+interface Props { latestSnapshot?: Snapshot | null; }
+
+export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
   const { periods, selectedPeriod } = usePeriod();
 
-  // Raw API data
+  // Data
   const [rawData, setRawData] = useState<ConsolidatedCostRow[]>([]);
   const [loading, setLoading] = useState(false);
-
-  // Lookups for filter dropdowns
   const [projectOptions, setProjectOptions] = useState<Project[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenter[]>([]);
 
-  // Filter state — default to the globally selected period so values match Project Costs
+  // Filters
   const [selectedPeriodIds, setSelectedPeriodIds] = useState<string[]>(
     () => selectedPeriod ? [`${selectedPeriod.year}-${selectedPeriod.month}`] : []
   );
   const [periodPreset, setPeriodPreset] = useState<'all' | 'first3' | 'first6' | 'custom'>(
     () => selectedPeriod ? 'custom' : 'all'
   );
-  const [customStart, setCustomStart] = useState<string>(
-    () => selectedPeriod ? `${selectedPeriod.year}-${selectedPeriod.month}` : ''
-  );
-  const [customEnd, setCustomEnd] = useState<string>(
-    () => selectedPeriod ? `${selectedPeriod.year}-${selectedPeriod.month}` : ''
-  );
+  const [customStart, setCustomStart] = useState(() => selectedPeriod ? `${selectedPeriod.year}-${selectedPeriod.month}` : '');
+  const [customEnd, setCustomEnd] = useState(() => selectedPeriod ? `${selectedPeriod.year}-${selectedPeriod.month}` : '');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
-
-  // Planned cost visibility toggle
   const [showPlanned, setShowPlanned] = useState(true);
+  const [showAllProjects, setShowAllProjects] = useState(false);
 
-  // Drill-down dialog state
-  const [drillDown, setDrillDown] = useState<{
-    mode: 'project' | 'cc';
-    title: string;
-    year: number;
-    month: number;
-    projectId?: string;
-    costCenterId?: string;
-  } | null>(null);
-  const [drillDownData, setDrillDownData] = useState<ConsolidatedCostDetail | null>(null);
-  const [drillDownLoading, setDrillDownLoading] = useState(false);
-  const [detailTab, setDetailTab] = useState<'planned' | 'actual' | 'oop' | 'equipment'>('planned');
+  // Drawer
+  const [drawer, setDrawer] = useState<DrawerState | null>(null);
+  const [drawerVisible, setDrawerVisible] = useState(false);
+  const [drawerDetail, setDrawerDetail] = useState<ConsolidatedCostDetail | null>(null);
+  const [drawerLoading, setDrawerLoading] = useState(false);
+  const [drawerTab, setDrawerTab] = useState<'bymonth' | 'planned' | 'actual' | 'oop' | 'equipment'>('bymonth');
 
-  // Load aggregation data
+  // ── Loaders ──────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     setLoading(true);
     getConsolidatedCosts()
-      .then((res) => setRawData(res.data))
+      .then(res => setRawData(res.data))
       .catch(() => setRawData([]))
       .finally(() => setLoading(false));
   }, []);
 
-  // Load lookups for filter dropdowns
   useEffect(() => {
     lookupsApi.listProjects?.().then(setProjectOptions).catch(() => {});
     lookupsApi.listCostCenters?.().then(setCostCenterOptions).catch(() => {});
   }, []);
 
-  // ── Period helpers ────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!drawer) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') closeDrawer(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawer]);
+
+  // ── Period helpers ────────────────────────────────────────────────────────────
 
   const sortedPeriods = useMemo(
-    () => [...periods].sort((a, b) => (a.year !== b.year ? a.year - b.year : a.month - b.month)),
+    () => [...periods].sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month),
     [periods]
   );
 
   const applyLastNPeriods = (n: number) => {
-    const open = sortedPeriods.filter((p) => p.status === 'open').slice(0, n);
-    setSelectedPeriodIds(open.map((p) => `${p.year}-${p.month}`));
+    const open = sortedPeriods.filter(p => p.status === 'open').slice(0, n);
+    setSelectedPeriodIds(open.map(p => `${p.year}-${p.month}`));
   };
 
   const applyCustomRange = (start: string, end: string) => {
-    if (!start || !end) {
-      setSelectedPeriodIds([]);
-      return;
-    }
+    if (!start || !end) { setSelectedPeriodIds([]); return; }
     const [sy, sm] = start.split('-').map(Number);
     const [ey, em] = end.split('-').map(Number);
-    const startVal = sy * 12 + sm;
-    const endVal = ey * 12 + em;
-    const lo = Math.min(startVal, endVal);
-    const hi = Math.max(startVal, endVal);
-    const ids = sortedPeriods
-      .filter((p) => { const v = p.year * 12 + p.month; return v >= lo && v <= hi && p.status !== 'locked'; })
-      .map((p) => `${p.year}-${p.month}`);
-    setSelectedPeriodIds(ids);
-  };
-
-  const handlePeriodChange = (periodId: string | null) => {
-    if (periodId === null) {
-      setSelectedPeriodIds([]);
-      setCustomStart('');
-      setCustomEnd('');
-      setPeriodPreset('all');
-    }
+    const lo = Math.min(sy * 12 + sm, ey * 12 + em);
+    const hi = Math.max(sy * 12 + sm, ey * 12 + em);
+    setSelectedPeriodIds(
+      sortedPeriods
+        .filter(p => { const v = p.year * 12 + p.month; return v >= lo && v <= hi && p.status !== 'locked'; })
+        .map(p => `${p.year}-${p.month}`)
+    );
   };
 
   const clearAllFilters = () => {
-    setSelectedPeriodIds([]);
-    setPeriodPreset('all');
-    setCustomStart('');
-    setCustomEnd('');
-    setSelectedProjectId(null);
-    setSelectedCostCenterId(null);
+    setSelectedPeriodIds([]); setPeriodPreset('all');
+    setCustomStart(''); setCustomEnd('');
+    setSelectedProjectId(null); setSelectedCostCenterId(null);
     setShowPlanned(true);
   };
 
-  const closeDrillDown = () => {
-    setDrillDown(null);
-    setDrillDownData(null);
-  };
+  // ── Derived data ─────────────────────────────────────────────────────────────
 
-  // Map CC name → CC id, built from rawData so it's available before ccChartData memo
   const ccNameToId = useMemo(() => {
     const m = new Map<string, string>();
-    rawData.forEach((r) => {
-      if (r.cost_center_id && r.cost_center_name) m.set(r.cost_center_name, r.cost_center_id);
-    });
+    rawData.forEach(r => { if (r.cost_center_id && r.cost_center_name) m.set(r.cost_center_name, r.cost_center_id); });
     return m;
   }, [rawData]);
 
-  // Project bar click → open detail dialog
-  const handleProjectBarClick = (entityName: string, label: string) => {
-    const [monthStr, yearStr] = label.split(' ');
-    const year = parseInt(yearStr, 10);
-    const month = monthNames.indexOf(monthStr) + 1;
-    const match = rawData.find((r) => r.project_name === entityName && r.year === year && r.month === month);
-    if (!match) return;
-    setDrillDown({ mode: 'project', title: entityName, year, month, projectId: match.project_id });
-    setDetailTab('planned');
-    setDrillDownLoading(true);
-    getConsolidatedCostDetail({ project_id: match.project_id, year, month })
-      .then(setDrillDownData)
-      .catch(() => setDrillDownData(null))
-      .finally(() => setDrillDownLoading(false));
-  };
-
-  // Cost center bar click → open detail dialog for that CC + period
-  const handleCcBarClick = (entityName: string, label: string) => {
-    const [monthStr, yearStr] = label.split(' ');
-    const year = parseInt(yearStr, 10);
-    const month = monthNames.indexOf(monthStr) + 1;
-    const ccId = ccNameToId.get(entityName);
-    if (!ccId) return; // "Unassigned" has no CC id — can't drill down
-    setDrillDown({ mode: 'cc', title: entityName, year, month, costCenterId: ccId });
-    setDetailTab('planned');
-    setDrillDownLoading(true);
-    getConsolidatedCostDetail({ cost_center_id: ccId, year, month })
-      .then(setDrillDownData)
-      .catch(() => setDrillDownData(null))
-      .finally(() => setDrillDownLoading(false));
-  };
-
-  // ── Filtered data ─────────────────────────────────────────────────────────
-
   const filteredData = useMemo(() => {
     let d = rawData;
-    if (selectedPeriodIds.length > 0) {
-      d = d.filter((r) => selectedPeriodIds.includes(`${r.year}-${r.month}`));
-    }
-    if (selectedProjectId) {
-      d = d.filter((r) => r.project_id === selectedProjectId);
-    }
+    if (selectedPeriodIds.length > 0) d = d.filter(r => selectedPeriodIds.includes(`${r.year}-${r.month}`));
+    if (selectedProjectId) d = d.filter(r => r.project_id === selectedProjectId);
     if (selectedCostCenterId) {
-      const ccProjectIds = new Set(
-        projectOptions.filter((p) => p.cost_center_id === selectedCostCenterId).map((p) => p.id)
-      );
-      d = d.filter((r) => ccProjectIds.has(r.project_id));
+      const pids = new Set(projectOptions.filter(p => p.cost_center_id === selectedCostCenterId).map(p => p.id));
+      d = d.filter(r => pids.has(r.project_id));
     }
     return d;
   }, [rawData, selectedPeriodIds, selectedProjectId, selectedCostCenterId, projectOptions]);
 
-  // ── KPI totals ────────────────────────────────────────────────────────────
-
-  const kpis = useMemo(
-    () => ({
-      planned: filteredData.reduce((s, r) => s + r.demand_cost, 0),
-      actual: filteredData.reduce((s, r) => s + r.actuals_cost, 0),
-      oop: filteredData.reduce((s, r) => s + r.externals_cost, 0),
-      equipment: filteredData.reduce((s, r) => s + r.equipment_cost, 0),
-    }),
-    [filteredData]
-  );
-
-  // ── Chart data: by project ────────────────────────────────────────────────
-
-  const { projectChartData, projectNames, projectLegendMap } = useMemo(() => {
-    const periodMap = new Map<string, { year: number; month: number }>();
-    const projMap = new Map<string, string>(); // id → name
-    filteredData.forEach((r) => {
-      periodMap.set(`${r.year}-${r.month}`, { year: r.year, month: r.month });
-      projMap.set(r.project_id, r.project_name);
-    });
-
-    const data: GroupedBarChartDatum[] = Array.from(periodMap.entries())
-      .sort(([a], [b]) => {
-        const [ay, am] = a.split('-').map(Number);
-        const [by, bm] = b.split('-').map(Number);
-        return ay !== by ? ay - by : am - bm;
-      })
-      .map(([, { year, month }]) => {
-        const row: GroupedBarChartDatum = { label: `${monthNames[month - 1]} ${year}` };
-        projMap.forEach((name, id) => {
-          const matches = filteredData.filter((r) => r.project_id === id && r.year === year && r.month === month);
-          row[`${name}_planned`] = matches.reduce((s, r) => s + r.demand_cost, 0);
-          row[`${name}_actual`] = matches.reduce((s, r) => s + r.actuals_cost, 0);
-          row[`${name}_oop`] = matches.reduce((s, r) => s + r.externals_cost, 0) / 100;
-          row[`${name}_equipment`] = matches.reduce((s, r) => s + r.equipment_cost, 0) / 100;
-        });
-        return row;
-      });
-
-    const allNames = Array.from(projMap.values());
-    const names = allNames; // No TopN filtering
-
-    const legendMap: Record<string, string> = {};
-    names.forEach((n) => {
-      legendMap[`${n}_planned`] = `${n} — Planned`;
-      legendMap[`${n}_actual`] = `${n} — Actual`;
-      legendMap[`${n}_oop`] = `${n} — OoP`;
-      legendMap[`${n}_equipment`] = `${n} — Equipment`;
-    });
-
-    return { projectChartData: data, projectNames: names, projectLegendMap: legendMap };
+  const sortedMonths = useMemo(() => {
+    const map = new Map<string, { year: number; month: number }>();
+    filteredData.forEach(r => map.set(`${r.year}-${r.month}`, { year: r.year, month: r.month }));
+    return Array.from(map.values()).sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
   }, [filteredData]);
 
-  // ── Chart data: by cost center ────────────────────────────────────────────
+  // KPIs — oop/equipment in raw cents, planned/actual in DKK
+  const kpis = useMemo(() => ({
+    planned: filteredData.reduce((s, r) => s + r.demand_cost, 0),
+    actual: filteredData.reduce((s, r) => s + r.actuals_cost, 0),
+    oop: filteredData.reduce((s, r) => s + r.externals_cost, 0),
+    equipment: filteredData.reduce((s, r) => s + r.equipment_cost, 0),
+  }), [filteredData]);
 
-  const { ccChartData, ccNames, ccLegendMap } = useMemo(() => {
-    const periodMap = new Map<string, { year: number; month: number }>();
-    const ccSet = new Set<string>();
-    filteredData.forEach((r) => {
-      periodMap.set(`${r.year}-${r.month}`, { year: r.year, month: r.month });
-      ccSet.add(r.cost_center_name ?? 'Unassigned');
-    });
-
-    const data: GroupedBarChartDatum[] = Array.from(periodMap.entries())
-      .sort(([a], [b]) => {
-        const [ay, am] = a.split('-').map(Number);
-        const [by, bm] = b.split('-').map(Number);
-        return ay !== by ? ay - by : am - bm;
-      })
-      .map(([, { year, month }]) => {
-        const row: GroupedBarChartDatum = { label: `${monthNames[month - 1]} ${year}` };
-        ccSet.forEach((ccName) => {
-          const related = filteredData.filter((r) =>
-            (r.cost_center_name ?? 'Unassigned') === ccName && r.year === year && r.month === month
-          );
-          row[`${ccName}_planned`] = related.reduce((s, r) => s + r.demand_cost, 0);
-          row[`${ccName}_actual`] = related.reduce((s, r) => s + r.actuals_cost, 0);
-          row[`${ccName}_oop`] = related.reduce((s, r) => s + r.externals_cost, 0) / 100;
-          row[`${ccName}_equipment`] = related.reduce((s, r) => s + r.equipment_cost, 0) / 100;
-        });
-        return row;
-      });
-
-    const names = Array.from(ccSet);
-    const legendMap: Record<string, string> = {};
-    names.forEach((n) => {
-      legendMap[`${n}_planned`] = `${n} — Planned`;
-      legendMap[`${n}_actual`] = `${n} — Actual`;
-      legendMap[`${n}_oop`] = `${n} — OoP`;
-      legendMap[`${n}_equipment`] = `${n} — Equipment`;
-    });
-
-    return { ccChartData: data, ccNames: names, ccLegendMap: legendMap };
-  }, [filteredData]);
-
-  // ── Active filter labels (for chips) ─────────────────────────────────────
-
-  const activePeriodLabel = useMemo(() => {
-    if (!selectedPeriodIds.length) return null;
-    if (periodPreset === 'custom' && customStart && customEnd) {
-      const startP = periods.find((p) => `${p.year}-${p.month}` === customStart);
-      const endP = periods.find((p) => `${p.year}-${p.month}` === customEnd);
-      const startLabel = startP ? `${monthNames[startP.month - 1]} ${startP.year}` : customStart;
-      const endLabel = endP ? `${monthNames[endP.month - 1]} ${endP.year}` : customEnd;
-      return customStart === customEnd ? startLabel : `${startLabel} – ${endLabel}`;
+  // Previous period KPIs for delta (same N months immediately before selected range)
+  const prevKpis = useMemo(() => {
+    if (selectedPeriodIds.length === 0) return null;
+    const sorted = [...selectedPeriodIds].sort();
+    const [fy, fm] = sorted[0].split('-').map(Number);
+    const count = sorted.length;
+    const prevIds: string[] = [];
+    for (let i = count; i >= 1; i--) {
+      let m = fm - i, y = fy;
+      while (m <= 0) { m += 12; y--; }
+      prevIds.push(`${y}-${m}`);
     }
-    const id = selectedPeriodIds[0];
-    const match = periods.find((p) => `${p.year}-${p.month}` === id);
-    return match ? `${monthNames[match.month - 1]} ${match.year}` : id;
-  }, [selectedPeriodIds, periods, periodPreset, customStart, customEnd]);
+    let prev = rawData.filter(r => prevIds.includes(`${r.year}-${r.month}`));
+    if (selectedProjectId) prev = prev.filter(r => r.project_id === selectedProjectId);
+    if (selectedCostCenterId) {
+      const pids = new Set(projectOptions.filter(p => p.cost_center_id === selectedCostCenterId).map(p => p.id));
+      prev = prev.filter(r => pids.has(r.project_id));
+    }
+    if (prev.length === 0) return null;
+    return {
+      planned: prev.reduce((s, r) => s + r.demand_cost, 0),
+      actual: prev.reduce((s, r) => s + r.actuals_cost, 0),
+      oop: prev.reduce((s, r) => s + r.externals_cost, 0),
+      equipment: prev.reduce((s, r) => s + r.equipment_cost, 0),
+    };
+  }, [rawData, selectedPeriodIds, selectedProjectId, selectedCostCenterId, projectOptions]);
 
-  const activeProjectLabel = useMemo(
-    () => (selectedProjectId ? (projectOptions.find((p) => p.id === selectedProjectId)?.name ?? selectedProjectId) : null),
-    [selectedProjectId, projectOptions]
-  );
+  const projectRows = useMemo((): EntityRow[] => {
+    const map = new Map<string, EntityRow>();
+    filteredData.forEach(r => {
+      let row = map.get(r.project_id);
+      if (!row) {
+        row = { id: r.project_id, name: r.project_name, planned: 0, actual: 0, oop: 0, equip: 0, total: 0, monthlyTotals: [] };
+        map.set(r.project_id, row);
+      }
+      row.planned += r.demand_cost;
+      row.actual += r.actuals_cost;
+      row.oop += r.externals_cost / 100;
+      row.equip += r.equipment_cost / 100;
+    });
+    const rows = Array.from(map.values());
+    rows.forEach(row => {
+      row.total = row.planned + row.actual + row.oop + row.equip;
+      row.monthlyTotals = sortedMonths.map(({ year, month }) =>
+        filteredData
+          .filter(r => r.project_id === row.id && r.year === year && r.month === month)
+          .reduce((s, r) => s + r.demand_cost + r.actuals_cost + r.externals_cost / 100 + r.equipment_cost / 100, 0)
+      );
+    });
+    return rows.sort((a, b) => b.total - a.total);
+  }, [filteredData, sortedMonths]);
 
-  const activeCcLabel = useMemo(
-    () =>
-      selectedCostCenterId
-        ? (costCenterOptions.find((c) => c.id === selectedCostCenterId)?.name ?? selectedCostCenterId)
-        : null,
-    [selectedCostCenterId, costCenterOptions]
-  );
+  const ccRows = useMemo((): EntityRow[] => {
+    const map = new Map<string, EntityRow>();
+    filteredData.forEach(r => {
+      const name = r.cost_center_name ?? 'Unassigned';
+      let row = map.get(name);
+      if (!row) {
+        row = { id: name, name, planned: 0, actual: 0, oop: 0, equip: 0, total: 0, monthlyTotals: [] };
+        map.set(name, row);
+      }
+      row.planned += r.demand_cost;
+      row.actual += r.actuals_cost;
+      row.oop += r.externals_cost / 100;
+      row.equip += r.equipment_cost / 100;
+    });
+    const rows = Array.from(map.values());
+    rows.forEach(row => {
+      row.total = row.planned + row.actual + row.oop + row.equip;
+      row.monthlyTotals = sortedMonths.map(({ year, month }) =>
+        filteredData
+          .filter(r => (r.cost_center_name ?? 'Unassigned') === row.name && r.year === year && r.month === month)
+          .reduce((s, r) => s + r.demand_cost + r.actuals_cost + r.externals_cost / 100 + r.equipment_cost / 100, 0)
+      );
+    });
+    return rows.sort((a, b) => b.total - a.total);
+  }, [filteredData, sortedMonths]);
 
-  const hasActiveFilters = !!activePeriodLabel || !!activeProjectLabel || !!activeCcLabel;
+  // Heatmap: top 10 CCs × months matrix
+  const heatmapMatrix = useMemo(() => {
+    const top10 = ccRows.slice(0, 10);
+    const cells = new Map<string, number>();
+    let globalMax = 0;
+    top10.forEach(row => {
+      sortedMonths.forEach(({ year, month }) => {
+        const val = filteredData
+          .filter(r => (r.cost_center_name ?? 'Unassigned') === row.name && r.year === year && r.month === month)
+          .reduce((s, r) => s + r.demand_cost + r.actuals_cost + r.externals_cost / 100 + r.equipment_cost / 100, 0);
+        cells.set(`${row.name}::${year}-${month}`, val);
+        if (val > globalMax) globalMax = val;
+      });
+    });
+    return { top10, cells, globalMax };
+  }, [ccRows, filteredData, sortedMonths]);
 
-  // ── Drill-down CSV export ─────────────────────────────────────────────────
+  const periodRangeLabel = useMemo(() => {
+    if (selectedPeriodIds.length === 0) return 'All periods';
+    const sorted = [...selectedPeriodIds].sort();
+    const [fy, fm] = sorted[0].split('-').map(Number);
+    const [ly, lm] = sorted[sorted.length - 1].split('-').map(Number);
+    if (sorted.length === 1) return `${MF[fm - 1]} ${fy}`;
+    return `${MS[fm - 1]} ${fy} – ${MS[lm - 1]} ${ly}`;
+  }, [selectedPeriodIds]);
+
+  // ── Drawer ────────────────────────────────────────────────────────────────────
+
+  const buildMonthlyBuckets = useCallback((filter: (r: ConsolidatedCostRow) => boolean): MonthlyBucket[] =>
+    sortedMonths.map(({ year, month }) => {
+      const matches = filteredData.filter(r => filter(r) && r.year === year && r.month === month);
+      return {
+        year, month,
+        planned: matches.reduce((s, r) => s + r.demand_cost, 0),
+        actual: matches.reduce((s, r) => s + r.actuals_cost, 0),
+        oop: matches.reduce((s, r) => s + r.externals_cost / 100, 0),
+        equip: matches.reduce((s, r) => s + r.equipment_cost / 100, 0),
+      };
+    }),
+  [filteredData, sortedMonths]);
+
+  const closeDrawer = useCallback(() => {
+    setDrawerVisible(false);
+    setTimeout(() => { setDrawer(null); setDrawerDetail(null); }, 300);
+  }, []);
+
+  const openDrawerFor = useCallback((
+    mode: 'project' | 'cc',
+    row: EntityRow,
+    targetYear?: number,
+    targetMonth?: number,
+  ) => {
+    const filter = mode === 'project'
+      ? (r: ConsolidatedCostRow) => r.project_id === row.id
+      : (r: ConsolidatedCostRow) => (r.cost_center_name ?? 'Unassigned') === row.name;
+
+    const entityData = filteredData.filter(filter);
+    const latest = entityData
+      .filter(r => targetYear === undefined || (r.year === targetYear && r.month === targetMonth))
+      .sort((a, b) => a.year !== b.year ? b.year - a.year : b.month - a.month)[0]
+      ?? entityData.sort((a, b) => a.year !== b.year ? b.year - a.year : b.month - a.month)[0];
+    if (!latest) return;
+
+    const year = targetYear ?? latest.year;
+    const month = targetMonth ?? latest.month;
+
+    setDrawer({
+      mode, title: row.name, id: row.id, year, month,
+      monthlyData: buildMonthlyBuckets(filter),
+      kpis: { planned: row.planned, actual: row.actual, oop: row.oop, equip: row.equip },
+    });
+    setDrawerTab('bymonth');
+    setDrawerDetail(null);
+    requestAnimationFrame(() => setDrawerVisible(true));
+
+    const ccId = mode === 'cc' ? ccNameToId.get(row.name) : undefined;
+    if (mode === 'project' || ccId) {
+      setDrawerLoading(true);
+      const params = mode === 'project' ? { project_id: row.id, year, month } : { cost_center_id: ccId!, year, month };
+      getConsolidatedCostDetail(params)
+        .then(setDrawerDetail).catch(() => setDrawerDetail(null)).finally(() => setDrawerLoading(false));
+    }
+  }, [filteredData, buildMonthlyBuckets, ccNameToId]);
+
+  // ── CSV export (preserved from original) ─────────────────────────────────────
 
   const downloadDrillDownCsv = () => {
-    if (!drillDownData || !drillDown) return;
-    const esc = (v: string | number | null | undefined) =>
-      `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const isCc = drillDown.mode === 'cc';
-    const periodLabel = `${monthNames[drillDown.month - 1]}_${drillDown.year}`;
-    let header: string[];
-    let rows: string[][];
-
-    if (detailTab === 'planned') {
+    if (!drawerDetail || !drawer) return;
+    const esc = (v: string | number | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const isCc = drawer.mode === 'cc';
+    const periodLabel = `${MF[drawer.month - 1]}_${drawer.year}`;
+    let header: string[], rows: string[][];
+    if (drawerTab === 'planned') {
       header = [...(isCc ? ['Project'] : []), 'Employee', 'FTE %', 'Cost (DKK)'];
-      rows = drillDownData.demand_lines.map((l) => [
-        ...(isCc ? [l.project_name ?? ''] : []),
-        l.resource_name, String(l.fte_percent), String(l.cost),
-      ]);
-    } else if (detailTab === 'actual') {
+      rows = drawerDetail.demand_lines.map(l => [...(isCc ? [l.project_name ?? ''] : []), l.resource_name, String(l.fte_percent), String(l.cost)]);
+    } else if (drawerTab === 'actual') {
       header = [...(isCc ? ['Project'] : []), 'Employee', 'FTE %', 'Cost (DKK)'];
-      rows = drillDownData.actual_lines.map((l) => [
-        ...(isCc ? [l.project_name ?? ''] : []),
-        l.resource_name, String(l.fte_percent), String(l.cost),
-      ]);
-    } else if (detailTab === 'oop') {
-      header = [...(isCc ? ['Project'] : []), 'OoP Resource', 'Notes', 'Total (DKK)'];
-      rows = drillDownData.external_lines.map((l) => [
-        ...(isCc ? [l.project_name ?? ''] : []),
-        l.resource_name ?? l.description ?? '', l.notes ?? '',
-        String(l.total_cost),
-      ]);
+      rows = drawerDetail.actual_lines.map(l => [...(isCc ? [l.project_name ?? ''] : []), l.resource_name, String(l.fte_percent), String(l.cost)]);
+    } else if (drawerTab === 'oop') {
+      header = ['OoP Resource', 'Notes', 'Total (DKK)'];
+      rows = drawerDetail.external_lines.map(l => [l.resource_name ?? l.description ?? '', l.notes ?? '', String(l.total_cost / 100)]);
     } else {
-      header = [...(isCc ? ['Project'] : []), 'Description', 'Cost (DKK)'];
-      rows = drillDownData.equipment_lines.map((l) => [
-        ...(isCc ? [l.project_name ?? ''] : []),
-        l.description ?? '', String(l.cost),
-      ]);
+      header = ['Description', 'Cost (DKK)'];
+      rows = drawerDetail.equipment_lines.map(l => [l.description ?? '', String(l.cost / 100)]);
     }
-
-    const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\n');
+    const csv = [header, ...rows].map(r => r.map(esc).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${drillDown.title}_${periodLabel}_${detailTab}.csv`;
-    a.click();
+    const a = document.createElement('a'); a.href = url; a.download = `${drawer.title}_${periodLabel}_${drawerTab}.csv`; a.click();
     URL.revokeObjectURL(url);
   };
 
-  const downloadAllRealCostCsv = () => {
-    if (!drillDownData || !drillDown) return;
-    const esc = (v: string | number | null | undefined) =>
-      `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const periodLabel = `${monthNames[drillDown.month - 1]}_${drillDown.year}`;
-    const header = ['Type', 'Project', 'Resource/Description', 'Notes', 'Hours', 'Rate (DKK)', 'FTE %', 'Cost (DKK)'];
-    const rows: string[][] = [
-      ...drillDownData.actual_lines.map((l) => [
-        'Actual Labor',
-        l.project_name ?? '',
-        l.resource_name ?? '',
-        '',
-        '',
-        '',
-        String(l.fte_percent),
-        String(l.cost),
-      ]),
-      ...drillDownData.external_lines.map((l) => [
-        'OoP',
-        l.project_name ?? '',
-        l.resource_name ?? l.description ?? '',
-        l.notes ?? '',
-        String(l.hours),
-        String(l.rate / 100),
-        '',
-        String(l.total_cost / 100),
-      ]),
-      ...drillDownData.equipment_lines.map((l) => [
-        'Equipment',
-        l.project_name ?? '',
-        l.description ?? '',
-        '',
-        '',
-        '',
-        '',
-        String(l.cost / 100),
-      ]),
-    ];
-    const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${drillDown.title}_${periodLabel}_all_real_cost.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  // ── Render helpers ────────────────────────────────────────────────────────────
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  const maxProjTotal = projectRows[0]?.total ?? 1;
+  const maxCcTotal = ccRows[0]?.total ?? 1;
+
+  const calcDelta = (curr: number, prev: number | undefined) =>
+    prev && prev !== 0 ? ((curr - prev) / prev) * 100 : null;
+
+  const label11 = { fontSize: 11, fontWeight: 600, color: C.ink4, textTransform: 'uppercase' as const, letterSpacing: '0.5px' };
+  const thStyle = { padding: '8px 10px', fontWeight: 600, color: C.ink3, borderBottom: `2px solid ${C.border}`, background: '#f3f2f1' };
+  const tdStyle = { padding: '8px 10px', borderBottom: `1px solid ${C.border}` };
+
+  // ── JSX ───────────────────────────────────────────────────────────────────────
 
   return (
-    <div className={styles.root}>
-      {/* ── Filter toolbar ── */}
-      <div className={styles.filtersToolbar}>
-        <Card className={styles.filtersToolbarCard}>
-          <div className={styles.filtersToolbarHeader}>
-            <span className={styles.filtersToolbarTitle}>Filters</span>
-            <Button appearance="subtle" size="small" onClick={clearAllFilters}>
-              Clear filters
-            </Button>
-          </div>
-          <div className={styles.filtersRow}>
-            {/* Period */}
-            <div className={styles.filterGroup}>
-              <span className={styles.filterLabel}>Period</span>
-              <div className={styles.periodPresetRow}>
-                <Button
-                  size="small"
-                  appearance={periodPreset === 'all' ? 'primary' : 'secondary'}
-                  onClick={() => { setPeriodPreset('all'); setSelectedPeriodIds([]); }}
-                >All</Button>
-                <Button
-                  size="small"
-                  appearance={periodPreset === 'first3' ? 'primary' : 'secondary'}
-                  onClick={() => { setPeriodPreset('first3'); applyLastNPeriods(3); }}
-                >First 3</Button>
-                <Button
-                  size="small"
-                  appearance={periodPreset === 'first6' ? 'primary' : 'secondary'}
-                  onClick={() => { setPeriodPreset('first6'); applyLastNPeriods(6); }}
-                >First 6</Button>
-                <Button
-                  size="small"
-                  appearance={periodPreset === 'custom' ? 'primary' : 'secondary'}
-                  onClick={() => setPeriodPreset('custom')}
-                >Custom</Button>
-              </div>
-              {periodPreset === 'custom' && (
-                <div style={{ display: 'flex', gap: tokens.spacingHorizontalS, alignItems: 'flex-end' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS }}>
-                    <span className={styles.filterLabel}>From</span>
-                    <Select
-                      value={customStart}
-                      onChange={(_, data) => {
-                        const val = data.value || '';
-                        setCustomStart(val);
-                        applyCustomRange(val, customEnd);
-                      }}
-                    >
-                      <option value="">Start</option>
-                      {sortedPeriods.filter((p) => p.status !== 'locked').map((p) => (
-                        <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>
-                          {monthNames[p.month - 1]} {p.year}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS }}>
-                    <span className={styles.filterLabel}>To</span>
-                    <Select
-                      value={customEnd}
-                      onChange={(_, data) => {
-                        const val = data.value || '';
-                        setCustomEnd(val);
-                        applyCustomRange(customStart, val);
-                      }}
-                    >
-                      <option value="">End</option>
-                      {sortedPeriods.filter((p) => p.status !== 'locked').map((p) => (
-                        <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>
-                          {monthNames[p.month - 1]} {p.year}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                </div>
-              )}
-            </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-            {/* Project */}
-            <div className={styles.filterGroup}>
-              <span className={styles.filterLabel}>Project</span>
-              <Select
-                value={selectedProjectId ?? ''}
-                onChange={(_, data) => setSelectedProjectId(data.value || null)}
-                style={{ minWidth: 180 }}
-              >
-                <option value="">All projects</option>
-                {projectOptions.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </Select>
-            </div>
-
-            {/* Show Planned toggle */}
-            <div className={styles.filterGroup} style={{ justifyContent: 'flex-end' }}>
-              <Button
-                size="small"
-                appearance={showPlanned ? 'primary' : 'secondary'}
-                onClick={() => setShowPlanned((v) => !v)}
-              >
-                {showPlanned ? 'Planned: On' : 'Planned: Off'}
-              </Button>
-            </div>
-
-            {/* Cost Center */}
-            <div className={styles.filterGroup}>
-              <span className={styles.filterLabel}>Cost Center</span>
-              <Combobox
-                value={selectedCostCenterId ? (costCenterOptions.find((c) => c.id === selectedCostCenterId)?.name ?? '') : ''}
-                onOptionSelect={(_, data) => setSelectedCostCenterId(data.optionValue ? String(data.optionValue) : null)}
-              >
-                <Option key="__all" value="" text="All cost centers">All cost centers</Option>
-                {costCenterOptions.map((c) => (
-                  <Option key={c.id} value={c.id} text={c.name}>{c.name}</Option>
-                ))}
-              </Combobox>
-            </div>
-          </div>
-        </Card>
-
-        {/* Active filter chips */}
-        {hasActiveFilters && (
-          <div className={styles.filtersChipsRow}>
-            {activePeriodLabel && (
-              <Button appearance="outline" size="small" onClick={() => handlePeriodChange(null)}>
-                {`Period: ${activePeriodLabel} ✕`}
-              </Button>
-            )}
-            {activeProjectLabel && (
-              <Button appearance="outline" size="small" onClick={() => setSelectedProjectId(null)}>
-                {`Project: ${activeProjectLabel} ✕`}
-              </Button>
-            )}
-            {activeCcLabel && (
-              <Button appearance="outline" size="small" onClick={() => setSelectedCostCenterId(null)}>
-                {`Cost center: ${activeCcLabel} ✕`}
-              </Button>
-            )}
+      {/* Section 1 — Page header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: C.ink1 }}>Cost Overview</h1>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: C.ink3 }}>{periodRangeLabel}</p>
+        </div>
+        {latestSnapshot && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: C.ink3 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.pos, display: 'inline-block', flexShrink: 0 }} />
+            Last snapshot: {new Date(latestSnapshot.published_at).toLocaleDateString('da-DK')}
           </div>
         )}
       </div>
 
-      {/* ── KPI strip ── */}
-      <div className={styles.kpiRow}>
-        {[ 
-          { label: 'Total Planned Labor', value: kpis.planned, divide: false },
-          { label: 'Total Actual Labor', value: kpis.actual, divide: false },
-          { label: 'Total OoP', value: kpis.oop, divide: true },
-          { label: 'Total Equipment', value: kpis.equipment, divide: true },
-        ].map(({ label, value, divide }) => (
-          <div key={label} className={styles.kpiCard}>
-            <div className={styles.kpiLabel}>{label}</div>
-            <div className={styles.kpiValue}>{dkk(divide ? value / 100 : value)}</div>
+      {/* Section 2 — Filter bar */}
+      <div style={{
+        background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8,
+        boxShadow: '0 1px 4px rgba(0,0,0,0.06)', padding: '14px 20px',
+        display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-end',
+      }}>
+        {/* Period */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={label11}>Period</span>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {(['all', 'first3', 'first6', 'custom'] as const).map(p => (
+              <button key={p} onClick={() => {
+                setPeriodPreset(p);
+                if (p === 'all') setSelectedPeriodIds([]);
+                else if (p === 'first3') applyLastNPeriods(3);
+                else if (p === 'first6') applyLastNPeriods(6);
+              }} style={{
+                padding: '5px 12px', fontSize: 13, borderRadius: 6,
+                border: `1px solid ${periodPreset === p ? C.accent : C.borderStrong}`,
+                background: periodPreset === p ? C.accent : C.surface,
+                color: periodPreset === p ? '#fff' : C.ink2,
+                cursor: 'pointer', fontWeight: periodPreset === p ? 600 : 400,
+              }}>
+                {p === 'all' ? 'All' : p === 'first3' ? 'First 3' : p === 'first6' ? 'First 6' : 'Custom'}
+              </button>
+            ))}
           </div>
-        ))}
+          {periodPreset === 'custom' && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+              <Select value={customStart} onChange={(_, d) => { const v = d.value || ''; setCustomStart(v); applyCustomRange(v, customEnd); }}>
+                <option value="">From</option>
+                {sortedPeriods.filter(p => p.status !== 'locked').map(p => (
+                  <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>{MS[p.month - 1]} {p.year}</option>
+                ))}
+              </Select>
+              <Select value={customEnd} onChange={(_, d) => { const v = d.value || ''; setCustomEnd(v); applyCustomRange(customStart, v); }}>
+                <option value="">To</option>
+                {sortedPeriods.filter(p => p.status !== 'locked').map(p => (
+                  <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>{MS[p.month - 1]} {p.year}</option>
+                ))}
+              </Select>
+            </div>
+          )}
+        </div>
+
+        {/* Project */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={label11}>Project</span>
+          <Select value={selectedProjectId ?? ''} onChange={(_, d) => setSelectedProjectId(d.value || null)} style={{ minWidth: 160 }}>
+            <option value="">All projects</option>
+            {projectOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </Select>
+        </div>
+
+        {/* Cost Center */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={label11}>Cost Center</span>
+          <Combobox
+            value={selectedCostCenterId ? (costCenterOptions.find(c => c.id === selectedCostCenterId)?.name ?? '') : ''}
+            onOptionSelect={(_, d) => setSelectedCostCenterId(d.optionValue ? String(d.optionValue) : null)}
+            style={{ minWidth: 160 }}
+          >
+            <Option key="__all" value="" text="All cost centers">All cost centers</Option>
+            {costCenterOptions.map(c => <Option key={c.id} value={c.id} text={c.name}>{c.name}</Option>)}
+          </Combobox>
+        </div>
+
+        {/* Planned toggle */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={label11}>Planned</span>
+          <button onClick={() => setShowPlanned(v => !v)} style={{
+            padding: '5px 14px', fontSize: 13, borderRadius: 6, cursor: 'pointer',
+            border: `1px solid ${showPlanned ? C.accent : C.borderStrong}`,
+            background: showPlanned ? C.accentSoft : C.surface,
+            color: showPlanned ? C.accent : C.ink3, fontWeight: showPlanned ? 600 : 400,
+          }}>
+            {showPlanned ? '● On' : 'Off'}
+          </button>
+        </div>
+
+        <div style={{ flex: 1 }} />
+        <button onClick={clearAllFilters} style={{
+          fontSize: 13, padding: '5px 12px', borderRadius: 6,
+          border: `1px solid ${C.border}`, background: C.surface, color: C.ink3, cursor: 'pointer',
+        }}>Clear filters</button>
       </div>
 
-      {/* ── Charts ── */}
+      {/* Section 3 — KPI strip */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+        {[
+          { label: 'Planned Labor', accent: C.accent, curr: kpis.planned, prev: prevKpis?.planned, display: kpis.planned },
+          { label: 'Actual Labor', accent: C.planned, curr: kpis.actual, prev: prevKpis?.actual, display: kpis.actual },
+          { label: 'Out-of-Pocket', accent: C.oop, curr: kpis.oop, prev: prevKpis?.oop, display: kpis.oop / 100 },
+          { label: 'Equipment', accent: C.equip, curr: kpis.equipment, prev: prevKpis?.equipment, display: kpis.equipment / 100 },
+        ].map(({ label, accent, curr, prev, display }) => {
+          const d = calcDelta(curr, prev);
+          return (
+            <div key={label} style={{
+              background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8,
+              boxShadow: '0 1px 4px rgba(0,0,0,0.06)', display: 'flex', overflow: 'hidden',
+            }}>
+              <div style={{ width: 3, background: accent, flexShrink: 0 }} />
+              <div style={{ padding: '14px 16px', flex: 1, minWidth: 0 }}>
+                <div style={{ ...label11, marginBottom: 6 }}>{label}</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: C.ink1 }}>{dkk(display)}</div>
+                {d !== null && (
+                  <div style={{ marginTop: 4, fontSize: 12, color: d > 0 ? C.neg : C.pos }}>
+                    {d > 0 ? '▲' : '▼'} {Math.abs(d).toFixed(1)}% vs prior period
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Section 4 — Two-panel layout */}
       {loading ? (
-        <div className={styles.loadingWrap}>
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
           <Spinner label="Loading cost data…" />
         </div>
       ) : filteredData.length === 0 ? (
-        <div className={styles.emptyState}>
-          <Body1>No cost data found for the selected filters.</Body1>
+        <div style={{ textAlign: 'center', padding: 40, color: C.ink4, fontSize: 14 }}>
+          No cost data found for the selected filters.
         </div>
       ) : (
-        <div className={styles.chartsGrid}>
-          {/* By project — click a bar to open detail dialog */}
-          <div className={styles.chartCard}>
-            <div className={styles.chartCardHeader}>
-              <span className={styles.chartCardTitle}>Costs by Project</span>
-              <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-                Click a bar to drill down
-              </Body1>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+
+          {/* Panel A — Costs by Project */}
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
+            <div style={{ padding: '14px 20px', borderBottom: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: C.ink1 }}>Costs by Project</div>
+              <div style={{ fontSize: 12, color: C.ink4, marginTop: 2 }}>Ranked by total cost across selected period</div>
             </div>
-            <div className={styles.chartCardBody}>
-              <CostGroupedBarChart
-                data={projectChartData}
-                entityNames={projectNames}
-                legendMap={projectLegendMap}
-                onBarClick={handleProjectBarClick}
-                hiddenCategories={showPlanned ? [] : ['planned']}
-              />
+            <div style={{ padding: 20 }}>
+              {/* Legend */}
+              <div style={{ display: 'flex', gap: 14, marginBottom: 14, flexWrap: 'wrap' }}>
+                {[{ l: 'Planned', c: C.planned }, { l: 'Actual', c: C.actual }, { l: 'OoP', c: C.oop }, { l: 'Equipment', c: C.equip }].map(s => (
+                  <div key={s.l} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: C.ink3 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: s.c }} />{s.l}
+                  </div>
+                ))}
+              </div>
+
+              {/* Horizontal stacked bars — top 5 */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+                {(showAllProjects ? projectRows : projectRows.slice(0, 5)).map(row => (
+                  <div key={row.id} style={{ display: 'grid', gridTemplateColumns: '140px 1fr 96px', gap: 8, alignItems: 'center' }}>
+                    <div style={{ fontSize: 13, color: C.ink2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.name}>{row.name}</div>
+                    <div
+                      style={{ height: 18, display: 'flex', borderRadius: 3, overflow: 'hidden', cursor: 'pointer', background: C.border }}
+                      onClick={() => openDrawerFor('project', row)}
+                      title={`Click to drill down into ${row.name}`}
+                    >
+                      {showPlanned && row.planned > 0 && <div style={{ flex: row.planned, background: C.planned }} />}
+                      {row.actual > 0 && <div style={{ flex: row.actual, background: C.actual }} />}
+                      {row.oop > 0 && <div style={{ flex: row.oop, background: C.oop }} />}
+                      {row.equip > 0 && <div style={{ flex: row.equip, background: C.equip }} />}
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: C.ink1, textAlign: 'right' }}>{dkk(row.total)}</div>
+                  </div>
+                ))}
+                {projectRows.length > 5 && (
+                  <button onClick={() => setShowAllProjects(v => !v)} style={{
+                    background: 'none', border: 'none', color: C.accent, fontSize: 13, cursor: 'pointer', textAlign: 'left', padding: 0, marginTop: 2,
+                  }}>
+                    {showAllProjects ? 'Show fewer' : `Show all ${projectRows.length} projects`}
+                  </button>
+                )}
+              </div>
+
+              {/* Ranked table */}
+              <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr 72px 90px 88px 20px', gap: 8, padding: '0 6px 8px', ...label11 }}>
+                  <div>#</div><div>Name</div><div>Breakdown</div><div style={{ textAlign: 'right' }}>Total</div><div>Trend</div><div />
+                </div>
+                {projectRows.map((row, i) => (
+                  <div key={row.id}
+                    onClick={() => openDrawerFor('project', row)}
+                    style={{ display: 'grid', gridTemplateColumns: '24px 1fr 72px 90px 88px 20px', gap: 8, padding: '7px 6px', alignItems: 'center', cursor: 'pointer', borderRadius: 6 }}
+                    onMouseEnter={e => (e.currentTarget.style.background = C.rowHover)}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <div style={{ fontSize: 12, color: C.ink4, fontWeight: 600 }}>{i + 1}</div>
+                    <div style={{ fontSize: 13, color: C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.name}</div>
+                    <MiniBar planned={showPlanned ? row.planned : 0} actual={row.actual} oop={row.oop} equip={row.equip} max={maxProjTotal} />
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.ink1, textAlign: 'right' }}>{dkk(row.total)}</div>
+                    <TrendCell data={row.monthlyTotals} color={C.accent} />
+                    <ChevronRight20Regular style={{ color: C.ink4 }} />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* By cost center — click a bar to drill down into that CC's costs */}
-          <div className={styles.chartCard}>
-            <div className={styles.chartCardHeader}>
-              <span className={styles.chartCardTitle}>Costs by Cost Center</span>
-              <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-                Click a bar to drill down
-              </Body1>
+          {/* Panel B — Costs by Cost Center */}
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
+            <div style={{ padding: '14px 20px', borderBottom: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: C.ink1 }}>Costs by Cost Center</div>
             </div>
-            <div className={styles.chartCardBody}>
-              {ccNames.length > 0 ? (
-                <CostGroupedBarChart
-                  data={ccChartData}
-                  entityNames={ccNames}
-                  legendMap={ccLegendMap}
-                  onBarClick={handleCcBarClick}
-                  hiddenCategories={showPlanned ? ['oop', 'equipment'] : ['planned', 'oop', 'equipment']}
-                />
-              ) : (
-                <div className={styles.emptyState}>
-                  <Body1>No cost center mapping found. Ensure projects are assigned to cost centers.</Body1>
+            <div style={{ padding: 20 }}>
+              {/* Heatmap */}
+              {heatmapMatrix.top10.length > 0 && sortedMonths.length > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: C.ink4, marginBottom: 8 }}>Monthly Heatmap</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: `130px repeat(${sortedMonths.length}, 1fr)`, gap: 2 }}>
+                    <div />
+                    {sortedMonths.map(m => (
+                      <div key={`h-${m.year}-${m.month}`} style={{ fontSize: 10, color: C.ink4, textAlign: 'center', fontWeight: 600, paddingBottom: 3 }}>
+                        {MS[m.month - 1]}
+                      </div>
+                    ))}
+                    {heatmapMatrix.top10.map(row => (
+                      <React.Fragment key={row.name}>
+                        <div style={{ fontSize: 12, color: C.ink2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: '22px' }} title={row.name}>{row.name}</div>
+                        {sortedMonths.map(m => {
+                          const val = heatmapMatrix.cells.get(`${row.name}::${m.year}-${m.month}`) ?? 0;
+                          const intensity = heatmapMatrix.globalMax > 0 ? val / heatmapMatrix.globalMax : 0;
+                          return (
+                            <div
+                              key={`${m.year}-${m.month}`}
+                              title={`${row.name} · ${MS[m.month - 1]} ${m.year}: ${dkk(val)}`}
+                              onClick={() => val > 0 && openDrawerFor('cc', row, m.year, m.month)}
+                              style={{
+                                height: 22, borderRadius: 2,
+                                cursor: val > 0 ? 'pointer' : 'default',
+                                background: val > 0 ? `rgba(15,108,189,${(0.1 + intensity * 0.85).toFixed(2)})` : '#f0efee',
+                              }}
+                              onMouseEnter={e => { if (val > 0) (e.currentTarget as HTMLElement).style.outline = `2px solid ${C.accent}`; }}
+                              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.outline = 'none'; }}
+                            />
+                          );
+                        })}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 11, color: C.ink4 }}>
+                    <span>Low</span>
+                    <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'linear-gradient(to right, rgba(15,108,189,0.1), rgba(15,108,189,0.95))' }} />
+                    <span>High</span>
+                  </div>
                 </div>
               )}
+
+              {/* Ranked CC table */}
+              <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr 72px 90px 88px 20px', gap: 8, padding: '0 6px 8px', ...label11 }}>
+                  <div>#</div><div>Name</div><div>Breakdown</div><div style={{ textAlign: 'right' }}>Total</div><div>Trend</div><div />
+                </div>
+                {ccRows.map((row, i) => (
+                  <div key={row.id}
+                    onClick={() => openDrawerFor('cc', row)}
+                    style={{ display: 'grid', gridTemplateColumns: '24px 1fr 72px 90px 88px 20px', gap: 8, padding: '7px 6px', alignItems: 'center', cursor: 'pointer', borderRadius: 6 }}
+                    onMouseEnter={e => (e.currentTarget.style.background = C.rowHover)}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <div style={{ fontSize: 12, color: C.ink4, fontWeight: 600 }}>{i + 1}</div>
+                    <div style={{ fontSize: 13, color: C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.name}</div>
+                    <MiniBar planned={showPlanned ? row.planned : 0} actual={row.actual} oop={row.oop} equip={row.equip} max={maxCcTotal} />
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.ink1, textAlign: 'right' }}>{dkk(row.total)}</div>
+                    <TrendCell data={row.monthlyTotals} color={C.planned} />
+                    <ChevronRight20Regular style={{ color: C.ink4 }} />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Drill-down dialog ── */}
-      <Dialog open={!!drillDown} onOpenChange={(_, d) => { if (!d.open) closeDrillDown(); }}>
-        <DialogSurface className={styles.dialogSurface}>
-          <DialogBody className={styles.dialogBody}>
-            <DialogTitle>
-              {drillDown?.title} — {monthNames[(drillDown?.month ?? 1) - 1]} {drillDown?.year}
-            </DialogTitle>
-            <DialogContent className={styles.dialogContent}>
-              {drillDownLoading ? (
-                <div className={styles.loadingWrap}>
-                  <Spinner label="Loading details…" />
-                </div>
-              ) : drillDownData ? (
-                <>
-                  {/* Detail KPI strip */}
-                  <div className={styles.detailKpiRow} style={drillDown?.mode === 'cc' ? { gridTemplateColumns: 'repeat(3, 1fr)' } : { gridTemplateColumns: 'repeat(5, 1fr)' }}>
-                    {(() => {
-                      const actualTotal = drillDownData.actual_lines.reduce((s, l) => s + l.cost, 0);
-                      const oopTotal = drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100;
-                      const equipTotal = drillDownData.equipment_lines.reduce((s, l) => s + l.cost, 0) / 100;
-                      const isCc = drillDown?.mode === 'cc';
-                      const cards = [
-                        { label: 'Planned Labor', value: drillDownData.demand_lines.reduce((s, l) => s + l.cost, 0) },
-                        { label: 'Actual Labor', value: actualTotal },
-                        ...(!isCc ? [{ label: 'OoP', value: oopTotal }, { label: 'Equipment', value: equipTotal }] : []),
-                        { label: 'Total Cost', value: isCc ? actualTotal : actualTotal + oopTotal + equipTotal },
-                      ];
-                      return cards.map(({ label, value }) => (
-                        <div key={label} className={styles.detailKpiCard}>
-                          <div className={styles.detailKpiLabel}>{label}</div>
-                          <div className={styles.detailKpiValue}>{dkk(value)}</div>
-                        </div>
-                      ));
-                    })()}
+      {/* Section 5 — Drill-down drawer */}
+      {drawer && (
+        <>
+          <div
+            onClick={closeDrawer}
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 1000,
+              opacity: drawerVisible ? 1 : 0, transition: 'opacity 0.25s ease', cursor: 'pointer',
+            }}
+          />
+          <div style={{
+            position: 'fixed', right: 0, top: 0, bottom: 0, width: 560,
+            background: C.surface, zIndex: 1001,
+            boxShadow: '-4px 0 32px rgba(0,0,0,0.18)',
+            transform: drawerVisible ? 'translateX(0)' : 'translateX(100%)',
+            transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1)',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}>
+            {/* Drawer header */}
+            <div style={{ padding: '20px 24px 16px', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: C.ink1 }}>{drawer.title}</div>
+                  <div style={{ fontSize: 12, color: C.ink4, marginTop: 3 }}>
+                    {drawer.mode === 'project' ? 'Project' : 'Cost center'} drilldown · {periodRangeLabel}
                   </div>
+                </div>
+                <button onClick={closeDrawer} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: C.ink3, display: 'flex' }}>
+                  <Dismiss20Regular />
+                </button>
+              </div>
+              {/* KPI strip */}
+              <div style={{ display: 'flex', border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden', marginTop: 14 }}>
+                {[
+                  { label: 'Planned', val: drawer.kpis.planned },
+                  { label: 'Actual', val: drawer.kpis.actual },
+                  { label: 'OoP', val: drawer.kpis.oop },
+                  { label: 'Equipment', val: drawer.kpis.equip },
+                  { label: 'Total', val: drawer.kpis.planned + drawer.kpis.actual + drawer.kpis.oop + drawer.kpis.equip },
+                ].map((k, i, arr) => (
+                  <div key={k.label} style={{ flex: 1, padding: '10px 10px', borderRight: i < arr.length - 1 ? `1px solid ${C.border}` : 'none', background: i === arr.length - 1 ? C.bg : C.surface }}>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: C.ink4, textTransform: 'uppercase', letterSpacing: '0.4px' }}>{k.label}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: C.ink1, marginTop: 3 }}>{dkk(k.val)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-                  {/* Tab navigation */}
-                  <TabList
-                    value={detailTab}
-                    onTabSelect={(_, d) => setDetailTab(d.value as typeof detailTab)}
-                  >
-                    <Tab value="planned">Planned Labor ({drillDownData.demand_lines.length})</Tab>
-                    <Tab value="actual">Actual Labor ({drillDownData.actual_lines.length})</Tab>
-                    {drillDown?.mode !== 'cc' && <Tab value="oop">OoP ({drillDownData.external_lines.length})</Tab>}
-                    {drillDown?.mode !== 'cc' && <Tab value="equipment">Equipment ({drillDownData.equipment_lines.length})</Tab>}
-                  </TabList>
+            {/* Drawer tabs */}
+            <div style={{ padding: '0 24px', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+              <TabList selectedValue={drawerTab} onTabSelect={(_, d) => setDrawerTab(d.value as typeof drawerTab)}>
+                <Tab value="bymonth">By month</Tab>
+                <Tab value="planned">Planned ({drawerDetail?.demand_lines.length ?? '…'})</Tab>
+                <Tab value="actual">Actual ({drawerDetail?.actual_lines.length ?? '…'})</Tab>
+                {drawer.mode !== 'cc' && <Tab value="oop">OoP ({drawerDetail?.external_lines.length ?? '…'})</Tab>}
+                {drawer.mode !== 'cc' && <Tab value="equipment">Equipment ({drawerDetail?.equipment_lines.length ?? '…'})</Tab>}
+              </TabList>
+            </div>
 
-                  {/* Planned Labor table */}
-                  {detailTab === 'planned' && (
-                    drillDownData.demand_lines.length === 0 ? (
-                      <div className={styles.emptyState}><Body1>No planned labor lines for this period.</Body1></div>
-                    ) : (
-                      <div className={styles.tableWrap}>
-                        <Table size="small">
-                          <TableHeader>
-                            <TableRow className={styles.tableHeaderRow}>
-                              {drillDown?.mode === 'cc' && <TableHeaderCell style={{ flex: '0 0 180px' }}>Project</TableHeaderCell>}
-                              <TableHeaderCell style={{ flex: '1 1 auto' }}>Employee</TableHeaderCell>
-                              <TableHeaderCell style={{ flex: '0 0 80px', justifyContent: 'flex-end' }}>FTE %</TableHeaderCell>
-                              <TableHeaderCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>Cost (DKK)</TableHeaderCell>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {drillDownData.demand_lines.map((l, i) => (
-                              <TableRow key={i}>
-                                {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 180px' }}>{l.project_name ?? '—'}</TableCell>}
-                                <TableCell style={{ flex: '1 1 auto' }}>{l.resource_name}</TableCell>
-                                <TableCell style={{ flex: '0 0 80px', justifyContent: 'flex-end' }}>{l.fte_percent}%</TableCell>
-                                <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>{dkkDetail(l.cost)}</TableCell>
-                              </TableRow>
-                            ))}
-                            <TableRow className={styles.totalRow}>
-                              {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 180px' }} />}
-                              <TableCell style={{ flex: '1 1 auto' }}>Total</TableCell>
-                              <TableCell style={{ flex: '0 0 80px' }} />
-                              <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>
-                                {dkk(drillDownData.demand_lines.reduce((s, l) => s + l.cost, 0))}
-                              </TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )
-                  )}
+            {/* Drawer body */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
 
-                  {/* Actual Labor table */}
-                  {detailTab === 'actual' && (
-                    drillDownData.actual_lines.length === 0 ? (
-                      <div className={styles.emptyState}><Body1>No actual labor lines for this period.</Body1></div>
-                    ) : (
-                      <div className={styles.tableWrap}>
-                        <Table size="small">
-                          <TableHeader>
-                            <TableRow className={styles.tableHeaderRow}>
-                              {drillDown?.mode === 'cc' && <TableHeaderCell style={{ flex: '0 0 180px' }}>Project</TableHeaderCell>}
-                              <TableHeaderCell style={{ flex: '1 1 auto' }}>Employee</TableHeaderCell>
-                              <TableHeaderCell style={{ flex: '0 0 80px', justifyContent: 'flex-end' }}>FTE %</TableHeaderCell>
-                              <TableHeaderCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>Cost (DKK)</TableHeaderCell>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {drillDownData.actual_lines.map((l, i) => (
-                              <TableRow key={i}>
-                                {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 180px' }}>{l.project_name ?? '—'}</TableCell>}
-                                <TableCell style={{ flex: '1 1 auto' }}>{l.resource_name}</TableCell>
-                                <TableCell style={{ flex: '0 0 80px', justifyContent: 'flex-end' }}>{l.fte_percent}%</TableCell>
-                                <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>{dkkDetail(l.cost)}</TableCell>
-                              </TableRow>
-                            ))}
-                            <TableRow className={styles.totalRow}>
-                              {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 180px' }} />}
-                              <TableCell style={{ flex: '1 1 auto' }}>Total</TableCell>
-                              <TableCell style={{ flex: '0 0 80px' }} />
-                              <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>
-                                {dkk(drillDownData.actual_lines.reduce((s, l) => s + l.cost, 0))}
-                              </TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )
-                  )}
+              {/* By month */}
+              {drawerTab === 'bymonth' && (() => {
+                const maxBkt = Math.max(...drawer.monthlyData.map(m => m.planned + m.actual + m.oop + m.equip), 1);
+                return (
+                  <div>
+                    {/* Stacked bar chart */}
+                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 110, marginBottom: 20, padding: '0 2px' }}>
+                      {drawer.monthlyData.map((m, i) => {
+                        const total = m.planned + m.actual + m.oop + m.equip;
+                        const hPct = (total / maxBkt) * 100;
+                        const segs = [
+                          ...(showPlanned ? [{ val: m.planned, color: C.planned }] : []),
+                          { val: m.actual, color: C.actual },
+                          { val: m.oop, color: C.oop },
+                          { val: m.equip, color: C.equip },
+                        ].filter(s => s.val > 0);
+                        return (
+                          <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                            <div style={{ width: '85%', height: 100, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                              <div style={{ height: `${hPct}%`, display: 'flex', flexDirection: 'column-reverse', borderRadius: '3px 3px 0 0', overflow: 'hidden', minHeight: total > 0 ? 3 : 0 }}>
+                                {segs.map((s, si) => <div key={si} style={{ flex: s.val, background: s.color }} />)}
+                              </div>
+                            </div>
+                            <div style={{ fontSize: 10, color: C.ink4, marginTop: 4 }}>{MS[m.month - 1]}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
 
-                  {/* Externals table */}
-                  {detailTab === 'oop' && (
-                    drillDownData.external_lines.length === 0 ? (
-                      <div className={styles.emptyState}><Body1>No OoP lines for this period.</Body1></div>
-                    ) : (
-                      <div className={styles.tableWrap}>
-                        <Table size="small">
-                          <TableHeader>
-                            <TableRow className={styles.tableHeaderRow}>
-                              {drillDown?.mode === 'cc' && <TableHeaderCell style={{ flex: '0 0 160px' }}>Project</TableHeaderCell>}
-                              <TableHeaderCell style={{ flex: '1 1 auto' }}>OoP Resource</TableHeaderCell>
-                              <TableHeaderCell style={{ flex: '1 1 auto' }}>Notes</TableHeaderCell>
-                              <TableHeaderCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>Total (DKK)</TableHeaderCell>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {drillDownData.external_lines.map((l, i) => (
-                              <TableRow key={i}>
-                                {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 160px' }}>{l.project_name ?? '—'}</TableCell>}
-                                <TableCell style={{ flex: '1 1 auto' }}>{l.resource_name ?? l.description ?? '—'}</TableCell>
-                                <TableCell style={{ flex: '1 1 auto' }}>{l.notes ?? '—'}</TableCell>
-                                <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>{dkk(l.total_cost / 100)}</TableCell>
-                              </TableRow>
-                            ))}
-                            <TableRow className={styles.totalRow}>
-                              {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 160px' }} />}
-                              <TableCell style={{ flex: '1 1 auto' }}>Total</TableCell>
-                              <TableCell style={{ flex: '1 1 auto' }} />
-                              <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>
-                                {dkk(drillDownData.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100)}
-                              </TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )
-                  )}
+                    {/* Monthly table */}
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ ...thStyle, textAlign: 'left' }}>Month</th>
+                          {showPlanned && <th style={{ ...thStyle, textAlign: 'right' }}>Planned</th>}
+                          <th style={{ ...thStyle, textAlign: 'right' }}>Actual</th>
+                          <th style={{ ...thStyle, textAlign: 'right' }}>OoP</th>
+                          <th style={{ ...thStyle, textAlign: 'right' }}>Equipment</th>
+                          <th style={{ ...thStyle, textAlign: 'right' }}>Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {drawer.monthlyData.map((m, i) => (
+                          <tr key={i} onMouseEnter={e => (e.currentTarget.style.background = C.rowHover)} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                            <td style={{ ...tdStyle, color: C.ink2 }}>{MF[m.month - 1]} {m.year}</td>
+                            {showPlanned && <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.planned)}</td>}
+                            <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.actual)}</td>
+                            <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.oop)}</td>
+                            <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.equip)}</td>
+                            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: C.ink1 }}>{dkk(m.planned + m.actual + m.oop + m.equip)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
 
-                  {/* Equipment table */}
-                  {detailTab === 'equipment' && (
-                    drillDownData.equipment_lines.length === 0 ? (
-                      <div className={styles.emptyState}><Body1>No equipment lines for this period.</Body1></div>
-                    ) : (
-                      <div className={styles.tableWrap}>
-                        <Table size="small">
-                          <TableHeader>
-                            <TableRow className={styles.tableHeaderRow}>
-                              {drillDown?.mode === 'cc' && <TableHeaderCell style={{ flex: '0 0 180px' }}>Project</TableHeaderCell>}
-                              <TableHeaderCell style={{ flex: '1 1 auto' }}>Description</TableHeaderCell>
-                              <TableHeaderCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>Cost (DKK)</TableHeaderCell>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {drillDownData.equipment_lines.map((l, i) => (
-                              <TableRow key={i}>
-                                {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 180px' }}>{l.project_name ?? '—'}</TableCell>}
-                                <TableCell style={{ flex: '1 1 auto' }}>{l.description ?? '—'}</TableCell>
-                                <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>{dkkDetail(l.cost / 100)}</TableCell>
-                              </TableRow>
-                            ))}
-                            <TableRow className={styles.totalRow}>
-                              {drillDown?.mode === 'cc' && <TableCell style={{ flex: '0 0 180px' }} />}
-                              <TableCell style={{ flex: '1 1 auto' }}>Total</TableCell>
-                              <TableCell style={{ flex: '0 0 150px', justifyContent: 'flex-end' }}>
-                                {dkk(drillDownData.equipment_lines.reduce((s, l) => s + l.cost, 0) / 100)}
-                              </TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )
-                  )}
-                </>
-              ) : (
-                <div className={styles.emptyState}><Body1>No detail data available.</Body1></div>
+              {/* Loading state for detail tabs */}
+              {drawerTab !== 'bymonth' && drawerLoading && (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}><Spinner /></div>
               )}
-            </DialogContent>
-            <DialogActions>
-              <Button
-                appearance="secondary"
-                icon={<ArrowDownloadRegular />}
-                onClick={downloadDrillDownCsv}
-                disabled={!drillDownData || drillDownLoading}
-              >
-                Download CSV
-              </Button>
-              <Button
-                appearance="secondary"
-                icon={<ArrowDownloadRegular />}
-                onClick={downloadAllRealCostCsv}
-                disabled={!drillDownData || drillDownLoading}
-              >
-                Download All Real Cost CSV
-              </Button>
-              <Button onClick={closeDrillDown}>Close</Button>
-            </DialogActions>
-          </DialogBody>
-        </DialogSurface>
-      </Dialog>
+
+              {/* Planned labor */}
+              {drawerTab === 'planned' && !drawerLoading && (() => {
+                if (!drawerDetail) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No detail available. Data shown is for {MF[drawer.month - 1]} {drawer.year}.</div>;
+                if (drawerDetail.demand_lines.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No planned labor for {MF[drawer.month - 1]} {drawer.year}.</div>;
+                return (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead><tr>
+                      {drawer.mode === 'cc' && <th style={{ ...thStyle, textAlign: 'left' }}>Project</th>}
+                      <th style={{ ...thStyle, textAlign: 'left' }}>Employee</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>FTE %</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Cost</th>
+                    </tr></thead>
+                    <tbody>
+                      {drawerDetail.demand_lines.map((l, i) => (
+                        <tr key={i}>
+                          {drawer.mode === 'cc' && <td style={{ ...tdStyle, color: C.ink3 }}>{l.project_name ?? '—'}</td>}
+                          <td style={{ ...tdStyle, color: C.ink1 }}>{l.resource_name}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                              <div style={{ width: 50, height: 5, borderRadius: 3, background: C.plannedSoft, overflow: 'hidden' }}>
+                                <div style={{ width: `${Math.min(100, l.fte_percent)}%`, height: '100%', background: C.planned }} />
+                              </div>
+                              <span style={{ color: C.ink2 }}>{l.fte_percent}%</span>
+                            </div>
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'right', color: C.ink1 }}>{dkkD(l.cost)}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ background: C.bg, fontWeight: 700 }}>
+                        {drawer.mode === 'cc' && <td style={{ padding: '8px 10px' }} />}
+                        <td style={{ padding: '8px 10px', color: C.ink1 }}>Total</td>
+                        <td />
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(drawerDetail.demand_lines.reduce((s, l) => s + l.cost, 0))}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                );
+              })()}
+
+              {/* Actual labor */}
+              {drawerTab === 'actual' && !drawerLoading && (() => {
+                if (!drawerDetail) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No detail available.</div>;
+                if (drawerDetail.actual_lines.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No actuals booked for {MF[drawer.month - 1]} {drawer.year} yet.</div>;
+                return (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead><tr>
+                      {drawer.mode === 'cc' && <th style={{ ...thStyle, textAlign: 'left' }}>Project</th>}
+                      <th style={{ ...thStyle, textAlign: 'left' }}>Employee</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>FTE %</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Cost</th>
+                    </tr></thead>
+                    <tbody>
+                      {drawerDetail.actual_lines.map((l, i) => (
+                        <tr key={i}>
+                          {drawer.mode === 'cc' && <td style={{ ...tdStyle, color: C.ink3 }}>{l.project_name ?? '—'}</td>}
+                          <td style={{ ...tdStyle, color: C.ink1 }}>{l.resource_name}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                              <div style={{ width: 50, height: 5, borderRadius: 3, background: C.actualSoft, overflow: 'hidden' }}>
+                                <div style={{ width: `${Math.min(100, l.fte_percent)}%`, height: '100%', background: C.actual }} />
+                              </div>
+                              <span style={{ color: C.ink2 }}>{l.fte_percent}%</span>
+                            </div>
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'right', color: C.ink1 }}>{dkkD(l.cost)}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ background: C.bg, fontWeight: 700 }}>
+                        {drawer.mode === 'cc' && <td style={{ padding: '8px 10px' }} />}
+                        <td style={{ padding: '8px 10px', color: C.ink1 }}>Total</td>
+                        <td />
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(drawerDetail.actual_lines.reduce((s, l) => s + l.cost, 0))}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                );
+              })()}
+
+              {/* OoP */}
+              {drawerTab === 'oop' && drawer.mode !== 'cc' && !drawerLoading && (() => {
+                if (!drawerDetail) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No detail available.</div>;
+                if (drawerDetail.external_lines.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No OoP lines for {MF[drawer.month - 1]} {drawer.year}.</div>;
+                return (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead><tr>
+                      <th style={{ ...thStyle, textAlign: 'left' }}>Description</th>
+                      <th style={{ ...thStyle, textAlign: 'left' }}>Notes</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Total</th>
+                    </tr></thead>
+                    <tbody>
+                      {drawerDetail.external_lines.map((l, i) => (
+                        <tr key={i}>
+                          <td style={{ ...tdStyle, color: C.ink1 }}>{l.resource_name ?? l.description ?? '—'}</td>
+                          <td style={{ ...tdStyle, color: C.ink3 }}>{l.notes ?? '—'}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right', color: C.ink1 }}>{dkk(l.total_cost / 100)}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ background: C.bg, fontWeight: 700 }}>
+                        <td style={{ padding: '8px 10px', color: C.ink1 }}>Total</td><td />
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(drawerDetail.external_lines.reduce((s, l) => s + l.total_cost, 0) / 100)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                );
+              })()}
+
+              {/* Equipment */}
+              {drawerTab === 'equipment' && drawer.mode !== 'cc' && !drawerLoading && (() => {
+                if (!drawerDetail) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No detail available.</div>;
+                if (drawerDetail.equipment_lines.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No equipment lines for {MF[drawer.month - 1]} {drawer.year}.</div>;
+                return (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead><tr>
+                      <th style={{ ...thStyle, textAlign: 'left' }}>Item</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Cost</th>
+                    </tr></thead>
+                    <tbody>
+                      {drawerDetail.equipment_lines.map((l, i) => (
+                        <tr key={i}>
+                          <td style={{ ...tdStyle, color: C.ink1 }}>{l.description ?? '—'}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right', color: C.ink1 }}>{dkkD(l.cost / 100)}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ background: C.bg, fontWeight: 700 }}>
+                        <td style={{ padding: '8px 10px', color: C.ink1 }}>Total</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(drawerDetail.equipment_lines.reduce((s, l) => s + l.cost, 0) / 100)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                );
+              })()}
+            </div>
+
+            {/* Drawer footer */}
+            <div style={{ padding: '14px 24px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', flexShrink: 0, gap: 12 }}>
+              {drawerDetail && drawerTab !== 'bymonth' ? (
+                <button onClick={downloadDrillDownCsv} style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px',
+                  borderRadius: 6, border: `1px solid ${C.borderStrong}`, background: C.surface,
+                  color: C.ink2, cursor: 'pointer', fontSize: 13,
+                }}>
+                  <ArrowDownloadRegular style={{ fontSize: 16 }} /> Download CSV
+                </button>
+              ) : <div />}
+              <button onClick={closeDrawer} style={{
+                padding: '7px 22px', borderRadius: 6, border: 'none',
+                background: C.accent, color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+              }}>Done</button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };

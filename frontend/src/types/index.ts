@@ -3,7 +3,7 @@
  */
 
 // User roles matching backend
-export type UserRole = 'Admin' | 'Finance' | 'PM' | 'Manager' | 'Employee';
+export type UserRole = 'Admin' | 'Finance' | 'PM' | 'Manager' | 'Employee' | 'Reader';
 
 // Period status
 export type PeriodStatus = 'open' | 'locked';

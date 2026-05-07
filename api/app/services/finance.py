@@ -611,6 +611,22 @@ class FinanceService:
                 else:
                     cc_pm_project_ids = []
 
+            # Manager restriction (non-Reader): scope to accessible resources only
+            cc_manager_resource_ids: Optional[list] = None
+            if self.current_user.role == "Manager" and not self.current_user.is_manager_reader:
+                from api.app.services.reporting import ReportingService
+                _rs = ReportingService(self.db, self.current_user)
+                _ids = list(_rs.get_accessible_resource_ids())
+                _cur = self.db.query(User).filter(
+                    User.tenant_id == self.current_user.tenant_id,
+                    User.object_id == self.current_user.object_id,
+                ).first()
+                if _cur:
+                    for _rid in _rs.get_delegated_resource_ids(_cur.id):
+                        if _rid not in _ids:
+                            _ids.append(_rid)
+                cc_manager_resource_ids = _ids
+
             demand_lines: list[DemandLineDetail] = []
             actual_lines: list[ActualLineDetail] = []
             external_lines: list[ExternalLineDetail] = []
@@ -629,6 +645,8 @@ class FinanceService:
             )
             if cc_pm_project_ids is not None:
                 demand_q = demand_q.filter(DemandLine.project_id.in_(cc_pm_project_ids))
+            if cc_manager_resource_ids is not None:
+                demand_q = demand_q.filter(Resource.id.in_(cc_manager_resource_ids))
             demand_rows = demand_q.all()
 
             # Actual lines — join Resource, filter by Resource.cost_center_id
@@ -645,6 +663,8 @@ class FinanceService:
             )
             if cc_pm_project_ids is not None:
                 actual_q = actual_q.filter(ActualLine.project_id.in_(cc_pm_project_ids))
+            if cc_manager_resource_ids is not None:
+                actual_q = actual_q.filter(Resource.id.in_(cc_manager_resource_ids))
             actual_rows = actual_q.all()
 
             # External lines — outerjoin Resource, filter by Resource.cost_center_id
@@ -659,6 +679,8 @@ class FinanceService:
             )
             if cc_pm_project_ids is not None:
                 ext_q = ext_q.filter(ProjectExternalLine.project_id.in_(cc_pm_project_ids))
+            if cc_manager_resource_ids is not None:
+                ext_q = ext_q.filter(Resource.id.in_(cc_manager_resource_ids))
             ext_rows = ext_q.all()
 
             # Equipment lines — no resource FK, cannot filter by cost center; skip in CC mode
@@ -755,8 +777,24 @@ class FinanceService:
             if proj is None:
                 raise HTTPException(status_code=404, detail="Project not found.")
 
+        # Manager restriction (non-Reader): scope demand/actual to accessible resources
+        proj_manager_resource_ids: Optional[list] = None
+        if self.current_user.role == "Manager" and not self.current_user.is_manager_reader:
+            from api.app.services.reporting import ReportingService
+            _rs = ReportingService(self.db, self.current_user)
+            _ids = list(_rs.get_accessible_resource_ids())
+            _cur = self.db.query(User).filter(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            ).first()
+            if _cur:
+                for _rid in _rs.get_delegated_resource_ids(_cur.id):
+                    if _rid not in _ids:
+                        _ids.append(_rid)
+            proj_manager_resource_ids = _ids
+
         # Demand lines (planned labor) — skip placeholders
-        demand_rows = (
+        demand_q = (
             self.db.query(DemandLine, Resource)
             .join(Resource, DemandLine.resource_id == Resource.id)
             .filter(
@@ -765,8 +803,10 @@ class FinanceService:
                 DemandLine.period_id == period.id,
                 DemandLine.resource_id.isnot(None),
             )
-            .all()
         )
+        if proj_manager_resource_ids is not None:
+            demand_q = demand_q.filter(Resource.id.in_(proj_manager_resource_ids))
+        demand_rows = demand_q.all()
         demand_lines = [
             DemandLineDetail(
                 resource_name=resource.display_name,
@@ -778,7 +818,7 @@ class FinanceService:
 
         # Actual lines — approved only
         approved_subq_proj = self._approved_actual_ids_subq()
-        actual_rows = (
+        actual_q = (
             self.db.query(ActualLine, Resource)
             .join(Resource, ActualLine.resource_id == Resource.id)
             .filter(
@@ -787,8 +827,10 @@ class FinanceService:
                 ActualLine.period_id == period.id,
                 ActualLine.id.in_(approved_subq_proj),
             )
-            .all()
         )
+        if proj_manager_resource_ids is not None:
+            actual_q = actual_q.filter(Resource.id.in_(proj_manager_resource_ids))
+        actual_rows = actual_q.all()
         actual_lines = [
             ActualLineDetail(
                 resource_name=resource.display_name,
@@ -903,9 +945,10 @@ class FinanceService:
         if not period_ids:
             return ConsolidatedCostResponse(data=[], monthly_fte_cost=monthly_fte_cost)
 
-        # 3a. Manager role restriction — scope to accessible resources via reporting hierarchy
+        # 3a. Manager role restriction — scope to accessible resources via reporting hierarchy.
+        # Manager+Reader bypasses this and sees all data (same view as Finance).
         scoped_resource_ids: Optional[set] = None
-        if self.current_user.role == "Manager":
+        if self.current_user.role == "Manager" and not self.current_user.is_manager_reader:
             from api.app.services.reporting import ReportingService
             rs = ReportingService(self.db, self.current_user)
             ids = list(rs.get_accessible_resource_ids())

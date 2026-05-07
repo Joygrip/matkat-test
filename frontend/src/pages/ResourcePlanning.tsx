@@ -17,6 +17,7 @@ import { SearchableFilter } from '../components/SearchableFilter';
 import { LoadingState } from '../components/LoadingState';
 import { StatusBanner } from '../components/StatusBanner';
 import { ResourcePlanningMatrix } from '../components/ResourcePlanningMatrix';
+import { PeriodPillSelector } from '../components/shared/PeriodPillSelector';
 import { Period } from '../types/index';
 import { periodsApi } from '../api/periods';
 import {
@@ -151,50 +152,6 @@ const useStyles = makeStyles({
     letterSpacing: '0.5px',
     marginBottom: tokens.spacingVerticalXS,
   },
-  periodPills: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalXS,
-    flexWrap: 'wrap' as const,
-    alignItems: 'center',
-  },
-  periodPill: {
-    padding: `4px 10px`,
-    borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorNeutralStroke1}`,
-    backgroundColor: tokens.colorNeutralBackground1,
-    color: tokens.colorNeutralForeground2,
-    fontSize: tokens.fontSizeBase200,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    userSelect: 'none' as const,
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground3,
-    },
-  },
-  periodPillActive: {
-    padding: `4px 10px`,
-    borderRadius: tokens.borderRadiusMedium,
-    border: '1px solid #1e3a5f',
-    backgroundColor: '#1e3a5f',
-    color: '#ffffff',
-    fontSize: tokens.fontSizeBase200,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    fontWeight: tokens.fontWeightSemibold,
-    userSelect: 'none' as const,
-  },
-  periodPillInRange: {
-    padding: `4px 10px`,
-    borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid #4a90d9`,
-    backgroundColor: '#d0e3f7',
-    color: '#1e3a5f',
-    fontSize: tokens.fontSizeBase200,
-    cursor: 'grabbing',
-    fontFamily: 'inherit',
-    fontWeight: tokens.fontWeightSemibold,
-    userSelect: 'none' as const,
-  },
   kpiShowingLabel: {
     marginTop: tokens.spacingVerticalXS,
     fontSize: tokens.fontSizeBase200,
@@ -247,8 +204,6 @@ export const ResourcePlanning: React.FC = () => {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
   const [selectedPeriodIds, setSelectedPeriodIds] = useState<Set<string>>(new Set());
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStartIdx, setDragStartIdx] = useState<number | null>(null);
 
   useEffect(() => {
     if (!user?.tenant_id) return;
@@ -274,13 +229,6 @@ export const ResourcePlanning: React.FC = () => {
       setSelectedPeriodIds(new Set([openPeriods[0].id]));
     }
   }, [openPeriods]);
-
-  // End drag on mouseup anywhere in the document
-  useEffect(() => {
-    const handleMouseUp = () => { setIsDragging(false); setDragStartIdx(null); };
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => document.removeEventListener('mouseup', handleMouseUp);
-  }, []);
 
   const isPM = user?.role === 'PM';
 
@@ -510,37 +458,11 @@ export const ResourcePlanning: React.FC = () => {
       {openPeriods.length > 0 && (
         <div className={styles.periodSelectorWrap}>
           <span className={styles.periodSelectorLabel}>Period</span>
-          <div
-            className={styles.periodPills}
-            style={{ cursor: isDragging ? 'grabbing' : 'default' }}
-          >
-            {openPeriods.map((p, i) => {
-              const isSelected = selectedPeriodIds.has(p.id);
-              const pillClass = isSelected
-                ? (isDragging ? styles.periodPillInRange : styles.periodPillActive)
-                : styles.periodPill;
-              return (
-                <button
-                  key={p.id}
-                  className={pillClass}
-                  onMouseDown={e => {
-                    e.preventDefault();
-                    setIsDragging(true);
-                    setDragStartIdx(i);
-                    setSelectedPeriodIds(new Set([p.id]));
-                  }}
-                  onMouseEnter={() => {
-                    if (!isDragging || dragStartIdx === null) return;
-                    const lo = Math.min(dragStartIdx, i);
-                    const hi = Math.max(dragStartIdx, i);
-                    setSelectedPeriodIds(new Set(openPeriods.slice(lo, hi + 1).map(x => x.id)));
-                  }}
-                >
-                  {fmtPeriodShort(p)}
-                </button>
-              );
-            })}
-          </div>
+          <PeriodPillSelector
+            periods={openPeriods}
+            selectedIds={selectedPeriodIds}
+            onChange={setSelectedPeriodIds}
+          />
         </div>
       )}
 

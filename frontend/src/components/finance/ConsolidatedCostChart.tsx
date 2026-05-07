@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Spinner, Select, Tab, TabList, Combobox, Option } from '@fluentui/react-components';
 import { ChevronRight20Regular, Dismiss20Regular, ArrowDownloadRegular } from '@fluentui/react-icons';
+import { PeriodPillSelector } from '../shared/PeriodPillSelector';
 import {
   getConsolidatedCosts,
   getConsolidatedCostDetail,
@@ -13,8 +14,6 @@ import {
   ConsolidatedCostDetail,
 } from '../../api/finance';
 import { usePeriod } from '../../contexts/PeriodContext';
-import { lookupsApi } from '../../api/lookups';
-import type { Project, CostCenter } from '../../api/admin';
 import type { Snapshot } from '../../api/consolidation';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -132,23 +131,14 @@ interface DrawerState {
 interface Props { latestSnapshot?: Snapshot | null; }
 
 export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
-  const { periods, selectedPeriod } = usePeriod();
+  const { periods } = usePeriod();
 
   // Data
   const [rawData, setRawData] = useState<ConsolidatedCostRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [projectOptions, setProjectOptions] = useState<Project[]>([]);
-  const [costCenterOptions, setCostCenterOptions] = useState<CostCenter[]>([]);
 
   // Filters
-  const [selectedPeriodIds, setSelectedPeriodIds] = useState<string[]>(
-    () => selectedPeriod ? [`${selectedPeriod.year}-${selectedPeriod.month}`] : []
-  );
-  const [periodPreset, setPeriodPreset] = useState<'all' | 'first3' | 'first6' | 'custom'>(
-    () => selectedPeriod ? 'custom' : 'all'
-  );
-  const [customStart, setCustomStart] = useState(() => selectedPeriod ? `${selectedPeriod.year}-${selectedPeriod.month}` : '');
-  const [customEnd, setCustomEnd] = useState(() => selectedPeriod ? `${selectedPeriod.year}-${selectedPeriod.month}` : '');
+  const [selectedPeriodIds, setSelectedPeriodIds] = useState<Set<string>>(new Set());
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
   const [showPlanned, setShowPlanned] = useState(true);
@@ -171,10 +161,6 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    lookupsApi.listProjects?.().then(setProjectOptions).catch(() => {});
-    lookupsApi.listCostCenters?.().then(setCostCenterOptions).catch(() => {});
-  }, []);
 
   useEffect(() => {
     if (!drawer) return;
@@ -186,32 +172,22 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
 
   // ── Period helpers ────────────────────────────────────────────────────────────
 
-  const sortedPeriods = useMemo(
-    () => [...periods].sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month),
+  const openPeriods = useMemo(
+    () => [...periods]
+      .filter(p => p.status === 'open')
+      .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month),
     [periods]
   );
 
-  const applyLastNPeriods = (n: number) => {
-    const open = sortedPeriods.filter(p => p.status === 'open').slice(0, n);
-    setSelectedPeriodIds(open.map(p => `${p.year}-${p.month}`));
-  };
-
-  const applyCustomRange = (start: string, end: string) => {
-    if (!start || !end) { setSelectedPeriodIds([]); return; }
-    const [sy, sm] = start.split('-').map(Number);
-    const [ey, em] = end.split('-').map(Number);
-    const lo = Math.min(sy * 12 + sm, ey * 12 + em);
-    const hi = Math.max(sy * 12 + sm, ey * 12 + em);
-    setSelectedPeriodIds(
-      sortedPeriods
-        .filter(p => { const v = p.year * 12 + p.month; return v >= lo && v <= hi && p.status !== 'locked'; })
-        .map(p => `${p.year}-${p.month}`)
-    );
-  };
+  const selectedYearMonths = useMemo((): Set<string> | null => {
+    if (selectedPeriodIds.size === 0) return null;
+    const ym = new Set<string>();
+    openPeriods.filter(p => selectedPeriodIds.has(p.id)).forEach(p => ym.add(`${p.year}-${p.month}`));
+    return ym;
+  }, [selectedPeriodIds, openPeriods]);
 
   const clearAllFilters = () => {
-    setSelectedPeriodIds([]); setPeriodPreset('all');
-    setCustomStart(''); setCustomEnd('');
+    setSelectedPeriodIds(new Set());
     setSelectedProjectId(null); setSelectedCostCenterId(null);
     setShowPlanned(true);
   };
@@ -224,16 +200,39 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     return m;
   }, [rawData]);
 
+  // Derive project and cost-center filter options from already-scoped rawData
+  // so dropdowns only show what the current user can see (PM → own projects, Manager → own CC resources, etc.)
+  const projectOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const result: { id: string; name: string }[] = [];
+    rawData.forEach(r => {
+      if (!seen.has(r.project_id)) {
+        seen.add(r.project_id);
+        result.push({ id: r.project_id, name: r.project_name });
+      }
+    });
+    return result.sort((a, b) => a.name.localeCompare(b.name));
+  }, [rawData]);
+
+  const costCenterOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const result: { id: string; name: string }[] = [];
+    rawData.forEach(r => {
+      if (r.cost_center_id && !seen.has(r.cost_center_id)) {
+        seen.add(r.cost_center_id);
+        result.push({ id: r.cost_center_id, name: r.cost_center_name ?? '' });
+      }
+    });
+    return result.sort((a, b) => a.name.localeCompare(b.name));
+  }, [rawData]);
+
   const filteredData = useMemo(() => {
     let d = rawData;
-    if (selectedPeriodIds.length > 0) d = d.filter(r => selectedPeriodIds.includes(`${r.year}-${r.month}`));
+    if (selectedYearMonths) d = d.filter(r => selectedYearMonths.has(`${r.year}-${r.month}`));
     if (selectedProjectId) d = d.filter(r => r.project_id === selectedProjectId);
-    if (selectedCostCenterId) {
-      const pids = new Set(projectOptions.filter(p => p.cost_center_id === selectedCostCenterId).map(p => p.id));
-      d = d.filter(r => pids.has(r.project_id));
-    }
+    if (selectedCostCenterId) d = d.filter(r => r.cost_center_id === selectedCostCenterId);
     return d;
-  }, [rawData, selectedPeriodIds, selectedProjectId, selectedCostCenterId, projectOptions]);
+  }, [rawData, selectedYearMonths, selectedProjectId, selectedCostCenterId]);
 
   const sortedMonths = useMemo(() => {
     const map = new Map<string, { year: number; month: number }>();
@@ -251,22 +250,20 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
 
   // Previous period KPIs for delta (same N months immediately before selected range)
   const prevKpis = useMemo(() => {
-    if (selectedPeriodIds.length === 0) return null;
-    const sorted = [...selectedPeriodIds].sort();
-    const [fy, fm] = sorted[0].split('-').map(Number);
-    const count = sorted.length;
+    if (selectedPeriodIds.size === 0) return null;
+    const selPeriods = openPeriods.filter(p => selectedPeriodIds.has(p.id));
+    if (selPeriods.length === 0) return null;
+    const count = selPeriods.length;
+    const first = selPeriods[0];
     const prevIds: string[] = [];
     for (let i = count; i >= 1; i--) {
-      let m = fm - i, y = fy;
+      let m = first.month - i, y = first.year;
       while (m <= 0) { m += 12; y--; }
       prevIds.push(`${y}-${m}`);
     }
     let prev = rawData.filter(r => prevIds.includes(`${r.year}-${r.month}`));
     if (selectedProjectId) prev = prev.filter(r => r.project_id === selectedProjectId);
-    if (selectedCostCenterId) {
-      const pids = new Set(projectOptions.filter(p => p.cost_center_id === selectedCostCenterId).map(p => p.id));
-      prev = prev.filter(r => pids.has(r.project_id));
-    }
+    if (selectedCostCenterId) prev = prev.filter(r => r.cost_center_id === selectedCostCenterId);
     if (prev.length === 0) return null;
     return {
       planned: prev.reduce((s, r) => s + r.demand_cost, 0),
@@ -274,7 +271,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
       oop: prev.reduce((s, r) => s + r.externals_cost, 0),
       equipment: prev.reduce((s, r) => s + r.equipment_cost, 0),
     };
-  }, [rawData, selectedPeriodIds, selectedProjectId, selectedCostCenterId, projectOptions]);
+  }, [rawData, selectedPeriodIds, openPeriods, selectedProjectId, selectedCostCenterId]);
 
   const projectRows = useMemo((): EntityRow[] => {
     const map = new Map<string, EntityRow>();
@@ -345,13 +342,13 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
   }, [ccRows, filteredData, sortedMonths]);
 
   const periodRangeLabel = useMemo(() => {
-    if (selectedPeriodIds.length === 0) return 'All periods';
-    const sorted = [...selectedPeriodIds].sort();
-    const [fy, fm] = sorted[0].split('-').map(Number);
-    const [ly, lm] = sorted[sorted.length - 1].split('-').map(Number);
-    if (sorted.length === 1) return `${MF[fm - 1]} ${fy}`;
-    return `${MS[fm - 1]} ${fy} – ${MS[lm - 1]} ${ly}`;
-  }, [selectedPeriodIds]);
+    if (selectedPeriodIds.size === 0) return 'All periods';
+    const selPeriods = openPeriods.filter(p => selectedPeriodIds.has(p.id));
+    if (selPeriods.length === 0) return 'All periods';
+    if (selPeriods.length === 1) return `${MF[selPeriods[0].month - 1]} ${selPeriods[0].year}`;
+    const first = selPeriods[0], last = selPeriods[selPeriods.length - 1];
+    return `${MS[first.month - 1]} ${first.year} – ${MS[last.month - 1]} ${last.year}`;
+  }, [selectedPeriodIds, openPeriods]);
 
   // ── Drawer ────────────────────────────────────────────────────────────────────
 
@@ -467,40 +464,11 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
         {/* Period */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={label11}>Period</span>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {(['all', 'first3', 'first6', 'custom'] as const).map(p => (
-              <button key={p} onClick={() => {
-                setPeriodPreset(p);
-                if (p === 'all') setSelectedPeriodIds([]);
-                else if (p === 'first3') applyLastNPeriods(3);
-                else if (p === 'first6') applyLastNPeriods(6);
-              }} style={{
-                padding: '5px 12px', fontSize: 13, borderRadius: 6,
-                border: `1px solid ${periodPreset === p ? C.accent : C.borderStrong}`,
-                background: periodPreset === p ? C.accent : C.surface,
-                color: periodPreset === p ? '#fff' : C.ink2,
-                cursor: 'pointer', fontWeight: periodPreset === p ? 600 : 400,
-              }}>
-                {p === 'all' ? 'All' : p === 'first3' ? 'First 3' : p === 'first6' ? 'First 6' : 'Custom'}
-              </button>
-            ))}
-          </div>
-          {periodPreset === 'custom' && (
-            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-              <Select value={customStart} onChange={(_, d) => { const v = d.value || ''; setCustomStart(v); applyCustomRange(v, customEnd); }}>
-                <option value="">From</option>
-                {sortedPeriods.filter(p => p.status !== 'locked').map(p => (
-                  <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>{MS[p.month - 1]} {p.year}</option>
-                ))}
-              </Select>
-              <Select value={customEnd} onChange={(_, d) => { const v = d.value || ''; setCustomEnd(v); applyCustomRange(customStart, v); }}>
-                <option value="">To</option>
-                {sortedPeriods.filter(p => p.status !== 'locked').map(p => (
-                  <option key={`${p.year}-${p.month}`} value={`${p.year}-${p.month}`}>{MS[p.month - 1]} {p.year}</option>
-                ))}
-              </Select>
-            </div>
-          )}
+          <PeriodPillSelector
+            periods={openPeriods}
+            selectedIds={selectedPeriodIds}
+            onChange={setSelectedPeriodIds}
+          />
         </div>
 
         {/* Project */}

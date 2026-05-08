@@ -799,14 +799,17 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
               </div>
               {/* KPI strip */}
               <div style={{ display: 'flex', border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden', marginTop: 14 }}>
-                {[
+                {(drawer.mode === 'cc' ? [
+                  { label: 'Planned', val: drawer.kpis.planned },
+                  { label: 'Actual', val: drawer.kpis.actual },
+                ] : [
                   { label: 'Planned', val: drawer.kpis.planned },
                   { label: 'Actual', val: drawer.kpis.actual },
                   { label: 'OoP', val: drawer.kpis.oop },
                   { label: 'Equipment', val: drawer.kpis.equip },
                   { label: 'Planned Total', val: drawer.kpis.planned + drawer.kpis.oop + drawer.kpis.equip },
                   { label: 'Actual Total', val: drawer.kpis.actual + drawer.kpis.oop + drawer.kpis.equip },
-                ].map((k, i, arr) => (
+                ]).map((k, i, arr) => (
                   <div key={k.label} style={{ flex: 1, padding: '10px 10px', borderRight: i < arr.length - 1 ? `1px solid ${C.border}` : 'none', background: i >= arr.length - 2 ? C.bg : C.surface }}>
                     <div style={{ fontSize: 10, fontWeight: 600, color: C.ink4, textTransform: 'uppercase', letterSpacing: '0.4px' }}>{k.label}</div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: C.ink1, marginTop: 3 }}>{dkk(k.val)}</div>
@@ -831,19 +834,19 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
 
               {/* By month */}
               {drawerTab === 'bymonth' && (() => {
-                const maxBkt = Math.max(...drawer.monthlyData.map(m => m.planned + m.actual + m.oop + m.equip), 1);
+                const isCc = drawer.mode === 'cc';
+                const maxBkt = Math.max(...drawer.monthlyData.map(m => isCc ? m.planned + m.actual : m.planned + m.actual + m.oop + m.equip), 1);
                 return (
                   <div>
                     {/* Stacked bar chart */}
                     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 110, marginBottom: 20, padding: '0 2px' }}>
                       {drawer.monthlyData.map((m, i) => {
-                        const total = m.planned + m.actual + m.oop + m.equip;
+                        const total = isCc ? m.planned + m.actual : m.planned + m.actual + m.oop + m.equip;
                         const hPct = (total / maxBkt) * 100;
                         const segs = [
                           ...(showPlanned ? [{ val: m.planned, color: C.planned }] : []),
                           { val: m.actual, color: C.actual },
-                          { val: m.oop, color: C.oop },
-                          { val: m.equip, color: C.equip },
+                          ...(!isCc ? [{ val: m.oop, color: C.oop }, { val: m.equip, color: C.equip }] : []),
                         ].filter(s => s.val > 0);
                         return (
                           <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -858,17 +861,17 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                       })}
                     </div>
 
-                    {/* Monthly table — Planned Total and Actual Total columns */}
+                    {/* Monthly table */}
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                       <thead>
                         <tr>
                           <th style={{ ...thStyle, textAlign: 'left' }}>Month</th>
                           {showPlanned && <th style={{ ...thStyle, textAlign: 'right' }}>Planned</th>}
                           <th style={{ ...thStyle, textAlign: 'right' }}>Actual</th>
-                          <th style={{ ...thStyle, textAlign: 'right' }}>OoP</th>
-                          <th style={{ ...thStyle, textAlign: 'right' }}>Equipment</th>
-                          <th style={{ ...thStyle, textAlign: 'right' }}>Planned Total</th>
-                          <th style={{ ...thStyle, textAlign: 'right' }}>Actual Total</th>
+                          {!isCc && <th style={{ ...thStyle, textAlign: 'right' }}>OoP</th>}
+                          {!isCc && <th style={{ ...thStyle, textAlign: 'right' }}>Equipment</th>}
+                          {!isCc && <th style={{ ...thStyle, textAlign: 'right' }}>Planned Total</th>}
+                          {!isCc && <th style={{ ...thStyle, textAlign: 'right' }}>Actual Total</th>}
                         </tr>
                       </thead>
                       <tbody>
@@ -877,10 +880,10 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                             <td style={{ ...tdStyle, color: C.ink2 }}>{MF[m.month - 1]} {m.year}</td>
                             {showPlanned && <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.planned)}</td>}
                             <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.actual)}</td>
-                            <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.oop)}</td>
-                            <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.equip)}</td>
-                            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: C.ink1 }}>{dkk(m.planned + m.oop + m.equip)}</td>
-                            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: C.ink1 }}>{dkk(m.actual + m.oop + m.equip)}</td>
+                            {!isCc && <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.oop)}</td>}
+                            {!isCc && <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.equip)}</td>}
+                            {!isCc && <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: C.ink1 }}>{dkk(m.planned + m.oop + m.equip)}</td>}
+                            {!isCc && <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: C.ink1 }}>{dkk(m.actual + m.oop + m.equip)}</td>}
                           </tr>
                         ))}
                       </tbody>

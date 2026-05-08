@@ -3,7 +3,7 @@
  * API: /finance/consolidated-costs + /finance/consolidated-costs/detail
  * All demand_cost / actuals_cost are in DKK; externals_cost / equipment_cost are in cents.
  */
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Spinner, Select, Tab, TabList, Combobox, Option } from '@fluentui/react-components';
 import { ChevronRight20Regular, Dismiss20Regular, ArrowDownloadRegular } from '@fluentui/react-icons';
 import { PeriodPillSelector } from '../shared/PeriodPillSelector';
@@ -91,7 +91,7 @@ function TrendCell({ data, color }: { data: number[]; color?: string }) {
   const delta = ((last - first) / first) * 100;
   const flat = Math.abs(delta) < 0.5;
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' }}>
       <Sparkline data={data} color={color ?? C.accent} />
       {!flat && (
         <span style={{
@@ -144,6 +144,21 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
   const [showPlanned, setShowPlanned] = useState(true);
   const [showAllProjects, setShowAllProjects] = useState(false);
+
+  // Sticky filter bar shadow detection
+  const filterSentinelRef = useRef<HTMLDivElement>(null);
+  const [filterBarStuck, setFilterBarStuck] = useState(false);
+
+  useEffect(() => {
+    const sentinel = filterSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setFilterBarStuck(!entry.isIntersecting),
+      { threshold: 0 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []);
 
   // Modal (formerly drawer)
   const [drawer, setDrawer] = useState<DrawerState | null>(null);
@@ -477,10 +492,17 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
 
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
+      {/* Sentinel for sticky shadow detection */}
+      <div ref={filterSentinelRef} style={{ height: 1, marginBottom: -1 }} />
+
       {/* Section 2 — Filter bar */}
       <div style={{
+        position: 'sticky', top: 0, zIndex: 10,
         background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8,
-        boxShadow: '0 1px 4px rgba(0,0,0,0.06)', padding: '14px 20px',
+        boxShadow: filterBarStuck
+          ? '0 4px 10px -2px rgba(0,0,0,0.14)'
+          : '0 1px 4px rgba(0,0,0,0.06)',
+        padding: '14px 20px',
         display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-end',
       }}>
         {/* Period */}
@@ -635,8 +657,8 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
 
               {/* Ranked table */}
               <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr 72px 90px 88px 20px', gap: 8, padding: '0 6px 8px', ...label11 }}>
-                  <div>#</div><div>Name</div><div>Breakdown</div><div style={{ textAlign: 'right' }}>Planned Total</div><div>Trend</div><div />
+                <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr 72px 110px 88px 20px', gap: 8, padding: '0 6px 8px', ...label11 }}>
+                  <div>#</div><div>Name</div><div>Breakdown</div><div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>Planned Total</div><div style={{ textAlign: 'right' }}>Trend</div><div />
                 </div>
                 {projectRows.map((row, i) => (
                   <div key={row.id}
@@ -708,8 +730,8 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
 
               {/* Ranked CC table */}
               <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr 72px 90px 88px 20px', gap: 8, padding: '0 6px 8px', ...label11 }}>
-                  <div>#</div><div>Name</div><div>Breakdown</div><div style={{ textAlign: 'right' }}>Planned Total</div><div>Trend</div><div />
+                <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr 72px 110px 88px 20px', gap: 8, padding: '0 6px 8px', ...label11 }}>
+                  <div>#</div><div>Name</div><div>Breakdown</div><div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>Planned Total</div><div style={{ textAlign: 'right' }}>Trend</div><div />
                 </div>
                 {ccRows.map((row, i) => (
                   <div key={row.id}

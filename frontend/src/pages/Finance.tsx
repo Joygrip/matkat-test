@@ -90,9 +90,6 @@ const useStyles = makeStyles({
     alignItems: 'center',
   },
   toolbar: {
-    position: 'sticky' as const,
-    top: 0,
-    zIndex: 10,
     backgroundColor: tokens.colorNeutralBackground1,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
     marginBottom: tokens.spacingVerticalL,

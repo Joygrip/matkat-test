@@ -636,7 +636,7 @@ export function ActualsTab({
         d.employee_email.toLowerCase().includes(q) ||
         d.project_name.toLowerCase().includes(q) ||
         d.cost_center_name.toLowerCase().includes(q) ||
-        (d.employee_initials != null && d.employee_initials.toLowerCase() === q),
+        (d.employee_initials != null && d.employee_initials.toLowerCase().includes(q)),
       );
     }
     if (onlyNeedsAction) out = out.filter(d => d.can_action || d.can_proxy_approve_step1);
@@ -672,7 +672,7 @@ export function ActualsTab({
     const q = searchQuery.trim().toLowerCase();
     return empStats
       .filter(s => s.demand_fte > 0 && s.actuals_fte === 0 && !nameSet.has(s.employee_name))
-      .filter(s => !q || s.employee_name.toLowerCase().includes(q))
+      .filter(s => !q || s.employee_name.toLowerCase().includes(q) || s.projects.some(p => p.project_name.toLowerCase().includes(q)))
       .filter(s => {
         if (selectedProjectIds.size === 0) return true;
         return s.projects.some(p => selectedProjectIds.has(p.project_id));
@@ -1035,7 +1035,7 @@ export function ActualsTab({
                     <td className={styles.td}>
                       <div style={{ display:'flex', alignItems:'center', gap:9 }}>
                         <div className={styles.avatar} style={{ background: nameColor(group.employee_name) }}>
-                          {group.rows[0]?.employee_initials ?? nameInitials(group.employee_name)}
+                          {group.rows[0]?.employee_initials || nameInitials(group.employee_name)}
                         </div>
                         <div style={{ minWidth:0 }}>
                           <div style={{ fontWeight:600, fontSize:13, color:C.ink, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
@@ -1154,11 +1154,11 @@ export function ActualsTab({
 
                   /* Expanded row */
                   isExpanded && (
-                    <tr key={`${group.employee_name}-expanded`} style={{ background: C.surface2 }}>
+                    <tr key={`${group.employee_name}-expanded`} style={{ background: '#f3f2f1' }}>
                       <td colSpan={8} style={{ padding:0, borderLeft: `3px solid ${borderColor}`, borderBottom: `1px solid ${C.line}` }}>
 
                         {/* Meta strip */}
-                        <div style={{ background: C.surface2, borderBottom: `1px solid ${C.line}`, padding:'7px 16px 7px 52px', display:'flex', gap:28, fontSize:11, color:C.ink3, flexWrap:'wrap' }}>
+                        <div style={{ background: '#f3f2f1', borderBottom: `1px solid ${C.line}`, padding:'7px 16px 7px 52px', display:'flex', gap:28, fontSize:11, color:C.ink3, flexWrap:'wrap' }}>
                           <span>PERIOD <strong style={{ color:C.ink, marginLeft:4 }}>{group.rows[0] ? `${group.rows[0].year}-${String(group.rows[0].month).padStart(2,'0')}` : (year > 0 ? `${year}-${String(month).padStart(2,'0')}` : '—')}</strong></span>
                           <span>COST CENTER <strong style={{ color:C.ink, marginLeft:4 }}>{group.cost_center_name}</strong></span>
                           <span>SUPPLY <strong style={{ color:C.ink, marginLeft:4 }}>{stat?.supply_fte != null ? `${stat.supply_fte}%` : '—'}</strong></span>

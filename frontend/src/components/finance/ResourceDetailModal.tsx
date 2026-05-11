@@ -393,20 +393,6 @@ export function ResourceDetailModal({
     } catch {}
   };
 
-  // Silent background refetch — no loading state, no flash
-  const silentRefetch = () => {
-    if (!periodId || !resourceId) return;
-    Promise.all([
-      planningApi.getDemandLines(periodId, { resourceId }),
-      planningApi.getSupplyLines(periodId, { resourceId }),
-      consolidationApi.getResourceDetail(periodId, resourceId),
-    ]).then(([dl, sl, d]) => {
-      setDemandLines(dl);
-      setSupplyLines(sl);
-      setLocalDetail(d);
-    }).catch(() => {});
-  };
-
   // ── Demand handlers ──────────────────────────────────────────────────────────
 
   const startAddDemand = () => {
@@ -421,11 +407,20 @@ export function ResourceDetailModal({
     setSaving(true);
     try {
       if (lineId) {
+        const oldLine = demandLines.find(l => l.id === lineId);
         const updated = await planningApi.updateDemandLine(lineId, {
           project_id: demandForm.project_id,
           fte_percent: demandForm.fte_percent,
         });
         setDemandLines(prev => prev.map(l => l.id === lineId ? updated : l));
+        if (oldLine) {
+          const diff = updated.fte_percent - oldLine.fte_percent;
+          setLocalDetail(prev => prev ? {
+            ...prev,
+            total_demand_fte: prev.total_demand_fte + diff,
+            gap_fte: prev.gap_fte - diff,
+          } : prev);
+        }
         showSuccess('Demand line updated');
       } else {
         const newLine = await planningApi.createDemandLine({
@@ -436,7 +431,6 @@ export function ResourceDetailModal({
           year: selectedPeriod!.year,
           month: selectedPeriod!.month,
         });
-        // Optimistic append
         setDemandLines(prev => [...prev, newLine]);
         setLocalDetail(prev => prev ? {
           ...prev,
@@ -448,7 +442,6 @@ export function ResourceDetailModal({
       setEditingDemandId(null);
       setAddingDemand(false);
       setLastSaved(new Date());
-      silentRefetch();
       onDataChanged();
     } catch (e) { showApiError(e as Error); }
     finally { setSaving(false); }
@@ -468,7 +461,6 @@ export function ResourceDetailModal({
     try {
       await planningApi.updateDemandLine(lineId, { fte_percent: newPct });
       setLastSaved(new Date());
-      silentRefetch();
       onDataChanged();
     } catch (e) {
       // Revert
@@ -497,7 +489,6 @@ export function ResourceDetailModal({
       await planningApi.deleteDemandLine(lineId);
       showSuccess('Demand line removed');
       setLastSaved(new Date());
-      silentRefetch();
       onDataChanged();
     } catch (e) {
       // Revert
@@ -527,11 +518,20 @@ export function ResourceDetailModal({
     setSaving(true);
     try {
       if (lineId) {
+        const oldLine = supplyLines.find(l => l.id === lineId);
         const updated = await planningApi.updateSupplyLine(lineId, {
           project_id: supplyForm.project_id || undefined,
           fte_percent: supplyForm.fte_percent,
         });
         setSupplyLines(prev => prev.map(l => l.id === lineId ? updated : l));
+        if (oldLine) {
+          const diff = updated.fte_percent - oldLine.fte_percent;
+          setLocalDetail(prev => prev ? {
+            ...prev,
+            total_supply_fte: prev.total_supply_fte + diff,
+            gap_fte: prev.gap_fte + diff,
+          } : prev);
+        }
         showSuccess('Supply line updated');
       } else {
         const newLine = await planningApi.createSupplyLine({
@@ -542,7 +542,6 @@ export function ResourceDetailModal({
           year: selectedPeriod!.year,
           month: selectedPeriod!.month,
         });
-        // Optimistic append
         setSupplyLines(prev => [...prev, newLine]);
         setLocalDetail(prev => prev ? {
           ...prev,
@@ -554,7 +553,6 @@ export function ResourceDetailModal({
       setEditingSupplyId(null);
       setAddingSupply(false);
       setLastSaved(new Date());
-      silentRefetch();
       onDataChanged();
     } catch (e) { showApiError(e as Error); }
     finally { setSaving(false); }
@@ -574,7 +572,6 @@ export function ResourceDetailModal({
     try {
       await planningApi.updateSupplyLine(lineId, { fte_percent: newPct });
       setLastSaved(new Date());
-      silentRefetch();
       onDataChanged();
     } catch (e) {
       // Revert
@@ -603,7 +600,6 @@ export function ResourceDetailModal({
       await planningApi.deleteSupplyLine(lineId);
       showSuccess('Supply line removed');
       setLastSaved(new Date());
-      silentRefetch();
       onDataChanged();
     } catch (e) {
       // Revert

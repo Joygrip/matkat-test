@@ -406,18 +406,22 @@ function CcNavCard({
         backgroundColor: selected ? sevC.bg : C.surface,
         boxShadow: selected ? `0 2px 8px ${sevC.bar}28` : '0 1px 2px rgba(0,0,0,.04)',
         cursor: 'pointer',
-        overflow: 'hidden',
         outline: 'none',
         transition: 'border-color 0.12s, background 0.12s',
+        overflow: 'visible',
       }}
     >
-      {/* Severity accent bar */}
-      <div style={{ width: selected ? 4 : 3, flexShrink: 0, backgroundColor: sevC.bar, transition: 'width 0.12s' }} />
+      {/* Severity accent bar — border-radius applied here so parent doesn't need overflow:hidden */}
+      <div style={{
+        width: selected ? 4 : 3, flexShrink: 0, backgroundColor: sevC.bar,
+        borderTopLeftRadius: 7, borderBottomLeftRadius: 7,
+        transition: 'width 0.12s',
+      }} />
 
-      <div style={{ flex: 1, padding: '9px 11px', minWidth: 0 }}>
+      <div style={{ flex: 1, padding: '9px 11px 12px', minWidth: 0 }}>
         {/* Name + gap chip */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.ink, wordBreak: 'break-word', flex: 1 }}>
             {cc.cost_center_name}
           </div>
           <span style={{

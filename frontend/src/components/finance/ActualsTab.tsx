@@ -676,7 +676,7 @@ export function ActualsTab({
     const q = searchQuery.trim().toLowerCase();
     return empStats
       .filter(s => s.demand_fte > 0 && s.actuals_fte === 0 && !nameSet.has(s.employee_name))
-      .filter(s => !q || s.employee_name.toLowerCase().includes(q) || s.projects.some(p => p.project_name.toLowerCase().includes(q)))
+      .filter(s => !q || s.employee_name.toLowerCase().includes(q) || s.projects.some(p => p.project_name.toLowerCase().includes(q)) || (s.cost_center_name ?? '').toLowerCase().includes(q) || (s.employee_initials ?? '').toLowerCase().includes(q))
       .filter(s => {
         if (selectedProjectIds.size === 0) return true;
         return s.projects.some(p => selectedProjectIds.has(p.project_id));

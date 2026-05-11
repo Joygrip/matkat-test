@@ -160,11 +160,23 @@ function KpiCards({ summary: s, costCenters }: { summary: FilteredSummary; costC
     return { bad, warn, good, over, neutral, total: costCenters.length };
   }, [costCenters]);
 
+  const { shortage, surplus, netGap } = useMemo(() => {
+    let shortage = 0;
+    let surplus = 0;
+    for (const cc of costCenters) {
+      for (const r of cc.resources) {
+        if (r.gap_fte < 0) shortage += r.gap_fte;
+        else if (r.gap_fte > 0) surplus += r.gap_fte;
+      }
+    }
+    return { shortage: Math.round(shortage), surplus: Math.round(surplus), netGap: Math.round(shortage + surplus) };
+  }, [costCenters]);
+
   const totalResources = costCenters.reduce((n, cc) => n + cc.resources.length, 0);
   const coveredPct = s.total_demand_fte > 0
     ? Math.round((s.total_supply_fte / s.total_demand_fte) * 100)
     : 0;
-  const netSev = gapSeverity(s.total_gap_fte, true);
+  const netSev = gapSeverity(netGap, true);
   const netColors = SEV[netSev];
 
   const card: React.CSSProperties = {
@@ -248,8 +260,8 @@ function KpiCards({ summary: s, costCenters }: { summary: FilteredSummary; costC
       {/* Net Gap — hero card */}
       <div style={{
         ...card,
-        border: `1px solid ${s.total_gap_fte < 0 ? C.badSoft : C.line}`,
-        background: s.total_gap_fte < 0
+        border: `1px solid ${netGap < 0 ? C.badSoft : C.line}`,
+        background: netGap < 0
           ? 'linear-gradient(180deg, #fff 0%, #fbf4f2 100%)'
           : 'linear-gradient(180deg, #fff 0%, #f4f8ff 100%)',
       }}>
@@ -258,19 +270,19 @@ function KpiCards({ summary: s, costCenters }: { summary: FilteredSummary; costC
           <div>
             <div style={{ fontSize: 10, color: C.ink3, marginBottom: 2 }}>Shortage</div>
             <div style={{ fontSize: 20, fontWeight: 700, color: C.bad }}>
-              {Math.abs(Math.min(s.total_gap_fte, 0))}%
+              {fmtGap(shortage)}
             </div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: C.ink3, marginBottom: 2 }}>Surplus</div>
             <div style={{ fontSize: 20, fontWeight: 700, color: C.over }}>
-              {Math.max(s.total_gap_fte, 0)}%
+              {fmtGap(surplus)}
             </div>
           </div>
           <div style={{ borderLeft: `1px solid ${C.line}`, paddingLeft: 8 }}>
             <div style={{ fontSize: 10, color: C.ink3, marginBottom: 2 }}>Net</div>
             <div style={{ fontSize: 20, fontWeight: 700, color: netColors.text }}>
-              {fmtGap(s.total_gap_fte)}
+              {fmtGap(netGap)}
             </div>
           </div>
         </div>

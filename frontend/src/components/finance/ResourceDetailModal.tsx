@@ -1,34 +1,18 @@
 import { useState, useEffect } from 'react';
 import {
-  makeStyles,
   tokens,
-  Body2,
-  Caption1,
-  Subtitle2,
-  Badge,
-  Table,
-  TableHeader,
-  TableRow,
-  TableHeaderCell,
-  TableBody,
-  TableCell,
   Dialog,
   DialogSurface,
-  DialogTitle,
   DialogBody,
   DialogContent,
-  DialogActions,
   Button,
   Spinner,
-  Divider,
   Select,
   type DialogOpenChangeData,
   type DialogOpenChangeEvent,
 } from '@fluentui/react-components';
 import {
-  PersonRegular,
   Dismiss24Regular,
-  Edit24Regular,
   Delete24Regular,
   AddRegular,
   CheckmarkRegular,
@@ -40,51 +24,276 @@ import { planningApi, type DemandLine, type SupplyLine } from '../../api/plannin
 import { lookupsApi, type Project } from '../../api/lookups';
 import { useToast } from '../../hooks/useToast';
 import { usePeriod } from '../../contexts/PeriodContext';
-import { GapBadge } from './FinanceBadges';
+
+// ── Color system (matches OverviewTab) ────────────────────────────────────────
+
+const C = {
+  accent:   '#1e3a5f',
+  good:     '#2a6f4d', goodSoft:  '#e3efe7',
+  warn:     '#9a5b00', warnSoft:  '#fbe8cf',
+  bad:      '#a32f2a', badSoft:   '#f6dad7',
+  over:     '#1e5fa0', overSoft:  '#dbeaf6',
+  ink:      '#1b1b1a',
+  ink2:     '#424242',
+  ink3:     '#707070',
+  line:     '#e5e4e0',
+  surface:  '#ffffff',
+  surface2: '#f6f5f2',
+};
+
+type Severity = 'bad' | 'warn' | 'good' | 'over' | 'neutral';
+
+const SEV: Record<Severity, { bar: string; bg: string; text: string }> = {
+  bad:     { bar: C.bad,   bg: C.badSoft,  text: C.bad   },
+  warn:    { bar: C.warn,  bg: C.warnSoft, text: C.warn  },
+  good:    { bar: C.good,  bg: C.goodSoft, text: C.good  },
+  over:    { bar: C.over,  bg: C.overSoft, text: C.over  },
+  neutral: { bar: '#aaa',  bg: C.surface2, text: C.ink3  },
+};
+
+function gapSev(gap: number): Severity {
+  if (gap < -20) return 'bad';
+  if (gap < 0)   return 'warn';
+  if (gap > 15)  return 'over';
+  return 'good';
+}
+
+function getInitials(name: string): string {
+  return name.split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('');
+}
+
+function fmtGap(gap: number): string {
+  return `${gap > 0 ? '+' : ''}${gap}%`;
+}
+
+// ── Balance bar ───────────────────────────────────────────────────────────────
+
+function BalanceBar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
+  const pct = max > 0 ? Math.min((value / max) * 100, 110) : 0;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+      <div style={{ width: 60, fontSize: 11, color: C.ink3, textAlign: 'right', flexShrink: 0 }}>{label}</div>
+      <div style={{ flex: 1, position: 'relative', height: 8, borderRadius: 4, backgroundColor: '#ebe9e4', overflow: 'hidden' }}>
+        <div style={{
+          position: 'absolute', left: 0, top: 0,
+          width: `${Math.min(pct, 100)}%`, height: '100%',
+          borderRadius: 4, backgroundColor: color,
+        }} />
+      </div>
+      <div style={{ width: 44, fontSize: 12, fontFamily: 'monospace', color: C.ink2, textAlign: 'right', flexShrink: 0, fontWeight: 600 }}>
+        {value}%
+      </div>
+    </div>
+  );
+}
+
+// ── Mini allocation bar inside table rows ────────────────────────────────────
+
+function MiniPctBar({ pct, color }: { pct: number; color: string }) {
+  return (
+    <div style={{ position: 'relative', height: 4, borderRadius: 2, backgroundColor: '#ebe9e4', width: 72, flexShrink: 0 }}>
+      <div style={{ position: 'absolute', left: 0, top: 0, width: `${Math.min(pct, 100)}%`, height: '100%', borderRadius: 2, backgroundColor: color }} />
+    </div>
+  );
+}
+
+// ── Section header ────────────────────────────────────────────────────────────
+
+function SectionHeader({
+  title,
+  count,
+  totalPct,
+  canAdd,
+  adding,
+  saving,
+  onAdd,
+  color,
+}: {
+  title: string;
+  count: number;
+  totalPct: number;
+  canAdd: boolean;
+  adding: boolean;
+  saving: boolean;
+  onAdd: () => void;
+  color: string;
+}) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '10px 16px',
+      borderBottom: `1px solid ${C.line}`,
+      backgroundColor: C.surface2,
+    }}>
+      <div style={{ width: 3, height: 16, borderRadius: 2, backgroundColor: color, flexShrink: 0 }} />
+      <span style={{ fontSize: 13, fontWeight: 600, color: C.ink, flex: 1 }}>{title}</span>
+      <span style={{ fontSize: 12, color: C.ink3 }}>
+        {count} line{count !== 1 ? 's' : ''}
+      </span>
+      <span style={{
+        fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
+        padding: '1px 8px', borderRadius: 10,
+        backgroundColor: `${color}18`, color: color,
+      }}>
+        {totalPct}%
+      </span>
+      {canAdd && (
+        <Button
+          size="small"
+          appearance="subtle"
+          icon={<AddRegular />}
+          onClick={onAdd}
+          disabled={adding || saving}
+          style={{ fontSize: 11, color: C.accent }}
+        >
+          Add
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// ── Assignment row (read mode) ────────────────────────────────────────────────
+
+function AssignmentRow({
+  projectName,
+  ftePct,
+  barColor,
+  canEdit,
+  saving,
+  editing,
+  onDelete,
+}: {
+  projectName: string | null;
+  ftePct: number;
+  barColor: string;
+  canEdit: boolean;
+  saving: boolean;
+  editing: boolean;
+  onDelete: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '9px 16px',
+        borderBottom: `1px solid ${C.line}`,
+        backgroundColor: hovered ? C.surface2 : C.surface,
+        transition: 'background 0.1s',
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {projectName ?? <em style={{ color: C.ink3 }}>General availability</em>}
+        </div>
+      </div>
+      <div style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 600, color: C.ink2, width: 42, textAlign: 'right', flexShrink: 0 }}>
+        {ftePct}%
+      </div>
+      <MiniPctBar pct={ftePct} color={barColor} />
+      {canEdit && (
+        <div style={{ display: 'flex', gap: 2, opacity: hovered ? 1 : 0, transition: 'opacity 0.1s', flexShrink: 0 }}>
+          <Button
+            size="small"
+            appearance="subtle"
+            icon={<Delete24Regular />}
+            onClick={onDelete}
+            disabled={saving || editing}
+            title="Remove"
+            style={{ color: C.bad }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Edit row (inline form) ─────────────────────────────────────────────────────
+
+function EditRow({
+  projects,
+  projectId,
+  ftePct,
+  saving,
+  supplyMode,
+  onProjectChange,
+  onFteChange,
+  onSave,
+  onCancel,
+}: {
+  projects: Project[];
+  projectId: string;
+  ftePct: number;
+  saving: boolean;
+  supplyMode?: boolean;
+  onProjectChange: (v: string) => void;
+  onFteChange: (v: number) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px',
+      borderBottom: `1px solid ${C.line}`, backgroundColor: '#f0f4fa',
+    }}>
+      <div style={{ flex: 1 }}>
+        <Select
+          value={projectId}
+          onChange={e => onProjectChange(e.target.value)}
+          style={{ width: '100%', fontSize: 13 }}
+          size="small"
+        >
+          <option value="">{supplyMode ? '— General availability —' : '— Select project —'}</option>
+          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </Select>
+      </div>
+      <input
+        type="number"
+        min={5} max={100} step={5}
+        value={ftePct}
+        onChange={e => onFteChange(Math.min(100, Math.max(5, parseInt(e.target.value) || 5)))}
+        style={{
+          width: 60, padding: '4px 6px', borderRadius: 4,
+          border: `1px solid ${C.line}`, fontSize: 12,
+          fontFamily: 'monospace', color: C.ink2,
+        }}
+      />
+      <Button size="small" appearance="primary" icon={<CheckmarkRegular />} onClick={onSave} disabled={saving || (!supplyMode && !projectId)} />
+      <Button size="small" appearance="subtle" icon={<DismissRegular />} onClick={onCancel} disabled={saving} />
+    </div>
+  );
+}
+
+// ── Props ─────────────────────────────────────────────────────────────────────
 
 export interface ResourceDetailModalProps {
   open: boolean;
   resourceId: string | null;
   resourceName: string;
+  ccName?: string;
   detail: ResourceDetail | null;
   loading: boolean;
   periodId: string | null;
-  canEditDemand: boolean;  // Finance, PM
-  canEditSupply: boolean;  // Finance, Manager
-  isPM: boolean;           // PM: scoped projects + per-line project gate
+  canEditDemand: boolean;
+  canEditSupply: boolean;
+  isPM: boolean;
   onClose: () => void;
   onDataChanged: () => void;
 }
 
-const useStyles = makeStyles({
-  assignmentSection: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: tokens.spacingVerticalS,
-  },
-  sectionTitleRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: tokens.spacingVerticalXS,
-  },
-  sectionTitleLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  actionCell: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalXS,
-    justifyContent: 'flex-end',
-    minWidth: '80px',
-  },
-});
+// ── Main component ────────────────────────────────────────────────────────────
 
 export function ResourceDetailModal({
   open,
   resourceId,
   resourceName,
+  ccName,
   detail,
   loading,
   periodId,
@@ -94,38 +303,29 @@ export function ResourceDetailModal({
   onClose,
   onDataChanged,
 }: ResourceDetailModalProps) {
-  const styles = useStyles();
   const { showSuccess, showApiError } = useToast();
   const { periods } = usePeriod();
   const selectedPeriod = periods.find(p => p.id === periodId);
 
-  // Planning lines (editable, with IDs)
-  const [demandLines, setDemandLines] = useState<DemandLine[]>([]);
-  const [supplyLines, setSupplyLines] = useState<SupplyLine[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [demandLines,  setDemandLines]  = useState<DemandLine[]>([]);
+  const [supplyLines,  setSupplyLines]  = useState<SupplyLine[]>([]);
+  const [projects,     setProjects]     = useState<Project[]>([]);
   const [linesLoading, setLinesLoading] = useState(false);
+  const [localDetail,  setLocalDetail]  = useState<ResourceDetail | null>(null);
 
-  // Refreshable summary detail
-  const [localDetail, setLocalDetail] = useState<ResourceDetail | null>(null);
-
-  // Inline edit state — demand
   const [editingDemandId, setEditingDemandId] = useState<string | null>(null);
-  const [addingDemand, setAddingDemand] = useState(false);
+  const [addingDemand,    setAddingDemand]    = useState(false);
   const [demandForm, setDemandForm] = useState({ project_id: '', fte_percent: 50 });
 
-  // Inline edit state — supply
   const [editingSupplyId, setEditingSupplyId] = useState<string | null>(null);
-  const [addingSupply, setAddingSupply] = useState(false);
+  const [addingSupply,    setAddingSupply]    = useState(false);
   const [supplyForm, setSupplyForm] = useState({ project_id: '', fte_percent: 100 });
 
   const [saving, setSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
-  // Sync incoming detail into local state
-  useEffect(() => {
-    setLocalDetail(detail);
-  }, [detail]);
+  useEffect(() => { setLocalDetail(detail); }, [detail]);
 
-  // Load editable planning lines when modal opens
   useEffect(() => {
     if (!open) {
       setEditingDemandId(null);
@@ -134,6 +334,7 @@ export function ResourceDetailModal({
       setAddingSupply(false);
       setDemandLines([]);
       setSupplyLines([]);
+      setLastSaved(null);
       return;
     }
     if ((canEditDemand || canEditSupply) && periodId && resourceId) {
@@ -160,7 +361,6 @@ export function ResourceDetailModal({
 
   const loadProjects = async () => {
     try {
-      // PM gets only their scoped projects (backend enforces ownership)
       const ps = isPM ? await lookupsApi.listProjectsScoped() : await lookupsApi.listProjects();
       setProjects(ps);
     } catch {}
@@ -174,22 +374,12 @@ export function ResourceDetailModal({
     } catch {}
   };
 
-  // --- Demand handlers ---
-  const startEditDemand = (line: DemandLine) => {
-    setEditingDemandId(line.id);
-    setAddingDemand(false);
-    setDemandForm({ project_id: line.project_id, fte_percent: line.fte_percent });
-  };
+  // ── Demand handlers ──────────────────────────────────────────────────────────
 
   const startAddDemand = () => {
     setAddingDemand(true);
     setEditingDemandId(null);
     setDemandForm({ project_id: '', fte_percent: 50 });
-  };
-
-  const cancelDemandEdit = () => {
-    setEditingDemandId(null);
-    setAddingDemand(false);
   };
 
   const saveDemand = async (lineId: string | null) => {
@@ -198,10 +388,7 @@ export function ResourceDetailModal({
     setSaving(true);
     try {
       if (lineId) {
-        await planningApi.updateDemandLine(lineId, {
-          project_id: demandForm.project_id,
-          fte_percent: demandForm.fte_percent,
-        });
+        await planningApi.updateDemandLine(lineId, { project_id: demandForm.project_id, fte_percent: demandForm.fte_percent });
         showSuccess('Demand line updated');
       } else {
         await planningApi.createDemandLine({
@@ -216,14 +403,12 @@ export function ResourceDetailModal({
       }
       setEditingDemandId(null);
       setAddingDemand(false);
+      setLastSaved(new Date());
       await loadLines();
       await refreshSummary();
       onDataChanged();
-    } catch (e: unknown) {
-      showApiError(e as Error);
-    } finally {
-      setSaving(false);
-    }
+    } catch (e) { showApiError(e as Error); }
+    finally { setSaving(false); }
   };
 
   const deleteDemand = async (lineId: string) => {
@@ -231,32 +416,20 @@ export function ResourceDetailModal({
     try {
       await planningApi.deleteDemandLine(lineId);
       showSuccess('Demand line removed');
+      setLastSaved(new Date());
       await loadLines();
       await refreshSummary();
       onDataChanged();
-    } catch (e: unknown) {
-      showApiError(e as Error);
-    } finally {
-      setSaving(false);
-    }
+    } catch (e) { showApiError(e as Error); }
+    finally { setSaving(false); }
   };
 
-  // --- Supply handlers ---
-  const startEditSupply = (line: SupplyLine) => {
-    setEditingSupplyId(line.id);
-    setAddingSupply(false);
-    setSupplyForm({ project_id: line.project_id ?? '', fte_percent: line.fte_percent });
-  };
+  // ── Supply handlers ──────────────────────────────────────────────────────────
 
   const startAddSupply = () => {
     setAddingSupply(true);
     setEditingSupplyId(null);
     setSupplyForm({ project_id: '', fte_percent: 100 });
-  };
-
-  const cancelSupplyEdit = () => {
-    setEditingSupplyId(null);
-    setAddingSupply(false);
   };
 
   const saveSupply = async (lineId: string | null) => {
@@ -265,10 +438,7 @@ export function ResourceDetailModal({
     setSaving(true);
     try {
       if (lineId) {
-        await planningApi.updateSupplyLine(lineId, {
-          project_id: supplyForm.project_id || undefined,
-          fte_percent: supplyForm.fte_percent,
-        });
+        await planningApi.updateSupplyLine(lineId, { project_id: supplyForm.project_id || undefined, fte_percent: supplyForm.fte_percent });
         showSuccess('Supply line updated');
       } else {
         await planningApi.createSupplyLine({
@@ -283,14 +453,12 @@ export function ResourceDetailModal({
       }
       setEditingSupplyId(null);
       setAddingSupply(false);
+      setLastSaved(new Date());
       await loadLines();
       await refreshSummary();
       onDataChanged();
-    } catch (e: unknown) {
-      showApiError(e as Error);
-    } finally {
-      setSaving(false);
-    }
+    } catch (e) { showApiError(e as Error); }
+    finally { setSaving(false); }
   };
 
   const deleteSupply = async (lineId: string) => {
@@ -298,343 +466,351 @@ export function ResourceDetailModal({
     try {
       await planningApi.deleteSupplyLine(lineId);
       showSuccess('Supply line removed');
+      setLastSaved(new Date());
       await loadLines();
       await refreshSummary();
       onDataChanged();
-    } catch (e: unknown) {
-      showApiError(e as Error);
-    } finally {
-      setSaving(false);
-    }
+    } catch (e) { showApiError(e as Error); }
+    finally { setSaving(false); }
   };
 
-  const activeDetail = localDetail ?? detail;
+  // ── Derived display values ───────────────────────────────────────────────────
+
   const anyCanEdit = canEditDemand || canEditSupply;
-  // When role can edit and lines are loaded, use planning lines for count/display
   const showEditableLines = anyCanEdit && !linesLoading;
-  // For PM: set of project IDs they own — gates edit/delete buttons and filters visible lines
   const editableProjectIds = isPM ? new Set(projects.map(p => p.id)) : null;
-  // PM only sees demand lines for their own projects
+
   const visibleDemandLines = editableProjectIds
     ? demandLines.filter(l => editableProjectIds.has(l.project_id))
     : demandLines;
-  const visibleReadOnlyDemandLines = editableProjectIds && activeDetail
-    ? activeDetail.demand_lines.filter(l => l.project_id && editableProjectIds.has(l.project_id))
-    : activeDetail?.demand_lines ?? [];
-  const demandCount = showEditableLines ? visibleDemandLines.length : visibleReadOnlyDemandLines.length;
-  const supplyCount = showEditableLines ? supplyLines.length : (activeDetail?.supply_lines.length ?? 0);
+  const visibleReadOnlyDemandLines = editableProjectIds && localDetail
+    ? localDetail.demand_lines.filter(l => l.project_id && editableProjectIds.has(l.project_id))
+    : (localDetail?.demand_lines ?? []);
 
+  const shownDemandLines = showEditableLines ? visibleDemandLines : visibleReadOnlyDemandLines;
+  const shownSupplyLines = showEditableLines ? supplyLines : (localDetail?.supply_lines ?? []);
+  const totalDemandPct = shownDemandLines.reduce((s, l) => s + l.fte_percent, 0);
+  const totalSupplyPct = shownSupplyLines.reduce((s, l) => s + l.fte_percent, 0);
+
+  const activeDetail = localDetail ?? detail;
+  const gap = activeDetail?.gap_fte ?? 0;
+  const gapSeverity = gapSev(gap);
+  const gapColors = SEV[gapSeverity];
+  const initials = getInitials(resourceName);
+  const maxFte = Math.max(activeDetail?.total_demand_fte ?? 0, activeDetail?.total_supply_fte ?? 0, 1);
+
+  const periodLabel = selectedPeriod
+    ? `${selectedPeriod.year}-${String(selectedPeriod.month).padStart(2, '0')}`
+    : '';
+
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <Dialog open={open} onOpenChange={(_ev: DialogOpenChangeEvent, data: DialogOpenChangeData) => { if (!data.open) onClose(); }}>
-      <DialogSurface style={{ minWidth: 600, maxWidth: 780 }}>
-        <DialogBody>
-          <DialogTitle
-            action={
-              <Button appearance="subtle" icon={<Dismiss24Regular />} onClick={onClose} />
-            }
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
-              <PersonRegular />
-              {resourceName}
-            </span>
-          </DialogTitle>
-          <DialogContent>
+    <Dialog
+      open={open}
+      onOpenChange={(_ev: DialogOpenChangeEvent, data: DialogOpenChangeData) => { if (!data.open) onClose(); }}
+    >
+      <DialogSurface style={{ width: 700, maxWidth: '94vw', padding: 0, overflow: 'hidden', borderRadius: 12 }}>
+        <DialogBody style={{ display: 'flex', flexDirection: 'column', maxHeight: '88vh', padding: 0 }}>
+
+          {/* ── Header ── */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 14,
+            padding: '18px 20px',
+            borderBottom: `1px solid ${C.line}`,
+            background: `linear-gradient(135deg, ${gapColors.bg} 0%, ${C.surface} 60%)`,
+            flexShrink: 0,
+          }}>
+            <div style={{
+              width: 44, height: 44, borderRadius: 22, flexShrink: 0,
+              background: `linear-gradient(135deg, ${gapColors.bar}28, ${gapColors.bar}55)`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 14, fontWeight: 700, color: gapColors.bar,
+              border: `1.5px solid ${gapColors.bar}44`,
+            }}>
+              {initials}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>{resourceName}</div>
+              <div style={{ fontSize: 12, color: C.ink3, marginTop: 1 }}>
+                {[ccName, periodLabel].filter(Boolean).join(' · ')}
+              </div>
+            </div>
+            <Button
+              appearance="subtle"
+              icon={<Dismiss24Regular />}
+              onClick={onClose}
+              aria-label="Close"
+            />
+          </div>
+
+          {/* ── Scrollable content ── */}
+          <DialogContent style={{ padding: 0, flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+
             {loading && (
               <div style={{ display: 'flex', justifyContent: 'center', padding: tokens.spacingVerticalXL }}>
                 <Spinner label="Loading assignments..." />
               </div>
             )}
+
             {!loading && activeDetail && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL }}>
-                {/* Summary row */}
-                <div style={{ display: 'flex', gap: tokens.spacingHorizontalXL }}>
-                  <Body2>Demand: <strong>{activeDetail.total_demand_fte}%</strong></Body2>
-                  <Body2>Supply: <strong>{activeDetail.total_supply_fte}%</strong></Body2>
-                  <GapBadge gap={activeDetail.gap_fte} />
-                </div>
-
-                <Divider />
-
-                {/* Demand assignments */}
-                <div className={styles.assignmentSection}>
-                  <div className={styles.sectionTitleRow}>
-                    <div className={styles.sectionTitleLeft}>
-                      <Subtitle2>Demand assignments</Subtitle2>
-                      <Badge appearance="outline" size="small">{demandCount}</Badge>
+              <>
+                {/* ── Summary strip ── */}
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
+                  borderBottom: `1px solid ${C.line}`,
+                }}>
+                  {[
+                    { label: 'Demand',  value: `${activeDetail.total_demand_fte}%`, color: C.bad,          bg: C.badSoft  },
+                    { label: 'Supply',  value: `${activeDetail.total_supply_fte}%`, color: C.accent,       bg: C.overSoft },
+                    { label: 'Net Gap', value: fmtGap(gap),                          color: gapColors.text, bg: gapColors.bg },
+                  ].map(({ label, value, color, bg }, i) => (
+                    <div key={label} style={{
+                      padding: '14px 20px',
+                      backgroundColor: bg,
+                      borderRight: i < 2 ? `1px solid ${C.line}` : undefined,
+                      textAlign: 'center',
+                    }}>
+                      <div style={{ fontSize: 11, fontWeight: 500, color: C.ink3, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>
+                        {label}
+                      </div>
+                      <div style={{ fontSize: 22, fontWeight: 700, color, fontFamily: 'monospace' }}>
+                        {value}
+                      </div>
                     </div>
-                    {canEditDemand && (
-                      <Button
-                        size="small"
-                        appearance="subtle"
-                        icon={<AddRegular />}
-                        onClick={startAddDemand}
-                        disabled={addingDemand || saving}
-                      >
-                        Add
-                      </Button>
-                    )}
-                  </div>
-
-                  {linesLoading && canEditDemand ? (
-                    <Spinner size="tiny" label="Loading..." />
-                  ) : (
-                    <>
-                      {(showEditableLines ? visibleDemandLines.length === 0 : visibleReadOnlyDemandLines.length === 0) && !addingDemand ? (
-                        <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>No demand assignments.</Caption1>
-                      ) : (
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHeaderCell>Project</TableHeaderCell>
-                              <TableHeaderCell style={{ width: 90 }}>FTE %</TableHeaderCell>
-                              {canEditDemand && <TableHeaderCell style={{ width: 100 }} />}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {showEditableLines
-                              ? visibleDemandLines.map(line => (
-                                  <TableRow key={line.id}>
-                                    {editingDemandId === line.id ? (
-                                      <>
-                                        <TableCell>
-                                          <Select
-                                            value={demandForm.project_id}
-                                            onChange={(e) => setDemandForm(f => ({ ...f, project_id: e.target.value }))}
-                                            style={{ width: '100%' }}
-                                          >
-                                            <option value="">— select project —</option>
-                                            {projects.map(p => (
-                                              <option key={p.id} value={p.id}>{p.name}</option>
-                                            ))}
-                                          </Select>
-                                        </TableCell>
-                                        <TableCell>
-                                          <input
-                                            type="number"
-                                            min={5}
-                                            max={100}
-                                            step={5}
-                                            value={demandForm.fte_percent}
-                                            onChange={(e) => setDemandForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(5, parseInt(e.target.value) || 5)) }))}
-                                            style={{ width: '70px' }}
-                                          />
-                                        </TableCell>
-                                        <TableCell>
-                                          <div className={styles.actionCell}>
-                                            <Button size="small" appearance="primary" icon={<CheckmarkRegular />} onClick={() => saveDemand(line.id)} disabled={saving || !demandForm.project_id} />
-                                            <Button size="small" appearance="subtle" icon={<DismissRegular />} onClick={cancelDemandEdit} disabled={saving} />
-                                          </div>
-                                        </TableCell>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <TableCell>{line.project_name ?? '—'}</TableCell>
-                                        <TableCell>{line.fte_percent}%</TableCell>
-                                        {canEditDemand && (
-                                          <TableCell>
-                                            <div className={styles.actionCell}>
-                                              <Button size="small" appearance="subtle" icon={<Edit24Regular />} onClick={() => startEditDemand(line)} disabled={saving || !!editingDemandId || addingDemand} title="Edit" />
-                                              <Button size="small" appearance="subtle" icon={<Delete24Regular />} onClick={() => deleteDemand(line.id)} disabled={saving || !!editingDemandId || addingDemand} title="Delete" />
-                                            </div>
-                                          </TableCell>
-                                        )}
-                                      </>
-                                    )}
-                                  </TableRow>
-                                ))
-                              : visibleReadOnlyDemandLines.map((line, i) => (
-                                  <TableRow key={i}>
-                                    <TableCell>{line.project_name ?? '—'}</TableCell>
-                                    <TableCell>{line.fte_percent}%</TableCell>
-                                  </TableRow>
-                                ))
-                            }
-                            {addingDemand && (
-                              <TableRow>
-                                <TableCell>
-                                  <Select
-                                    value={demandForm.project_id}
-                                    onChange={(e) => setDemandForm(f => ({ ...f, project_id: e.target.value }))}
-                                    style={{ width: '100%' }}
-                                  >
-                                    <option value="">— select project —</option>
-                                    {projects.map(p => (
-                                      <option key={p.id} value={p.id}>{p.name}</option>
-                                    ))}
-                                  </Select>
-                                </TableCell>
-                                <TableCell>
-                                  <input
-                                    type="number"
-                                    min={5}
-                                    max={100}
-                                    step={5}
-                                    value={demandForm.fte_percent}
-                                    onChange={(e) => setDemandForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(5, parseInt(e.target.value) || 5)) }))}
-                                    style={{ width: '70px' }}
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <div className={styles.actionCell}>
-                                    <Button size="small" appearance="primary" icon={<CheckmarkRegular />} onClick={() => saveDemand(null)} disabled={saving || !demandForm.project_id} />
-                                    <Button size="small" appearance="subtle" icon={<DismissRegular />} onClick={cancelDemandEdit} disabled={saving} />
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
-                      )}
-                    </>
-                  )}
+                  ))}
                 </div>
 
-                <Divider />
-
-                {/* Supply assignments */}
-                <div className={styles.assignmentSection}>
-                  <div className={styles.sectionTitleRow}>
-                    <div className={styles.sectionTitleLeft}>
-                      <Subtitle2>Supply assignments</Subtitle2>
-                      <Badge appearance="outline" size="small">{supplyCount}</Badge>
-                    </div>
-                    {canEditSupply && (
-                      <Button
-                        size="small"
-                        appearance="subtle"
-                        icon={<AddRegular />}
-                        onClick={startAddSupply}
-                        disabled={addingSupply || saving}
-                      >
-                        Add
-                      </Button>
-                    )}
-                  </div>
-
-                  {linesLoading && canEditSupply ? (
-                    <Spinner size="tiny" label="Loading..." />
-                  ) : (
-                    <>
-                      {(showEditableLines ? supplyLines.length === 0 : activeDetail.supply_lines.length === 0) && !addingSupply ? (
-                        <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>No supply assignments.</Caption1>
-                      ) : (
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHeaderCell>Project</TableHeaderCell>
-                              <TableHeaderCell style={{ width: 90 }}>FTE %</TableHeaderCell>
-                              {canEditSupply && <TableHeaderCell style={{ width: 100 }} />}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {showEditableLines
-                              ? supplyLines.map(line => (
-                                  <TableRow key={line.id}>
-                                    {editingSupplyId === line.id ? (
-                                      <>
-                                        <TableCell>
-                                          <Select
-                                            value={supplyForm.project_id}
-                                            onChange={(e) => setSupplyForm(f => ({ ...f, project_id: e.target.value }))}
-                                            style={{ width: '100%' }}
-                                          >
-                                            <option value="">None (general availability)</option>
-                                            {projects.map(p => (
-                                              <option key={p.id} value={p.id}>{p.name}</option>
-                                            ))}
-                                          </Select>
-                                        </TableCell>
-                                        <TableCell>
-                                          <input
-                                            type="number"
-                                            min={5}
-                                            max={100}
-                                            step={5}
-                                            value={supplyForm.fte_percent}
-                                            onChange={(e) => setSupplyForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(5, parseInt(e.target.value) || 5)) }))}
-                                            style={{ width: '70px' }}
-                                          />
-                                        </TableCell>
-                                        <TableCell>
-                                          <div className={styles.actionCell}>
-                                            <Button size="small" appearance="primary" icon={<CheckmarkRegular />} onClick={() => saveSupply(line.id)} disabled={saving} />
-                                            <Button size="small" appearance="subtle" icon={<DismissRegular />} onClick={cancelSupplyEdit} disabled={saving} />
-                                          </div>
-                                        </TableCell>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <TableCell>
-                                          {line.project_name ?? <em style={{ color: tokens.colorNeutralForeground3 }}>General availability</em>}
-                                        </TableCell>
-                                        <TableCell>{line.fte_percent}%</TableCell>
-                                        {canEditSupply && (
-                                          <TableCell>
-                                            <div className={styles.actionCell}>
-                                              <Button size="small" appearance="subtle" icon={<Edit24Regular />} onClick={() => startEditSupply(line)} disabled={saving || !!editingSupplyId || addingSupply} title="Edit" />
-                                              <Button size="small" appearance="subtle" icon={<Delete24Regular />} onClick={() => deleteSupply(line.id)} disabled={saving || !!editingSupplyId || addingSupply} title="Delete" />
-                                            </div>
-                                          </TableCell>
-                                        )}
-                                      </>
-                                    )}
-                                  </TableRow>
-                                ))
-                              : activeDetail.supply_lines.map((line, i) => (
-                                  <TableRow key={i}>
-                                    <TableCell>
-                                      {line.project_name ?? <em style={{ color: tokens.colorNeutralForeground3 }}>General availability</em>}
-                                    </TableCell>
-                                    <TableCell>{line.fte_percent}%</TableCell>
-                                  </TableRow>
-                                ))
-                            }
-                            {addingSupply && (
-                              <TableRow>
-                                <TableCell>
-                                  <Select
-                                    value={supplyForm.project_id}
-                                    onChange={(e) => setSupplyForm(f => ({ ...f, project_id: e.target.value }))}
-                                    style={{ width: '100%' }}
-                                  >
-                                    <option value="">None (general availability)</option>
-                                    {projects.map(p => (
-                                      <option key={p.id} value={p.id}>{p.name}</option>
-                                    ))}
-                                  </Select>
-                                </TableCell>
-                                <TableCell>
-                                  <input
-                                    type="number"
-                                    min={5}
-                                    max={100}
-                                    step={5}
-                                    value={supplyForm.fte_percent}
-                                    onChange={(e) => setSupplyForm(f => ({ ...f, fte_percent: Math.min(100, Math.max(5, parseInt(e.target.value) || 5)) }))}
-                                    style={{ width: '70px' }}
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <div className={styles.actionCell}>
-                                    <Button size="small" appearance="primary" icon={<CheckmarkRegular />} onClick={() => saveSupply(null)} disabled={saving} />
-                                    <Button size="small" appearance="subtle" icon={<DismissRegular />} onClick={cancelSupplyEdit} disabled={saving} />
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
-                      )}
-                    </>
-                  )}
+                {/* ── Balance bars ── */}
+                <div style={{ padding: '14px 20px 10px', borderBottom: `1px solid ${C.line}` }}>
+                  <BalanceBar label="Demand" value={activeDetail.total_demand_fte} max={maxFte} color={C.bad} />
+                  <BalanceBar label="Supply" value={activeDetail.total_supply_fte} max={maxFte} color={C.accent} />
                 </div>
-              </div>
+
+                {/* ── Demand assignments ── */}
+                <div style={{ borderTop: `1px solid ${C.line}` }}>
+                    <SectionHeader
+                      title="Demand assignments"
+                      count={shownDemandLines.length}
+                      totalPct={totalDemandPct}
+                      canAdd={canEditDemand}
+                      adding={addingDemand}
+                      saving={saving}
+                      onAdd={startAddDemand}
+                      color={C.bad}
+                    />
+
+                    {linesLoading && canEditDemand ? (
+                      <div style={{ padding: '16px 20px' }}>
+                        <Spinner size="tiny" label="Loading..." />
+                      </div>
+                    ) : (
+                      <>
+                        {shownDemandLines.length === 0 && !addingDemand && (
+                          <div style={{ padding: '16px 20px', fontSize: 13, color: C.ink3 }}>
+                            No demand assignments.
+                          </div>
+                        )}
+
+                        {showEditableLines
+                          ? visibleDemandLines.map(line => (
+                              editingDemandId === line.id ? (
+                                <EditRow
+                                  key={line.id}
+                                  projects={projects}
+                                  projectId={demandForm.project_id}
+                                  ftePct={demandForm.fte_percent}
+                                  saving={saving}
+                                  onProjectChange={v => setDemandForm(f => ({ ...f, project_id: v }))}
+                                  onFteChange={v => setDemandForm(f => ({ ...f, fte_percent: v }))}
+                                  onSave={() => saveDemand(line.id)}
+                                  onCancel={() => setEditingDemandId(null)}
+                                />
+                              ) : (
+                                <AssignmentRow
+                                  key={line.id}
+                                  projectName={line.project_name ?? null}
+                                  ftePct={line.fte_percent}
+                                  barColor={C.bad}
+                                  canEdit={canEditDemand}
+                                  saving={saving}
+                                  editing={!!editingDemandId || addingDemand}
+
+                                  onDelete={() => deleteDemand(line.id)}
+                                />
+                              )
+                            ))
+                          : visibleReadOnlyDemandLines.map((line, i) => (
+                              <AssignmentRow
+                                key={i}
+                                projectName={line.project_name ?? null}
+                                ftePct={line.fte_percent}
+                                barColor={C.bad}
+                                canEdit={false}
+                                saving={false}
+                                editing={false}
+                                onDelete={() => {}}
+                              />
+                            ))
+                        }
+
+                        {addingDemand && (
+                          <EditRow
+                            projects={projects}
+                            projectId={demandForm.project_id}
+                            ftePct={demandForm.fte_percent}
+                            saving={saving}
+                            onProjectChange={v => setDemandForm(f => ({ ...f, project_id: v }))}
+                            onFteChange={v => setDemandForm(f => ({ ...f, fte_percent: v }))}
+                            onSave={() => saveDemand(null)}
+                            onCancel={() => setAddingDemand(false)}
+                          />
+                        )}
+                      </>
+                    )}
+
+                    {/* Section footer */}
+                    {shownDemandLines.length > 0 && (
+                      <div style={{
+                        padding: '8px 16px',
+                        borderTop: `1px solid ${C.line}`,
+                        display: 'flex', justifyContent: 'space-between',
+                        fontSize: 11, color: C.ink3,
+                        backgroundColor: C.surface2,
+                      }}>
+                        <span>{shownDemandLines.length} demand line{shownDemandLines.length !== 1 ? 's' : ''}</span>
+                        <span style={{ fontFamily: 'monospace', fontWeight: 600, color: C.bad }}>Total {totalDemandPct}%</span>
+                      </div>
+                    )}
+                </div>
+
+                {/* ── Supply assignments ── */}
+                <div style={{ borderTop: `1px solid ${C.line}` }}>
+                    <SectionHeader
+                      title="Supply assignments"
+                      count={shownSupplyLines.length}
+                      totalPct={totalSupplyPct}
+                      canAdd={canEditSupply}
+                      adding={addingSupply}
+                      saving={saving}
+                      onAdd={startAddSupply}
+                      color={C.accent}
+                    />
+
+                    {linesLoading && canEditSupply ? (
+                      <div style={{ padding: '16px 20px' }}>
+                        <Spinner size="tiny" label="Loading..." />
+                      </div>
+                    ) : (
+                      <>
+                        {shownSupplyLines.length === 0 && !addingSupply && (
+                          <div style={{ padding: '16px 20px', fontSize: 13, color: C.ink3 }}>
+                            No supply assignments.
+                          </div>
+                        )}
+
+                        {showEditableLines
+                          ? supplyLines.map(line => (
+                              editingSupplyId === line.id ? (
+                                <EditRow
+                                  key={line.id}
+                                  projects={projects}
+                                  projectId={supplyForm.project_id}
+                                  ftePct={supplyForm.fte_percent}
+                                  saving={saving}
+                                  supplyMode
+                                  onProjectChange={v => setSupplyForm(f => ({ ...f, project_id: v }))}
+                                  onFteChange={v => setSupplyForm(f => ({ ...f, fte_percent: v }))}
+                                  onSave={() => saveSupply(line.id)}
+                                  onCancel={() => setEditingSupplyId(null)}
+                                />
+                              ) : (
+                                <AssignmentRow
+                                  key={line.id}
+                                  projectName={line.project_name ?? null}
+                                  ftePct={line.fte_percent}
+                                  barColor={C.accent}
+                                  canEdit={canEditSupply}
+                                  saving={saving}
+                                  editing={!!editingSupplyId || addingSupply}
+                                  onDelete={() => deleteSupply(line.id)}
+                                />
+                              )
+                            ))
+                          : (localDetail?.supply_lines ?? []).map((line, i) => (
+                              <AssignmentRow
+                                key={i}
+                                projectName={line.project_name ?? null}
+                                ftePct={line.fte_percent}
+                                barColor={C.accent}
+                                canEdit={false}
+                                saving={false}
+                                editing={false}
+                                onDelete={() => {}}
+                              />
+                            ))
+                        }
+
+                        {addingSupply && (
+                          <EditRow
+                            projects={projects}
+                            projectId={supplyForm.project_id}
+                            ftePct={supplyForm.fte_percent}
+                            saving={saving}
+                            supplyMode
+                            onProjectChange={v => setSupplyForm(f => ({ ...f, project_id: v }))}
+                            onFteChange={v => setSupplyForm(f => ({ ...f, fte_percent: v }))}
+                            onSave={() => saveSupply(null)}
+                            onCancel={() => setAddingSupply(false)}
+                          />
+                        )}
+                      </>
+                    )}
+
+                    {/* Section footer */}
+                    {shownSupplyLines.length > 0 && (
+                      <div style={{
+                        padding: '8px 16px',
+                        borderTop: `1px solid ${C.line}`,
+                        display: 'flex', justifyContent: 'space-between',
+                        fontSize: 11, color: C.ink3,
+                        backgroundColor: C.surface2,
+                      }}>
+                        <span>{shownSupplyLines.length} supply line{shownSupplyLines.length !== 1 ? 's' : ''}</span>
+                        <span style={{ fontFamily: 'monospace', fontWeight: 600, color: C.accent }}>Total {totalSupplyPct}%</span>
+                      </div>
+                    )}
+                </div>
+
+
+              </>
             )}
           </DialogContent>
-          <DialogActions>
-            <Button appearance="secondary" onClick={onClose}>Close</Button>
-          </DialogActions>
+
+          {/* ── Footer ── */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '12px 20px',
+            borderTop: `1px solid ${C.line}`,
+            backgroundColor: C.surface2,
+            flexShrink: 0,
+          }}>
+            <span style={{ fontSize: 11, color: C.ink3 }}>
+              {saving
+                ? '⏳ Saving…'
+                : lastSaved
+                  ? `✓ Saved ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                  : 'Auto-saved · all changes saved immediately'
+              }
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button appearance="secondary" onClick={onClose}>Close</Button>
+              <Button appearance="primary" onClick={onClose} disabled={saving}>Apply</Button>
+            </div>
+          </div>
+
         </DialogBody>
       </DialogSurface>
     </Dialog>

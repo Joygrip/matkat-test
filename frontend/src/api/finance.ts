@@ -23,6 +23,9 @@ export interface EmployeeStats {
   supply_fte: number;
   actuals_fte: number;
   projects: ProjectBreakdown[];
+  cost_center_id?: string;
+  cost_center_name?: string;
+  employee_initials?: string;
 }
 
 export async function getCostCenterStats(year: number, month: number, costCenterId?: string): Promise<CostCenterStats[]> {

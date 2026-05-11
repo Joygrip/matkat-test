@@ -607,9 +607,12 @@ export function ActualsTab({
     if (costCenters.length > 0) {
       return costCenters.map(cc => ({ id: cc.id, name: cc.name }));
     }
-    // Fallback: derive from actuals data when lookups not available
+    // Fallback: derive from actuals data + empStats when lookups not available
     const map = new Map<string, string>();
     for (const r of actualsData) map.set(r.cost_center_id, r.cost_center_name);
+    for (const s of empStats ?? []) {
+      if (s.cost_center_id && s.cost_center_name) map.set(s.cost_center_id, s.cost_center_name);
+    }
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [costCenters, actualsData]);
 
@@ -680,8 +683,9 @@ export function ActualsTab({
       .map(s => ({
         employee_name: s.employee_name,
         employee_email: '',
-        cost_center_id: '',
-        cost_center_name: '',
+        cost_center_id: s.cost_center_id ?? '',
+        cost_center_name: s.cost_center_name ?? '',
+        employee_initials: s.employee_initials,
         rows: [],
         isMissingOnly: true,
       }));

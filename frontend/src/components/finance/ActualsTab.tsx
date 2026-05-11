@@ -657,6 +657,7 @@ export function ActualsTab({
         map.set(row.employee_name, {
           employee_name: row.employee_name,
           employee_email: row.employee_email,
+          employee_initials: row.employee_initials,
           cost_center_id: row.cost_center_id,
           cost_center_name: row.cost_center_name,
           rows: [row],
@@ -1039,7 +1040,7 @@ export function ActualsTab({
                     <td className={styles.td}>
                       <div style={{ display:'flex', alignItems:'center', gap:9 }}>
                         <div className={styles.avatar} style={{ background: nameColor(group.employee_name) }}>
-                          {group.rows[0]?.employee_initials || nameInitials(group.employee_name)}
+                          {group.employee_initials || nameInitials(group.employee_name)}
                         </div>
                         <div style={{ minWidth:0 }}>
                           <div style={{ fontWeight:600, fontSize:13, color:C.ink, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>

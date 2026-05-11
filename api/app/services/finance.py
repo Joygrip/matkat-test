@@ -383,7 +383,7 @@ class FinanceService:
         """Get demand vs actuals per employee for a given period."""
         from collections import defaultdict
         from api.app.models.planning import DemandLine, SupplyLine
-        from api.app.models.core import Resource, Project as ProjectModel
+        from api.app.models.core import Resource, Project as ProjectModel, CostCenter
         from sqlalchemy import func
 
         # Manager restriction: scope to accessible resources via reporting hierarchy
@@ -459,10 +459,14 @@ class FinanceService:
             self.db.query(
                 Resource.id.label("resource_id"),
                 Resource.display_name.label("employee_name"),
+                Resource.cost_center_id.label("cost_center_id"),
+                CostCenter.name.label("cost_center_name"),
+                Resource.initials.label("initials"),
                 func.coalesce(demand_subq.c.demand_fte, 0).label("demand_fte"),
                 func.coalesce(supply_subq.c.supply_fte, 0).label("supply_fte"),
                 func.coalesce(actuals_subq.c.actuals_fte, 0).label("actuals_fte"),
             )
+            .outerjoin(CostCenter, Resource.cost_center_id == CostCenter.id)
             .outerjoin(demand_subq, Resource.id == demand_subq.c.resource_id)
             .outerjoin(supply_subq, Resource.id == supply_subq.c.resource_id)
             .outerjoin(actuals_subq, Resource.id == actuals_subq.c.resource_id)
@@ -567,6 +571,9 @@ class FinanceService:
             FinanceEmployeeStatsResponse(
                 resource_id=row.resource_id,
                 employee_name=row.employee_name,
+                cost_center_id=row.cost_center_id,
+                cost_center_name=row.cost_center_name,
+                initials=row.initials,
                 demand_fte=float(row.demand_fte or 0),
                 supply_fte=float(row.supply_fte or 0),
                 actuals_fte=float(row.actuals_fte or 0),

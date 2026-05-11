@@ -45,6 +45,9 @@ class ProjectBreakdownItem(BaseModel):
 class FinanceEmployeeStatsResponse(BaseModel):
     resource_id: str
     employee_name: str
+    cost_center_id: Optional[str] = None
+    cost_center_name: Optional[str] = None
+    initials: Optional[str] = None
     demand_fte: float
     supply_fte: float
     actuals_fte: float

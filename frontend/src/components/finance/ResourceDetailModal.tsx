@@ -100,23 +100,11 @@ function MiniPctBar({ pct, color }: { pct: number; color: string }) {
 // ── Section header ────────────────────────────────────────────────────────────
 
 function SectionHeader({
-  title,
-  count,
-  totalPct,
-  canAdd,
-  adding,
-  saving,
-  onAdd,
-  color,
+  title, count, totalPct, canAdd, adding, saving, onAdd, color,
 }: {
-  title: string;
-  count: number;
-  totalPct: number;
-  canAdd: boolean;
-  adding: boolean;
-  saving: boolean;
-  onAdd: () => void;
-  color: string;
+  title: string; count: number; totalPct: number;
+  canAdd: boolean; adding: boolean; saving: boolean;
+  onAdd: () => void; color: string;
 }) {
   return (
     <div style={{
@@ -133,7 +121,7 @@ function SectionHeader({
       <span style={{
         fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
         padding: '1px 8px', borderRadius: 10,
-        backgroundColor: `${color}18`, color: color,
+        backgroundColor: `${color}18`, color,
       }}>
         {totalPct}%
       </span>
@@ -153,7 +141,7 @@ function SectionHeader({
   );
 }
 
-// ── Assignment row (read mode) ────────────────────────────────────────────────
+// ── Assignment row ────────────────────────────────────────────────────────────
 
 function AssignmentRow({
   projectName,
@@ -163,6 +151,7 @@ function AssignmentRow({
   saving,
   editing,
   onDelete,
+  onFteChange,
 }: {
   projectName: string | null;
   ftePct: number;
@@ -171,8 +160,22 @@ function AssignmentRow({
   saving: boolean;
   editing: boolean;
   onDelete: () => void;
+  onFteChange?: (newPct: number) => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const [localFte, setLocalFte] = useState(ftePct);
+  const [fteFocused, setFteFocused] = useState(false);
+
+  useEffect(() => {
+    if (!fteFocused) setLocalFte(ftePct);
+  }, [ftePct, fteFocused]);
+
+  const commitFte = () => {
+    setFteFocused(false);
+    if (localFte !== ftePct && onFteChange) {
+      onFteChange(localFte);
+    }
+  };
 
   return (
     <div
@@ -193,10 +196,41 @@ function AssignmentRow({
           {projectName ?? <em style={{ color: C.ink3 }}>General availability</em>}
         </div>
       </div>
-      <div style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 600, color: C.ink2, width: 42, textAlign: 'right', flexShrink: 0 }}>
-        {ftePct}%
-      </div>
+
+      {/* FTE value — inline input when editable */}
+      {canEdit && onFteChange ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+          <input
+            type="number"
+            min={5} max={100} step={5}
+            value={localFte}
+            onChange={e => setLocalFte(Math.min(100, Math.max(5, parseInt(e.target.value) || 5)))}
+            onFocus={() => setFteFocused(true)}
+            onBlur={commitFte}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { commitFte(); (e.target as HTMLInputElement).blur(); }
+              if (e.key === 'Escape') { setLocalFte(ftePct); setFteFocused(false); (e.target as HTMLInputElement).blur(); }
+            }}
+            disabled={saving}
+            style={{
+              width: 50, padding: '2px 4px', borderRadius: 4,
+              border: `1px solid ${fteFocused ? C.accent : C.line}`,
+              fontSize: 12, fontFamily: 'monospace', fontWeight: 600,
+              color: C.ink2, textAlign: 'right',
+              background: fteFocused ? '#fff' : 'transparent',
+              outline: 'none',
+            }}
+          />
+          <span style={{ fontSize: 12, color: C.ink3, flexShrink: 0 }}>%</span>
+        </div>
+      ) : (
+        <div style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 600, color: C.ink2, width: 42, textAlign: 'right', flexShrink: 0 }}>
+          {ftePct}%
+        </div>
+      )}
+
       <MiniPctBar pct={ftePct} color={barColor} />
+
       {canEdit && (
         <div style={{ display: 'flex', gap: 2, opacity: hovered ? 1 : 0, transition: 'opacity 0.1s', flexShrink: 0 }}>
           <Button
@@ -214,18 +248,11 @@ function AssignmentRow({
   );
 }
 
-// ── Edit row (inline form) ─────────────────────────────────────────────────────
+// ── Edit row (inline add form) ─────────────────────────────────────────────────
 
 function EditRow({
-  projects,
-  projectId,
-  ftePct,
-  saving,
-  supplyMode,
-  onProjectChange,
-  onFteChange,
-  onSave,
-  onCancel,
+  projects, projectId, ftePct, saving, supplyMode,
+  onProjectChange, onFteChange, onSave, onCancel,
 }: {
   projects: Project[];
   projectId: string;
@@ -366,12 +393,18 @@ export function ResourceDetailModal({
     } catch {}
   };
 
-  const refreshSummary = async () => {
+  // Silent background refetch — no loading state, no flash
+  const silentRefetch = () => {
     if (!periodId || !resourceId) return;
-    try {
-      const d = await consolidationApi.getResourceDetail(periodId, resourceId);
+    Promise.all([
+      planningApi.getDemandLines(periodId, { resourceId }),
+      planningApi.getSupplyLines(periodId, { resourceId }),
+      consolidationApi.getResourceDetail(periodId, resourceId),
+    ]).then(([dl, sl, d]) => {
+      setDemandLines(dl);
+      setSupplyLines(sl);
       setLocalDetail(d);
-    } catch {}
+    }).catch(() => {});
   };
 
   // ── Demand handlers ──────────────────────────────────────────────────────────
@@ -388,10 +421,14 @@ export function ResourceDetailModal({
     setSaving(true);
     try {
       if (lineId) {
-        await planningApi.updateDemandLine(lineId, { project_id: demandForm.project_id, fte_percent: demandForm.fte_percent });
+        const updated = await planningApi.updateDemandLine(lineId, {
+          project_id: demandForm.project_id,
+          fte_percent: demandForm.fte_percent,
+        });
+        setDemandLines(prev => prev.map(l => l.id === lineId ? updated : l));
         showSuccess('Demand line updated');
       } else {
-        await planningApi.createDemandLine({
+        const newLine = await planningApi.createDemandLine({
           period_id: periodId,
           project_id: demandForm.project_id,
           resource_id: resourceId,
@@ -399,29 +436,81 @@ export function ResourceDetailModal({
           year: selectedPeriod!.year,
           month: selectedPeriod!.month,
         });
+        // Optimistic append
+        setDemandLines(prev => [...prev, newLine]);
+        setLocalDetail(prev => prev ? {
+          ...prev,
+          total_demand_fte: prev.total_demand_fte + newLine.fte_percent,
+          gap_fte: prev.gap_fte - newLine.fte_percent,
+        } : prev);
         showSuccess('Demand line added');
       }
       setEditingDemandId(null);
       setAddingDemand(false);
       setLastSaved(new Date());
-      await loadLines();
-      await refreshSummary();
+      silentRefetch();
       onDataChanged();
     } catch (e) { showApiError(e as Error); }
     finally { setSaving(false); }
   };
 
+  const updateFteDemand = async (lineId: string, newPct: number) => {
+    const oldLine = demandLines.find(l => l.id === lineId);
+    if (!oldLine) return;
+    const diff = newPct - oldLine.fte_percent;
+    // Optimistic update
+    setDemandLines(prev => prev.map(l => l.id === lineId ? { ...l, fte_percent: newPct } : l));
+    setLocalDetail(prev => prev ? {
+      ...prev,
+      total_demand_fte: prev.total_demand_fte + diff,
+      gap_fte: prev.gap_fte - diff,
+    } : prev);
+    try {
+      await planningApi.updateDemandLine(lineId, { fte_percent: newPct });
+      setLastSaved(new Date());
+      silentRefetch();
+      onDataChanged();
+    } catch (e) {
+      // Revert
+      setDemandLines(prev => prev.map(l => l.id === lineId ? oldLine : l));
+      setLocalDetail(prev => prev ? {
+        ...prev,
+        total_demand_fte: prev.total_demand_fte - diff,
+        gap_fte: prev.gap_fte + diff,
+      } : prev);
+      showApiError(e as Error);
+    }
+  };
+
   const deleteDemand = async (lineId: string) => {
+    const oldLine = demandLines.find(l => l.id === lineId);
+    if (!oldLine) return;
+    // Optimistic remove
+    setDemandLines(prev => prev.filter(l => l.id !== lineId));
+    setLocalDetail(prev => prev ? {
+      ...prev,
+      total_demand_fte: prev.total_demand_fte - oldLine.fte_percent,
+      gap_fte: prev.gap_fte + oldLine.fte_percent,
+    } : prev);
     setSaving(true);
     try {
       await planningApi.deleteDemandLine(lineId);
       showSuccess('Demand line removed');
       setLastSaved(new Date());
-      await loadLines();
-      await refreshSummary();
+      silentRefetch();
       onDataChanged();
-    } catch (e) { showApiError(e as Error); }
-    finally { setSaving(false); }
+    } catch (e) {
+      // Revert
+      setDemandLines(prev => [...prev, oldLine]);
+      setLocalDetail(prev => prev ? {
+        ...prev,
+        total_demand_fte: prev.total_demand_fte + oldLine.fte_percent,
+        gap_fte: prev.gap_fte - oldLine.fte_percent,
+      } : prev);
+      showApiError(e as Error);
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── Supply handlers ──────────────────────────────────────────────────────────
@@ -438,10 +527,14 @@ export function ResourceDetailModal({
     setSaving(true);
     try {
       if (lineId) {
-        await planningApi.updateSupplyLine(lineId, { project_id: supplyForm.project_id || undefined, fte_percent: supplyForm.fte_percent });
+        const updated = await planningApi.updateSupplyLine(lineId, {
+          project_id: supplyForm.project_id || undefined,
+          fte_percent: supplyForm.fte_percent,
+        });
+        setSupplyLines(prev => prev.map(l => l.id === lineId ? updated : l));
         showSuccess('Supply line updated');
       } else {
-        await planningApi.createSupplyLine({
+        const newLine = await planningApi.createSupplyLine({
           period_id: periodId,
           resource_id: resourceId,
           project_id: supplyForm.project_id || undefined,
@@ -449,29 +542,81 @@ export function ResourceDetailModal({
           year: selectedPeriod!.year,
           month: selectedPeriod!.month,
         });
+        // Optimistic append
+        setSupplyLines(prev => [...prev, newLine]);
+        setLocalDetail(prev => prev ? {
+          ...prev,
+          total_supply_fte: prev.total_supply_fte + newLine.fte_percent,
+          gap_fte: prev.gap_fte + newLine.fte_percent,
+        } : prev);
         showSuccess('Supply line added');
       }
       setEditingSupplyId(null);
       setAddingSupply(false);
       setLastSaved(new Date());
-      await loadLines();
-      await refreshSummary();
+      silentRefetch();
       onDataChanged();
     } catch (e) { showApiError(e as Error); }
     finally { setSaving(false); }
   };
 
+  const updateFteSupply = async (lineId: string, newPct: number) => {
+    const oldLine = supplyLines.find(l => l.id === lineId);
+    if (!oldLine) return;
+    const diff = newPct - oldLine.fte_percent;
+    // Optimistic update
+    setSupplyLines(prev => prev.map(l => l.id === lineId ? { ...l, fte_percent: newPct } : l));
+    setLocalDetail(prev => prev ? {
+      ...prev,
+      total_supply_fte: prev.total_supply_fte + diff,
+      gap_fte: prev.gap_fte + diff,
+    } : prev);
+    try {
+      await planningApi.updateSupplyLine(lineId, { fte_percent: newPct });
+      setLastSaved(new Date());
+      silentRefetch();
+      onDataChanged();
+    } catch (e) {
+      // Revert
+      setSupplyLines(prev => prev.map(l => l.id === lineId ? oldLine : l));
+      setLocalDetail(prev => prev ? {
+        ...prev,
+        total_supply_fte: prev.total_supply_fte - diff,
+        gap_fte: prev.gap_fte - diff,
+      } : prev);
+      showApiError(e as Error);
+    }
+  };
+
   const deleteSupply = async (lineId: string) => {
+    const oldLine = supplyLines.find(l => l.id === lineId);
+    if (!oldLine) return;
+    // Optimistic remove
+    setSupplyLines(prev => prev.filter(l => l.id !== lineId));
+    setLocalDetail(prev => prev ? {
+      ...prev,
+      total_supply_fte: prev.total_supply_fte - oldLine.fte_percent,
+      gap_fte: prev.gap_fte - oldLine.fte_percent,
+    } : prev);
     setSaving(true);
     try {
       await planningApi.deleteSupplyLine(lineId);
       showSuccess('Supply line removed');
       setLastSaved(new Date());
-      await loadLines();
-      await refreshSummary();
+      silentRefetch();
       onDataChanged();
-    } catch (e) { showApiError(e as Error); }
-    finally { setSaving(false); }
+    } catch (e) {
+      // Revert
+      setSupplyLines(prev => [...prev, oldLine]);
+      setLocalDetail(prev => prev ? {
+        ...prev,
+        total_supply_fte: prev.total_supply_fte + oldLine.fte_percent,
+        gap_fte: prev.gap_fte + oldLine.fte_percent,
+      } : prev);
+      showApiError(e as Error);
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── Derived display values ───────────────────────────────────────────────────
@@ -589,199 +734,197 @@ export function ResourceDetailModal({
 
                 {/* ── Demand assignments ── */}
                 <div style={{ borderTop: `1px solid ${C.line}` }}>
-                    <SectionHeader
-                      title="Demand assignments"
-                      count={shownDemandLines.length}
-                      totalPct={totalDemandPct}
-                      canAdd={canEditDemand}
-                      adding={addingDemand}
-                      saving={saving}
-                      onAdd={startAddDemand}
-                      color={C.bad}
-                    />
+                  <SectionHeader
+                    title="Demand assignments"
+                    count={shownDemandLines.length}
+                    totalPct={totalDemandPct}
+                    canAdd={canEditDemand}
+                    adding={addingDemand}
+                    saving={saving}
+                    onAdd={startAddDemand}
+                    color={C.bad}
+                  />
 
-                    {linesLoading && canEditDemand ? (
-                      <div style={{ padding: '16px 20px' }}>
-                        <Spinner size="tiny" label="Loading..." />
-                      </div>
-                    ) : (
-                      <>
-                        {shownDemandLines.length === 0 && !addingDemand && (
-                          <div style={{ padding: '16px 20px', fontSize: 13, color: C.ink3 }}>
-                            No demand assignments.
-                          </div>
-                        )}
+                  {linesLoading && canEditDemand ? (
+                    <div style={{ padding: '16px 20px' }}>
+                      <Spinner size="tiny" label="Loading..." />
+                    </div>
+                  ) : (
+                    <>
+                      {shownDemandLines.length === 0 && !addingDemand && (
+                        <div style={{ padding: '16px 20px', fontSize: 13, color: C.ink3 }}>
+                          No demand assignments.
+                        </div>
+                      )}
 
-                        {showEditableLines
-                          ? visibleDemandLines.map(line => (
-                              editingDemandId === line.id ? (
-                                <EditRow
-                                  key={line.id}
-                                  projects={projects}
-                                  projectId={demandForm.project_id}
-                                  ftePct={demandForm.fte_percent}
-                                  saving={saving}
-                                  onProjectChange={v => setDemandForm(f => ({ ...f, project_id: v }))}
-                                  onFteChange={v => setDemandForm(f => ({ ...f, fte_percent: v }))}
-                                  onSave={() => saveDemand(line.id)}
-                                  onCancel={() => setEditingDemandId(null)}
-                                />
-                              ) : (
-                                <AssignmentRow
-                                  key={line.id}
-                                  projectName={line.project_name ?? null}
-                                  ftePct={line.fte_percent}
-                                  barColor={C.bad}
-                                  canEdit={canEditDemand}
-                                  saving={saving}
-                                  editing={!!editingDemandId || addingDemand}
-
-                                  onDelete={() => deleteDemand(line.id)}
-                                />
-                              )
-                            ))
-                          : visibleReadOnlyDemandLines.map((line, i) => (
+                      {showEditableLines
+                        ? visibleDemandLines.map(line => (
+                            editingDemandId === line.id ? (
+                              <EditRow
+                                key={line.id}
+                                projects={projects}
+                                projectId={demandForm.project_id}
+                                ftePct={demandForm.fte_percent}
+                                saving={saving}
+                                onProjectChange={v => setDemandForm(f => ({ ...f, project_id: v }))}
+                                onFteChange={v => setDemandForm(f => ({ ...f, fte_percent: v }))}
+                                onSave={() => saveDemand(line.id)}
+                                onCancel={() => setEditingDemandId(null)}
+                              />
+                            ) : (
                               <AssignmentRow
-                                key={i}
+                                key={line.id}
                                 projectName={line.project_name ?? null}
                                 ftePct={line.fte_percent}
                                 barColor={C.bad}
-                                canEdit={false}
-                                saving={false}
-                                editing={false}
-                                onDelete={() => {}}
+                                canEdit={canEditDemand}
+                                saving={saving}
+                                editing={!!editingDemandId || addingDemand}
+                                onDelete={() => deleteDemand(line.id)}
+                                onFteChange={canEditDemand ? (newPct) => updateFteDemand(line.id, newPct) : undefined}
                               />
-                            ))
-                        }
+                            )
+                          ))
+                        : visibleReadOnlyDemandLines.map((line, i) => (
+                            <AssignmentRow
+                              key={i}
+                              projectName={line.project_name ?? null}
+                              ftePct={line.fte_percent}
+                              barColor={C.bad}
+                              canEdit={false}
+                              saving={false}
+                              editing={false}
+                              onDelete={() => {}}
+                            />
+                          ))
+                      }
 
-                        {addingDemand && (
-                          <EditRow
-                            projects={projects}
-                            projectId={demandForm.project_id}
-                            ftePct={demandForm.fte_percent}
-                            saving={saving}
-                            onProjectChange={v => setDemandForm(f => ({ ...f, project_id: v }))}
-                            onFteChange={v => setDemandForm(f => ({ ...f, fte_percent: v }))}
-                            onSave={() => saveDemand(null)}
-                            onCancel={() => setAddingDemand(false)}
-                          />
-                        )}
-                      </>
-                    )}
+                      {addingDemand && (
+                        <EditRow
+                          projects={projects}
+                          projectId={demandForm.project_id}
+                          ftePct={demandForm.fte_percent}
+                          saving={saving}
+                          onProjectChange={v => setDemandForm(f => ({ ...f, project_id: v }))}
+                          onFteChange={v => setDemandForm(f => ({ ...f, fte_percent: v }))}
+                          onSave={() => saveDemand(null)}
+                          onCancel={() => setAddingDemand(false)}
+                        />
+                      )}
+                    </>
+                  )}
 
-                    {/* Section footer */}
-                    {shownDemandLines.length > 0 && (
-                      <div style={{
-                        padding: '8px 16px',
-                        borderTop: `1px solid ${C.line}`,
-                        display: 'flex', justifyContent: 'space-between',
-                        fontSize: 11, color: C.ink3,
-                        backgroundColor: C.surface2,
-                      }}>
-                        <span>{shownDemandLines.length} demand line{shownDemandLines.length !== 1 ? 's' : ''}</span>
-                        <span style={{ fontFamily: 'monospace', fontWeight: 600, color: C.bad }}>Total {totalDemandPct}%</span>
-                      </div>
-                    )}
+                  {shownDemandLines.length > 0 && (
+                    <div style={{
+                      padding: '8px 16px',
+                      borderTop: `1px solid ${C.line}`,
+                      display: 'flex', justifyContent: 'space-between',
+                      fontSize: 11, color: C.ink3,
+                      backgroundColor: C.surface2,
+                    }}>
+                      <span>{shownDemandLines.length} demand line{shownDemandLines.length !== 1 ? 's' : ''}</span>
+                      <span style={{ fontFamily: 'monospace', fontWeight: 600, color: C.bad }}>Total {totalDemandPct}%</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* ── Supply assignments ── */}
                 <div style={{ borderTop: `1px solid ${C.line}` }}>
-                    <SectionHeader
-                      title="Supply assignments"
-                      count={shownSupplyLines.length}
-                      totalPct={totalSupplyPct}
-                      canAdd={canEditSupply}
-                      adding={addingSupply}
-                      saving={saving}
-                      onAdd={startAddSupply}
-                      color={C.accent}
-                    />
+                  <SectionHeader
+                    title="Supply assignments"
+                    count={shownSupplyLines.length}
+                    totalPct={totalSupplyPct}
+                    canAdd={canEditSupply}
+                    adding={addingSupply}
+                    saving={saving}
+                    onAdd={startAddSupply}
+                    color={C.accent}
+                  />
 
-                    {linesLoading && canEditSupply ? (
-                      <div style={{ padding: '16px 20px' }}>
-                        <Spinner size="tiny" label="Loading..." />
-                      </div>
-                    ) : (
-                      <>
-                        {shownSupplyLines.length === 0 && !addingSupply && (
-                          <div style={{ padding: '16px 20px', fontSize: 13, color: C.ink3 }}>
-                            No supply assignments.
-                          </div>
-                        )}
+                  {linesLoading && canEditSupply ? (
+                    <div style={{ padding: '16px 20px' }}>
+                      <Spinner size="tiny" label="Loading..." />
+                    </div>
+                  ) : (
+                    <>
+                      {shownSupplyLines.length === 0 && !addingSupply && (
+                        <div style={{ padding: '16px 20px', fontSize: 13, color: C.ink3 }}>
+                          No supply assignments.
+                        </div>
+                      )}
 
-                        {showEditableLines
-                          ? supplyLines.map(line => (
-                              editingSupplyId === line.id ? (
-                                <EditRow
-                                  key={line.id}
-                                  projects={projects}
-                                  projectId={supplyForm.project_id}
-                                  ftePct={supplyForm.fte_percent}
-                                  saving={saving}
-                                  supplyMode
-                                  onProjectChange={v => setSupplyForm(f => ({ ...f, project_id: v }))}
-                                  onFteChange={v => setSupplyForm(f => ({ ...f, fte_percent: v }))}
-                                  onSave={() => saveSupply(line.id)}
-                                  onCancel={() => setEditingSupplyId(null)}
-                                />
-                              ) : (
-                                <AssignmentRow
-                                  key={line.id}
-                                  projectName={line.project_name ?? null}
-                                  ftePct={line.fte_percent}
-                                  barColor={C.accent}
-                                  canEdit={canEditSupply}
-                                  saving={saving}
-                                  editing={!!editingSupplyId || addingSupply}
-                                  onDelete={() => deleteSupply(line.id)}
-                                />
-                              )
-                            ))
-                          : (localDetail?.supply_lines ?? []).map((line, i) => (
+                      {showEditableLines
+                        ? supplyLines.map(line => (
+                            editingSupplyId === line.id ? (
+                              <EditRow
+                                key={line.id}
+                                projects={projects}
+                                projectId={supplyForm.project_id}
+                                ftePct={supplyForm.fte_percent}
+                                saving={saving}
+                                supplyMode
+                                onProjectChange={v => setSupplyForm(f => ({ ...f, project_id: v }))}
+                                onFteChange={v => setSupplyForm(f => ({ ...f, fte_percent: v }))}
+                                onSave={() => saveSupply(line.id)}
+                                onCancel={() => setEditingSupplyId(null)}
+                              />
+                            ) : (
                               <AssignmentRow
-                                key={i}
+                                key={line.id}
                                 projectName={line.project_name ?? null}
                                 ftePct={line.fte_percent}
                                 barColor={C.accent}
-                                canEdit={false}
-                                saving={false}
-                                editing={false}
-                                onDelete={() => {}}
+                                canEdit={canEditSupply}
+                                saving={saving}
+                                editing={!!editingSupplyId || addingSupply}
+                                onDelete={() => deleteSupply(line.id)}
+                                onFteChange={canEditSupply ? (newPct) => updateFteSupply(line.id, newPct) : undefined}
                               />
-                            ))
-                        }
+                            )
+                          ))
+                        : (localDetail?.supply_lines ?? []).map((line, i) => (
+                            <AssignmentRow
+                              key={i}
+                              projectName={line.project_name ?? null}
+                              ftePct={line.fte_percent}
+                              barColor={C.accent}
+                              canEdit={false}
+                              saving={false}
+                              editing={false}
+                              onDelete={() => {}}
+                            />
+                          ))
+                      }
 
-                        {addingSupply && (
-                          <EditRow
-                            projects={projects}
-                            projectId={supplyForm.project_id}
-                            ftePct={supplyForm.fte_percent}
-                            saving={saving}
-                            supplyMode
-                            onProjectChange={v => setSupplyForm(f => ({ ...f, project_id: v }))}
-                            onFteChange={v => setSupplyForm(f => ({ ...f, fte_percent: v }))}
-                            onSave={() => saveSupply(null)}
-                            onCancel={() => setAddingSupply(false)}
-                          />
-                        )}
-                      </>
-                    )}
+                      {addingSupply && (
+                        <EditRow
+                          projects={projects}
+                          projectId={supplyForm.project_id}
+                          ftePct={supplyForm.fte_percent}
+                          saving={saving}
+                          supplyMode
+                          onProjectChange={v => setSupplyForm(f => ({ ...f, project_id: v }))}
+                          onFteChange={v => setSupplyForm(f => ({ ...f, fte_percent: v }))}
+                          onSave={() => saveSupply(null)}
+                          onCancel={() => setAddingSupply(false)}
+                        />
+                      )}
+                    </>
+                  )}
 
-                    {/* Section footer */}
-                    {shownSupplyLines.length > 0 && (
-                      <div style={{
-                        padding: '8px 16px',
-                        borderTop: `1px solid ${C.line}`,
-                        display: 'flex', justifyContent: 'space-between',
-                        fontSize: 11, color: C.ink3,
-                        backgroundColor: C.surface2,
-                      }}>
-                        <span>{shownSupplyLines.length} supply line{shownSupplyLines.length !== 1 ? 's' : ''}</span>
-                        <span style={{ fontFamily: 'monospace', fontWeight: 600, color: C.accent }}>Total {totalSupplyPct}%</span>
-                      </div>
-                    )}
+                  {shownSupplyLines.length > 0 && (
+                    <div style={{
+                      padding: '8px 16px',
+                      borderTop: `1px solid ${C.line}`,
+                      display: 'flex', justifyContent: 'space-between',
+                      fontSize: 11, color: C.ink3,
+                      backgroundColor: C.surface2,
+                    }}>
+                      <span>{shownSupplyLines.length} supply line{shownSupplyLines.length !== 1 ? 's' : ''}</span>
+                      <span style={{ fontFamily: 'monospace', fontWeight: 600, color: C.accent }}>Total {totalSupplyPct}%</span>
+                    </div>
+                  )}
                 </div>
-
 
               </>
             )}

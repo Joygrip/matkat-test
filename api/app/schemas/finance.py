@@ -6,6 +6,7 @@ class FinanceActualsDashboardResponse(BaseModel):
     actual_id: str
     employee_name: str
     employee_email: Optional[str] = None
+    employee_initials: Optional[str] = None
     project_id: str
     project_name: str
     cost_center_id: str
@@ -37,6 +38,7 @@ class ProjectBreakdownItem(BaseModel):
     project_id: str
     project_name: str
     demand_fte: float
+    supply_fte: float = 0.0
     actuals_fte: float
 
 

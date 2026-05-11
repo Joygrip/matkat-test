@@ -12,6 +12,7 @@ export interface ProjectBreakdown {
   project_id: string;
   project_name: string;
   demand_fte: number;
+  supply_fte?: number;
   actuals_fte: number;
 }
 

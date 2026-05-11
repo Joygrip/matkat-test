@@ -63,6 +63,7 @@ export interface FinanceActualRow {
   actual_id: string;
   employee_name: string;
   employee_email: string;
+  employee_initials?: string | null;
   project_id: string;
   project_name: string;
   cost_center_id: string;
@@ -84,12 +85,14 @@ export interface FinanceActualRow {
 }
 
 interface LookupProject { id: string; name: string; }
+interface LookupCostCenter { id: string; name: string; }
 
 export interface ActualsTabProps {
   actualsData: FinanceActualRow[];
   actualsLoading: boolean;
   actualsError: string | null;
   projects: LookupProject[];
+  costCenters: LookupCostCenter[];
   actualsProjectId: string;
   actualsApprovalStatus?: string;
   year: number;
@@ -467,6 +470,8 @@ export function ActualsTab({
   actualsData,
   actualsLoading,
   actualsError,
+  projects,
+  costCenters,
   actualsProjectId,
   year,
   month,
@@ -596,18 +601,27 @@ export function ActualsTab({
     return map;
   }, [empStats]);
 
-  // ── Derived filter options ─────────────────────────────────────────────────
+  // ── Derived filter options — prefer lookup lists so filters are always populated
+  //    even when no actuals exist for the selected period yet.
   const ccOptions = useMemo(() => {
+    if (costCenters.length > 0) {
+      return costCenters.map(cc => ({ id: cc.id, name: cc.name }));
+    }
+    // Fallback: derive from actuals data when lookups not available
     const map = new Map<string, string>();
     for (const r of actualsData) map.set(r.cost_center_id, r.cost_center_name);
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [actualsData]);
+  }, [costCenters, actualsData]);
 
   const projectOptions = useMemo(() => {
+    if (projects.length > 0) {
+      return projects.map(p => ({ id: p.id, name: p.name }));
+    }
+    // Fallback: derive from actuals data when lookups not available
     const map = new Map<string, string>();
     for (const r of actualsData) map.set(r.project_id, r.project_name);
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [actualsData]);
+  }, [projects, actualsData]);
 
   // ── Filtered actuals ───────────────────────────────────────────────────────
   const filteredActuals = useMemo(() => {
@@ -621,7 +635,8 @@ export function ActualsTab({
         d.employee_name.toLowerCase().includes(q) ||
         d.employee_email.toLowerCase().includes(q) ||
         d.project_name.toLowerCase().includes(q) ||
-        d.cost_center_name.toLowerCase().includes(q),
+        d.cost_center_name.toLowerCase().includes(q) ||
+        (d.employee_initials != null && d.employee_initials.toLowerCase() === q),
       );
     }
     if (onlyNeedsAction) out = out.filter(d => d.can_action || d.can_proxy_approve_step1);
@@ -1020,7 +1035,7 @@ export function ActualsTab({
                     <td className={styles.td}>
                       <div style={{ display:'flex', alignItems:'center', gap:9 }}>
                         <div className={styles.avatar} style={{ background: nameColor(group.employee_name) }}>
-                          {nameInitials(group.employee_name)}
+                          {group.rows[0]?.employee_initials ?? nameInitials(group.employee_name)}
                         </div>
                         <div style={{ minWidth:0 }}>
                           <div style={{ fontWeight:600, fontSize:13, color:C.ink, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
@@ -1139,7 +1154,7 @@ export function ActualsTab({
 
                   /* Expanded row */
                   isExpanded && (
-                    <tr key={`${group.employee_name}-expanded`} style={{ background: C.bg }}>
+                    <tr key={`${group.employee_name}-expanded`} style={{ background: C.surface2 }}>
                       <td colSpan={8} style={{ padding:0, borderLeft: `3px solid ${borderColor}`, borderBottom: `1px solid ${C.line}` }}>
 
                         {/* Meta strip */}
@@ -1165,6 +1180,7 @@ export function ActualsTab({
                             projectName: string;
                             costCenterName: string;
                             rowDemand: number;
+                            rowSupply: number | null;
                             rowActual: number;
                             row?: FinanceActualRow;
                           };
@@ -1174,6 +1190,7 @@ export function ActualsTab({
                                 projectName: p.project_name,
                                 costCenterName: '',
                                 rowDemand: p.demand_fte,
+                                rowSupply: p.supply_fte != null ? p.supply_fte : null,
                                 rowActual: 0,
                               }))
                             : group.rows.map(row => {
@@ -1183,6 +1200,7 @@ export function ActualsTab({
                                   projectName: row.project_name,
                                   costCenterName: row.cost_center_name,
                                   rowDemand: projStat?.demand_fte ?? 0,
+                                  rowSupply: projStat?.supply_fte != null ? projStat.supply_fte : null,
                                   rowActual: row.fte_percent,
                                   row,
                                 };
@@ -1195,6 +1213,7 @@ export function ActualsTab({
                                   <th style={{ padding:'5px 12px 5px 52px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'26%' }}>Project</th>
                                   <th style={{ padding:'5px 12px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'22%' }}>Allocation</th>
                                   <th style={{ padding:'5px 12px', textAlign:'right', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'10%' }}>Demand</th>
+                                  <th style={{ padding:'5px 12px', textAlign:'right', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'10%' }}>Supply</th>
                                   <th style={{ padding:'5px 12px', textAlign:'right', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'10%' }}>Actual</th>
                                   <th style={{ padding:'5px 12px', textAlign:'right', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'10%' }}>Gap</th>
                                   <th style={{ padding:'5px 12px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}` }}>Status</th>
@@ -1221,6 +1240,9 @@ export function ActualsTab({
                                       </td>
                                       <td style={{ padding:'10px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:C.ink3, verticalAlign:'middle' }}>
                                         {sr.rowDemand > 0 ? `${sr.rowDemand}%` : '—'}
+                                      </td>
+                                      <td style={{ padding:'10px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:C.ink3, verticalAlign:'middle' }}>
+                                        {sr.rowSupply != null && sr.rowSupply > 0 ? `${sr.rowSupply}%` : '—'}
                                       </td>
                                       <td style={{ padding:'10px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:C.ink, verticalAlign:'middle' }}>
                                         {sr.rowActual > 0 ? `${sr.rowActual}%` : '—'}

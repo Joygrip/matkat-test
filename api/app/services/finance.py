@@ -235,6 +235,7 @@ class FinanceService:
                 actual_id=actual.id,
                 employee_name=resource.display_name,
                 employee_email=resource.email or "",
+                employee_initials=resource.initials,
                 project_id=project.id,
                 project_name=project.name,
                 cost_center_id=cost_center.id,
@@ -529,12 +530,35 @@ class FinanceService:
                 for r in proj_actuals_rows
             }
 
+            proj_supply_filters = [
+                SupplyLine.tenant_id == self.current_user.tenant_id,
+                SupplyLine.year == year,
+                SupplyLine.month == month,
+                SupplyLine.resource_id.in_(result_resource_ids),
+                SupplyLine.project_id.isnot(None),
+            ]
+            proj_supply_rows = (
+                self.db.query(
+                    SupplyLine.resource_id.label("resource_id"),
+                    SupplyLine.project_id.label("project_id"),
+                    func.sum(SupplyLine.fte_percent).label("supply_fte"),
+                )
+                .filter(*proj_supply_filters)
+                .group_by(SupplyLine.resource_id, SupplyLine.project_id)
+                .all()
+            )
+            proj_supply_by = {
+                (r.resource_id, r.project_id): float(r.supply_fte or 0)
+                for r in proj_supply_rows
+            }
+
             for r in proj_demand_rows:
                 proj_map[r.resource_id].append(
                     ProjectBreakdownItem(
                         project_id=r.project_id,
                         project_name=r.project_name,
                         demand_fte=float(r.demand_fte or 0),
+                        supply_fte=proj_supply_by.get((r.resource_id, r.project_id), 0.0),
                         actuals_fte=proj_actuals_by.get((r.resource_id, r.project_id), 0.0),
                     )
                 )

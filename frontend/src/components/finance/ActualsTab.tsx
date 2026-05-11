@@ -1174,7 +1174,7 @@ export function ActualsTab({
 
                         {/* Sub-header */}
                         <div style={{ padding:'8px 16px 4px 52px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.6px', color:C.ink3 }}>
-                          Project Breakdown · {group.rows.length} {group.rows.length === 1 ? 'line' : 'lines'}
+                          Project Breakdown · {group.isMissingOnly ? (stat?.projects?.length ?? 0) : group.rows.length} {(group.isMissingOnly ? (stat?.projects?.length ?? 0) : group.rows.length) === 1 ? 'line' : 'lines'}
                         </div>
 
                         {/* Sub-table — for missing-only employees use empStats.projects; otherwise use actual rows */}

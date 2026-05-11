@@ -67,7 +67,7 @@ const C_PAGE = {
   ink:     '#1b1b1a',
   ink2:    '#424242',
   ink3:    '#707070',
-  accent:  '#2a4f3f',
+  accent:  '#1e3a5f',
   good:    '#2a6f4d',
   goodSoft:'#e3efe7',
   warn:    '#9a5b00',

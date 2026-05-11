@@ -47,7 +47,7 @@ class FinanceEmployeeStatsResponse(BaseModel):
     employee_name: str
     cost_center_id: Optional[str] = None
     cost_center_name: Optional[str] = None
-    initials: Optional[str] = None
+    employee_initials: Optional[str] = None
     demand_fte: float
     supply_fte: float
     actuals_fte: float

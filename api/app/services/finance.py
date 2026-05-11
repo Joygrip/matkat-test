@@ -573,7 +573,7 @@ class FinanceService:
                 employee_name=row.employee_name,
                 cost_center_id=row.cost_center_id,
                 cost_center_name=row.cost_center_name,
-                initials=row.initials,
+                employee_initials=row.initials,
                 demand_fte=float(row.demand_fte or 0),
                 supply_fte=float(row.supply_fte or 0),
                 actuals_fte=float(row.actuals_fte or 0),

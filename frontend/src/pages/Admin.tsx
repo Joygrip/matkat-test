@@ -81,7 +81,6 @@ import { PeriodPanel } from '../components/PeriodPanel';
 import { PeriodSelector } from '../components/PeriodSelector';
 import { SnapshotsTab } from '../components/finance/SnapshotsTab';
 import { CostReportTab } from '../components/finance/CostReportTab';
-import type { FinanceActualRow } from '../components/finance/ActualsTab';
 
 const useStyles = makeStyles({
   container: {
@@ -1492,9 +1491,6 @@ export function Admin() {
   const [publishName, setPublishName] = useState('');
   const [publishDescription, setPublishDescription] = useState('');
 
-  // ── Cost Report tab state ──
-  const [actualsData, setActualsData] = useState<FinanceActualRow[]>([]);
-  const [actualsLoading, setActualsLoading] = useState(false);
 
   const latestSnapshot = useMemo(() =>
     snapshots.length > 0
@@ -1613,22 +1609,6 @@ export function Admin() {
     }
   }, [selectedPeriodId, canManageFinanceData]);
 
-  const loadActuals = useCallback(async () => {
-    if (!currentPeriod || !canManageFinanceData) return;
-    setActualsLoading(true);
-    try {
-      const params = new URLSearchParams();
-      params.append('year', String(currentPeriod.year));
-      params.append('month', String(currentPeriod.month));
-      const result = await apiClient.get<FinanceActualRow[]>(`/finance/actuals-dashboard?${params.toString()}`);
-      setActualsData(result);
-    } catch {
-      // non-fatal: CostReportTab handles empty state
-    } finally {
-      setActualsLoading(false);
-    }
-  }, [currentPeriod, canManageFinanceData]);
-
   const handlePublish = async () => {
     if (!publishName.trim()) { showError('Name is required'); return; }
     try {
@@ -1643,19 +1623,15 @@ export function Admin() {
     }
   };
 
-  // Reload finance data when period changes while on those tabs
+  // Reload snapshots when period changes while on that tab
   useEffect(() => {
-    if (selectedPeriodId) {
-      if (selectedTab === 'snapshots') loadSnapshots();
-      if (selectedTab === 'cost-report') loadActuals();
-    }
+    if (selectedPeriodId && selectedTab === 'snapshots') loadSnapshots();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPeriodId]);
 
-  // Load finance data when switching to those tabs
+  // Load snapshots when switching to that tab
   useEffect(() => {
     if (selectedTab === 'snapshots' && selectedPeriodId) loadSnapshots();
-    if (selectedTab === 'cost-report' && selectedPeriodId) loadActuals();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTab]);
 
@@ -1927,10 +1903,8 @@ export function Admin() {
             </div>
           </div>
           <CostReportTab
-            actualsData={actualsData}
-            actualsLoading={actualsLoading}
             selectedPeriodId={selectedPeriodId}
-            onLoadActuals={loadActuals}
+            currentPeriod={currentPeriod}
             showSuccess={showSuccess}
             showError={showError}
             showApiError={showApiError}

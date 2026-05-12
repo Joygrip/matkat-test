@@ -1,7 +1,7 @@
 /**
  * Admin page for managing master data.
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Card,
@@ -23,6 +23,7 @@ import {
   DialogActions,
   DialogContent,
   Input,
+  Textarea,
   Label,
   Checkbox,
   makeStyles,
@@ -32,6 +33,8 @@ import {
   Select,
   MessageBar,
   MessageBarBody,
+  Body1,
+  Body2,
   Text,
   Radio,
   RadioGroup,
@@ -49,6 +52,9 @@ import {
   ArrowSyncRegular,
   AlertRegular,
   EyeRegular,
+  CalendarMonthRegular,
+  CameraRegular,
+  MoneyRegular,
 } from '@fluentui/react-icons';
 import {
   adminApi,
@@ -69,6 +75,13 @@ import { apiClient } from '../api/client';
 import { config } from '../config';
 import { AdminToolbar } from '../components/admin/AdminToolbar';
 import { StatusPill, projectStatus, resourceStatus } from '../components/admin/StatusPill';
+import { usePeriod } from '../contexts/PeriodContext';
+import { consolidationApi, Snapshot } from '../api/consolidation';
+import { PeriodPanel } from '../components/PeriodPanel';
+import { PeriodSelector } from '../components/PeriodSelector';
+import { SnapshotsTab } from '../components/finance/SnapshotsTab';
+import { CostReportTab } from '../components/finance/CostReportTab';
+import type { FinanceActualRow } from '../components/finance/ActualsTab';
 
 const useStyles = makeStyles({
   container: {
@@ -154,6 +167,9 @@ type TabValue =
   | 'projects'
   | 'resources'
   | 'placeholders'
+  | 'periods'
+  | 'snapshots'
+  | 'cost-report'
   | 'manager-overrides'
   | 'delegates'
   | 'users'
@@ -1451,7 +1467,7 @@ function NotificationsPanel() {
 
 export function Admin() {
   const styles = useStyles();
-  const { showSuccess, showApiError } = useToast();
+  const { showSuccess, showError, showApiError } = useToast();
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const [selectedTab, setSelectedTab] = useState<TabValue>(searchParams.get('tab') ?? 'cost-centers');
@@ -1460,6 +1476,34 @@ export function Admin() {
   const canManageMasterData = user?.role === 'Admin' || user?.role === 'Finance';
   const canManageSettings = user?.role === 'Admin';
   const canManageDelegates = user?.role === 'Admin' || user?.role === 'Finance' || user?.role === 'Manager';
+  const canManageFinanceData = user?.role === 'Admin' || user?.role === 'Finance';
+
+  // ── Period context (for Snapshots and Cost Report tabs) ──
+  const {
+    periods,
+    selectedPeriodId,
+    setSelectedPeriodId,
+    selectedPeriod: currentPeriod,
+  } = usePeriod();
+
+  // ── Snapshots tab state ──
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
+  const [publishName, setPublishName] = useState('');
+  const [publishDescription, setPublishDescription] = useState('');
+
+  // ── Cost Report tab state ──
+  const [actualsData, setActualsData] = useState<FinanceActualRow[]>([]);
+  const [actualsLoading, setActualsLoading] = useState(false);
+
+  const latestSnapshot = useMemo(() =>
+    snapshots.length > 0
+      ? [...snapshots].sort((a, b) =>
+          new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
+        )[0]
+      : null,
+    [snapshots]
+  );
 
   // Data
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
@@ -1555,6 +1599,64 @@ export function Admin() {
     setSearchText('');
     setFilterCostCenter('');
     setFilterStatus('');
+  }, [selectedTab]);
+
+  // ── Finance data loaders (Snapshots + Cost Report tabs) ──
+
+  const loadSnapshots = useCallback(async () => {
+    if (!canManageFinanceData) return;
+    try {
+      const data = await consolidationApi.getSnapshots(selectedPeriodId);
+      setSnapshots(data);
+    } catch (err) {
+      showApiError(err as Error, 'Failed to load snapshots');
+    }
+  }, [selectedPeriodId, canManageFinanceData]);
+
+  const loadActuals = useCallback(async () => {
+    if (!currentPeriod || !canManageFinanceData) return;
+    setActualsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.append('year', String(currentPeriod.year));
+      params.append('month', String(currentPeriod.month));
+      const result = await apiClient.get<FinanceActualRow[]>(`/finance/actuals-dashboard?${params.toString()}`);
+      setActualsData(result);
+    } catch {
+      // non-fatal: CostReportTab handles empty state
+    } finally {
+      setActualsLoading(false);
+    }
+  }, [currentPeriod, canManageFinanceData]);
+
+  const handlePublish = async () => {
+    if (!publishName.trim()) { showError('Name is required'); return; }
+    try {
+      await consolidationApi.publishSnapshot(selectedPeriodId, publishName, publishDescription || undefined);
+      showSuccess('Snapshot published successfully');
+      setIsPublishDialogOpen(false);
+      setPublishName('');
+      setPublishDescription('');
+      loadSnapshots();
+    } catch (err) {
+      showApiError(err as Error, 'Failed to publish snapshot');
+    }
+  };
+
+  // Reload finance data when period changes while on those tabs
+  useEffect(() => {
+    if (selectedPeriodId) {
+      if (selectedTab === 'snapshots') loadSnapshots();
+      if (selectedTab === 'cost-report') loadActuals();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPeriodId]);
+
+  // Load finance data when switching to those tabs
+  useEffect(() => {
+    if (selectedTab === 'snapshots' && selectedPeriodId) loadSnapshots();
+    if (selectedTab === 'cost-report' && selectedPeriodId) loadActuals();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTab]);
 
   const handleTabSelect: SelectTabEventHandler = (_, data) => {
@@ -1786,6 +1888,57 @@ export function Admin() {
   const renderTable = () => {
     if (selectedTab === 'sync') return <SyncPanel />;
     if (selectedTab === 'notifications') return <NotificationsPanel />;
+
+    // ── Finance-data tabs (self-managed, no master-data loading) ──
+    if (selectedTab === 'periods') {
+      return <PeriodPanel variant="embedded" />;
+    }
+
+    if (selectedTab === 'snapshots') {
+      return (
+        <>
+          {/* Period selector + Publish button */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalL, marginBottom: tokens.spacingVerticalL, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS }}>
+              <span style={{ fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground2, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Period</span>
+              <PeriodSelector periods={periods} selectedId={selectedPeriodId} onSelect={setSelectedPeriodId} />
+            </div>
+            <Button appearance="primary" style={{ marginTop: 'auto' }} onClick={() => setIsPublishDialogOpen(true)}>
+              Publish Snapshot
+            </Button>
+            <span style={{ marginLeft: 'auto', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+              {latestSnapshot
+                ? `Last snapshot: ${new Date(latestSnapshot.published_at).toLocaleDateString()}`
+                : 'No snapshots yet'}
+            </span>
+          </div>
+          <SnapshotsTab snapshots={snapshots} canDownloadCsv={canManageFinanceData} showApiError={showApiError} />
+        </>
+      );
+    }
+
+    if (selectedTab === 'cost-report') {
+      return (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalL, marginBottom: tokens.spacingVerticalL, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS }}>
+              <span style={{ fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground2, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Period</span>
+              <PeriodSelector periods={periods} selectedId={selectedPeriodId} onSelect={setSelectedPeriodId} />
+            </div>
+          </div>
+          <CostReportTab
+            actualsData={actualsData}
+            actualsLoading={actualsLoading}
+            selectedPeriodId={selectedPeriodId}
+            onLoadActuals={loadActuals}
+            showSuccess={showSuccess}
+            showError={showError}
+            showApiError={showApiError}
+          />
+        </>
+      );
+    }
+
     if (loading) return <Spinner label="Loading..." />;
 
     switch (selectedTab) {
@@ -2692,6 +2845,9 @@ export function Admin() {
     'projects': 'Projects',
     'resources': 'Resources',
     'placeholders': 'Placeholders',
+    'periods': 'Periods',
+    'snapshots': 'Snapshots',
+    'cost-report': 'Cost Report',
     'manager-overrides': 'Manager Overrides',
     'delegates': 'Approval Delegates',
     'users': 'Users',
@@ -2716,6 +2872,9 @@ export function Admin() {
           {canManageMasterData && <Tab value="projects" icon={<FolderRegular />}>Projects</Tab>}
           {canManageMasterData && <Tab value="resources" icon={<PersonRegular />}>Resources</Tab>}
           {canManageMasterData && <Tab value="placeholders" icon={<PersonQuestionMarkRegular />}>Placeholders</Tab>}
+          {canManageFinanceData && <Tab value="periods" icon={<CalendarMonthRegular />}>Periods</Tab>}
+          {canManageFinanceData && <Tab value="snapshots" icon={<CameraRegular />}>Snapshots</Tab>}
+          {canManageFinanceData && <Tab value="cost-report" icon={<MoneyRegular />}>Cost Report</Tab>}
           {canManageSettings && (
             <Tab value="manager-overrides" icon={<PeopleTeamRegular />}>Manager Overrides</Tab>
           )}
@@ -2748,7 +2907,9 @@ export function Admin() {
                 </p>
               )}
             </div>
-            {selectedTab !== 'users' && selectedTab !== 'sync' && selectedTab !== 'notifications' && (canManageMasterData ||
+            {selectedTab !== 'users' && selectedTab !== 'sync' && selectedTab !== 'notifications' &&
+             selectedTab !== 'periods' && selectedTab !== 'snapshots' && selectedTab !== 'cost-report' &&
+             (canManageMasterData ||
               (selectedTab === 'manager-overrides' && canManageSettings) ||
               (selectedTab === 'delegates' && canManageDelegates)) && (
               <Button appearance="primary" icon={<AddRegular />} onClick={openCreateDialog}>
@@ -2814,6 +2975,48 @@ export function Admin() {
           </DialogBody>
         </DialogSurface>
       </Dialog>
+
+      {/* Publish Snapshot dialog */}
+      {canManageFinanceData && (
+        <Dialog open={isPublishDialogOpen} onOpenChange={(_, data) => setIsPublishDialogOpen(data.open)}>
+          <DialogSurface>
+            <DialogBody>
+              <DialogTitle>Publish Snapshot</DialogTitle>
+              <DialogContent>
+                <MessageBar intent="info" style={{ marginBottom: tokens.spacingVerticalM }}>
+                  <MessageBarBody>A snapshot is an immutable copy of planning data at this point in time.</MessageBarBody>
+                </MessageBar>
+                {currentPeriod && (
+                  <div style={{ marginBottom: tokens.spacingVerticalM }}>
+                    <Body2 style={{ fontWeight: tokens.fontWeightSemibold }}>Period</Body2>
+                    <Body1>{currentPeriod.year}-{String(currentPeriod.month).padStart(2, '0')}</Body1>
+                  </div>
+                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, marginBottom: tokens.spacingVerticalM }}>
+                  <label>Snapshot Name *</label>
+                  <Input
+                    value={publishName}
+                    onChange={(_, data) => setPublishName(data.value)}
+                    placeholder={`${currentPeriod?.year}-${String(currentPeriod?.month ?? 1).padStart(2, '0')} Final`}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, marginBottom: tokens.spacingVerticalM }}>
+                  <label>Description (optional)</label>
+                  <Textarea
+                    value={publishDescription}
+                    onChange={(_, data) => setPublishDescription(data.value)}
+                    placeholder="Optional description..."
+                  />
+                </div>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setIsPublishDialogOpen(false)}>Cancel</Button>
+                <Button appearance="primary" onClick={handlePublish}>Publish</Button>
+              </DialogActions>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
+      )}
     </div>
   );
 }

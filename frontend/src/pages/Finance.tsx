@@ -2,56 +2,33 @@
  * Finance Page — Shell
  *
  * Orchestrates shared state and data loading for all Finance tabs.
- * Tabs: Overview (merged dashboard + cost centers), Actuals, Snapshots, Cost Report.
+ * Tabs: Overview, Cost Overview, OoP + Equipment.
+ * Snapshots, Cost Report, and Period Management have moved to Admin.
  * Accessible to: Admin, Finance, Director
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Title3,
-  Body1,
-  Body2,
-  Button,
   Spinner,
   makeStyles,
   Select,
-  Dialog,
-  DialogSurface,
-  DialogBody,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   MessageBar,
   MessageBarBody,
-  Input,
-  Textarea,
   Tab,
   TabList,
   tokens,
 } from '@fluentui/react-components';
 import {
-  ArrowDownload24Regular,
-  CalendarLtr24Regular,
-  ChartMultiple24Regular,
-  Dismiss24Regular,
-} from '@fluentui/react-icons';
-import {
   consolidationApi,
-  ConsolidationDashboard,
   Snapshot,
 } from '../api/consolidation';
 import { usePeriod } from '../contexts/PeriodContext';
-import { apiClient } from '../api/client';
 import { lookupsApi } from '../api/lookups';
-import { PeriodPanel } from '../components/PeriodPanel';
 import { PeriodSelector } from '../components/PeriodSelector';
 import { useToast } from '../hooks/useToast';
 import { useAuth, useHasRole } from '../auth/AuthProvider';
 
 // Tab components
 import { FinanceOverview } from '../components/shared/FinanceOverview';
-import type { FinanceActualRow } from '../components/finance/ActualsTab';
-import { SnapshotsTab } from '../components/finance/SnapshotsTab';
-import { CostReportTab } from '../components/finance/CostReportTab';
 import { ConsolidatedCostChart } from '../components/finance/ConsolidatedCostChart';
 import { ProjectCostsMatrix } from '../components/project-costs/ProjectCostsMatrix';
 
@@ -59,8 +36,7 @@ import { ProjectCostsMatrix } from '../components/project-costs/ProjectCostsMatr
 
 interface LookupProject { id: string; name: string; }
 
-
-type ActiveTab = 'overview' | 'snapshots' | 'costreport' | 'costoverview' | 'projectcosts';
+type ActiveTab = 'overview' | 'costoverview' | 'projectcosts';
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
@@ -70,24 +46,6 @@ const useStyles = makeStyles({
     maxWidth: '1600px',
     margin: '0 auto',
     minHeight: 'calc(100vh - 80px)',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: tokens.spacingVerticalL,
-    paddingBottom: tokens.spacingVerticalS,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  headerTitle: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-  },
-  headerActions: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalM,
-    alignItems: 'center',
   },
   toolbar: {
     backgroundColor: tokens.colorNeutralBackground1,
@@ -128,12 +86,6 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
   },
-  formField: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: tokens.spacingVerticalXS,
-    marginBottom: tokens.spacingVerticalM,
-  },
   loading: {
     display: 'flex',
     justifyContent: 'center',
@@ -145,16 +97,11 @@ const useStyles = makeStyles({
 
 export const Finance: React.FC = () => {
   const styles = useStyles();
-  const { showSuccess, showError, showApiError } = useToast();
+  const { showApiError } = useToast();
   const { user } = useAuth();
-  const isManagerReader = user?.role === 'Manager' && user?.secondary_role === 'Reader';
   const canSeeStats = useHasRole('Finance', 'Manager', 'Admin');
-  const canSeeCostReport = useHasRole('Finance', 'Admin');
   const canSeeSnapshots = useHasRole('Finance', 'Admin');
   const canSeeProjectCosts = useHasRole('Finance', 'Admin', 'PM');
-  const canManagePeriods = user?.role === 'Finance' || user?.role === 'Admin';
-  const canPublishSnapshot = user?.role === 'Finance' || user?.role === 'Admin';
-  const canDownloadCsv = user?.role === 'Finance' || user?.role === 'Admin';
   const isPM = user?.role === 'PM';
 
   // ── Period ──
@@ -162,37 +109,20 @@ export const Finance: React.FC = () => {
     periods,
     selectedPeriodId,
     setSelectedPeriodId,
-    selectedPeriod: currentPeriod,
     loading: periodsLoading,
   } = usePeriod();
 
   // ── Tab ──
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
 
-  // ── Dashboard (used by the Publish dialog; populated via FinanceOverview callback) ──
-  const [dashboard, setDashboard] = useState<ConsolidationDashboard | null>(null);
-
-  // ── Actuals (used by CostReportTab) ──
-  const [actualsData, setActualsData] = useState<FinanceActualRow[]>([]);
-  const [actualsLoading, setActualsLoading] = useState(false);
+  // ── Snapshots (loaded only to display "Last snapshot" info) ──
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
 
   // ── Overview filters ──
   const [overviewProjectId, setOverviewProjectId] = useState<string>('');
 
-  // ── Snapshots ──
-  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
-
   // ── Lookups ──
   const [projects, setProjects] = useState<LookupProject[]>([]);
-
-  // ── Publish dialog ──
-  const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
-  const [publishName, setPublishName] = useState('');
-  const [publishDescription, setPublishDescription] = useState('');
-
-  // ── Period modal ──
-  const [isPeriodModalOpen, setIsPeriodModalOpen] = useState(false);
-
 
   const latestSnapshot = useMemo(() =>
     snapshots.length > 0
@@ -211,10 +141,7 @@ export const Finance: React.FC = () => {
 
   // ── Reload when period changes ──
   useEffect(() => {
-    if (selectedPeriodId) {
-      if (canSeeSnapshots) loadSnapshots(selectedPeriodId);
-      if (!isPM) loadActuals(selectedPeriodId);
-    }
+    if (selectedPeriodId && canSeeSnapshots) loadSnapshots(selectedPeriodId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPeriodId]);
 
@@ -230,40 +157,6 @@ export const Finance: React.FC = () => {
     }
   };
 
-  const loadActuals = async (periodId?: string) => {
-    const pid = periodId || selectedPeriodId;
-    if (!currentPeriod || !pid) return;
-    setActualsLoading(true);
-    try {
-      const params = new URLSearchParams();
-      params.append('year', String(currentPeriod.year));
-      params.append('month', String(currentPeriod.month));
-
-      const result = await apiClient.get<FinanceActualRow[]>(
-        `/finance/actuals-dashboard?${params.toString()}`
-      );
-      setActualsData(result);
-    } catch {
-      // non-fatal: CostReportTab handles empty state
-    } finally {
-      setActualsLoading(false);
-    }
-  };
-
-  const handlePublish = async () => {
-    if (!publishName.trim()) { showError('Name is required'); return; }
-    try {
-      await consolidationApi.publishSnapshot(selectedPeriodId, publishName, publishDescription || undefined);
-      showSuccess('Snapshot published successfully');
-      setIsPublishDialogOpen(false);
-      setPublishName('');
-      setPublishDescription('');
-      loadSnapshots();
-    } catch (err) {
-      showApiError(err as Error, 'Failed to publish snapshot');
-    }
-  };
-
   // ── Loading state ──
   if (periodsLoading) {
     return (
@@ -274,90 +167,7 @@ export const Finance: React.FC = () => {
   }
 
   return (
-
     <div className={styles.container}>
-
-      {/* ── Publish dialog ── */}
-      {canPublishSnapshot && (
-        <Dialog open={isPublishDialogOpen} onOpenChange={(_: unknown, data: { open: boolean }) => setIsPublishDialogOpen(data.open)}>
-          <DialogSurface>
-            <DialogBody>
-              <DialogTitle>Publish Snapshot</DialogTitle>
-              <DialogContent>
-                <MessageBar intent="info" style={{ marginBottom: tokens.spacingVerticalM }}>
-                  <MessageBarBody>A snapshot is an immutable copy of planning data at this point in time.</MessageBarBody>
-                </MessageBar>
-                {currentPeriod && (
-                  <div style={{ marginBottom: tokens.spacingVerticalM }}>
-                    <Body2 style={{ fontWeight: tokens.fontWeightSemibold }}>Period</Body2>
-                    <Body1>
-                      {currentPeriod.year}-{String(currentPeriod.month).padStart(2, '0')}
-                      {dashboard && ` · ${dashboard.summary.total_cost_centers} cost centers`}
-                    </Body1>
-                  </div>
-                )}
-                {dashboard && (dashboard.summary.orphans_count > 0 || dashboard.summary.over_allocations_count > 0) && (
-                  <MessageBar intent="warning" style={{ marginBottom: tokens.spacingVerticalM }}>
-                    <MessageBarBody>
-                      {dashboard.summary.orphans_count > 0 && `${dashboard.summary.orphans_count} orphan demand(s). `}
-                      {dashboard.summary.over_allocations_count > 0 && `${dashboard.summary.over_allocations_count} over-allocation(s). `}
-                      Consider resolving before publishing.
-                    </MessageBarBody>
-                  </MessageBar>
-                )}
-                <div className={styles.formField}>
-                  <label>Snapshot Name *</label>
-                  <Input
-                    value={publishName}
-                    onChange={(_, data) => setPublishName(data.value)}
-                    placeholder={`${currentPeriod?.year}-${String(currentPeriod?.month ?? 1).padStart(2, '0')} Final`}
-                  />
-                </div>
-                <div className={styles.formField}>
-                  <label>Description (optional)</label>
-                  <Textarea
-                    value={publishDescription}
-                    onChange={(_, data) => setPublishDescription(data.value)}
-                    placeholder="Optional description..."
-                  />
-                </div>
-              </DialogContent>
-              <DialogActions>
-                <Button onClick={() => setIsPublishDialogOpen(false)}>Cancel</Button>
-                <Button appearance="primary" onClick={handlePublish}>Publish</Button>
-              </DialogActions>
-            </DialogBody>
-          </DialogSurface>
-        </Dialog>
-      )}
-
-      {/* ── Period management modal ── */}
-      {canManagePeriods && (
-        <Dialog
-          open={isPeriodModalOpen}
-          onOpenChange={(_: unknown, data: { open: boolean }) => setIsPeriodModalOpen(data.open)}
-        >
-          <DialogSurface style={{ width: '860px', maxWidth: '92vw' }}>
-            <DialogBody style={{ display: 'flex', flexDirection: 'column', maxHeight: '88vh' }}>
-              <DialogTitle
-                action={
-                  <Button
-                    appearance="subtle"
-                    aria-label="Close"
-                    icon={<Dismiss24Regular />}
-                    onClick={() => setIsPeriodModalOpen(false)}
-                  />
-                }
-              >
-                Period Management
-              </DialogTitle>
-              <DialogContent style={{ overflowY: 'auto', flex: 1 }}>
-                <PeriodPanel variant="embedded" />
-              </DialogContent>
-            </DialogBody>
-          </DialogSurface>
-        </Dialog>
-      )}
 
       {/* ── Sticky toolbar ── */}
       <div className={styles.toolbar}>
@@ -367,9 +177,6 @@ export const Finance: React.FC = () => {
             onTabSelect={(_, data) => setActiveTab(data.value as ActiveTab)}
           >
             <Tab value="overview">Overview</Tab>
-
-            {canSeeSnapshots && <Tab value="snapshots">Snapshots</Tab>}
-            {!isPM && canSeeCostReport && <Tab value="costreport">Cost Report</Tab>}
             {(canSeeStats || isPM) && <Tab value="costoverview">Cost Overview</Tab>}
             {canSeeProjectCosts && <Tab value="projectcosts">OoP + Equipment</Tab>}
           </TabList>
@@ -407,7 +214,6 @@ export const Finance: React.FC = () => {
               </Select>
             </div>
           )}
-
         </div>
       </div>
 
@@ -421,27 +227,8 @@ export const Finance: React.FC = () => {
           <FinanceOverview
             scope={isPM ? 'pm' : user?.role === 'Manager' ? 'manager' : user?.role === 'Finance' ? 'finance' : user?.role === 'Admin' ? 'admin' : 'reader'}
             projectId={overviewProjectId}
-            onDashboardLoaded={setDashboard}
           />
         </>
-      )}
-      {canSeeSnapshots && activeTab === 'snapshots' && (
-        <SnapshotsTab
-          snapshots={snapshots}
-          canDownloadCsv={canDownloadCsv}
-          showApiError={showApiError}
-        />
-      )}
-      {!isPM && activeTab === 'costreport' && canSeeCostReport && (
-        <CostReportTab
-          actualsData={actualsData}
-          actualsLoading={actualsLoading}
-          selectedPeriodId={selectedPeriodId}
-          onLoadActuals={() => loadActuals(selectedPeriodId)}
-          showSuccess={showSuccess}
-          showError={showError}
-          showApiError={showApiError}
-        />
       )}
       {activeTab === 'projectcosts' && canSeeProjectCosts && (
         <ProjectCostsMatrix />

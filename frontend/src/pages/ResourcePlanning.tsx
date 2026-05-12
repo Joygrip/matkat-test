@@ -548,8 +548,8 @@ export const ResourcePlanning: React.FC = () => {
                     return (
                       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, padding: '8px 12px', fontSize: 13 }}>
                         <p style={{ margin: '0 0 6px', fontWeight: 600, color: '#111827' }}>{label}</p>
-                        {demandEntry && <p style={{ margin: '2px 0', color: '#1e3a5f' }}>Total Demand: {demandEntry.value}%</p>}
-                        {supplyEntry && <p style={{ margin: '2px 0', color: '#16a34a' }}>Total Supply: {supplyEntry.value}%</p>}
+                        {demandEntry && <p style={{ margin: '2px 0', color: '#d97706' }}>Total Demand: {demandEntry.value}%</p>}
+                        {supplyEntry && <p style={{ margin: '2px 0', color: '#0d9488' }}>Total Supply: {supplyEntry.value}%</p>}
                         {gapAbs > 0 && (
                           <p style={{ margin: '4px 0 0', color: isUnder ? '#b91c1c' : '#15803d', fontWeight: 600 }}>
                             {isUnder ? `Understaffed: ${gapAbs}%` : `Overstaffed: ${gapAbs}%`}
@@ -568,7 +568,7 @@ export const ResourcePlanning: React.FC = () => {
                       key={p.id}
                       x1={fmtPeriodShort(p)}
                       x2={fmtPeriodShort(p)}
-                      fill="#1e3a5f"
+                      fill="#d97706"
                       fillOpacity={0.08}
                     />
                   ))
@@ -578,8 +578,8 @@ export const ResourcePlanning: React.FC = () => {
                 <Area type="monotone" dataKey="gap_under" stackId="gap" fill="#fee2e2" fillOpacity={0.4} stroke="none" legendType="none" name="Understaffed gap" isAnimationActive={false} />
                 <Area type="monotone" dataKey="gap_over" stackId="gap" fill="#dcfce7" fillOpacity={0.4} stroke="none" legendType="none" name="Overstaffed gap" isAnimationActive={false} />
                 {/* Lines on top */}
-                <Line type="monotone" dataKey="demand" stroke="#1e3a5f" strokeWidth={2.5} dot={false} name="Total Demand" unit="%" />
-                <Line type="monotone" dataKey="supply" stroke="#16a34a" strokeWidth={2.5} dot={false} name="Total Supply" unit="%" />
+                <Line type="monotone" dataKey="demand" stroke="#d97706" strokeWidth={2.5} dot={false} name="Total Demand" unit="%" />
+                <Line type="monotone" dataKey="supply" stroke="#0d9488" strokeWidth={2.5} dot={false} name="Total Supply" unit="%" />
               </ComposedChart>
             </ResponsiveContainer>
           </div>

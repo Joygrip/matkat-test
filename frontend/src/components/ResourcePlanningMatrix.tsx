@@ -31,8 +31,38 @@ const PERIOD_COL_PX = `${PERIOD_COL_WIDTH}px`;
 const TYPE_LEFT = RESOURCE_COL_WIDTH + PROJECT_COL_WIDTH;
 const TYPE_LEFT_PX = `${TYPE_LEFT}px`;
 
-const DEMAND_COLOR = '#dbeafe';
-const SUPPLY_COLOR = '#dcfce7';
+const DEMAND_ROW_BG   = 'rgba(246, 218, 215, 0.15)';
+const SUPPLY_ROW_BG   = 'rgba(227, 234, 242, 0.15)';
+const DEMAND_TYPE_BG  = 'rgba(246, 218, 215, 0.45)';
+const SUPPLY_TYPE_BG  = 'rgba(227, 234, 242, 0.45)';
+const DEMAND_ACCENT   = '#a32f2a';
+const SUPPLY_ACCENT   = '#1e3a5f';
+const CURRENT_PERIOD_BG = 'rgba(227, 234, 242, 0.35)';
+const COL_HOVER_BG    = 'rgba(30, 58, 95, 0.06)';
+const COL_HOVER_HDR_BG = 'rgba(30, 58, 95, 0.12)';
+
+
+const AVATAR_PALETTES = [
+  '#1e3a5f', '#a32f2a', '#2d6a4f', '#5a4b8a',
+  '#8b5e3c', '#1a5c8a', '#6b3a4f', '#3a6b3a',
+];
+function nameHash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+function getAvatarBg(name: string): string {
+  return AVATAR_PALETTES[nameHash(name) % AVATAR_PALETTES.length];
+}
+function isCurrentPeriod(p: { year: number; month: number }): boolean {
+  const now = new Date();
+  return p.year === now.getFullYear() && p.month === (now.getMonth() + 1);
+}
+function getPipColor(dSum: number, sSum: number): string {
+  if (dSum === 0 && sSum === 0) return '#cfcfcc';
+  if (sSum >= dSum) return '#22c55e';
+  return (dSum - sSum) / dSum >= 0.5 ? '#ef4444' : '#f59e0b';
+}
 
 const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function getFteColor(val: number): { background: string; color: string } | undefined {
@@ -96,9 +126,10 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
     borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground1,
+    backgroundColor: '#f6f5f2',
     textAlign: 'center' as const,
     whiteSpace: 'nowrap' as const,
+    verticalAlign: 'bottom' as const,
   },
   thResource: {
     position: 'sticky' as const,
@@ -106,6 +137,7 @@ const useStyles = makeStyles({
     zIndex: 4,
     textAlign: 'left' as const,
     minWidth: RESOURCE_COL_PX,
+    backgroundColor: '#f6f5f2',
   },
   thProject: {
     position: 'sticky' as const,
@@ -113,6 +145,7 @@ const useStyles = makeStyles({
     zIndex: 4,
     textAlign: 'left' as const,
     minWidth: PROJECT_COL_PX,
+    backgroundColor: '#f6f5f2',
   },
   thType: {
     position: 'sticky' as const,
@@ -120,56 +153,68 @@ const useStyles = makeStyles({
     zIndex: 4,
     textAlign: 'left' as const,
     minWidth: TYPE_COL_PX,
+    backgroundColor: '#f6f5f2',
   },
   summaryRow: {
-    backgroundColor: tokens.colorNeutralBackground3,
+    backgroundColor: '#f1efeb',
     cursor: 'pointer',
+    borderTop: '1px solid #e5e4e0',
+    borderBottom: '1px solid #e5e4e0',
     ':hover': { filter: 'brightness(0.97)' },
   },
   summaryFixed: {
-    fontWeight: tokens.fontWeightSemibold,
+    fontWeight: 700,
+    fontSize: '11px',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.06em',
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+    borderBottom: '1px solid #e5e4e0',
+    borderTop: '1px solid #e5e4e0',
     whiteSpace: 'nowrap' as const,
     position: 'sticky' as const,
     left: 0,
-    backgroundColor: tokens.colorNeutralBackground3,
+    backgroundColor: '#f1efeb',
     zIndex: 1,
     minWidth: RESOURCE_COL_PX,
   },
   summaryProject: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+    borderBottom: '1px solid #e5e4e0',
+    borderTop: '1px solid #e5e4e0',
     position: 'sticky' as const,
     left: RESOURCE_COL_PX,
-    backgroundColor: tokens.colorNeutralBackground3,
+    backgroundColor: '#f1efeb',
     zIndex: 1,
     minWidth: PROJECT_COL_PX,
   },
   summaryType: {
     padding: `2px ${tokens.spacingHorizontalXS}`,
-    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+    borderBottom: '1px solid #e5e4e0',
+    borderTop: '1px solid #e5e4e0',
     position: 'sticky' as const,
     left: TYPE_LEFT_PX,
-    backgroundColor: tokens.colorNeutralBackground3,
+    backgroundColor: '#f1efeb',
     zIndex: 1,
     minWidth: TYPE_COL_PX,
   },
   summaryValueCell: {
-    padding: `8px ${tokens.spacingHorizontalXS}`,
-    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+    padding: `6px ${tokens.spacingHorizontalXS}`,
+    borderBottom: '1px solid #e5e4e0',
+    borderTop: '1px solid #e5e4e0',
     textAlign: 'center' as const,
     width: PERIOD_COL_PX,
     minWidth: PERIOD_COL_PX,
     verticalAlign: 'middle' as const,
+    backgroundColor: '#f1efeb',
   },
   typeCellDemand: {
-    backgroundColor: DEMAND_COLOR,
-    color: '#1a3a7a',
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase100,
+    backgroundColor: DEMAND_TYPE_BG,
+    color: DEMAND_ACCENT,
+    fontWeight: 600,
+    fontSize: '11px',
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+    boxShadow: `inset 3px 0 0 ${DEMAND_ACCENT}`,
     position: 'sticky' as const,
     left: TYPE_LEFT_PX,
     zIndex: 1,
@@ -177,12 +222,13 @@ const useStyles = makeStyles({
     minWidth: TYPE_COL_PX,
   },
   typeCellSupply: {
-    backgroundColor: SUPPLY_COLOR,
-    color: '#0a4a1a',
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase100,
+    backgroundColor: SUPPLY_TYPE_BG,
+    color: SUPPLY_ACCENT,
+    fontWeight: 600,
+    fontSize: '11px',
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+    boxShadow: `inset 3px 0 0 ${SUPPLY_ACCENT}`,
     position: 'sticky' as const,
     left: TYPE_LEFT_PX,
     zIndex: 1,
@@ -220,11 +266,13 @@ const useStyles = makeStyles({
     verticalAlign: 'middle' as const,
   },
   valueCell: {
-    padding: '2px 2px',
+    padding: '2px 4px',
     borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
     textAlign: 'center' as const,
     width: PERIOD_COL_PX,
     minWidth: PERIOD_COL_PX,
+    fontFamily: 'monospace',
+    fontSize: '12.5px',
   },
   cellInput: {
     width: '64px',
@@ -247,7 +295,7 @@ const useStyles = makeStyles({
     ':hover': { filter: 'brightness(0.92)' },
   },
   emptyCell: {
-    color: tokens.colorNeutralForeground4,
+    color: '#cfcfcc',
     cursor: 'pointer',
     fontSize: tokens.fontSizeBase200,
     display: 'inline-block',
@@ -257,7 +305,7 @@ const useStyles = makeStyles({
     ':hover': { backgroundColor: tokens.colorNeutralBackground3 },
   },
   emptyCellReadonly: {
-    color: tokens.colorNeutralForeground4,
+    color: '#cfcfcc',
     fontSize: tokens.fontSizeBase200,
     display: 'inline-block',
     minWidth: '42px',
@@ -449,6 +497,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     ccId: string;
   } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [hoveredColIdx, setHoveredColIdx] = useState<number | null>(null);
   const [dragType, setDragType] = useState<'demand' | 'supply' | null>(null);
   const [applyValue, setApplyValue] = useState<string>('');
   const [applying, setApplying] = useState(false);
@@ -1180,7 +1229,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         )}
       </div>
     )}
-    <div style={{ padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`, borderBottom: `2px solid ${tokens.colorNeutralStroke2}`, display: 'flex', alignItems: 'center' }}>
+    <div style={{ padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`, borderBottom: `1px solid #e5e4e0`, display: 'flex', alignItems: 'center', gap: 12, backgroundColor: '#ffffff' }}>
       <Button
         size="small"
         appearance="primary"
@@ -1189,6 +1238,30 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       >
         Add Line
       </Button>
+      {/* Legend */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 8, fontSize: '11.5px', color: '#6b6966' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ width: 14, height: 10, backgroundColor: DEMAND_TYPE_BG, borderLeft: `3px solid ${DEMAND_ACCENT}`, borderRadius: 2 }} />
+          <span>Demand</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ width: 14, height: 10, backgroundColor: SUPPLY_TYPE_BG, borderLeft: `3px solid ${SUPPLY_ACCENT}`, borderRadius: 2 }} />
+          <span>Supply</span>
+        </div>
+        <div style={{ width: 1, height: 14, backgroundColor: '#e5e4e0' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#22c55e' }} />
+          <span>Balanced</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#f59e0b' }} />
+          <span>Gap</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#ef4444' }} />
+          <span>Shortfall &gt;50%</span>
+        </div>
+      </div>
     </div>
     <div style={{ position: 'relative' }}>
     {/* Sticky header — lives outside the overflow-x container so vertical sticky works */}
@@ -1211,15 +1284,34 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
             <th className={`${styles.th} ${styles.thType}`} style={{ textAlign: 'left' }}>
               D / S
             </th>
-            {periods.map(p => (
-              <th
-                key={p.id}
-                className={styles.th}
-                style={{ width: PERIOD_COL_PX, minWidth: PERIOD_COL_PX }}
-              >
-                {MONTH_SHORT[p.month - 1]} {p.year}
-              </th>
-            ))}
+            {periods.map((p, colIdx) => {
+              const isCur = isCurrentPeriod(p);
+              const isHov = hoveredColIdx === colIdx;
+              return (
+                <th
+                  key={p.id}
+                  className={styles.th}
+                  style={{
+                    width: PERIOD_COL_PX,
+                    minWidth: PERIOD_COL_PX,
+                    backgroundColor: isHov
+                      ? (isCur ? '#d6dfeb' : COL_HOVER_HDR_BG)
+                      : isCur ? '#e3eaf2' : '#f6f5f2',
+                    boxShadow: isCur ? 'inset 0 -2px 0 0 #1e3a5f' : undefined,
+                    color: isCur ? SUPPLY_ACCENT : undefined,
+                  }}
+                  onMouseEnter={() => setHoveredColIdx(colIdx)}
+                  onMouseLeave={() => setHoveredColIdx(null)}
+                >
+                  <div style={{ fontSize: '11px', fontWeight: 600, lineHeight: 1.3 }}>
+                    {MONTH_SHORT[p.month - 1]}
+                  </div>
+                  <div style={{ fontSize: '9.5px', fontWeight: 400, color: isCur ? SUPPLY_ACCENT : '#9b9997' }}>
+                    {p.year}
+                  </div>
+                </th>
+              );
+            })}
           </tr>
         </thead>
       </table>
@@ -1262,24 +1354,53 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                   </td>
                   <td className={styles.summaryProject} />
                   <td className={styles.summaryType} />
-                  {periodTotals.map(({ dSum, sSum }, i) => (
-                    <td key={periods[i].id} className={styles.summaryValueCell}>
-                      <div style={{
-                        backgroundColor: DEMAND_COLOR,
-                        color: getFteColor(dSum)?.color ?? tokens.colorNeutralForeground3,
-                      }}>
-                        <span style={{ fontSize: '11px', fontWeight: 400 }}>D: </span>
-                        <span style={{ fontSize: '13px', fontWeight: 600 }}>{dSum > 0 ? `${dSum}%` : '—'}</span>
-                      </div>
-                      <div style={{
-                        backgroundColor: SUPPLY_COLOR,
-                        color: getFteColor(sSum)?.color ?? tokens.colorNeutralForeground3,
-                      }}>
-                        <span style={{ fontSize: '11px', fontWeight: 400 }}>S: </span>
-                        <span style={{ fontSize: '13px', fontWeight: 600 }}>{sSum > 0 ? `${sSum}%` : '—'}</span>
-                      </div>
-                    </td>
-                  ))}
+                  {periodTotals.map(({ dSum, sSum }, i) => {
+                    const isCur = isCurrentPeriod(periods[i]);
+                    const isHov = hoveredColIdx === i;
+                    const pipColor = getPipColor(dSum, sSum);
+                    return (
+                      <td
+                        key={periods[i].id}
+                        className={styles.summaryValueCell}
+                        style={{
+                          backgroundColor: isHov
+                            ? (isCur ? '#d0dae9' : 'rgba(30,58,95,0.08)')
+                            : isCur ? '#d6dfeb' : '#f1efeb',
+                        }}
+                        onMouseEnter={() => setHoveredColIdx(i)}
+                        onMouseLeave={() => setHoveredColIdx(null)}
+                      >
+                        {/* health pip */}
+                        <div style={{
+                          width: '100%',
+                          height: 4,
+                          backgroundColor: pipColor,
+                          borderRadius: 2,
+                          marginBottom: 4,
+                        }} />
+                        <div style={{
+                          backgroundColor: 'rgba(246,218,215,0.5)',
+                          color: DEMAND_ACCENT,
+                          borderRadius: 2,
+                          padding: '1px 0',
+                          fontFamily: 'monospace',
+                        }}>
+                          <span style={{ fontSize: '10px', fontWeight: 400 }}>D: </span>
+                          <span style={{ fontSize: '12px', fontWeight: 600 }}>{dSum > 0 ? `${dSum}%` : '—'}</span>
+                        </div>
+                        <div style={{
+                          backgroundColor: 'rgba(227,234,242,0.6)',
+                          color: SUPPLY_ACCENT,
+                          borderRadius: 2,
+                          padding: '1px 0',
+                          fontFamily: 'monospace',
+                        }}>
+                          <span style={{ fontSize: '10px', fontWeight: 400 }}>S: </span>
+                          <span style={{ fontSize: '12px', fontWeight: 600 }}>{sSum > 0 ? `${sSum}%` : '—'}</span>
+                        </div>
+                      </td>
+                    );
+                  })}
                 </tr>
 
                 {isExpanded && (
@@ -1303,17 +1424,16 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                             const demandRowIndex = flatRowIndex * 2;
                             const supplyRowIndex = flatRowIndex * 2 + 1;
                             const isFirstRow = rowIdx === 0;
-                            const topBorder = isFirstRow ? `3px solid ${tokens.colorBrandBackground}` : undefined;
-                            const demandBorderTop = isFirstRow ? `3px solid ${tokens.colorBrandBackground}` : `2px solid #93c5fd`;
 
                             return (
                               <React.Fragment key={row.key}>
                                 {/* Demand row */}
-                                <tr style={{ backgroundColor: DEMAND_COLOR }}>
+                                <tr style={{ backgroundColor: DEMAND_ROW_BG }}>
                                   {isFirstRow && (() => {
                                     const initials = row.isPlaceholder
                                       ? '?'
                                       : (row.resourceInitials || row.resourceName.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2));
+                                    const avatarBg = row.isPlaceholder ? '#9b9997' : getAvatarBg(row.resourceName);
                                     return (
                                       <td
                                         className={styles.resourceCell}
@@ -1321,25 +1441,24 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                         title={row.resourceName}
                                         style={{
                                           ...(row.isPlaceholder ? { fontStyle: 'italic' } : {}),
-                                          fontSize: '14px',
+                                          fontSize: '12.5px',
                                           fontWeight: 600,
-                                          backgroundColor: tokens.colorNeutralBackground2,
-                                          borderTop: topBorder,
-                                          borderLeft: `3px solid ${tokens.colorBrandBackground}`,
+                                          backgroundColor: '#ffffff',
+                                          borderTop: '1px solid #e5e4e0',
                                         }}
                                       >
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                           <div style={{
                                             flexShrink: 0,
-                                            width: 28,
-                                            height: 28,
+                                            width: 26,
+                                            height: 26,
                                             borderRadius: '50%',
-                                            backgroundColor: tokens.colorBrandBackground,
-                                            color: tokens.colorNeutralForegroundOnBrand,
+                                            backgroundColor: avatarBg,
+                                            color: '#ffffff',
                                             display: 'flex',
                                             alignItems: 'center',
                                             justifyContent: 'center',
-                                            fontSize: '11px',
+                                            fontSize: '10px',
                                             fontWeight: 700,
                                           }}>
                                             {initials}
@@ -1367,30 +1486,33 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                     title={row.projectName}
                                     style={{
                                       ...(row.isGeneral ? { fontStyle: 'italic' } : {}),
-                                      paddingLeft: '16px',
+                                      paddingLeft: '12px',
                                       color: tokens.colorNeutralForeground2,
-                                      fontSize: '13px',
+                                      fontSize: '12px',
                                       fontWeight: 'normal',
-                                      borderBottom: `1.5px solid ${tokens.colorNeutralStroke1}`,
-                                      borderTop: demandBorderTop,
-                                      borderLeft: '3px solid #93c5fd',
+                                      borderBottom: '1px solid #efeeea',
+                                      borderTop: '1px solid #e5e4e0',
+                                      backgroundColor: '#ffffff',
                                     }}
                                   >
                                     {row.projectName}
                                     {row.isGeneral && ' *'}
                                   </td>
-                                  <td className={styles.typeCellDemand} style={{ borderTop: demandBorderTop }}>Demand</td>
+                                  <td className={styles.typeCellDemand} style={{ borderTop: '1px solid #e5e4e0' }}>D</td>
                                   {periods.map((period, colIndex) => {
                                     const dLine = row.demandByPeriod.get(period.id);
-                                    const sLine = row.supplyByPeriod.get(period.id);
                                     const dVal = dLine?.fte_percent ?? 0;
-                                    const sVal = sLine?.fte_percent ?? 0;
                                     const existingCellKey = `d-${row.key}-${period.id}`;
                                     const dragCellKey = buildCellKey('demand', row.resourceId, row.placeholderId, row.projectId, period.id);
                                     const isSelectable = canEditDemand && !row.isGeneral;
                                     const canEdit = isSelectable && !isDragging;
                                     const isSelected = selectedCells.has(dragCellKey);
                                     const isDimmed = isDragging && dragType !== 'demand' && dragStart?.ccId === group.ccId;
+                                    const isCurPeriod = isCurrentPeriod(period);
+                                    const isColHov = hoveredColIdx === colIndex;
+                                    const cellBg = isColHov
+                                      ? (isCurPeriod ? 'rgba(227,234,242,0.55)' : COL_HOVER_BG)
+                                      : isCurPeriod ? CURRENT_PERIOD_BG : undefined;
                                     return (
                                       <td
                                         key={period.id}
@@ -1400,7 +1522,10 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                           isSelected && styles.cellSelected,
                                           isDimmed && styles.cellDimmed,
                                         )}
-                                        style={{ borderTop: demandBorderTop }}
+                                        style={{
+                                          borderTop: '1px solid #e5e4e0',
+                                          ...(cellBg && !isSelected ? { backgroundColor: cellBg } : {}),
+                                        }}
                                         data-row-index={demandRowIndex}
                                         data-col-index={colIndex}
                                         data-cell-key={dragCellKey}
@@ -1408,9 +1533,11 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                         onMouseDown={isSelectable
                                           ? (e) => handleCellMouseDown(e, dragCellKey, 'demand', demandRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, group.ccId)
                                           : undefined}
-                                        onMouseEnter={isDragging
-                                          ? () => handleCellMouseEnter(demandRowIndex, colIndex, allRows, group.ccId)
-                                          : undefined}
+                                        onMouseEnter={() => {
+                                          setHoveredColIdx(colIndex);
+                                          if (isDragging) handleCellMouseEnter(demandRowIndex, colIndex, allRows, group.ccId);
+                                        }}
+                                        onMouseLeave={() => setHoveredColIdx(null)}
                                       >
                                         <CellEditor
                                           value={dVal}
@@ -1428,13 +1555,11 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                   })}
                                 </tr>
                                 {/* Supply row */}
-                                <tr style={{ backgroundColor: SUPPLY_COLOR }}>
+                                <tr style={{ backgroundColor: SUPPLY_ROW_BG }}>
                                   {/* resource and project cells spanned by rowSpan above */}
-                                  <td className={styles.typeCellSupply} style={{ borderBottom: `1.5px solid ${tokens.colorNeutralStroke1}` }}>Supply</td>
+                                  <td className={styles.typeCellSupply} style={{ borderBottom: '1px solid #efeeea' }}>S</td>
                                   {periods.map((period, colIndex) => {
-                                    const dLine = row.demandByPeriod.get(period.id);
                                     const sLine = row.supplyByPeriod.get(period.id);
-                                    const dVal = dLine?.fte_percent ?? 0;
                                     const sVal = sLine?.fte_percent ?? 0;
                                     const existingCellKey = `s-${row.key}-${period.id}`;
                                     const dragCellKey = buildCellKey('supply', row.resourceId, row.placeholderId, row.projectId, period.id);
@@ -1442,6 +1567,11 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                     const canEdit = isSelectable && !isDragging;
                                     const isSelected = selectedCells.has(dragCellKey);
                                     const isDimmed = isDragging && dragType !== 'supply' && dragStart?.ccId === group.ccId;
+                                    const isCurPeriod = isCurrentPeriod(period);
+                                    const isColHov = hoveredColIdx === colIndex;
+                                    const cellBg = isColHov
+                                      ? (isCurPeriod ? 'rgba(227,234,242,0.55)' : COL_HOVER_BG)
+                                      : isCurPeriod ? CURRENT_PERIOD_BG : undefined;
                                     return (
                                       <td
                                         key={period.id}
@@ -1451,7 +1581,10 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                           isSelected && styles.cellSelected,
                                           isDimmed && styles.cellDimmed,
                                         )}
-                                        style={{ borderBottom: `1.5px solid ${tokens.colorNeutralStroke1}` }}
+                                        style={{
+                                          borderBottom: '1px solid #efeeea',
+                                          ...(cellBg && !isSelected ? { backgroundColor: cellBg } : {}),
+                                        }}
                                         data-row-index={supplyRowIndex}
                                         data-col-index={colIndex}
                                         data-cell-key={dragCellKey}
@@ -1459,9 +1592,11 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                         onMouseDown={isSelectable
                                           ? (e) => handleCellMouseDown(e, dragCellKey, 'supply', supplyRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, group.ccId)
                                           : undefined}
-                                        onMouseEnter={isDragging
-                                          ? () => handleCellMouseEnter(supplyRowIndex, colIndex, allRows, group.ccId)
-                                          : undefined}
+                                        onMouseEnter={() => {
+                                          setHoveredColIdx(colIndex);
+                                          if (isDragging) handleCellMouseEnter(supplyRowIndex, colIndex, allRows, group.ccId);
+                                        }}
+                                        onMouseLeave={() => setHoveredColIdx(null)}
                                       >
                                         <CellEditor
                                           value={sVal}
@@ -1483,22 +1618,22 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                           })}
 
                           {/* Resource Total row */}
-                          <tr style={{ backgroundColor: tokens.colorNeutralBackground3 }}>
+                          <tr style={{ backgroundColor: '#f6f5f2' }}>
                             <td style={{
                               position: 'sticky',
                               left: 0,
                               zIndex: 1,
                               minWidth: RESOURCE_COL_PX,
                               fontWeight: 600,
-                              fontSize: '12px',
+                              fontSize: '11px',
                               color: tokens.colorNeutralForeground2,
                               paddingLeft: '8px',
-                              paddingTop: '6px',
-                              paddingBottom: '6px',
-                              backgroundColor: tokens.colorNeutralBackground3,
-                              borderBottom: `3px solid ${tokens.colorBrandBackground}`,
+                              paddingTop: '5px',
+                              paddingBottom: '5px',
+                              backgroundColor: '#f6f5f2',
+                              borderTop: '1px solid #e5e4e0',
+                              borderBottom: '2px solid #e5e4e0',
                               borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
-                              borderLeft: `3px solid ${tokens.colorBrandBackground}`,
                             }}>
                               Total
                             </td>
@@ -1507,8 +1642,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                               left: RESOURCE_COL_PX,
                               zIndex: 1,
                               minWidth: PROJECT_COL_PX,
-                              backgroundColor: tokens.colorNeutralBackground3,
-                              borderBottom: `3px solid ${tokens.colorBrandBackground}`,
+                              backgroundColor: '#f6f5f2',
+                              borderTop: '1px solid #e5e4e0',
+                              borderBottom: '2px solid #e5e4e0',
                               borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
                             }} />
                             <td style={{
@@ -1516,38 +1652,48 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                               left: TYPE_LEFT_PX,
                               zIndex: 1,
                               minWidth: TYPE_COL_PX,
-                              backgroundColor: tokens.colorNeutralBackground3,
-                              borderBottom: `3px solid ${tokens.colorBrandBackground}`,
-                              fontSize: '11px',
-                              fontWeight: tokens.fontWeightSemibold,
+                              backgroundColor: '#f6f5f2',
+                              borderTop: '1px solid #e5e4e0',
+                              borderBottom: '2px solid #e5e4e0',
+                              fontSize: '10px',
+                              fontWeight: 600,
                               padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
                               whiteSpace: 'nowrap' as const,
                             }}>
-                              <div style={{ color: '#1a3a7a', fontSize: '10px', fontWeight: 600 }}>Demand</div>
-                              <div style={{ color: '#0a4a1a', fontSize: '10px', fontWeight: 600 }}>Supply</div>
+                              <div style={{ color: DEMAND_ACCENT }}>D</div>
+                              <div style={{ color: SUPPLY_ACCENT }}>S</div>
                             </td>
                             {rgPeriodTotals.map(({ dSum, sSum }, i) => {
                               const diff = sSum - dSum;
                               const statusColor = (dSum === 0 && sSum === 0)
-                                ? tokens.colorNeutralStroke1
-                                : diff >= 0
-                                  ? '#22c55e'
-                                  : '#ef4444';
+                                ? '#e5e4e0'
+                                : diff >= 0 ? '#22c55e' : '#ef4444';
+                              const isCurPeriod = isCurrentPeriod(periods[i]);
+                              const isColHov = hoveredColIdx === i;
+                              const cellBg = isColHov
+                                ? (isCurPeriod ? '#d0dae9' : 'rgba(30,58,95,0.08)')
+                                : isCurPeriod ? '#d6dfeb' : '#f6f5f2';
 
                               return (
-                                <td key={periods[i].id} style={{
-                                  textAlign: 'center',
-                                  width: PERIOD_COL_PX,
-                                  minWidth: PERIOD_COL_PX,
-                                  padding: `4px ${tokens.spacingHorizontalXS}`,
-                                  borderTop: `3px solid ${statusColor}`,
-                                  borderBottom: `3px solid ${tokens.colorBrandBackground}`,
-                                  verticalAlign: 'middle',
-                                  backgroundColor: tokens.colorNeutralBackground3,
-                                }}>
+                                <td
+                                  key={periods[i].id}
+                                  style={{
+                                    textAlign: 'center',
+                                    width: PERIOD_COL_PX,
+                                    minWidth: PERIOD_COL_PX,
+                                    padding: `4px ${tokens.spacingHorizontalXS}`,
+                                    borderTop: `2px solid ${statusColor}`,
+                                    borderBottom: '2px solid #e5e4e0',
+                                    verticalAlign: 'middle',
+                                    backgroundColor: cellBg,
+                                    fontFamily: 'monospace',
+                                  }}
+                                  onMouseEnter={() => setHoveredColIdx(i)}
+                                  onMouseLeave={() => setHoveredColIdx(null)}
+                                >
                                   <div style={{
-                                    backgroundColor: '#dbeafe',
-                                    color: '#1a3a7a',
+                                    backgroundColor: 'rgba(246,218,215,0.5)',
+                                    color: DEMAND_ACCENT,
                                     borderRadius: 2,
                                     padding: '1px 0',
                                   }}>
@@ -1555,8 +1701,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                     <span style={{ fontSize: '12px', fontWeight: 600 }}>{dSum > 0 ? `${dSum}%` : '—'}</span>
                                   </div>
                                   <div style={{
-                                    backgroundColor: '#dcfce7',
-                                    color: '#0a4a1a',
+                                    backgroundColor: 'rgba(227,234,242,0.6)',
+                                    color: SUPPLY_ACCENT,
                                     borderRadius: 2,
                                     padding: '1px 0',
                                   }}>

@@ -30,8 +30,24 @@ const TYPE_LEFT_PX = `${PROJECT_COL_WIDTH + DESC_COL_WIDTH}px`;
 
 const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-const OOP_COLOR = '#dbeafe';
-const EQUIP_COLOR = '#dcfce7';
+const C = {
+  oopAccent:    '#9a5b00',
+  oopBg:        '#fbe8cf',
+  oopTint:      'rgba(251, 232, 207, 0.25)',
+  oopHover:     'rgba(251, 232, 207, 0.45)',
+  equipAccent:  '#1e3a5f',
+  equipBg:      '#e3eaf2',
+  equipTint:    'rgba(227, 234, 242, 0.25)',
+  equipHover:   'rgba(227, 234, 242, 0.45)',
+
+  line:         '#e5e4e0',
+  surface2:     '#f6f5f2',
+  ink2:         '#424242',
+  ink3:         '#707070',
+  ink4:         '#a8a8a8',
+  ink5:         '#cfcfcc',
+  grandTotalBg: '#efece6',
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -74,18 +90,29 @@ interface ProjectGroup {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
+const MONO = "'JetBrains Mono', 'ui-monospace', monospace";
+
 const useStyles = makeStyles({
+  cardWrapper: {
+    background: 'white',
+    border: `1px solid ${C.line}`,
+    borderRadius: '10px',
+    boxShadow: '0 1px 2px rgba(15,15,15,0.04)',
+    overflow: 'hidden',
+  },
   wrapper: { overflowX: 'auto', width: '100%' },
   matrixSelecting: { userSelect: 'none' as const },
-  table: { borderCollapse: 'collapse', minWidth: '100%', fontSize: tokens.fontSizeBase200 },
+  table: { borderCollapse: 'collapse', minWidth: '100%', fontSize: '13px' },
 
   th: {
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
+    fontWeight: 500,
+    fontSize: '10px',
+    color: C.ink3,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.08em',
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground2,
+    borderBottom: `1px solid ${C.line}`,
+    backgroundColor: C.surface2,
     textAlign: 'center' as const,
     whiteSpace: 'nowrap' as const,
     position: 'sticky' as const,
@@ -95,48 +122,53 @@ const useStyles = makeStyles({
   thProject: { position: 'sticky' as const, left: 0, zIndex: 4, textAlign: 'left' as const, minWidth: PROJECT_COL_PX },
   thDesc:    { position: 'sticky' as const, left: DESC_LEFT_PX, zIndex: 4, textAlign: 'left' as const, minWidth: DESC_COL_PX },
   thType:    { position: 'sticky' as const, left: TYPE_LEFT_PX, zIndex: 4, textAlign: 'left' as const, minWidth: TYPE_COL_PX },
-
   summaryRow: {
     cursor: 'pointer',
-    backgroundColor: tokens.colorNeutralBackground3,
-    ':hover': { backgroundColor: tokens.colorNeutralBackground4 },
+    backgroundColor: 'white',
+    ':hover': { backgroundColor: C.surface2 },
   },
   summaryFixed: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderTop: `1px solid ${C.line}`,
+    borderBottom: `1px solid ${C.line}`,
     position: 'sticky' as const,
     left: 0,
-    backgroundColor: tokens.colorNeutralBackground3,
+    backgroundColor: 'white',
     zIndex: 1,
     fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase200,
+    fontSize: '13.5px',
     minWidth: PROJECT_COL_PX,
   },
   summaryDesc: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderTop: `1px solid ${C.line}`,
+    borderBottom: `1px solid ${C.line}`,
     position: 'sticky' as const,
     left: DESC_LEFT_PX,
-    backgroundColor: tokens.colorNeutralBackground3,
+    backgroundColor: 'white',
     zIndex: 1,
     minWidth: DESC_COL_PX,
   },
   summaryType: {
     padding: `2px ${tokens.spacingHorizontalXS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderTop: `1px solid ${C.line}`,
+    borderBottom: `1px solid ${C.line}`,
     position: 'sticky' as const,
     left: TYPE_LEFT_PX,
-    backgroundColor: tokens.colorNeutralBackground3,
+    backgroundColor: 'white',
     zIndex: 1,
     minWidth: TYPE_COL_PX,
   },
   summaryValueCell: {
     padding: `2px ${tokens.spacingHorizontalXS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    textAlign: 'center' as const,
+    borderTop: `1px solid ${C.line}`,
+    borderBottom: `1px solid ${C.line}`,
+    textAlign: 'right' as const,
     width: PERIOD_COL_PX,
     minWidth: PERIOD_COL_PX,
     verticalAlign: 'middle' as const,
+    fontFamily: MONO,
+    fontVariantNumeric: 'tabular-nums' as const,
     fontSize: '11px',
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground3,
@@ -144,22 +176,18 @@ const useStyles = makeStyles({
 
   projectCell: {
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderBottom: `1px solid ${C.line}`,
     position: 'sticky' as const,
     left: 0,
-    backgroundColor: tokens.colorNeutralBackground1,
     zIndex: 1,
     minWidth: PROJECT_COL_PX,
     maxWidth: PROJECT_COL_PX,
   },
   descCell: {
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderBottom: `1px solid ${C.line}`,
     position: 'sticky' as const,
     left: DESC_LEFT_PX,
-    backgroundColor: tokens.colorNeutralBackground1,
     zIndex: 1,
     minWidth: DESC_COL_PX,
     maxWidth: DESC_COL_PX,
@@ -167,15 +195,11 @@ const useStyles = makeStyles({
     textOverflow: 'ellipsis' as const,
     whiteSpace: 'nowrap' as const,
     verticalAlign: 'middle' as const,
-    fontSize: tokens.fontSizeBase200,
+    fontSize: '13px',
   },
   typeCellOop: {
-    backgroundColor: OOP_COLOR,
-    color: '#1a3a7a',
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase100,
-    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalXS}`,
+    borderBottom: `1px solid ${C.line}`,
     position: 'sticky' as const,
     left: TYPE_LEFT_PX,
     zIndex: 1,
@@ -184,12 +208,8 @@ const useStyles = makeStyles({
     verticalAlign: 'middle' as const,
   },
   typeCellEquip: {
-    backgroundColor: EQUIP_COLOR,
-    color: '#0a4a1a',
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase100,
-    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalXS}`,
+    borderBottom: `1px solid ${C.line}`,
     position: 'sticky' as const,
     left: TYPE_LEFT_PX,
     zIndex: 1,
@@ -197,13 +217,50 @@ const useStyles = makeStyles({
     minWidth: TYPE_COL_PX,
     verticalAlign: 'middle' as const,
   },
+  badgeOop: {
+    display: 'inline-flex' as const,
+    alignItems: 'center' as const,
+    fontSize: '10px',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.06em',
+    padding: '2px 6px',
+    borderRadius: '3px',
+    fontWeight: 600,
+    lineHeight: '1.4',
+    background: C.oopBg,
+    color: C.oopAccent,
+    border: '1px solid rgba(154,91,0,0.15)',
+  },
+  badgeEquip: {
+    display: 'inline-flex' as const,
+    alignItems: 'center' as const,
+    fontSize: '10px',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.06em',
+    padding: '2px 6px',
+    borderRadius: '3px',
+    fontWeight: 600,
+    lineHeight: '1.4',
+    background: C.equipBg,
+    color: C.equipAccent,
+    border: '1px solid rgba(30,58,95,0.15)',
+  },
+  deleteBtn: {
+    minWidth: 0,
+    padding: '0 2px',
+    transition: 'opacity 0.12s ease',
+    ':hover': { backgroundColor: '#f6dad7', color: '#a32f2a' },
+  },
 
   valueCell: {
     padding: '2px 2px',
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderBottom: `1px solid ${C.line}`,
     textAlign: 'center' as const,
     width: PERIOD_COL_PX,
     minWidth: PERIOD_COL_PX,
+    fontFamily: MONO,
+    fontVariantNumeric: 'tabular-nums' as const,
+    fontSize: '12.5px',
   },
   cellEditable: {
     cursor: 'crosshair',
@@ -232,15 +289,18 @@ const useStyles = makeStyles({
     padding: '2px 4px',
     borderRadius: tokens.borderRadiusSmall,
     cursor: 'pointer',
-    fontSize: tokens.fontSizeBase200,
+    fontFamily: MONO,
+    fontVariantNumeric: 'tabular-nums' as const,
+    fontSize: '12.5px',
     textAlign: 'right' as const,
     backgroundColor: tokens.colorNeutralBackground3,
     ':hover': { filter: 'brightness(0.92)' },
   },
   emptyCell: {
-    color: tokens.colorNeutralForeground4,
+    color: C.ink5,
     cursor: 'pointer',
-    fontSize: tokens.fontSizeBase200,
+    fontFamily: MONO,
+    fontSize: '12.5px',
     display: 'inline-block',
     minWidth: '64px',
     padding: '2px 4px',
@@ -248,8 +308,9 @@ const useStyles = makeStyles({
     ':hover': { backgroundColor: tokens.colorNeutralBackground3 },
   },
   emptyCellReadonly: {
-    color: tokens.colorNeutralForeground4,
-    fontSize: tokens.fontSizeBase200,
+    color: C.ink5,
+    fontFamily: MONO,
+    fontSize: '12.5px',
     display: 'inline-block',
     minWidth: '64px',
     padding: '2px 4px',
@@ -258,19 +319,68 @@ const useStyles = makeStyles({
     display: 'inline-block',
     minWidth: '64px',
     padding: '2px 4px',
-    fontSize: tokens.fontSizeBase200,
+    fontFamily: MONO,
+    fontVariantNumeric: 'tabular-nums' as const,
+    fontSize: '12.5px',
     color: tokens.colorNeutralForeground2,
     cursor: 'default',
   },
 
-  addLineRow: { backgroundColor: tokens.colorNeutralBackground1 },
+  addLineRow: { backgroundColor: 'white' },
   addLineCell: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderBottom: `1px solid ${C.line}`,
     position: 'sticky' as const,
     left: 0,
   },
   addLineForm: { display: 'flex', gap: tokens.spacingHorizontalS, alignItems: 'center', flexWrap: 'wrap' as const },
+
+  totalsOopRow: { backgroundColor: C.oopHover },
+  totalsEquipRow: { backgroundColor: C.equipHover },
+  totalsGrandRow: { backgroundColor: C.grandTotalBg },
+  totalsCellLabel: {
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    borderTop: `2px solid ${C.line}`,
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: '11px',
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase' as const,
+    position: 'sticky' as const,
+    left: 0,
+    zIndex: 1,
+  },
+  totalsCellValue: {
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalXS}`,
+    borderTop: `2px solid ${C.line}`,
+    textAlign: 'right' as const,
+    fontFamily: MONO,
+    fontVariantNumeric: 'tabular-nums' as const,
+    fontSize: '12px',
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  grandTotalCellLabel: {
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    borderTop: `2px solid ${C.line}`,
+    fontWeight: 700,
+    fontSize: '11.5px',
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase' as const,
+    color: C.ink2,
+    backgroundColor: C.grandTotalBg,
+    position: 'sticky' as const,
+    left: 0,
+    zIndex: 1,
+  },
+  grandTotalCellValue: {
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalXS}`,
+    borderTop: `2px solid ${C.line}`,
+    textAlign: 'right' as const,
+    fontFamily: MONO,
+    fontVariantNumeric: 'tabular-nums' as const,
+    fontSize: '13px',
+    fontWeight: 700,
+    backgroundColor: C.grandTotalBg,
+  },
 
   // Floating popover (replaces top toolbar)
   popover: {
@@ -400,6 +510,8 @@ export const ProjectCostsMatrix: React.FC = () => {
   const [applyValue, setApplyValue] = useState('');
   const [applying, setApplying] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [hoveredLine, setHoveredLine] = useState<string | null>(null);
+  const [hoveredMonth, setHoveredMonth] = useState<number | null>(null);
 
   // Refs for window event handlers (avoid stale closures)
   const isDraggingRef = useRef(false);
@@ -537,6 +649,21 @@ export const ProjectCostsMatrix: React.FC = () => {
       return { projectId: proj.id, projectName: proj.name, pmUserIds: proj.pm_user_ids ?? [], lines, totalsByPeriod };
     });
   }, [projects, extLines, equipLines, localLines, openPeriods, openPeriodIds]);
+
+  // ── Cross-project totals by type ──
+  const totalsByType = useMemo(() => {
+    const oopByPeriod = new Map<string, number>();
+    const equipByPeriod = new Map<string, number>();
+    for (const group of matrixGroups) {
+      for (const line of group.lines) {
+        const target = line.type === 'oop' ? oopByPeriod : equipByPeriod;
+        for (const [periodId, cell] of line.costsByPeriod) {
+          target.set(periodId, (target.get(periodId) ?? 0) + cell.cost);
+        }
+      }
+    }
+    return { oopByPeriod, equipByPeriod };
+  }, [matrixGroups]);
 
   // ── Cell save ──
   const saveCostCell = useCallback(async (
@@ -738,7 +865,7 @@ export const ProjectCostsMatrix: React.FC = () => {
   if (loading) return <div className={styles.loading}><Spinner label="Loading project costs…" /></div>;
 
   return (
-    <div>
+    <div className={styles.cardWrapper}>
       {/* Floating popover for drag-select bulk editing */}
       {popoverPos && selectedCells.size > 0 && (
         <div
@@ -780,23 +907,42 @@ export const ProjectCostsMatrix: React.FC = () => {
       )}
 
       <div className={mergeClasses(styles.wrapper, isDragging && styles.matrixSelecting)}>
-        <table className={styles.table}>
+        <table className={styles.table} onMouseLeave={() => setHoveredMonth(null)}>
           <thead>
             <tr>
               <th className={mergeClasses(styles.th, styles.thProject)} style={{ textAlign: 'left' }}>Project</th>
               <th className={mergeClasses(styles.th, styles.thDesc)}    style={{ textAlign: 'left' }}>Name</th>
               <th className={mergeClasses(styles.th, styles.thType)}    style={{ textAlign: 'left' }}>Type</th>
-              {openPeriods.map(p => (
-                <th key={p.id} className={styles.th} style={{ width: PERIOD_COL_PX, minWidth: PERIOD_COL_PX }}>
-                  {MONTH_SHORT[p.month - 1]} {p.year}
-                </th>
-              ))}
+              {openPeriods.map((p, idx) => {
+                const isColHovered = hoveredMonth === idx;
+                return (
+                  <th
+                    key={p.id}
+                    className={styles.th}
+                    style={{
+                      width: PERIOD_COL_PX,
+                      minWidth: PERIOD_COL_PX,
+                      transition: 'background-color 0.1s ease',
+                      ...(isColHovered ? { backgroundColor: 'rgba(30,58,95,0.06)' } : {}),
+                    }}
+                    onMouseEnter={() => setHoveredMonth(idx)}
+                  >
+                    <span style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: C.ink2, textTransform: 'none', letterSpacing: 0 }}>
+                      {MONTH_SHORT[p.month - 1]}
+                    </span>
+                    <span style={{ display: 'block', fontSize: '9.5px', color: C.ink4, marginTop: '1px', letterSpacing: '0.05em', textTransform: 'none' }}>
+                      {p.year}
+                    </span>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
             {matrixGroups.map(group => {
               const isExpanded = expandedProjects.has(group.projectId);
               const canEditThisProject = canEditProject(group.pmUserIds);
+              const lineCount = group.lines.length;
 
               return (
                 <React.Fragment key={group.projectId}>
@@ -809,19 +955,33 @@ export const ProjectCostsMatrix: React.FC = () => {
                       return s;
                     })}
                   >
-                    <td className={styles.summaryFixed}>
+                    <td className={styles.summaryFixed} style={{ boxShadow: `inset 3px 0 0 ${C.equipAccent}`, paddingLeft: 14 }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         {isExpanded ? <ChevronDown20Regular /> : <ChevronRight20Regular />}
-                        {group.projectName}
+                        <span style={{ fontSize: '13.5px', fontWeight: 600 }}>{group.projectName}</span>
+                        {lineCount > 0 && (
+                          <span style={{ fontSize: '11px', color: C.ink3, fontWeight: 400 }}>
+                            · {lineCount} line{lineCount !== 1 ? 's' : ''}
+                          </span>
+                        )}
                       </span>
                     </td>
                     <td className={styles.summaryDesc} />
                     <td className={styles.summaryType} />
-                    {openPeriods.map(p => {
+                    {openPeriods.map((p, colIdx) => {
                       const total = group.totalsByPeriod.get(p.id) ?? 0;
+                      const isColHovered = hoveredMonth === colIdx;
                       return (
-                        <td key={p.id} className={styles.summaryValueCell}>
-                          {total > 0 ? fmtDKK(total) : '—'}
+                        <td
+                          key={p.id}
+                          className={styles.summaryValueCell}
+                          style={{
+                            transition: 'background-color 0.1s ease',
+                            ...(isColHovered ? { backgroundColor: 'rgba(30,58,95,0.06)' } : {}),
+                          }}
+                          onMouseEnter={() => setHoveredMonth(colIdx)}
+                        >
+                          {total > 0 ? fmtDKK(total) : <span style={{ color: C.ink5, fontWeight: 400 }}>—</span>}
                         </td>
                       );
                     })}
@@ -829,16 +989,32 @@ export const ProjectCostsMatrix: React.FC = () => {
 
                   {/* ── Line item rows (expanded) ── */}
                   {isExpanded && group.lines.map((line, lineIdx) => {
-                    // Dim rows of the wrong type only while dragging within this project
                     const isDimmed = isDragging && dragType !== null && dragType !== line.type && dragStart?.projectId === group.projectId;
+                    const isHovered = hoveredLine === line.lineKey;
+                    const rowBg = isHovered
+                      ? (line.type === 'oop' ? C.oopHover : C.equipHover)
+                      : (line.type === 'oop' ? C.oopTint : C.equipTint);
+                    const stickyBg = isHovered ? rowBg : 'white';
+                    const leftBorder = line.type === 'oop' ? C.oopAccent : C.equipAccent;
 
                     return (
-                      <tr key={line.lineKey} style={{ backgroundColor: line.type === 'oop' ? OOP_COLOR : EQUIP_COLOR }}>
+                      <tr
+                        key={line.lineKey}
+                        style={{ backgroundColor: rowBg }}
+                        onMouseEnter={() => setHoveredLine(line.lineKey)}
+                        onMouseLeave={() => setHoveredLine(null)}
+                      >
                         <td
                           className={styles.descCell}
                           colSpan={2}
                           title={line.description}
-                          style={{ left: 0, minWidth: `${PROJECT_COL_WIDTH + DESC_COL_WIDTH}px`, maxWidth: `${PROJECT_COL_WIDTH + DESC_COL_WIDTH}px` }}
+                          style={{
+                            left: 0,
+                            minWidth: `${PROJECT_COL_WIDTH + DESC_COL_WIDTH}px`,
+                            maxWidth: `${PROJECT_COL_WIDTH + DESC_COL_WIDTH}px`,
+                            backgroundColor: stickyBg,
+                            boxShadow: `inset 3px 0 0 ${leftBorder}`,
+                          }}
                         >
                           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                             {line.isLocal && (
@@ -848,15 +1024,21 @@ export const ProjectCostsMatrix: React.FC = () => {
                           </span>
                         </td>
 
-                        <td className={line.type === 'oop' ? styles.typeCellOop : styles.typeCellEquip}>
+                        <td
+                          className={line.type === 'oop' ? styles.typeCellOop : styles.typeCellEquip}
+                          style={{ backgroundColor: stickyBg }}
+                        >
                           <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
-                            {line.type === 'oop' ? 'OoP' : 'Equip'}
+                            <span className={line.type === 'oop' ? styles.badgeOop : styles.badgeEquip}>
+                              {line.type === 'oop' ? 'OoP' : 'Equip'}
+                            </span>
                             {canEditThisProject && (
                               <Button
                                 size="small"
                                 appearance="subtle"
                                 icon={<DeleteRegular />}
-                                style={{ minWidth: 0, padding: '0 2px' }}
+                                className={styles.deleteBtn}
+                                style={{ opacity: isHovered ? 1 : 0 }}
                                 onClick={() => {
                                   if (window.confirm(`Delete "${line.description}"? This will remove all values across all periods.`)) {
                                     handleDeleteLine(group.projectId, line.type, line.description, line.isLocal);
@@ -882,12 +1064,13 @@ export const ProjectCostsMatrix: React.FC = () => {
                                 isSelected && styles.cellSelected,
                                 isDimmed && styles.cellDimmed,
                               )}
+                              style={hoveredMonth === colIdx ? { backgroundColor: 'rgba(30,58,95,0.06)', transition: 'background-color 0.1s ease' } : undefined}
                               onMouseDown={canDrag
                                 ? e => handleCellMouseDown(e, cellKey, line.type, group.projectId, lineIdx, colIdx)
                                 : undefined}
                               onMouseEnter={isDragging
                                 ? () => handleCellMouseEnter(group.projectId, lineIdx, colIdx)
-                                : undefined}
+                                : () => setHoveredMonth(colIdx)}
                             >
                               <CostCellEditor
                                 cell={cell}
@@ -954,6 +1137,68 @@ export const ProjectCostsMatrix: React.FC = () => {
                 </React.Fragment>
               );
             })}
+
+            {/* ── Totals footer ── */}
+            <tr className={styles.totalsOopRow}>
+              <td
+                className={styles.totalsCellLabel}
+                colSpan={3}
+                style={{ backgroundColor: C.oopHover, boxShadow: `inset 3px 0 0 ${C.oopAccent}`, color: C.oopAccent }}
+              >
+                Total OoP
+              </td>
+              {openPeriods.map((p, colIdx) => {
+                const val = totalsByType.oopByPeriod.get(p.id) ?? 0;
+                return (
+                  <td
+                    key={p.id}
+                    className={styles.totalsCellValue}
+                    style={hoveredMonth === colIdx ? { backgroundColor: 'rgba(30,58,95,0.06)', transition: 'background-color 0.1s ease' } : undefined}
+                    onMouseEnter={() => setHoveredMonth(colIdx)}
+                  >
+                    {val > 0 ? fmtDKK(val) : <span style={{ color: C.ink5, fontWeight: 400 }}>—</span>}
+                  </td>
+                );
+              })}
+            </tr>
+            <tr className={styles.totalsEquipRow}>
+              <td
+                className={styles.totalsCellLabel}
+                colSpan={3}
+                style={{ backgroundColor: C.equipHover, boxShadow: `inset 3px 0 0 ${C.equipAccent}`, color: C.equipAccent }}
+              >
+                Total Equipment
+              </td>
+              {openPeriods.map((p, colIdx) => {
+                const val = totalsByType.equipByPeriod.get(p.id) ?? 0;
+                return (
+                  <td
+                    key={p.id}
+                    className={styles.totalsCellValue}
+                    style={hoveredMonth === colIdx ? { backgroundColor: 'rgba(30,58,95,0.06)', transition: 'background-color 0.1s ease' } : undefined}
+                    onMouseEnter={() => setHoveredMonth(colIdx)}
+                  >
+                    {val > 0 ? fmtDKK(val) : <span style={{ color: C.ink5, fontWeight: 400 }}>—</span>}
+                  </td>
+                );
+              })}
+            </tr>
+            <tr className={styles.totalsGrandRow}>
+              <td className={styles.grandTotalCellLabel} colSpan={3}>Grand Total</td>
+              {openPeriods.map((p, colIdx) => {
+                const total = (totalsByType.oopByPeriod.get(p.id) ?? 0) + (totalsByType.equipByPeriod.get(p.id) ?? 0);
+                return (
+                  <td
+                    key={p.id}
+                    className={styles.grandTotalCellValue}
+                    style={hoveredMonth === colIdx ? { backgroundColor: 'rgba(30,58,95,0.08)', transition: 'background-color 0.1s ease' } : undefined}
+                    onMouseEnter={() => setHoveredMonth(colIdx)}
+                  >
+                    {total > 0 ? fmtDKK(total) : <span style={{ color: C.ink5, fontWeight: 400 }}>—</span>}
+                  </td>
+                );
+              })}
+            </tr>
           </tbody>
         </table>
       </div>

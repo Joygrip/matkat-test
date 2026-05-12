@@ -48,7 +48,7 @@ import { useToast } from '../hooks/useToast';
 import { useAuth, useHasRole } from '../auth/AuthProvider';
 
 // Tab components
-import { OverviewTab } from '../components/finance/OverviewTab';
+import { FinanceOverview } from '../components/shared/FinanceOverview';
 import type { FinanceActualRow } from '../components/finance/ActualsTab';
 import { SnapshotsTab } from '../components/finance/SnapshotsTab';
 import { CostReportTab } from '../components/finance/CostReportTab';
@@ -169,9 +169,8 @@ export const Finance: React.FC = () => {
   // ── Tab ──
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
 
-  // ── Dashboard (shared: OverviewTab + Publish dialog) ──
+  // ── Dashboard (used by the Publish dialog; populated via FinanceOverview callback) ──
   const [dashboard, setDashboard] = useState<ConsolidationDashboard | null>(null);
-  const [dashboardLoading, setDashboardLoading] = useState(false);
 
   // ── Actuals (used by CostReportTab) ──
   const [actualsData, setActualsData] = useState<FinanceActualRow[]>([]);
@@ -213,29 +212,13 @@ export const Finance: React.FC = () => {
   // ── Reload when period changes ──
   useEffect(() => {
     if (selectedPeriodId) {
-      loadDashboard(selectedPeriodId);
       if (canSeeSnapshots) loadSnapshots(selectedPeriodId);
       if (!isPM) loadActuals(selectedPeriodId);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPeriodId]);
 
-
   // ── Data loaders ──
-
-  const loadDashboard = async (periodId?: string) => {
-    const pid = periodId || selectedPeriodId;
-    if (!pid) return;
-    setDashboardLoading(true);
-    try {
-      const data = await consolidationApi.getDashboard(pid);
-      setDashboard(data);
-    } catch (err) {
-      showApiError(err as Error, 'Failed to load dashboard');
-    } finally {
-      setDashboardLoading(false);
-    }
-  };
 
   const loadSnapshots = async (periodId?: string) => {
     const pid = periodId || selectedPeriodId;
@@ -435,7 +418,11 @@ export const Finance: React.FC = () => {
           <MessageBar intent="info" style={{ marginBottom: 12 }}>
             <MessageBarBody>Cost figures reflect fully approved actuals only. Pending or rejected actuals are excluded.</MessageBarBody>
           </MessageBar>
-          <OverviewTab dashboard={dashboard} loading={dashboardLoading} projectId={overviewProjectId} onDashboardChanged={() => selectedPeriodId && loadDashboard(selectedPeriodId)} />
+          <FinanceOverview
+            scope={isPM ? 'pm' : user?.role === 'Manager' ? 'manager' : user?.role === 'Finance' ? 'finance' : user?.role === 'Admin' ? 'admin' : 'reader'}
+            projectId={overviewProjectId}
+            onDashboardLoaded={setDashboard}
+          />
         </>
       )}
       {canSeeSnapshots && activeTab === 'snapshots' && (

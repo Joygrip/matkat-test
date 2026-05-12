@@ -16,10 +16,10 @@ import type { CostCenter, Project } from '../api/admin';
 import type { Period } from '../types/index';
 
 import { EmployeeView } from '../components/dashboard/EmployeeView';
-import { PMView } from '../components/dashboard/PMView';
-import { ManagerView } from '../components/dashboard/ManagerView';
-import { ReaderView } from '../components/dashboard/ReaderView';
-import { FinanceView } from '../components/dashboard/FinanceView';
+import { PMDashboard } from '../components/dashboard/PMDashboard';
+import { ManagerDashboard } from '../components/dashboard/ManagerDashboard';
+import { FinanceDashboard } from '../components/dashboard/FinanceDashboard';
+import { ExecutiveDashboard } from '../components/dashboard/ExecutiveDashboard';
 import { AdminView } from '../components/dashboard/AdminView';
 
 const useStyles = makeStyles({
@@ -177,7 +177,7 @@ export function Dashboard() {
       )}
 
       {user.role === 'PM' && (
-        <PMView
+        <PMDashboard
           demandLines={allDemandLines}
           supplyLines={allSupplyLines}
           projects={projects}
@@ -188,7 +188,7 @@ export function Dashboard() {
       )}
 
       {user.role === 'Manager' && !isManagerReader && (
-        <ManagerView
+        <ManagerDashboard
           demandLines={allDemandLines}
           supplyLines={allSupplyLines}
           costCenters={costCenters}
@@ -199,19 +199,18 @@ export function Dashboard() {
       )}
 
       {isManagerReader && (
-        <ReaderView
+        <ExecutiveDashboard
           demandLines={allDemandLines}
           supplyLines={allSupplyLines}
           costCenters={costCenters}
           periods={periods}
           approvalStatuses={approvalStatuses}
-          projects={projects}
           user={user}
         />
       )}
 
       {user.role === 'Finance' && (
-        <FinanceView
+        <FinanceDashboard
           demandLines={allDemandLines}
           supplyLines={allSupplyLines}
           costCenters={costCenters}

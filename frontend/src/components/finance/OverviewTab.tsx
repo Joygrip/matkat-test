@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Body1,
   Input,
@@ -14,6 +14,8 @@ import {
   BuildingRegular,
   Warning24Regular,
   EditRegular,
+  DismissRegular,
+  ChevronDownRegular,
 } from '@fluentui/react-icons';
 import type {
   ConsolidationDashboard,
@@ -23,6 +25,8 @@ import type {
   ResourceDetail,
 } from '../../api/consolidation';
 import { consolidationApi } from '../../api/consolidation';
+import { lookupsApi } from '../../api/lookups';
+import type { Project } from '../../api/lookups';
 import { useWorkQueueSort } from '../../hooks/useWorkQueueSort';
 import { useHasRole } from '../../auth/AuthProvider';
 import { ResourceDetailModal } from './ResourceDetailModal';
@@ -845,6 +849,9 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
   const [showIssuesOnly, setShowIssuesOnly] = useState(false);
   const [selectedCcId,  setSelectedCcId]  = useState<string | null>(null);
   const [search,        setSearch]        = useState('');
+  const [selectedProjectIds,  setSelectedProjectIds]  = useState<string[]>([]);
+  const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
+  const [projectsData,        setProjectsData]        = useState<Project[]>([]);
   const [drillOpen,     setDrillOpen]     = useState(false);
   const [drillResourceId,   setDrillResourceId]   = useState<string | null>(null);
   const [drillResourceName, setDrillResourceName] = useState('');
@@ -853,6 +860,10 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
   const [resourceDetailLoading, setResourceDetailLoading] = useState(false);
 
   const { sort, handleSortClick, sortItems } = useWorkQueueSort<CcSortKey>('gap');
+
+  useEffect(() => {
+    lookupsApi.listProjects().then(setProjectsData).catch(() => {/* non-critical */});
+  }, []);
 
   const handleResourceClick = async (resource: DashboardResource) => {
     if (!dashboard) return;
@@ -874,13 +885,51 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
     }
   };
 
-  // Cost centers scoped to the selected project (no list filter / search applied).
-  // Used for KPI and issue totals so they reflect the full project scope.
-  const projectFilteredCcs = useMemo(() => {
+  // Cost centers scoped to the external projectId prop (Finance toolbar / scope).
+  const externalProjectCcs = useMemo(() => {
     if (!dashboard) return [];
     if (!projectId) return dashboard.cost_centers;
     return dashboard.cost_centers.filter(cc => cc.project_ids.includes(projectId));
   }, [dashboard, projectId]);
+
+  // Projects that appear in the current scope, with names and codes from the lookup table.
+  const allProjects = useMemo(() => {
+    // Collect all project IDs referenced by the scoped cost centers.
+    const scopedIds = new Set<string>();
+    for (const cc of externalProjectCcs) {
+      for (const pid of cc.project_ids) scopedIds.add(pid);
+    }
+    // Build lookup by project.id from the fetched list.
+    const byId = new Map(projectsData.map(p => [p.id, p]));
+    // Fall back to placeholder-sourced names for any IDs not in the lookup (e.g. auth-limited scope).
+    const placeholderNames = new Map<string, string>();
+    for (const cc of externalProjectCcs) {
+      for (const ph of cc.placeholders) {
+        if (!placeholderNames.has(ph.project_id)) placeholderNames.set(ph.project_id, ph.project_name);
+      }
+    }
+    return Array.from(scopedIds)
+      .map(pid => {
+        const p = byId.get(pid);
+        if (p) {
+          const label = p.code ? `${p.name} (${p.code})` : p.name;
+          return { project_id: pid, project_name: label };
+        }
+        const fallbackName = placeholderNames.get(pid);
+        if (fallbackName) return { project_id: pid, project_name: fallbackName };
+        return null; // skip IDs with no resolvable name
+      })
+      .filter((x): x is { project_id: string; project_name: string } => x !== null)
+      .sort((a, b) => a.project_name.localeCompare(b.project_name));
+  }, [externalProjectCcs, projectsData]);
+
+  // Apply the internal project filter (sidebar dropdown) on top of the external scope.
+  const projectFilteredCcs = useMemo(() => {
+    if (!selectedProjectIds.length) return externalProjectCcs;
+    return externalProjectCcs.filter(cc =>
+      cc.project_ids.some(pid => selectedProjectIds.includes(pid))
+    );
+  }, [externalProjectCcs, selectedProjectIds]);
 
   const filteredOverAllocs = useMemo(() => {
     if (!dashboard) return [];
@@ -918,7 +967,13 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
     }
     if (search.trim()) {
       const q = search.toLowerCase();
-      ccs = ccs.filter(cc => cc.cost_center_name.toLowerCase().includes(q));
+      ccs = ccs.filter(cc => {
+        if (cc.cost_center_name.toLowerCase().includes(q)) return true;
+        return cc.resources.some(r =>
+          r.resource_name.toLowerCase().includes(q) ||
+          getInitials(r.resource_name).toLowerCase().includes(q)
+        );
+      });
     }
     return ccs;
   }, [dashboard, showIssuesOnly, search, projectFilteredCcs, filteredOverAllocs]);
@@ -950,6 +1005,16 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
       : [],
     [selectedCc, dashboard]
   );
+
+  // When search or project filter is active and the current CC is filtered out, select the first visible result.
+  useEffect(() => {
+    if (!search.trim() && !selectedProjectIds.length) return;
+    if (!sortedCcs.length) return;
+    setSelectedCcId(prev => {
+      if (prev && sortedCcs.some(cc => (cc.cost_center_id ?? '__none__') === prev)) return prev;
+      return sortedCcs[0].cost_center_id ?? '__none__';
+    });
+  }, [sortedCcs, search, selectedProjectIds]);
 
   // ── Loading state ──
   if (loading) {
@@ -1014,11 +1079,109 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
           {/* Search */}
           <Input
             contentBefore={<SearchRegular />}
-            placeholder="Search cost centers..."
+            contentAfter={search ? (
+              <button
+                onClick={() => setSearch('')}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' }}
+              >
+                <DismissRegular style={{ fontSize: 12, color: C.ink3 }} />
+              </button>
+            ) : undefined}
+            placeholder="Search cost centers, employees, initials..."
             value={search}
             onChange={(_, d) => setSearch(d.value)}
             size="small"
           />
+
+          {/* Project filter */}
+          {allProjects.length > 0 && (
+            <div style={{ position: 'relative' }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: C.ink3, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
+                PROJECT{selectedProjectIds.length > 0 ? ` (${selectedProjectIds.length})` : ''}
+              </div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  onClick={() => setProjectDropdownOpen(v => !v)}
+                  style={{
+                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '7px 12px', border: `1px solid ${selectedProjectIds.length > 0 ? C.accent : C.line}`,
+                    borderRadius: 6, backgroundColor: C.surface, fontSize: 13, cursor: 'pointer',
+                    color: selectedProjectIds.length > 0 ? C.ink : C.ink3,
+                    fontWeight: selectedProjectIds.length > 0 ? 500 : 400,
+                    outline: 'none',
+                  }}
+                >
+                  <span>{selectedProjectIds.length === 0 ? 'All projects' : `${selectedProjectIds.length} project${selectedProjectIds.length !== 1 ? 's' : ''} selected`}</span>
+                  <ChevronDownRegular style={{
+                    fontSize: 12, color: C.ink3, marginLeft: 4, flexShrink: 0,
+                    transform: projectDropdownOpen ? 'rotate(180deg)' : undefined,
+                    transition: 'transform 0.12s',
+                  }} />
+                </button>
+                {selectedProjectIds.length > 0 && (
+                  <button
+                    onClick={() => setSelectedProjectIds([])}
+                    title="Clear project filter"
+                    style={{ padding: '7px 9px', border: `1px solid ${C.line}`, borderRadius: 6, backgroundColor: C.surface, cursor: 'pointer', display: 'flex', alignItems: 'center', outline: 'none' }}
+                  >
+                    <DismissRegular style={{ fontSize: 12, color: C.ink3 }} />
+                  </button>
+                )}
+              </div>
+              {projectDropdownOpen && (
+                <>
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setProjectDropdownOpen(false)} />
+                  <div style={{
+                    position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0, zIndex: 100,
+                    backgroundColor: C.surface, border: `1px solid ${C.line}`, borderRadius: 8,
+                    boxShadow: '0 4px 16px rgba(0,0,0,.12)', maxHeight: 220, overflowY: 'auto',
+                    padding: '4px 0',
+                  }}>
+                    {allProjects.map(p => {
+                      const checked = selectedProjectIds.includes(p.project_id);
+                      return (
+                        <div
+                          key={p.project_id}
+                          role="checkbox"
+                          aria-checked={checked}
+                          tabIndex={0}
+                          onClick={() => setSelectedProjectIds(prev =>
+                            checked ? prev.filter(id => id !== p.project_id) : [...prev, p.project_id]
+                          )}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setSelectedProjectIds(prev =>
+                                checked ? prev.filter(id => id !== p.project_id) : [...prev, p.project_id]
+                              );
+                            }
+                          }}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            padding: '7px 12px', cursor: 'pointer', fontSize: 13,
+                            backgroundColor: checked ? `${C.accent}0d` : 'transparent',
+                            color: C.ink, userSelect: 'none',
+                          }}
+                        >
+                          <div style={{
+                            width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                            border: `1.5px solid ${checked ? C.accent : '#bbb'}`,
+                            backgroundColor: checked ? C.accent : 'transparent',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            {checked && <div style={{ width: 6, height: 6, backgroundColor: C.surface, borderRadius: 1 }} />}
+                          </div>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                            {p.project_name}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Sort segmented control */}
           <div style={{ display: 'flex', gap: 3, backgroundColor: C.surface2, borderRadius: 8, padding: 3 }}>

@@ -67,6 +67,7 @@ class ConsolidationService:
         placeholder_map = self._load_placeholder_map()
 
         demand_by_resource: Dict[str, int] = defaultdict(int)
+        demand_by_resource_project: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
         resource_project_ids: Dict[str, set] = defaultdict(set)
         resource_demands = self.db.query(DemandLine).filter(
             and_(
@@ -78,8 +79,12 @@ class ConsolidationService:
         for d in resource_demands:
             demand_by_resource[d.resource_id] += d.fte_percent
             resource_project_ids[d.resource_id].add(d.project_id)
+            if d.project_id:
+                demand_by_resource_project[d.resource_id][d.project_id] += d.fte_percent
 
         supply_by_resource: Dict[str, int] = defaultdict(int)
+        supply_by_resource_project: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        supply_general_by_resource: Dict[str, int] = defaultdict(int)
         supplies = self.db.query(SupplyLine).filter(
             and_(
                 SupplyLine.tenant_id == self.current_user.tenant_id,
@@ -88,6 +93,26 @@ class ConsolidationService:
         ).all()
         for s in supplies:
             supply_by_resource[s.resource_id] += s.fte_percent
+            if s.project_id:
+                supply_by_resource_project[s.resource_id][s.project_id] += s.fte_percent
+            else:
+                supply_general_by_resource[s.resource_id] += s.fte_percent
+
+        # Batch-load project names for per-resource/per-project allocation breakdown
+        _res_proj_ids: set = set()
+        for pids in resource_project_ids.values():
+            _res_proj_ids.update(pids)
+        for proj_dict in supply_by_resource_project.values():
+            _res_proj_ids.update(proj_dict.keys())
+        _res_proj_ids.discard(None)
+        res_project_name_map: Dict[str, str] = {}
+        if _res_proj_ids:
+            res_project_name_map = {
+                p.id: p.name for p in self.db.query(Project).filter(
+                    Project.id.in_(_res_proj_ids),
+                    Project.tenant_id == self.current_user.tenant_id,
+                ).all()
+            }
 
         placeholder_demands = self.db.query(DemandLine).filter(
             and_(
@@ -136,13 +161,36 @@ class ConsolidationService:
             elif gap > 0:
                 status = "over"
 
+            res_demand_proj = demand_by_resource_project.get(res_id, {})
+            res_supply_proj = supply_by_resource_project.get(res_id, {})
+            res_supply_gen = supply_general_by_resource.get(res_id, 0)
+            all_proj_ids = set(res_demand_proj.keys()) | set(res_supply_proj.keys())
+            project_allocations = [
+                {
+                    "project_id": pid,
+                    "project_name": res_project_name_map.get(pid, "Unknown"),
+                    "demand_fte": res_demand_proj.get(pid, 0),
+                    "supply_fte": res_supply_proj.get(pid, 0),
+                }
+                for pid in sorted(all_proj_ids)
+            ]
+            if res_supply_gen > 0:
+                project_allocations.append({
+                    "project_id": None,
+                    "project_name": "General availability",
+                    "demand_fte": 0,
+                    "supply_fte": res_supply_gen,
+                })
+
             cc_node["resources"].append({
                 "resource_id": res_id,
                 "resource_name": resource.display_name if resource else "Unknown",
+                "initials": resource.initials if resource else None,
                 "demand_fte": demand,
                 "supply_fte": supply,
                 "gap_fte": gap,
                 "status": status,
+                "project_allocations": project_allocations,
             })
 
             if demand > 100:

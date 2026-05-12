@@ -303,6 +303,7 @@ export interface ResourceDetailModalProps {
   open: boolean;
   resourceId: string | null;
   resourceName: string;
+  resourceInitials?: string | null;
   ccName?: string;
   detail: ResourceDetail | null;
   loading: boolean;
@@ -310,6 +311,8 @@ export interface ResourceDetailModalProps {
   canEditDemand: boolean;
   canEditSupply: boolean;
   isPM: boolean;
+  /** When set (PM scope), restrict visible lines to these project IDs */
+  scopeProjectIds?: string[];
   onClose: () => void;
   onDataChanged: () => void;
 }
@@ -320,6 +323,7 @@ export function ResourceDetailModal({
   open,
   resourceId,
   resourceName,
+  resourceInitials,
   ccName,
   detail,
   loading,
@@ -327,6 +331,7 @@ export function ResourceDetailModal({
   canEditDemand,
   canEditSupply,
   isPM,
+  scopeProjectIds,
   onClose,
   onDataChanged,
 }: ResourceDetailModalProps) {
@@ -619,26 +624,61 @@ export function ResourceDetailModal({
 
   const anyCanEdit = canEditDemand || canEditSupply;
   const showEditableLines = anyCanEdit && !linesLoading;
-  const editableProjectIds = isPM ? new Set(projects.map(p => p.id)) : null;
 
-  const visibleDemandLines = editableProjectIds
-    ? demandLines.filter(l => editableProjectIds.has(l.project_id))
+  // filterIdSet: use explicit scopeProjectIds when provided (PM scope), otherwise fall back
+  // to the projects loaded for PM editing (editableProjectIds logic).
+  const filterIdSet: Set<string> | null = scopeProjectIds?.length
+    ? new Set(scopeProjectIds)
+    : (isPM && projects.length > 0 ? new Set(projects.map(p => p.id)) : null);
+
+  // Demand filtering
+  const visibleDemandLines = filterIdSet
+    ? demandLines.filter(l => filterIdSet.has(l.project_id))
     : demandLines;
-  const visibleReadOnlyDemandLines = editableProjectIds && localDetail
-    ? localDetail.demand_lines.filter(l => l.project_id && editableProjectIds.has(l.project_id))
+  const visibleReadOnlyDemandLines = filterIdSet && localDetail
+    ? localDetail.demand_lines.filter(l => l.project_id != null && filterIdSet.has(l.project_id))
     : (localDetail?.demand_lines ?? []);
 
+  // Supply filtering — null project_id means "general availability" and is always visible
+  const visibleSupplyLines = filterIdSet
+    ? supplyLines.filter(l => !l.project_id || filterIdSet.has(l.project_id))
+    : supplyLines;
+  const visibleReadOnlySupplyLines = filterIdSet && localDetail
+    ? localDetail.supply_lines.filter(l => !l.project_id || filterIdSet.has(l.project_id))
+    : (localDetail?.supply_lines ?? []);
+
   const shownDemandLines = showEditableLines ? visibleDemandLines : visibleReadOnlyDemandLines;
-  const shownSupplyLines = showEditableLines ? supplyLines : (localDetail?.supply_lines ?? []);
+  const shownSupplyLines = showEditableLines ? visibleSupplyLines : visibleReadOnlySupplyLines;
   const totalDemandPct = shownDemandLines.reduce((s, l) => s + l.fte_percent, 0);
   const totalSupplyPct = shownSupplyLines.reduce((s, l) => s + l.fte_percent, 0);
+
+  // Count of lines hidden from PM scope (for "X additional lines on other projects" note)
+  const allDemandForCount = showEditableLines ? demandLines : (localDetail?.demand_lines ?? []);
+  const allSupplyForCount = showEditableLines ? supplyLines : (localDetail?.supply_lines ?? []);
+  const hiddenDemandCount = filterIdSet
+    ? allDemandForCount.filter(l => l.project_id != null && !filterIdSet.has(l.project_id)).length
+    : 0;
+  const hiddenSupplyCount = filterIdSet
+    ? allSupplyForCount.filter(l => !!l.project_id && !filterIdSet.has(l.project_id)).length
+    : 0;
+  const hiddenCount = hiddenDemandCount + hiddenSupplyCount;
 
   const activeDetail = localDetail ?? detail;
   const gap = activeDetail?.gap_fte ?? 0;
   const gapSeverity = gapSev(gap);
   const gapColors = SEV[gapSeverity];
-  const initials = getInitials(resourceName);
-  const maxFte = Math.max(activeDetail?.total_demand_fte ?? 0, activeDetail?.total_supply_fte ?? 0, 1);
+  const initials = resourceInitials || getInitials(resourceName);
+
+  // When scoped, derive gap from visible lines so the summary strip reflects PM's projects
+  const scopedGap = totalSupplyPct - totalDemandPct;
+  const displayGap = filterIdSet ? scopedGap : gap;
+  const displayGapColors = SEV[gapSev(displayGap)];
+
+  const maxFte = Math.max(
+    filterIdSet ? totalDemandPct : (activeDetail?.total_demand_fte ?? 0),
+    filterIdSet ? totalSupplyPct : (activeDetail?.total_supply_fte ?? 0),
+    1,
+  );
 
   const periodLabel = selectedPeriod
     ? `${selectedPeriod.year}-${String(selectedPeriod.month).padStart(2, '0')}`
@@ -659,15 +699,15 @@ export function ResourceDetailModal({
             display: 'flex', alignItems: 'center', gap: 14,
             padding: '18px 20px',
             borderBottom: `1px solid ${C.line}`,
-            background: `linear-gradient(135deg, ${gapColors.bg} 0%, ${C.surface} 60%)`,
+            background: `linear-gradient(135deg, ${displayGapColors.bg} 0%, ${C.surface} 60%)`,
             flexShrink: 0,
           }}>
             <div style={{
               width: 44, height: 44, borderRadius: 22, flexShrink: 0,
-              background: `linear-gradient(135deg, ${gapColors.bar}28, ${gapColors.bar}55)`,
+              background: `linear-gradient(135deg, ${displayGapColors.bar}28, ${displayGapColors.bar}55)`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 14, fontWeight: 700, color: gapColors.bar,
-              border: `1.5px solid ${gapColors.bar}44`,
+              fontSize: 14, fontWeight: 700, color: displayGapColors.bar,
+              border: `1.5px solid ${displayGapColors.bar}44`,
             }}>
               {initials}
             </div>
@@ -697,35 +737,67 @@ export function ResourceDetailModal({
             {!loading && activeDetail && (
               <>
                 {/* ── Summary strip ── */}
-                <div style={{
-                  display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
-                  borderBottom: `1px solid ${C.line}`,
-                }}>
-                  {[
-                    { label: 'Demand',  value: `${activeDetail.total_demand_fte}%`, color: C.bad,          bg: C.badSoft  },
-                    { label: 'Supply',  value: `${activeDetail.total_supply_fte}%`, color: C.accent,       bg: C.overSoft },
-                    { label: 'Net Gap', value: fmtGap(gap),                          color: gapColors.text, bg: gapColors.bg },
-                  ].map(({ label, value, color, bg }, i) => (
-                    <div key={label} style={{
-                      padding: '14px 20px',
-                      backgroundColor: bg,
-                      borderRight: i < 2 ? `1px solid ${C.line}` : undefined,
-                      textAlign: 'center',
-                    }}>
-                      <div style={{ fontSize: 11, fontWeight: 500, color: C.ink3, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>
-                        {label}
+                {filterIdSet ? (
+                  /* PM scoped view: show "My projects" values prominently + full total as context */
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
+                    borderBottom: `1px solid ${C.line}`,
+                  }}>
+                    {[
+                      { label: 'Demand',  scopedVal: `${totalDemandPct}%`,     totalVal: `${activeDetail.total_demand_fte}%`, color: C.bad,                  bg: C.badSoft  },
+                      { label: 'Supply',  scopedVal: `${totalSupplyPct}%`,     totalVal: `${activeDetail.total_supply_fte}%`, color: C.accent,               bg: C.overSoft },
+                      { label: 'Net Gap', scopedVal: fmtGap(scopedGap),        totalVal: fmtGap(gap),                         color: displayGapColors.text,  bg: displayGapColors.bg },
+                    ].map(({ label, scopedVal, totalVal, color, bg }, i) => (
+                      <div key={label} style={{
+                        padding: '12px 20px',
+                        backgroundColor: bg,
+                        borderRight: i < 2 ? `1px solid ${C.line}` : undefined,
+                        textAlign: 'center',
+                      }}>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: C.accent, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 2 }}>
+                          My projects
+                        </div>
+                        <div style={{ fontSize: 22, fontWeight: 700, color, fontFamily: 'monospace' }}>
+                          {scopedVal}
+                        </div>
+                        <div style={{ fontSize: 11, color: C.ink3, marginTop: 3 }}>
+                          Total: {totalVal}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 22, fontWeight: 700, color, fontFamily: 'monospace' }}>
-                        {value}
+                    ))}
+                  </div>
+                ) : (
+                  /* Standard view */
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
+                    borderBottom: `1px solid ${C.line}`,
+                  }}>
+                    {[
+                      { label: 'Demand',  value: `${activeDetail.total_demand_fte}%`, color: C.bad,          bg: C.badSoft  },
+                      { label: 'Supply',  value: `${activeDetail.total_supply_fte}%`, color: C.accent,       bg: C.overSoft },
+                      { label: 'Net Gap', value: fmtGap(gap),                          color: gapColors.text, bg: gapColors.bg },
+                    ].map(({ label, value, color, bg }, i) => (
+                      <div key={label} style={{
+                        padding: '14px 20px',
+                        backgroundColor: bg,
+                        borderRight: i < 2 ? `1px solid ${C.line}` : undefined,
+                        textAlign: 'center',
+                      }}>
+                        <div style={{ fontSize: 11, fontWeight: 500, color: C.ink3, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>
+                          {label}
+                        </div>
+                        <div style={{ fontSize: 22, fontWeight: 700, color, fontFamily: 'monospace' }}>
+                          {value}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* ── Balance bars ── */}
                 <div style={{ padding: '14px 20px 10px', borderBottom: `1px solid ${C.line}` }}>
-                  <BalanceBar label="Demand" value={activeDetail.total_demand_fte} max={maxFte} color={C.bad} />
-                  <BalanceBar label="Supply" value={activeDetail.total_supply_fte} max={maxFte} color={C.accent} />
+                  <BalanceBar label="Demand" value={filterIdSet ? totalDemandPct : activeDetail.total_demand_fte} max={maxFte} color={C.bad} />
+                  <BalanceBar label="Supply" value={filterIdSet ? totalSupplyPct : activeDetail.total_supply_fte} max={maxFte} color={C.accent} />
                 </div>
 
                 {/* ── Demand assignments ── */}
@@ -850,7 +922,7 @@ export function ResourceDetailModal({
                       )}
 
                       {showEditableLines
-                        ? supplyLines.map(line => (
+                        ? visibleSupplyLines.map(line => (
                             editingSupplyId === line.id ? (
                               <EditRow
                                 key={line.id}
@@ -878,7 +950,7 @@ export function ResourceDetailModal({
                               />
                             )
                           ))
-                        : (localDetail?.supply_lines ?? []).map((line, i) => (
+                        : visibleReadOnlySupplyLines.map((line, i) => (
                             <AssignmentRow
                               key={i}
                               projectName={line.project_name ?? null}
@@ -921,6 +993,20 @@ export function ResourceDetailModal({
                     </div>
                   )}
                 </div>
+
+                {/* Hidden lines note — shown in PM scope when this resource has lines on other projects */}
+                {hiddenCount > 0 && (
+                  <div style={{
+                    padding: '10px 20px',
+                    fontSize: 12,
+                    color: C.ink3,
+                    textAlign: 'center',
+                    borderTop: `1px solid ${C.line}`,
+                    backgroundColor: C.surface2,
+                  }}>
+                    {hiddenCount} additional line{hiddenCount !== 1 ? 's' : ''} on other projects not shown
+                  </div>
+                )}
 
               </>
             )}

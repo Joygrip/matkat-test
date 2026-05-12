@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import type { ConsolidationDashboard } from '../../api/consolidation';
+import type { ConsolidationDashboard, DashboardResource, OverAllocation } from '../../api/consolidation';
 import { consolidationApi } from '../../api/consolidation';
 import { usePeriod } from '../../contexts/PeriodContext';
 import { useToast } from '../../hooks/useToast';
@@ -63,19 +63,76 @@ export function FinanceOverview({
 
     if (scope === 'pm' && projectIds?.length) {
       const idSet = new Set(projectIds);
-      const ccs = dashboard.cost_centers.filter(cc =>
-        cc.project_ids.some(pid => idSet.has(pid))
+
+      const ccs = dashboard.cost_centers
+        .filter(cc => cc.project_ids.some(pid => idSet.has(pid)))
+        .map(cc => {
+          const scopedPlaceholders = cc.placeholders.filter(ph => idSet.has(ph.project_id));
+
+          // Scope each resource using project_allocations breakdown (available when the
+          // backend is up-to-date). Supply lines with null project_id (general availability)
+          // are included — consistent with how the resource detail modal treats them.
+          const scopedResources = cc.resources
+            .map((r): DashboardResource | null => {
+              if (!r.project_allocations?.length) return r;
+              const relevant = r.project_allocations.filter(
+                pa => pa.project_id === null || idSet.has(pa.project_id)
+              );
+              const scopedDemand = relevant.reduce((s, pa) => s + pa.demand_fte, 0);
+              const scopedSupply = relevant.reduce((s, pa) => s + pa.supply_fte, 0);
+              if (scopedDemand === 0 && scopedSupply === 0) return null;
+              const scopedGap = scopedSupply - scopedDemand;
+              return {
+                ...r,
+                demand_fte: scopedDemand,
+                supply_fte: scopedSupply,
+                gap_fte: scopedGap,
+                status: scopedGap < 0 ? 'under' : scopedGap > 0 ? 'over' : 'balanced',
+              };
+            })
+            .filter((r): r is DashboardResource => r !== null);
+
+          const resDemand  = scopedResources.reduce((s, r) => s + r.demand_fte, 0);
+          const resSupply  = scopedResources.reduce((s, r) => s + r.supply_fte, 0);
+          const phDemand   = scopedPlaceholders.reduce((s, ph) => s + ph.demand_fte, 0);
+          const totalDemand = resDemand + phDemand;
+
+          return {
+            ...cc,
+            project_ids: cc.project_ids.filter(pid => idSet.has(pid)),
+            placeholders: scopedPlaceholders,
+            resources: scopedResources,
+            total_demand_fte: totalDemand,
+            total_supply_fte: resSupply,
+            gap_fte: resSupply - totalDemand,
+          };
+        });
+
+      // Over-allocations are recomputed from scoped resource demand so a resource with
+      // org-wide demand > 100% but scoped demand ≤ 100% is not flagged for the PM.
+      const scopedOverAllocs: OverAllocation[] = ccs.flatMap(cc =>
+        cc.resources
+          .filter(r => r.demand_fte > 100)
+          .map(r => ({
+            resource_id: r.resource_id,
+            resource_name: r.resource_name,
+            cost_center_id: cc.cost_center_id ?? undefined,
+            cost_center_name: cc.cost_center_name,
+            total_demand_fte: r.demand_fte,
+          }))
       );
-      const ccIdSet = new Set(ccs.map(cc => cc.cost_center_id ?? '__none__'));
+
       return {
         ...dashboard,
         cost_centers: ccs,
-        over_allocations: dashboard.over_allocations.filter(
-          oa => ccIdSet.has(oa.cost_center_id ?? '__none__')
-        ),
+        over_allocations: scopedOverAllocs,
         summary: {
-          ...dashboard.summary,
           total_cost_centers: ccs.length,
+          total_demand_fte: ccs.reduce((s, cc) => s + cc.total_demand_fte, 0),
+          total_supply_fte: ccs.reduce((s, cc) => s + cc.total_supply_fte, 0),
+          total_gap_fte: ccs.reduce((s, cc) => s + cc.gap_fte, 0),
+          orphans_count: ccs.reduce((s, cc) => s + cc.placeholders.length, 0),
+          over_allocations_count: scopedOverAllocs.length,
         },
       };
     }
@@ -110,6 +167,7 @@ export function FinanceOverview({
       dashboard={scopedDashboard}
       loading={loading}
       projectId={projectId}
+      scopeProjectIds={scope === 'pm' ? projectIds : undefined}
       onDashboardChanged={handleDashboardChanged}
     />
   );

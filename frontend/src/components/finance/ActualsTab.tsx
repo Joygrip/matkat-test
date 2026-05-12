@@ -1472,7 +1472,7 @@ export function ActualsTab({
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px', flexWrap: 'wrap' }}>
                       <div style={{ width:36, height:36, borderRadius:'50%', background:nameColor(row.employee_name), color:'white', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', fontWeight:600, flexShrink:0, userSelect:'none' }}>
-                        {nameInitials(row.employee_name)}
+                        {row.employee_initials || nameInitials(row.employee_name)}
                       </div>
                       <div style={{ flex:'1 1 120px', minWidth:0 }}>
                         <div style={{ fontSize:'14px', fontWeight:600, lineHeight:'1.2' }}>{row.employee_name}</div>

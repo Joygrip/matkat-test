@@ -303,16 +303,16 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
 
   // ── Resource allocation map ──
   const resourceAllocations = useMemo(() => {
-    const map = new Map<string, { name: string; demand: number; supply: number }>();
+    const map = new Map<string, { name: string; initials: string | null; demand: number; supply: number }>();
     pd.filter(d => d.resource_id).forEach(d => {
       const ex = map.get(d.resource_id!);
       if (ex) ex.demand += d.fte_percent;
-      else map.set(d.resource_id!, { name: d.resource_name ?? d.resource_id!, demand: d.fte_percent, supply: 0 });
+      else map.set(d.resource_id!, { name: d.resource_name ?? d.resource_id!, initials: d.resource_initials ?? null, demand: d.fte_percent, supply: 0 });
     });
     ps.forEach(s => {
       const ex = map.get(s.resource_id);
       if (ex) ex.supply += s.fte_percent;
-      else map.set(s.resource_id, { name: s.resource_name ?? s.resource_id, demand: 0, supply: s.fte_percent });
+      else map.set(s.resource_id, { name: s.resource_name ?? s.resource_id, initials: s.resource_initials ?? null, demand: 0, supply: s.fte_percent });
     });
     return Array.from(map.entries()).map(([id, r]) => ({ id, ...r, gap: r.supply - r.demand }));
   }, [pd, ps]);
@@ -380,6 +380,7 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
     const rows: Array<{
       instance: ApprovalInstance;
       resourceName: string;
+      resourceInitials: string | null;
       ccName: string;
       actualTotal: number;
       plannedTotal: number;
@@ -392,6 +393,7 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
       seen.add(rid);
 
       const name = item.resource_name ?? rid;
+      const resourceInitials = pd.find(d => d.resource_id === rid)?.resource_initials ?? null;
       const ccName = myCc?.name ?? '';
       const resourceActuals = actuals.filter(a => a.resource_id === rid);
       const actualTotal = resourceActuals.reduce((s, a) => s + a.actual_fte_percent, 0);
@@ -417,6 +419,7 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
       rows.push({
         instance: item,
         resourceName: name,
+        resourceInitials,
         ccName,
         actualTotal,
         plannedTotal,
@@ -512,7 +515,7 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
                   {/* Col 1: Avatar + name */}
                   <div className={styles.resourceCell}>
                     <div className={styles.avatar} style={{ background: color }}>
-                      {initials(row.resourceName)}
+                      {row.resourceInitials || initials(row.resourceName)}
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <div className={styles.resourceName}>{row.resourceName}</div>
@@ -619,7 +622,7 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
                 <div key={r.id} className={styles.capacityRow}>
                   <div className={styles.resourceCell}>
                     <div className={styles.avatar} style={{ background: avatarColor(r.name) }}>
-                      {initials(r.name)}
+                      {r.initials || initials(r.name)}
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <div className={styles.resourceName}>{r.name}</div>

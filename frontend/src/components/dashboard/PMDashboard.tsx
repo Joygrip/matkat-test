@@ -321,7 +321,7 @@ export function PMDashboard({ demandLines, supplyLines, projects, periods }: Pro
   // ── resource-project gaps (for worst gaps + KPIs) ──
   const resourceGaps = useMemo(() => {
     const map = new Map<string, {
-      name: string; ccName: string; projectName: string; demand: number; supply: number;
+      name: string; initials: string | null; ccName: string; projectName: string; demand: number; supply: number;
     }>();
     pd.filter(d => d.resource_id).forEach(d => {
       const key = `${d.resource_id}-${d.project_id}`;
@@ -331,6 +331,7 @@ export function PMDashboard({ demandLines, supplyLines, projects, periods }: Pro
       } else {
         map.set(key, {
           name: d.resource_name ?? d.resource_id!,
+          initials: d.resource_initials ?? null,
           ccName: d.cost_center_name ?? '',
           projectName: d.project_name ?? d.project_id,
           demand: d.fte_percent,
@@ -513,7 +514,7 @@ export function PMDashboard({ demandLines, supplyLines, projects, periods }: Pro
                       className={styles.avatar}
                       style={{ background: color }}
                     >
-                      {initials(r.name)}
+                      {r.initials || initials(r.name)}
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <div className={styles.gapResourceName}>{r.name}</div>

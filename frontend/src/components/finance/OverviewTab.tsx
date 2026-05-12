@@ -13,7 +13,6 @@ import {
   SearchRegular,
   BuildingRegular,
   Warning24Regular,
-  EditRegular,
   DismissRegular,
   ChevronDownRegular,
 } from '@fluentui/react-icons';
@@ -27,7 +26,6 @@ import type {
 import { consolidationApi } from '../../api/consolidation';
 import { lookupsApi } from '../../api/lookups';
 import type { Project } from '../../api/lookups';
-import { useWorkQueueSort } from '../../hooks/useWorkQueueSort';
 import { useHasRole } from '../../auth/AuthProvider';
 import { ResourceDetailModal } from './ResourceDetailModal';
 
@@ -482,11 +480,15 @@ function ResourceRow({
   const [hovered, setHovered] = useState(false);
   const sev  = resourceSeverity(resource);
   const sevC = SEV[sev];
-  const initials = getInitials(resource.resource_name);
-  const COLS = 'minmax(200px,1.6fr) 80px 80px minmax(160px,1.4fr) 96px 124px 76px';
+  const initials = resource.initials || getInitials(resource.resource_name);
+  const COLS = 'minmax(200px,1.6fr) 80px 80px minmax(160px,1.8fr) 96px 124px';
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      onClick={onEdit}
+      onKeyDown={e => e.key === 'Enter' && onEdit()}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -495,10 +497,10 @@ function ResourceRow({
         alignItems: 'center',
         borderBottom: `1px solid ${C.line}`,
         borderLeft: `3px solid ${sev !== 'good' && sev !== 'neutral' ? sevC.bar : 'transparent'}`,
-        backgroundColor: hovered
-          ? (sev === 'bad' ? '#fdf5f4' : sev === 'warn' ? '#fdfaf5' : sev === 'over' ? '#f4f8ff' : '#f8f8f7')
-          : 'transparent',
+        backgroundColor: hovered ? '#fbfaf6' : 'transparent',
+        cursor: 'pointer',
         transition: 'background 0.1s',
+        outline: 'none',
       }}
     >
       {/* Resource */}
@@ -555,12 +557,6 @@ function ResourceRow({
         </span>
       </div>
 
-      {/* Actions — reveal on hover */}
-      <div style={{ padding: '10px 8px', display: 'flex', justifyContent: 'flex-end', gap: 4, opacity: hovered ? 1 : 0, transition: 'opacity 0.1s' }}>
-        <Button size="small" appearance="subtle" icon={<EditRegular />} onClick={e => { e.stopPropagation(); onEdit(); }}>
-          Edit
-        </Button>
-      </div>
     </div>
   );
 }
@@ -583,8 +579,8 @@ function CcDetailPanel({
   const issueCount = cc.placeholders.length + overAllocs.length + understaffedResources.length;
   const sev  = ccSeverity(cc);
   const sevC = SEV[sev];
-  const COLS = 'minmax(200px,1.6fr) 80px 80px minmax(160px,1.4fr) 96px 124px 76px';
-  const COL_HDRS = ['Resource', 'Demand', 'Supply', 'Demand vs Supply', 'Gap', 'Status', ''];
+  const COLS = 'minmax(200px,1.6fr) 80px 80px minmax(160px,1.8fr) 96px 124px';
+  const COL_HDRS = ['Resource', 'Demand', 'Supply', 'Demand vs Supply', 'Gap', 'Status'];
 
   // When "Issues only" is active, hide balanced/inactive resources from the table
   const displayedResources = showIssuesOnly
@@ -711,7 +707,6 @@ function CcDetailPanel({
                   Unassigned
                 </span>
               </div>
-              <div />
             </div>
           ))}
 
@@ -830,6 +825,8 @@ export interface OverviewTabProps {
   dashboard: ConsolidationDashboard | null;
   loading: boolean;
   projectId?: string;
+  /** When set (PM scope), restricts the project dropdown and CC navigator to these project IDs */
+  scopeProjectIds?: string[];
   onDashboardChanged?: () => void;
 }
 
@@ -841,7 +838,7 @@ const SORT_OPTIONS: { key: CcSortKey; label: string }[] = [
   { key: 'demand', label: 'Demand'   },
 ];
 
-export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged }: OverviewTabProps) {
+export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, onDashboardChanged }: OverviewTabProps) {
   const canEditDemand = useHasRole('Finance', 'PM');
   const canEditSupply = useHasRole('Finance', 'Manager');
   const isPM          = useHasRole('PM');
@@ -853,13 +850,24 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const [projectsData,        setProjectsData]        = useState<Project[]>([]);
   const [drillOpen,     setDrillOpen]     = useState(false);
-  const [drillResourceId,   setDrillResourceId]   = useState<string | null>(null);
-  const [drillResourceName, setDrillResourceName] = useState('');
-  const [drillCcName,       setDrillCcName]       = useState('');
+  const [drillResourceId,       setDrillResourceId]       = useState<string | null>(null);
+  const [drillResourceName,     setDrillResourceName]     = useState('');
+  const [drillResourceInitials, setDrillResourceInitials] = useState<string | null>(null);
+  const [drillCcName,           setDrillCcName]           = useState('');
   const [resourceDetail,        setResourceDetail]        = useState<ResourceDetail | null>(null);
   const [resourceDetailLoading, setResourceDetailLoading] = useState(false);
 
-  const { sort, handleSortClick, sortItems } = useWorkQueueSort<CcSortKey>('gap');
+  const [sortBy, setSortBy] = useState<CcSortKey>('gap');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const handleSortClick = (key: CcSortKey) => {
+    if (sortBy === key) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(key);
+      setSortDir(key === 'demand' ? 'desc' : 'asc');
+    }
+  };
 
   useEffect(() => {
     lookupsApi.listProjects().then(setProjectsData).catch(() => {/* non-critical */});
@@ -873,6 +881,7 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
       : null;
     setDrillResourceId(resource.resource_id);
     setDrillResourceName(resource.resource_name);
+    setDrillResourceInitials(resource.initials ?? null);
     setDrillCcName(currentCc?.cost_center_name ?? '');
     setDrillOpen(true);
     setResourceDetail(null);
@@ -899,6 +908,12 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
     for (const cc of externalProjectCcs) {
       for (const pid of cc.project_ids) scopedIds.add(pid);
     }
+    // When PM scope is active, restrict the dropdown to only the PM's assigned projects.
+    // A CC can be included because it touches any one of PM's projects, but may also have
+    // other projects that the PM should not be able to filter on.
+    const displayIds = scopeProjectIds?.length
+      ? new Set([...scopedIds].filter(id => scopeProjectIds!.includes(id)))
+      : scopedIds;
     // Build lookup by project.id from the fetched list.
     const byId = new Map(projectsData.map(p => [p.id, p]));
     // Fall back to placeholder-sourced names for any IDs not in the lookup (e.g. auth-limited scope).
@@ -908,7 +923,7 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
         if (!placeholderNames.has(ph.project_id)) placeholderNames.set(ph.project_id, ph.project_name);
       }
     }
-    return Array.from(scopedIds)
+    return Array.from(displayIds)
       .map(pid => {
         const p = byId.get(pid);
         if (p) {
@@ -921,7 +936,7 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
       })
       .filter((x): x is { project_id: string; project_name: string } => x !== null)
       .sort((a, b) => a.project_name.localeCompare(b.project_name));
-  }, [externalProjectCcs, projectsData]);
+  }, [externalProjectCcs, projectsData, scopeProjectIds]);
 
   // Apply the internal project filter (sidebar dropdown) on top of the external scope.
   const projectFilteredCcs = useMemo(() => {
@@ -971,25 +986,27 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
         if (cc.cost_center_name.toLowerCase().includes(q)) return true;
         return cc.resources.some(r =>
           r.resource_name.toLowerCase().includes(q) ||
-          getInitials(r.resource_name).toLowerCase().includes(q)
+          (r.initials || getInitials(r.resource_name)).toLowerCase().includes(q)
         );
       });
     }
     return ccs;
   }, [dashboard, showIssuesOnly, search, projectFilteredCcs, filteredOverAllocs]);
 
-  const sortedCcs = useMemo(() =>
-    sortItems(filteredCcs, (cc, key) => {
-      switch (key) {
-        case 'name':   return cc.cost_center_name;
-        case 'demand': return cc.total_demand_fte;
-        case 'supply': return cc.total_supply_fte;
+  const sortedCcs = useMemo(() => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...filteredCcs].sort((a, b) => {
+      let cmp = 0;
+      switch (sortBy) {
+        case 'name':   cmp = a.cost_center_name.localeCompare(b.cost_center_name); break;
+        case 'demand': cmp = a.total_demand_fte - b.total_demand_fte; break;
+        case 'supply': cmp = a.total_supply_fte - b.total_supply_fte; break;
         case 'gap':
-        default:       return cc.gap_fte;
+        default:       cmp = a.gap_fte - b.gap_fte; break;
       }
-    }),
-    [filteredCcs, sortItems]
-  );
+      return cmp * dir;
+    });
+  }, [filteredCcs, sortBy, sortDir]);
 
   const selectedCc = useMemo(() =>
     selectedCcId && dashboard
@@ -1185,24 +1202,32 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
 
           {/* Sort segmented control */}
           <div style={{ display: 'flex', gap: 3, backgroundColor: C.surface2, borderRadius: 8, padding: 3 }}>
-            {SORT_OPTIONS.map(opt => (
-              <button
-                key={opt.key}
-                onClick={() => handleSortClick(opt.key)}
-                style={{
-                  flex: 1, padding: '4px 0', borderRadius: 6,
-                  border: 'none',
-                  backgroundColor: sort === opt.key ? C.surface : 'transparent',
-                  boxShadow: sort === opt.key ? '0 1px 3px rgba(0,0,0,.10)' : 'none',
-                  color: sort === opt.key ? C.accent : C.ink3,
-                  fontSize: 11, fontWeight: sort === opt.key ? 600 : 400,
-                  cursor: 'pointer',
-                  transition: 'all 0.12s',
-                }}
-              >
-                {opt.label}
-              </button>
-            ))}
+            {SORT_OPTIONS.map(opt => {
+              const active = sortBy === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  onClick={() => handleSortClick(opt.key)}
+                  style={{
+                    flex: 1, padding: '4px 0', borderRadius: 6,
+                    border: 'none',
+                    backgroundColor: active ? C.surface : 'transparent',
+                    boxShadow: active ? '0 1px 3px rgba(0,0,0,.10)' : 'none',
+                    color: active ? C.accent : C.ink3,
+                    fontSize: 11, fontWeight: active ? 600 : 400,
+                    cursor: 'pointer',
+                    transition: 'all 0.12s',
+                  }}
+                >
+                  {opt.label}
+                  {active && (
+                    <span style={{ marginLeft: 3, color: C.ink3 }}>
+                      {sortDir === 'asc' ? '▲' : '▼'}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           {/* CC list */}
@@ -1263,11 +1288,12 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
         </div>
       </div>
 
-      {/* Resource detail modal — unchanged, keeps full CRUD */}
+      {/* Resource detail modal */}
       <ResourceDetailModal
         open={drillOpen}
         resourceId={drillResourceId}
         resourceName={drillResourceName}
+        resourceInitials={drillResourceInitials}
         ccName={drillCcName}
         detail={resourceDetail}
         loading={resourceDetailLoading}
@@ -1275,6 +1301,7 @@ export function OverviewTab({ dashboard, loading, projectId, onDashboardChanged 
         canEditDemand={canEditDemand}
         canEditSupply={canEditSupply}
         isPM={isPM}
+        scopeProjectIds={scopeProjectIds}
         onClose={() => setDrillOpen(false)}
         onDataChanged={() => onDashboardChanged?.()}
       />

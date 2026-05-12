@@ -449,6 +449,7 @@ export function ExecutiveDashboard({ demandLines, supplyLines, periods }: Props)
   const demandConflicts = useMemo(() => {
     const map = new Map<string, {
       name: string;
+      initials: string | null;
       ccName: string;
       projects: Map<string, number>;
       totalDemand: number;
@@ -464,6 +465,7 @@ export function ExecutiveDashboard({ demandLines, supplyLines, periods }: Props)
         const projects = new Map<string, number>([[d.project_id, d.fte_percent]]);
         map.set(d.resource_id!, {
           name:        d.resource_name ?? d.resource_id!,
+          initials:    d.resource_initials ?? null,
           ccName:      d.cost_center_name ?? '',
           projects,
           totalDemand: d.fte_percent,
@@ -743,7 +745,7 @@ export function ExecutiveDashboard({ demandLines, supplyLines, periods }: Props)
                 {/* Avatar + name + CC */}
                 <div className={styles.resourceCell}>
                   <div className={styles.avatar} style={{ background: avatarColor(r.name) }}>
-                    {initials(r.name)}
+                    {r.initials || initials(r.name)}
                   </div>
                   <div style={{ minWidth: 0 }}>
                     <div className={styles.resourceName}>{r.name}</div>

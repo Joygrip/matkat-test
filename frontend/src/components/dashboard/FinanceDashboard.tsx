@@ -18,11 +18,8 @@ import type { Period, MeResponse } from '../../types/index';
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-function fmtCost(cents: number): string {
-  const v = cents / 100;
-  if (Math.abs(v) >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(v) >= 1_000) return `$${(v / 1_000).toFixed(0)}K`;
-  return `$${Math.round(v)}`;
+function fmtCost(v: number): string {
+  return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', maximumFractionDigits: 0 }).format(v);
 }
 
 function daysSince(dateStr: string): number {
@@ -316,8 +313,8 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
   // Baseline FY — sum all months
   const totalPlannedLabor = useMemo(() => costRows.reduce((s, r) => s + r.demand_cost, 0), [costRows]);
   const totalActualLabor  = useMemo(() => costRows.reduce((s, r) => s + r.actuals_cost, 0), [costRows]);
-  const totalOoP          = useMemo(() => costRows.reduce((s, r) => s + r.externals_cost, 0), [costRows]);
-  const totalEquipment    = useMemo(() => costRows.reduce((s, r) => s + r.equipment_cost, 0), [costRows]);
+  const totalOoP          = useMemo(() => costRows.reduce((s, r) => s + r.externals_cost / 100, 0), [costRows]);
+  const totalEquipment    = useMemo(() => costRows.reduce((s, r) => s + r.equipment_cost / 100, 0), [costRows]);
   const variancePct       = totalPlannedLabor > 0
     ? ((totalActualLabor - totalPlannedLabor) / totalPlannedLabor) * 100
     : 0;
@@ -333,8 +330,8 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
     [costRows, currentPeriod],
   );
   const periodActualLabor  = useMemo(() => currentPeriodRows.reduce((s, r) => s + r.actuals_cost, 0), [currentPeriodRows]);
-  const periodOoP          = useMemo(() => currentPeriodRows.reduce((s, r) => s + r.externals_cost, 0), [currentPeriodRows]);
-  const periodEquipment    = useMemo(() => currentPeriodRows.reduce((s, r) => s + r.equipment_cost, 0), [currentPeriodRows]);
+  const periodOoP          = useMemo(() => currentPeriodRows.reduce((s, r) => s + r.externals_cost / 100, 0), [currentPeriodRows]);
+  const periodEquipment    = useMemo(() => currentPeriodRows.reduce((s, r) => s + r.equipment_cost / 100, 0), [currentPeriodRows]);
   const totalPeriod        = periodActualLabor + periodOoP + periodEquipment;
 
   // ── Section 2: Project Health Matrix ─────────────────────────────────────────

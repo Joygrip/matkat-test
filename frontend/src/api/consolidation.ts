@@ -4,13 +4,22 @@
 import { apiClient } from './client';
 
 // Cost-center dashboard types
+export interface ProjectAllocation {
+  project_id: string | null;
+  project_name: string;
+  demand_fte: number;
+  supply_fte: number;
+}
+
 export interface DashboardResource {
   resource_id: string;
   resource_name: string;
+  initials?: string | null;
   demand_fte: number;
   supply_fte: number;
   gap_fte: number;
   status: 'balanced' | 'under' | 'over';
+  project_allocations?: ProjectAllocation[];
 }
 
 export interface DashboardPlaceholder {

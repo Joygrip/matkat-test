@@ -17,6 +17,13 @@ import { AuditLogs } from './pages/AuditLogs';
 import { ProjectCosts } from './pages/ProjectCosts';
 import { config } from './config';
 
+// Employees manage actuals via the Dashboard; redirect them if they navigate here directly
+function ActualsRoute() {
+  const { user } = useAuth();
+  if (user?.role === 'Employee') return <Navigate to="/" replace />;
+  return <Actuals />;
+}
+
 const useStyles = makeStyles({
   loading: {
     display: 'flex',
@@ -79,7 +86,7 @@ function App() {
           <Route path="/resource-planning" element={<ResourcePlanning />} />
           <Route path="/demand" element={<Navigate to="/resource-planning" replace />} />
           <Route path="/supply" element={<Navigate to="/resource-planning" replace />} />
-          <Route path="/actuals" element={<Actuals />} />
+          <Route path="/actuals" element={<ActualsRoute />} />
           <Route path="/finance" element={<Finance />} />
           {/* Redirects for old routes */}
           <Route path="/finance-dashboard" element={<Navigate to="/finance" replace />} />

@@ -1,18 +1,15 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { makeStyles, tokens, Badge, Button, Spinner } from '@fluentui/react-components';
+import { makeStyles, tokens, Badge } from '@fluentui/react-components';
 import { DashboardKPIStrip } from '../shared/DashboardKPIStrip';
 import type { KPIStripItem } from '../shared/DashboardKPIStrip';
 import { DashboardSection } from './DashboardSection';
 import { FinanceOverview } from '../shared/FinanceOverview';
 import { actualsApi } from '../../api/actuals';
-import { approvalsApi } from '../../api/approvals';
 import type { ActualLine } from '../../api/actuals';
-import type { ApprovalInstance } from '../../api/approvals';
 import type { DemandLine, SupplyLine } from '../../api/planning';
 import type { CostCenter } from '../../api/admin';
 import type { Period, MeResponse } from '../../types/index';
-import { useToast } from '../../hooks/useToast';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -88,11 +85,14 @@ const useStyles = makeStyles({
   },
   queueRow: {
     display: 'grid',
-    gridTemplateColumns: 'minmax(180px, 1.2fr) 100px 1.4fr 240px',
+    gridTemplateColumns: 'minmax(200px, 1.2fr) 100px 1.4fr 80px 30px',
     alignItems: 'center',
     gap: tokens.spacingHorizontalM,
     padding: `${tokens.spacingVerticalM} 0`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    cursor: 'pointer',
+    borderRadius: tokens.borderRadiusMedium,
+    ':hover': { backgroundColor: tokens.colorNeutralBackground2 },
     '&:last-child': { borderBottom: 'none' },
   },
 
@@ -131,22 +131,29 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
   },
 
-  // FTE cell
-  fteCell: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-  },
-  ftePrimary: {
-    fontSize: '18px',
+  // Lines pending cell
+  linesCell: {
+    fontSize: '12px',
     fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-    lineHeight: '1.2',
-  },
-  fteSub: {
-    fontSize: '11px',
-    color: tokens.colorNeutralForeground3,
+    color: '#6b4eb8',
     whiteSpace: 'nowrap',
+  },
+
+  // Total FTE cell
+  totalFteCell: {
+    fontSize: '13px',
+    fontWeight: tokens.fontWeightSemibold,
+    fontFamily: 'monospace',
+    color: tokens.colorNeutralForeground1,
+    whiteSpace: 'nowrap',
+    textAlign: 'right' as const,
+  },
+
+  // Chevron cell
+  chevronCell: {
+    fontSize: '16px',
+    color: tokens.colorNeutralForeground3,
+    textAlign: 'center' as const,
   },
 
   // Project chips cell
@@ -167,14 +174,6 @@ const useStyles = makeStyles({
     background: '#ede9f8',
     color: '#4b2d9e',
     whiteSpace: 'nowrap',
-  },
-
-  // Actions cell
-  actionsCell: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalS,
-    justifyContent: 'flex-end',
-    alignItems: 'center',
   },
 
   // Spare capacity
@@ -256,12 +255,8 @@ function CapacityBar({ pct }: { pct: number }) {
 export function ManagerDashboard({ demandLines, supplyLines, costCenters, periods, approvalStatuses }: Props) {
   const styles = useStyles();
   const navigate = useNavigate();
-  const { showSuccess, showApiError } = useToast();
 
-  const [inbox, setInbox] = useState<ApprovalInstance[]>([]);
   const [actuals, setActuals] = useState<ActualLine[]>([]);
-  const [approving, setApproving] = useState<Set<string>>(new Set());
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
   // ── Period ──
   const earliestPeriod = useMemo(
@@ -292,9 +287,8 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
     [supplyLines, earliestPeriod],
   );
 
-  // ── Fetch inbox + actuals ──
+  // ── Fetch actuals ──
   useEffect(() => {
-    approvalsApi.getInbox().then(setInbox).catch(() => {});
     if (earliestPeriod) {
       actualsApi.getActualLines(earliestPeriod.id).then(setActuals).catch(() => {});
     }
@@ -329,6 +323,7 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
     () => Object.values(approvalStatuses).filter(s => s.status === 'pending').length,
     [approvalStatuses],
   );
+  // approvalQueue.length === pendingCount once actuals load; use pendingCount for badge (available immediately)
 
   // ── KPI strip ──
   const kpiItems: KPIStripItem[] = [
@@ -368,42 +363,23 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
     },
   ];
 
-  // ── Approval queue ──
-  const pendingInbox = useMemo(
-    () => inbox.filter(item => item.status === 'pending' && !dismissed.has(item.resource_id ?? item.id)),
-    [inbox, dismissed],
-  );
-
-  // Group by resource_id (one approval per resource per period)
+  // ── Approval queue — driven by approvalStatuses (keyed by resource_id) ──
   const approvalQueue = useMemo(() => {
-    const seen = new Set<string>();
-    const rows: Array<{
-      instance: ApprovalInstance;
-      resourceName: string;
-      resourceInitials: string | null;
-      ccName: string;
-      actualTotal: number;
-      plannedTotal: number;
-      projects: Array<{ name: string; fte: number }>;
-    }> = [];
+    const pendingResourceIds = Object.entries(approvalStatuses)
+      .filter(([, s]) => s.status === 'pending')
+      .map(([rid]) => rid);
 
-    pendingInbox.forEach(item => {
-      const rid = item.resource_id ?? item.id;
-      if (seen.has(rid)) return;
-      seen.add(rid);
+    return pendingResourceIds.map(rid => {
+      const resourceActuals = actuals.filter(a => a.resource_id === rid);
+      const lineCount = resourceActuals.length;
+      const totalFte = resourceActuals.reduce((s, a) => s + a.actual_fte_percent, 0);
 
-      const name = item.resource_name ?? rid;
+      const resourceName = resourceActuals[0]?.resource_name
+        ?? pd.find(d => d.resource_id === rid)?.resource_name
+        ?? rid;
       const resourceInitials = pd.find(d => d.resource_id === rid)?.resource_initials ?? null;
       const ccName = myCc?.name ?? '';
-      const resourceActuals = actuals.filter(a => a.resource_id === rid);
-      const actualTotal = resourceActuals.reduce((s, a) => s + a.actual_fte_percent, 0);
 
-      // Planned from demand lines for this resource
-      const plannedTotal = pd
-        .filter(d => d.resource_id === rid)
-        .reduce((s, d) => s + d.fte_percent, 0);
-
-      // Project breakdown from actuals
       const projMap = new Map<string, { name: string; fte: number }>();
       resourceActuals.forEach(a => {
         const pname = a.project_name ?? a.project_id;
@@ -411,47 +387,10 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
         if (ex) ex.fte += a.actual_fte_percent;
         else projMap.set(a.project_id, { name: pname ?? a.project_id, fte: a.actual_fte_percent });
       });
-      // Fallback to approval instance project if no actuals loaded yet
-      if (projMap.size === 0 && item.project_name && item.project_id) {
-        projMap.set(item.project_id, { name: item.project_name, fte: 0 });
-      }
 
-      rows.push({
-        instance: item,
-        resourceName: name,
-        resourceInitials,
-        ccName,
-        actualTotal,
-        plannedTotal,
-        projects: Array.from(projMap.values()),
-      });
+      return { rid, resourceName, resourceInitials, ccName, lineCount, totalFte, projects: Array.from(projMap.values()) };
     });
-
-    return rows;
-  }, [pendingInbox, actuals, pd, myCc]);
-
-  // ── Approve handler ──
-  const handleApprove = async (item: ApprovalInstance) => {
-    const pendingStep = item.steps?.find(s => s.status === 'pending');
-    if (!pendingStep) return;
-    const rid = item.resource_id ?? item.id;
-    setApproving(prev => new Set(prev).add(rid));
-    try {
-      await approvalsApi.approveStep(item.id, pendingStep.id);
-      setDismissed(prev => new Set(prev).add(rid));
-      showSuccess('Approved', `Actuals for ${item.resource_name ?? 'resource'} approved`);
-    } catch (err) {
-      showApiError(err as Error, 'Failed to approve');
-    } finally {
-      setApproving(prev => { const n = new Set(prev); n.delete(rid); return n; });
-    }
-  };
-
-  const handleApproveAll = async () => {
-    for (const row of approvalQueue) {
-      await handleApprove(row.instance);
-    }
-  };
+  }, [approvalStatuses, actuals, pd, myCc]);
 
   // ── Spare capacity ──
   const spareCapacity = useMemo(() => {
@@ -473,27 +412,27 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
       {/* ── Section 1: KPI Strip ── */}
       <DashboardKPIStrip items={kpiItems} />
 
-      {/* ── Section 2: Approval Queue (hero) ── */}
+      {/* ── Section 2: Pending Approvals (hero) ── */}
       <div className={styles.queueCard}>
         <div className={styles.queueHeader}>
           <div className={styles.queueHeaderLeft}>
-            <h2 className={styles.queueTitle}>Approval Queue</h2>
-            {pendingCount > 0 && (
-              <Badge
-                appearance="filled"
-                style={{ backgroundColor: '#6b4eb8', color: '#fff' }}
-              >
-                {pendingCount}
-              </Badge>
-            )}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+                <h2 className={styles.queueTitle}>Pending Approvals</h2>
+                {pendingCount > 0 && (
+                  <Badge
+                    appearance="filled"
+                    style={{ backgroundColor: '#6b4eb8', color: '#fff' }}
+                  >
+                    {pendingCount}
+                  </Badge>
+                )}
+              </div>
+              <div style={{ fontSize: '12px', color: tokens.colorNeutralForeground3, marginTop: '2px' }}>
+                Click to review in Actuals
+              </div>
+            </div>
           </div>
-          <Button
-            appearance="transparent"
-            size="small"
-            onClick={() => navigate('/finance')}
-          >
-            Open Actuals →
-          </Button>
         </div>
 
         <div className={styles.queueBody}>
@@ -503,16 +442,17 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
             </div>
           ) : (
             approvalQueue.map(row => {
-              const rid = row.instance.resource_id ?? row.instance.id;
-              const isApproving = approving.has(rid);
               const color = avatarColor(row.resourceName);
-              const coveragePctRow = row.plannedTotal > 0
-                ? Math.round((row.actualTotal / row.plannedTotal) * 100)
-                : null;
-
               return (
-                <div key={rid} className={styles.queueRow}>
-                  {/* Col 1: Avatar + name */}
+                <div
+                  key={row.rid}
+                  className={styles.queueRow}
+                  onClick={() => navigate('/actuals')}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={e => e.key === 'Enter' && navigate('/actuals')}
+                >
+                  {/* Col 1: Avatar + name + CC */}
                   <div className={styles.resourceCell}>
                     <div className={styles.avatar} style={{ background: color }}>
                       {row.resourceInitials || initials(row.resourceName)}
@@ -525,17 +465,12 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
                     </div>
                   </div>
 
-                  {/* Col 2: FTE reported */}
-                  <div className={styles.fteCell}>
-                    <div className={styles.ftePrimary}>
-                      {Math.round(row.actualTotal * 10) / 10}%
-                    </div>
-                    {row.plannedTotal > 0 && (
-                      <div className={styles.fteSub}>
-                        of {Math.round(row.plannedTotal)}%
-                        {coveragePctRow !== null && ` (${coveragePctRow}%)`}
-                      </div>
-                    )}
+                  {/* Col 2: Lines pending */}
+                  <div className={styles.linesCell}>
+                    {row.lineCount > 0
+                      ? `${row.lineCount} ${row.lineCount === 1 ? 'line' : 'lines'} pending`
+                      : <span style={{ color: tokens.colorNeutralForeground3, fontWeight: 'normal' }}>Loading…</span>
+                    }
                   </div>
 
                   {/* Col 3: Project chips */}
@@ -545,7 +480,7 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
                         <span key={i} className={styles.chip}>
                           {p.name}
                           {p.fte > 0 && (
-                            <span style={{ opacity: 0.7 }}>
+                            <span style={{ opacity: 0.7, marginLeft: '2px' }}>
                               {Math.round(p.fte * 10) / 10}%
                             </span>
                           )}
@@ -553,31 +488,18 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
                       ))
                     ) : (
                       <span style={{ fontSize: '12px', color: tokens.colorNeutralForeground3 }}>
-                        Loading…
+                        —
                       </span>
                     )}
                   </div>
 
-                  {/* Col 4: Actions */}
-                  <div className={styles.actionsCell}>
-                    <Button
-                      appearance="outline"
-                      size="small"
-                      onClick={() => navigate('/finance')}
-                    >
-                      Flag
-                    </Button>
-                    <Button
-                      appearance="primary"
-                      size="small"
-                      style={{ backgroundColor: '#107c10', borderColor: '#107c10' }}
-                      disabled={isApproving}
-                      icon={isApproving ? <Spinner size="tiny" /> : undefined}
-                      onClick={() => handleApprove(row.instance)}
-                    >
-                      {isApproving ? 'Approving…' : 'Approve'}
-                    </Button>
+                  {/* Col 4: Total FTE */}
+                  <div className={styles.totalFteCell}>
+                    {row.totalFte > 0 ? `${Math.round(row.totalFte * 10) / 10}%` : '—'}
                   </div>
+
+                  {/* Col 5: Chevron */}
+                  <div className={styles.chevronCell}>›</div>
                 </div>
               );
             })
@@ -587,17 +509,8 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
         {approvalQueue.length > 0 && (
           <div className={styles.queueFooter}>
             <span className={styles.queueFooterLabel}>
-              Showing {approvalQueue.length} of {pendingCount} pending
+              Showing {approvalQueue.length} {approvalQueue.length === 1 ? 'employee' : 'employees'} with pending actuals
             </span>
-            <Button
-              appearance="primary"
-              size="small"
-              style={{ backgroundColor: '#107c10', borderColor: '#107c10' }}
-              disabled={approving.size > 0}
-              onClick={handleApproveAll}
-            >
-              Approve all
-            </Button>
           </div>
         )}
       </div>

@@ -10,7 +10,7 @@ from api.app.auth.dependencies import (
 from api.app.models.core import UserRole
 from api.app.schemas.actuals import (
     ActualLineCreate, ActualLineUpdate, ActualLineResponse,
-    ProxySignRequest,
+    ProxySignRequest, ActualResubmitRequest,
 )
 from api.app.services.actuals import ActualsService
 
@@ -254,6 +254,25 @@ async def unsign_actual(
     """
     service = ActualsService(db, current_user)
     line = service.unsign(actual_id)
+    return _to_response(line)
+
+
+@router.post("/{actual_id}/resubmit", response_model=ActualLineResponse)
+async def resubmit_actual(
+    actual_id: str,
+    data: ActualResubmitRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(
+        UserRole.ADMIN, UserRole.EMPLOYEE, UserRole.MANAGER
+    )),
+):
+    """
+    Unsign, update FTE, and re-sign a rejected actual in one atomic operation.
+
+    Accessible to: Admin, Employee (own), Manager (own resource)
+    """
+    service = ActualsService(db, current_user)
+    line = service.resubmit(actual_id, data.actual_fte_percent)
     return _to_response(line)
 
 

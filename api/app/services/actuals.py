@@ -792,6 +792,79 @@ class ActualsService:
 
         return actual
 
+    def resubmit(self, actual_id: str, actual_fte_percent: float) -> ActualLine:
+        """Unsign, update FTE, and re-sign in a single transaction for a rejected actual."""
+        actual = self.get_by_id(actual_id)
+        if not actual:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "Actual line not found"}
+            )
+
+        self._check_employee_owns_resource(actual.resource_id)
+        self._check_period_open(actual.year, actual.month)
+
+        instance = self.db.query(ApprovalInstance).filter(
+            and_(
+                ApprovalInstance.tenant_id == self.current_user.tenant_id,
+                ApprovalInstance.subject_type == "actuals",
+                ApprovalInstance.subject_id == actual.id,
+            )
+        ).order_by(ApprovalInstance.created_at.desc()).first()
+
+        if not instance or instance.status != ApprovalStatus.REJECTED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "VALIDATION_ERROR",
+                    "message": "Can only resubmit actuals with a rejected approval",
+                }
+            )
+
+        if actual_fte_percent != 0 and (
+            actual_fte_percent < 5 or actual_fte_percent > 100 or actual_fte_percent % 5 != 0
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": ErrorCode.FTE_INVALID,
+                    "message": "FTE must be 0 or between 5 and 100 in steps of 5",
+                }
+            )
+        self._check_100_percent_limit(
+            actual.resource_id, actual.year, actual.month,
+            actual_fte_percent, exclude_line_id=actual.id
+        )
+
+        old_fte = actual.actual_fte_percent
+        actual.actual_fte_percent = actual_fte_percent
+        actual.employee_signed_at = None
+        actual.employee_signed_by = None
+        actual.is_proxy_signed = False
+        actual.proxy_sign_reason = None
+        actual.employee_signed_at = datetime.utcnow()
+        actual.employee_signed_by = self.current_user.object_id
+        actual.is_proxy_signed = False
+
+        self.db.commit()
+        self.db.refresh(actual)
+
+        self._ensure_approval_instance(actual)
+
+        log_audit(
+            self.db, self.current_user,
+            action="resubmit",
+            entity_type="ActualLine",
+            entity_id=actual.id,
+            old_values={"actual_fte_percent": old_fte},
+            new_values={
+                "actual_fte_percent": actual_fte_percent,
+                "employee_signed_at": str(actual.employee_signed_at),
+            },
+        )
+
+        return actual
+
     def get_my_approval_statuses(
         self, year: Optional[int] = None, month: Optional[int] = None
     ) -> Dict[str, Any]:

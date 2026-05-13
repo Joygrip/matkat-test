@@ -86,6 +86,20 @@ class ProxySignRequest(BaseModel):
         return v.strip()
 
 
+class ActualResubmitRequest(BaseModel):
+    """Request to resubmit a rejected actual with a new FTE value."""
+    actual_fte_percent: int
+
+    @field_validator('actual_fte_percent')
+    @classmethod
+    def validate_fte(cls, v: int) -> int:
+        if v != 0 and (v < 5 or v > 100):
+            raise ValueError(f'{ErrorCode.FTE_INVALID}: FTE must be 0 or between 5 and 100')
+        if v % 5 != 0:
+            raise ValueError(f'{ErrorCode.FTE_INVALID}: FTE must be in steps of 5')
+        return v
+
+
 class ActualsOverLimitError(BaseModel):
     """Error response when actuals exceed 100%."""
     code: str = ErrorCode.ACTUALS_OVER_100

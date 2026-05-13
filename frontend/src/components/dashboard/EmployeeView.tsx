@@ -453,36 +453,13 @@ export function EmployeeView({ periods }: Props) {
     setSavingCells(prev => new Set(prev).add(cellKey));
     try {
       if (existing && approvalStatus === 'rejected') {
-        // 3-step resubmission: unsign → update → re-sign
         try {
-          await actualsApi.unsignActual(existing.id);
+          await actualsApi.resubmitActual(existing.id, ftePct);
         } catch {
-          showError('Could not unsign', 'Could not unsign — contact your manager');
+          showError('Resubmit failed', 'Could not resubmit — please try again or contact your manager');
           return;
         }
 
-        let valueAfterUpdate: ActualLine;
-        try {
-          valueAfterUpdate = await actualsApi.updateActualLine(existing.id, { actual_fte_percent: ftePct });
-        } catch {
-          showError('Update failed', 'Could not update value');
-          return;
-        }
-
-        try {
-          await actualsApi.signActuals(existing.id);
-        } catch {
-          showError('Resubmit incomplete', 'Value updated but could not resubmit for approval — try signing manually');
-          setMyActuals(prev => {
-            const idx = prev.findIndex(a => a.id === existing.id);
-            if (idx >= 0) { const c = [...prev]; c[idx] = valueAfterUpdate; return c; }
-            return prev;
-          });
-          setActualsEdits(prev => { const n = { ...prev }; delete n[cellKey]; return n; });
-          return;
-        }
-
-        // Refresh statuses so KPI cards and cell colours update to PENDING
         const [updatedActuals, statuses] = await Promise.all([
           actualsApi.getMyActuals(),
           actualsApi.getMyApprovalStatuses(),

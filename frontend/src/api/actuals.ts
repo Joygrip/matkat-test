@@ -105,6 +105,10 @@ export const actualsApi = {
     return apiClient.delete<ActualLine>(`/actuals/${actualId}/sign`);
   },
 
+  async resubmitActual(actualId: string, actual_fte_percent: number): Promise<ActualLine> {
+    return apiClient.post<ActualLine>(`/actuals/${actualId}/resubmit`, { actual_fte_percent });
+  },
+
   async getMyApprovalStatuses(year?: number, month?: number): Promise<Record<string, ActualApprovalStatus>> {
     const params = new URLSearchParams();
     if (year) params.append('year', String(year));

@@ -21,6 +21,7 @@ export interface KPIStripItem {
 
 interface Props {
   items: KPIStripItem[];
+  columns?: number;
 }
 
 const SEV_FORE: Record<Sev, string> = {
@@ -84,11 +85,14 @@ const useStyles = makeStyles({
   },
 });
 
-export function DashboardKPIStrip({ items }: Props) {
+export function DashboardKPIStrip({ items, columns }: Props) {
   const styles = useStyles();
 
   return (
-    <div className={styles.strip}>
+    <div
+      className={styles.strip}
+      style={columns ? { gridTemplateColumns: `repeat(${columns}, 1fr)` } : undefined}
+    >
       {items.map((item, i) => (
         <div key={i} className={styles.card}>
           <div className={styles.label}>{item.label}</div>

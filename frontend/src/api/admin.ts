@@ -204,6 +204,10 @@ export const adminApi = {
   updateAdminUserSecondaryRole: (id: string, secondary_role: string | null) =>
     apiClient.patch<AdminUserDetail>(`/admin/users/${id}/secondary-role`, { secondary_role }),
 
+  // Sync status
+  getSyncStatus: () =>
+    apiClient.get<{ last_sync_at: string | null; status: string; sync_type: string | null }>('/admin/sync/status'),
+
   // Approval Delegates
   listDelegates: () =>
     apiClient.get<ApprovalDelegate[]>('/admin/delegates'),

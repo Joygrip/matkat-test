@@ -218,13 +218,8 @@ export function Dashboard() {
 
       {user.role === 'Admin' && (
         <AdminView
-          demandLines={allDemandLines}
-          supplyLines={allSupplyLines}
           costCenters={costCenters}
-          projects={projects}
           periods={periods}
-          approvalStatuses={approvalStatuses}
-          user={user}
         />
       )}
     </div>

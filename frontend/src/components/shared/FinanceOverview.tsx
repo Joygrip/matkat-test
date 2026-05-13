@@ -4,6 +4,7 @@ import { consolidationApi } from '../../api/consolidation';
 import { usePeriod } from '../../contexts/PeriodContext';
 import { useToast } from '../../hooks/useToast';
 import { OverviewTab } from '../finance/OverviewTab';
+import type { Period } from '../../types';
 
 export interface FinanceOverviewProps {
   scope: 'pm' | 'manager' | 'finance' | 'admin' | 'reader';
@@ -17,6 +18,12 @@ export interface FinanceOverviewProps {
   onDashboardLoaded?: (dashboard: ConsolidationDashboard | null) => void;
 }
 
+const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function fmtPeriod(p: Period): string {
+  return `${MONTH_SHORT[p.month - 1]} ${p.year}`;
+}
+
 export function FinanceOverview({
   scope,
   projectIds,
@@ -24,10 +31,30 @@ export function FinanceOverview({
   projectId,
   onDashboardLoaded,
 }: FinanceOverviewProps) {
-  const { selectedPeriodId } = usePeriod();
+  const { periods } = usePeriod();
   const { showApiError } = useToast();
   const [dashboard, setDashboard] = useState<ConsolidationDashboard | null>(null);
   const [loading, setLoading] = useState(false);
+  const [localPeriodId, setLocalPeriodId] = useState<string>('');
+
+  // Sort all periods chronologically (oldest → newest) for slider navigation.
+  const sortedPeriods = useMemo(
+    () => [...periods].sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month),
+    [periods]
+  );
+
+  // Initialize to earliest open period once the period list loads.
+  useEffect(() => {
+    if (!localPeriodId && sortedPeriods.length > 0) {
+      const openPeriods = sortedPeriods.filter(p => p.status === 'open');
+      setLocalPeriodId(openPeriods[0]?.id ?? sortedPeriods[0].id);
+    }
+  }, [sortedPeriods, localPeriodId]);
+
+  const localIdx = sortedPeriods.findIndex(p => p.id === localPeriodId);
+  const localPeriod = localIdx >= 0 ? sortedPeriods[localIdx] : null;
+  const canPrev = localIdx > 0;
+  const canNext = localIdx >= 0 && localIdx < sortedPeriods.length - 1;
 
   const fetchDashboard = async (periodId: string) => {
     setLoading(true);
@@ -43,14 +70,14 @@ export function FinanceOverview({
   };
 
   useEffect(() => {
-    if (selectedPeriodId) {
-      fetchDashboard(selectedPeriodId);
+    if (localPeriodId) {
+      fetchDashboard(localPeriodId);
     } else {
       setDashboard(null);
       onDashboardLoaded?.(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPeriodId]);
+  }, [localPeriodId]);
 
   // Apply scope-based filtering to produce the dashboard slice this viewer should see.
   // The resulting dashboard is passed to OverviewTab; its own projectId filter works on top.
@@ -159,16 +186,108 @@ export function FinanceOverview({
   }, [dashboard, scope, projectIds, costCenterId]);
 
   const handleDashboardChanged = () => {
-    if (selectedPeriodId) fetchDashboard(selectedPeriodId);
+    if (localPeriodId) fetchDashboard(localPeriodId);
   };
 
   return (
-    <OverviewTab
-      dashboard={scopedDashboard}
-      loading={loading}
-      projectId={projectId}
-      scopeProjectIds={scope === 'pm' ? projectIds : undefined}
-      onDashboardChanged={handleDashboardChanged}
-    />
+    <>
+      {/* Period slider — compact, right-aligned in its own header strip */}
+      {sortedPeriods.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {/* Prev arrow */}
+            <ArrowBtn
+              direction="left"
+              disabled={!canPrev}
+              onClick={() => canPrev && setLocalPeriodId(sortedPeriods[localIdx - 1].id)}
+            />
+
+            {/* Period label + badge */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              minWidth: 120, justifyContent: 'center',
+            }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#1b1b1a' }}>
+                {localPeriod ? fmtPeriod(localPeriod) : '—'}
+              </span>
+              {localPeriod && (
+                <span style={{
+                  fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+                  padding: '1px 6px', borderRadius: 4,
+                  backgroundColor: localPeriod.status === 'open' ? '#e3efe7' : '#f0f0ee',
+                  color: localPeriod.status === 'open' ? '#2a6f4d' : '#707070',
+                  border: `1px solid ${localPeriod.status === 'open' ? '#b8dac4' : '#d4d3cf'}`,
+                  textTransform: 'uppercase',
+                }}>
+                  {localPeriod.status === 'open' ? 'Open' : 'Locked'}
+                </span>
+              )}
+            </div>
+
+            {/* Next arrow */}
+            <ArrowBtn
+              direction="right"
+              disabled={!canNext}
+              onClick={() => canNext && setLocalPeriodId(sortedPeriods[localIdx + 1].id)}
+            />
+          </div>
+        </div>
+      )}
+
+      <OverviewTab
+        dashboard={scopedDashboard}
+        loading={loading}
+        projectId={projectId}
+        scopeProjectIds={scope === 'pm' ? projectIds : undefined}
+        onDashboardChanged={handleDashboardChanged}
+      />
+    </>
+  );
+}
+
+// ── Arrow button ──────────────────────────────────────────────────────────────
+
+function ArrowBtn({
+  direction,
+  disabled,
+  onClick,
+}: {
+  direction: 'left' | 'right';
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        width: 24, height: 24,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        border: '1px solid #e5e4e0',
+        borderRadius: 4,
+        backgroundColor: hovered && !disabled ? '#f6f5f2' : '#ffffff',
+        color: disabled ? '#c8c7c3' : hovered ? '#424242' : '#707070',
+        cursor: disabled ? 'default' : 'pointer',
+        padding: 0,
+        outline: 'none',
+        transition: 'background-color 0.1s, color 0.1s',
+        flexShrink: 0,
+      }}
+      aria-label={direction === 'left' ? 'Previous period' : 'Next period'}
+    >
+      {direction === 'left' ? (
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+          <path d="M6.5 2L3.5 5L6.5 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      ) : (
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+          <path d="M3.5 2L6.5 5L3.5 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      )}
+    </button>
   );
 }

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
-  Title3,
   Body1,
   Button,
   Card,
@@ -450,9 +449,6 @@ export const ResourcePlanning: React.FC = () => {
 
   return (
     <div className={styles.container}>
-      <div className={styles.header}>
-        <Title3>Resource Planning</Title3>
-      </div>
 
       {/* Period selector */}
       {openPeriods.length > 0 && (

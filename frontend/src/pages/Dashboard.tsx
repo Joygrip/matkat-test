@@ -27,9 +27,9 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalL,
-    maxWidth: '1400px',
+    maxWidth: '1800px',
     margin: '0 auto',
-    padding: `0 ${tokens.spacingHorizontalM}`,
+    padding: tokens.spacingHorizontalXXL,
   },
   header: {
     display: 'flex',
@@ -164,10 +164,6 @@ export function Dashboard() {
 
   return (
     <div className={styles.container}>
-      <div className={styles.header}>
-        <Title3>Dashboard</Title3>
-        <span className={styles.roleLabel}>{roleLabel}</span>
-      </div>
 
       {user.role === 'Employee' && (
         <EmployeeView

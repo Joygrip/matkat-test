@@ -257,6 +257,7 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
   const navigate = useNavigate();
 
   const [actuals, setActuals] = useState<ActualLine[]>([]);
+  const [actualsLoading, setActualsLoading] = useState(false);
 
   // ── Period ──
   const earliestPeriod = useMemo(
@@ -290,7 +291,10 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
   // ── Fetch actuals ──
   useEffect(() => {
     if (earliestPeriod) {
-      actualsApi.getActualLines(earliestPeriod.id).then(setActuals).catch(() => {});
+      setActualsLoading(true);
+      actualsApi.getActualLines(undefined, earliestPeriod.year, earliestPeriod.month)
+        .then(lines => { setActuals(lines); setActualsLoading(false); })
+        .catch(() => { setActualsLoading(false); });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [earliestPeriod?.id]);
@@ -363,14 +367,25 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
     },
   ];
 
-  // ── Approval queue — driven by approvalStatuses (keyed by resource_id) ──
+  // ── Approval queue — approvalStatuses is keyed by actual_line_id, not resource_id ──
   const approvalQueue = useMemo(() => {
-    const pendingResourceIds = Object.entries(approvalStatuses)
+    // Collect pending actual_line_ids
+    const pendingActualIds = Object.entries(approvalStatuses)
       .filter(([, s]) => s.status === 'pending')
-      .map(([rid]) => rid);
+      .map(([aid]) => aid);
 
-    return pendingResourceIds.map(rid => {
-      const resourceActuals = actuals.filter(a => a.resource_id === rid);
+    // Group matched actual lines by resource_id
+    const byResource = new Map<string, ActualLine[]>();
+    pendingActualIds.forEach(aid => {
+      const actual = actuals.find(a => a.id === aid);
+      if (actual) {
+        const existing = byResource.get(actual.resource_id) ?? [];
+        existing.push(actual);
+        byResource.set(actual.resource_id, existing);
+      }
+    });
+
+    return Array.from(byResource.entries()).map(([rid, resourceActuals]) => {
       const lineCount = resourceActuals.length;
       const totalFte = resourceActuals.reduce((s, a) => s + a.actual_fte_percent, 0);
 
@@ -436,7 +451,11 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
         </div>
 
         <div className={styles.queueBody}>
-          {approvalQueue.length === 0 ? (
+          {actualsLoading && pendingCount > 0 ? (
+            <div className={styles.emptyNeutral}>
+              Loading…
+            </div>
+          ) : approvalQueue.length === 0 ? (
             <div className={styles.emptySuccess}>
               No pending approvals — all actuals reviewed ✓
             </div>

@@ -939,19 +939,72 @@ export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, on
   }, [externalProjectCcs, projectsData, scopeProjectIds]);
 
   // Apply the internal project filter (sidebar dropdown) on top of the external scope.
-  const projectFilteredCcs = useMemo(() => {
+  // When projects are selected, rebuild resource aggregates from project_allocations so that
+  // demand/supply/gap reflect only the selected-project lines — not org-wide totals.
+  const projectFilteredCcs = useMemo((): DashboardCostCenter[] => {
     if (!selectedProjectIds.length) return externalProjectCcs;
-    return externalProjectCcs.filter(cc =>
-      cc.project_ids.some(pid => selectedProjectIds.includes(pid))
-    );
+    const idSet = new Set(selectedProjectIds);
+
+    return externalProjectCcs
+      .map((cc): DashboardCostCenter | null => {
+        const scopedPlaceholders = cc.placeholders.filter(ph => idSet.has(ph.project_id));
+
+        const scopedResources = cc.resources
+          .map((r): DashboardResource | null => {
+            // Fall back to including the resource as-is when no line-level breakdown is available.
+            if (!r.project_allocations?.length) return r;
+            const relevant = r.project_allocations.filter(
+              pa => pa.project_id !== null && idSet.has(pa.project_id)
+            );
+            const scopedDemand = relevant.reduce((s, pa) => s + pa.demand_fte, 0);
+            const scopedSupply = relevant.reduce((s, pa) => s + pa.supply_fte, 0);
+            if (scopedDemand === 0 && scopedSupply === 0) return null;
+            const scopedGap = scopedSupply - scopedDemand;
+            return {
+              ...r,
+              demand_fte: scopedDemand,
+              supply_fte: scopedSupply,
+              gap_fte: scopedGap,
+              status: scopedGap < 0 ? 'under' : scopedGap > 0 ? 'over' : 'balanced',
+            };
+          })
+          .filter((r): r is DashboardResource => r !== null);
+
+        if (scopedResources.length === 0 && scopedPlaceholders.length === 0) return null;
+
+        const resDemand   = scopedResources.reduce((s, r) => s + r.demand_fte, 0);
+        const resSupply   = scopedResources.reduce((s, r) => s + r.supply_fte, 0);
+        const phDemand    = scopedPlaceholders.reduce((s, ph) => s + ph.demand_fte, 0);
+        const totalDemand = resDemand + phDemand;
+        return {
+          ...cc,
+          resources: scopedResources,
+          placeholders: scopedPlaceholders,
+          total_demand_fte: totalDemand,
+          total_supply_fte: resSupply,
+          gap_fte: resSupply - totalDemand,
+        };
+      })
+      .filter((cc): cc is DashboardCostCenter => cc !== null);
   }, [externalProjectCcs, selectedProjectIds]);
 
-  const filteredOverAllocs = useMemo(() => {
+  // Derive over-allocations from filtered CC data so a resource whose project-scoped demand
+  // is ≤ 100% is not flagged even if their org-wide total exceeds 100%.
+  const filteredOverAllocs = useMemo((): OverAllocation[] => {
     if (!dashboard) return [];
-    if (!projectId) return dashboard.over_allocations;
-    const ids = new Set(projectFilteredCcs.map(cc => cc.cost_center_id ?? '__none__'));
-    return dashboard.over_allocations.filter(oa => ids.has(oa.cost_center_id ?? '__none__'));
-  }, [dashboard, projectId, projectFilteredCcs]);
+    if (!selectedProjectIds.length && !projectId) return dashboard.over_allocations;
+    return projectFilteredCcs.flatMap(cc =>
+      cc.resources
+        .filter(r => r.demand_fte > 100)
+        .map(r => ({
+          resource_id: r.resource_id,
+          resource_name: r.resource_name,
+          cost_center_id: cc.cost_center_id ?? undefined,
+          cost_center_name: cc.cost_center_name,
+          total_demand_fte: r.demand_fte,
+        }))
+    );
+  }, [dashboard, projectId, projectFilteredCcs, selectedProjectIds]);
 
   const filteredSummary = useMemo((): FilteredSummary | null => {
     if (!dashboard) return null;
@@ -1009,18 +1062,18 @@ export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, on
   }, [filteredCcs, sortBy, sortDir]);
 
   const selectedCc = useMemo(() =>
-    selectedCcId && dashboard
-      ? dashboard.cost_centers.find(cc => (cc.cost_center_id ?? '__none__') === selectedCcId) ?? null
+    selectedCcId
+      ? projectFilteredCcs.find(cc => (cc.cost_center_id ?? '__none__') === selectedCcId) ?? null
       : null,
-    [selectedCcId, dashboard]
+    [selectedCcId, projectFilteredCcs]
   );
 
   const overAllocsForSelected = useMemo(() =>
-    selectedCc && dashboard
-      ? dashboard.over_allocations.filter(oa =>
+    selectedCc
+      ? filteredOverAllocs.filter(oa =>
           (oa.cost_center_id ?? '__none__') === (selectedCc.cost_center_id ?? '__none__'))
       : [],
-    [selectedCc, dashboard]
+    [selectedCc, filteredOverAllocs]
   );
 
   // When search or project filter is active and the current CC is filtered out, select the first visible result.

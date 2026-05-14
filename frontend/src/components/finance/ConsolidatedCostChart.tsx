@@ -164,6 +164,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
   const [drawer, setDrawer] = useState<DrawerState | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [drawerDetail, setDrawerDetail] = useState<ConsolidatedCostDetail[] | null>(null);
+  const [drawerCcMap, setDrawerCcMap] = useState<Map<string, string>>(new Map());
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [drawerTab, setDrawerTab] = useState<'bymonth' | 'planned' | 'actual' | 'oop' | 'equipment'>('bymonth');
   const [collapsedPeriods, setCollapsedPeriods] = useState<Set<string>>(new Set());
@@ -384,7 +385,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
 
   const closeDrawer = useCallback(() => {
     setDrawerVisible(false);
-    setTimeout(() => { setDrawer(null); setDrawerDetail(null); }, 200);
+    setTimeout(() => { setDrawer(null); setDrawerDetail(null); setDrawerCcMap(new Map()); }, 200);
   }, []);
 
   const togglePeriod = useCallback((key: string) => {
@@ -423,6 +424,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     });
     setDrawerTab('bymonth');
     setDrawerDetail(null);
+    setDrawerCcMap(new Map());
     setCollapsedPeriods(new Set());
     requestAnimationFrame(() => setDrawerVisible(true));
 
@@ -437,12 +439,44 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
             new Map(entityData.map(r => [`${r.year}-${r.month}`, { year: r.year, month: r.month }])).values()
           ).sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
 
-      Promise.all(
+      const detailsPromise = Promise.all(
         periodsToFetch.map(p => getConsolidatedCostDetail({ ...baseParams, year: p.year, month: p.month }))
-      ).then(details => {
-        if (details.length === 0) { setDrawerDetail(null); return; }
-        setDrawerDetail(details);
-      }).catch(() => setDrawerDetail(null)).finally(() => setDrawerLoading(false));
+      );
+
+      // For project mode: fetch CC-mode detail per unique (CC, period) to build a
+      // resource→CC lookup so we can show the Cost Center column in Planned/Actual tabs.
+      let ccMapPromise: Promise<Map<string, string>> = Promise.resolve(new Map());
+      if (mode === 'project') {
+        const ccPeriods = Array.from(
+          new Map(entityData
+            .filter(r => r.cost_center_id)
+            .map(r => [`${r.year}-${r.month}-${r.cost_center_id}`,
+              { year: r.year, month: r.month, cost_center_id: r.cost_center_id! }])
+          ).values()
+        );
+        if (ccPeriods.length > 0) {
+          ccMapPromise = Promise.all(
+            ccPeriods.map(p => getConsolidatedCostDetail({ cost_center_id: p.cost_center_id, year: p.year, month: p.month }))
+          ).then(ccDetails => {
+            const map = new Map<string, string>();
+            ccDetails.forEach(d => {
+              const ccName = d.cost_center_name ?? '';
+              [...d.demand_lines, ...d.actual_lines].forEach(l => {
+                if (l.project_name === row.name)
+                  map.set(`${d.year}-${d.month}-${l.resource_name}`, ccName);
+              });
+            });
+            return map;
+          }).catch(() => new Map<string, string>());
+        }
+      }
+
+      Promise.all([detailsPromise, ccMapPromise])
+        .then(([details, ccMap]) => {
+          if (details.length === 0) { setDrawerDetail(null); return; }
+          setDrawerDetail(details);
+          setDrawerCcMap(ccMap);
+        }).catch(() => setDrawerDetail(null)).finally(() => setDrawerLoading(false));
     }
   }, [filteredData, buildMonthlyBuckets, ccNameToId]);
 
@@ -455,16 +489,28 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     const periodLabel = `${MF[drawer.month - 1]}_${drawer.year}`;
     let header: string[], rows: string[][];
     if (drawerTab === 'planned') {
-      header = ['Month', ...(isCc ? ['Project'] : []), 'Employee', 'FTE %', 'Cost (DKK)'];
+      header = ['Month', ...(isCc ? ['Project'] : ['Cost Center']), 'Employee', 'FTE %', 'Cost (DKK)'];
       rows = drawerDetail.flatMap(d => {
         const monthLabel = `${MF[d.month - 1]} ${d.year}`;
-        return d.demand_lines.map(l => [monthLabel, ...(isCc ? [l.project_name ?? ''] : []), l.resource_name, String(l.fte_percent), String(l.cost)]);
+        return d.demand_lines.map(l => [
+          monthLabel,
+          isCc ? (l.project_name ?? '') : (drawerCcMap.get(`${d.year}-${d.month}-${l.resource_name}`) ?? ''),
+          l.resource_name,
+          String(l.fte_percent),
+          String(l.cost),
+        ]);
       });
     } else if (drawerTab === 'actual') {
-      header = ['Month', ...(isCc ? ['Project'] : []), 'Employee', 'FTE %', 'Cost (DKK)'];
+      header = ['Month', ...(isCc ? ['Project'] : ['Cost Center']), 'Employee', 'FTE %', 'Cost (DKK)'];
       rows = drawerDetail.flatMap(d => {
         const monthLabel = `${MF[d.month - 1]} ${d.year}`;
-        return d.actual_lines.map(l => [monthLabel, ...(isCc ? [l.project_name ?? ''] : []), l.resource_name, String(l.fte_percent), String(l.cost)]);
+        return d.actual_lines.map(l => [
+          monthLabel,
+          isCc ? (l.project_name ?? '') : (drawerCcMap.get(`${d.year}-${d.month}-${l.resource_name}`) ?? ''),
+          l.resource_name,
+          String(l.fte_percent),
+          String(l.cost),
+        ]);
       });
     } else if (drawerTab === 'oop') {
       header = ['Month', 'OoP Resource', 'Notes', 'Total (DKK)'];
@@ -490,19 +536,25 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     if (!drawerDetail || !drawer) return;
     const esc = (v: string | number | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const isCc = drawer.mode === 'cc';
-    const header = ['Month', 'Category', 'Employee/Line Item', 'Project', 'FTE %', 'Cost (DKK)'];
+    const header = isCc
+      ? ['Month', 'Category', 'Employee/Line Item', 'Project', 'FTE %', 'Cost (DKK)']
+      : ['Month', 'Category', 'Employee/Line Item', 'Cost Center', 'FTE %', 'Cost (DKK)'];
     const rows: string[][] = [];
     for (const d of drawerDetail) {
       const monthLabel = `${MF[d.month - 1]} ${d.year}`;
       for (const l of d.demand_lines)
-        rows.push([monthLabel, 'Planned', l.resource_name, isCc ? (l.project_name ?? '') : drawer.title, String(l.fte_percent), String(l.cost)]);
+        rows.push([monthLabel, 'Planned', l.resource_name,
+          isCc ? (l.project_name ?? '') : (drawerCcMap.get(`${d.year}-${d.month}-${l.resource_name}`) ?? ''),
+          String(l.fte_percent), String(l.cost)]);
       for (const l of d.actual_lines)
-        rows.push([monthLabel, 'Actual', l.resource_name, isCc ? (l.project_name ?? '') : drawer.title, String(l.fte_percent), String(l.cost)]);
+        rows.push([monthLabel, 'Actual', l.resource_name,
+          isCc ? (l.project_name ?? '') : (drawerCcMap.get(`${d.year}-${d.month}-${l.resource_name}`) ?? ''),
+          String(l.fte_percent), String(l.cost)]);
       if (drawer.mode !== 'cc') {
         for (const l of d.external_lines)
-          rows.push([monthLabel, 'OoP', l.resource_name ?? l.description ?? '', drawer.title, '', String(l.total_cost / 100)]);
+          rows.push([monthLabel, 'OoP', l.resource_name ?? l.description ?? '', '', '', String(l.total_cost / 100)]);
         for (const l of d.equipment_lines)
-          rows.push([monthLabel, 'Equipment', l.description ?? '', drawer.title, '', String(l.cost / 100)]);
+          rows.push([monthLabel, 'Equipment', l.description ?? '', '', '', String(l.cost / 100)]);
       }
     }
     const csv = [header, ...rows].map(r => r.map(esc).join(',')).join('\n');
@@ -944,13 +996,14 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                 const allLines = drawerDetail.flatMap(d => d.demand_lines);
                 if (allLines.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No planned labor for the selected period(s).</div>;
                 const isCc = drawer.mode === 'cc';
-                const colSpan = isCc ? 4 : 3;
+                const colSpan = 4;
                 const grandTotal = allLines.reduce((s, l) => s + l.cost, 0);
                 return (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead><tr>
                       {isCc && <th style={{ ...thStyle, textAlign: 'left' }}>Project</th>}
                       <th style={{ ...thStyle, textAlign: 'left' }}>Employee</th>
+                      {!isCc && <th style={{ ...thStyle, textAlign: 'left', maxWidth: 150 }}>Cost Center</th>}
                       <th style={{ ...thStyle, textAlign: 'right' }}>FTE %</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Cost</th>
                     </tr></thead>
@@ -974,6 +1027,11 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                               <tr key={i}>
                                 {isCc && <td style={{ ...tdStyle, color: C.ink3 }}>{l.project_name ?? '—'}</td>}
                                 <td style={{ ...tdStyle, color: C.ink1 }}>{l.resource_name}</td>
+                                {!isCc && (
+                                  <td style={{ ...tdStyle, color: C.ink3, fontSize: 12, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {drawerCcMap.get(`${period.year}-${period.month}-${l.resource_name}`) ?? '—'}
+                                  </td>
+                                )}
                                 <td style={{ ...tdStyle, textAlign: 'right' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
                                     <div style={{ width: 50, height: 5, borderRadius: 3, background: C.plannedSoft, overflow: 'hidden' }}>
@@ -989,6 +1047,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                               <tr style={{ background: C.bg, fontWeight: 600 }}>
                                 {isCc && <td style={{ padding: '6px 10px' }} />}
                                 <td style={{ padding: '6px 10px', color: C.ink2 }}>Period subtotal</td>
+                                {!isCc && <td />}
                                 <td />
                                 <td style={{ padding: '6px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(periodTotal)}</td>
                               </tr>
@@ -999,6 +1058,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                       <tr style={{ background: C.bg, fontWeight: 700 }}>
                         {isCc && <td style={{ padding: '8px 10px' }} />}
                         <td style={{ padding: '8px 10px', color: C.ink1 }}>Total</td>
+                        {!isCc && <td />}
                         <td />
                         <td style={{ padding: '8px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(grandTotal)}</td>
                       </tr>
@@ -1013,13 +1073,14 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                 const allLines = drawerDetail.flatMap(d => d.actual_lines);
                 if (allLines.length === 0) return <div style={{ textAlign: 'center', padding: 32, color: C.ink4 }}>No actuals booked for the selected period(s) yet.</div>;
                 const isCc = drawer.mode === 'cc';
-                const colSpan = isCc ? 4 : 3;
+                const colSpan = 4;
                 const grandTotal = allLines.reduce((s, l) => s + l.cost, 0);
                 return (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead><tr>
                       {isCc && <th style={{ ...thStyle, textAlign: 'left' }}>Project</th>}
                       <th style={{ ...thStyle, textAlign: 'left' }}>Employee</th>
+                      {!isCc && <th style={{ ...thStyle, textAlign: 'left', maxWidth: 150 }}>Cost Center</th>}
                       <th style={{ ...thStyle, textAlign: 'right' }}>FTE %</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Cost</th>
                     </tr></thead>
@@ -1043,6 +1104,11 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                               <tr key={i}>
                                 {isCc && <td style={{ ...tdStyle, color: C.ink3 }}>{l.project_name ?? '—'}</td>}
                                 <td style={{ ...tdStyle, color: C.ink1 }}>{l.resource_name}</td>
+                                {!isCc && (
+                                  <td style={{ ...tdStyle, color: C.ink3, fontSize: 12, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {drawerCcMap.get(`${period.year}-${period.month}-${l.resource_name}`) ?? '—'}
+                                  </td>
+                                )}
                                 <td style={{ ...tdStyle, textAlign: 'right' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
                                     <div style={{ width: 50, height: 5, borderRadius: 3, background: C.actualSoft, overflow: 'hidden' }}>
@@ -1058,6 +1124,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                               <tr style={{ background: C.bg, fontWeight: 600 }}>
                                 {isCc && <td style={{ padding: '6px 10px' }} />}
                                 <td style={{ padding: '6px 10px', color: C.ink2 }}>Period subtotal</td>
+                                {!isCc && <td />}
                                 <td />
                                 <td style={{ padding: '6px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(periodTotal)}</td>
                               </tr>
@@ -1068,6 +1135,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                       <tr style={{ background: C.bg, fontWeight: 700 }}>
                         {isCc && <td style={{ padding: '8px 10px' }} />}
                         <td style={{ padding: '8px 10px', color: C.ink1 }}>Total</td>
+                        {!isCc && <td />}
                         <td />
                         <td style={{ padding: '8px 10px', textAlign: 'right', color: C.ink1 }}>{dkk(grandTotal)}</td>
                       </tr>

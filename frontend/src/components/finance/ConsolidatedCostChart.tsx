@@ -455,22 +455,63 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     const periodLabel = `${MF[drawer.month - 1]}_${drawer.year}`;
     let header: string[], rows: string[][];
     if (drawerTab === 'planned') {
-      header = [...(isCc ? ['Project'] : []), 'Employee', 'FTE %', 'Cost (DKK)'];
-      rows = drawerDetail.flatMap(d => d.demand_lines).map(l => [...(isCc ? [l.project_name ?? ''] : []), l.resource_name, String(l.fte_percent), String(l.cost)]);
+      header = ['Month', ...(isCc ? ['Project'] : []), 'Employee', 'FTE %', 'Cost (DKK)'];
+      rows = drawerDetail.flatMap(d => {
+        const monthLabel = `${MF[d.month - 1]} ${d.year}`;
+        return d.demand_lines.map(l => [monthLabel, ...(isCc ? [l.project_name ?? ''] : []), l.resource_name, String(l.fte_percent), String(l.cost)]);
+      });
     } else if (drawerTab === 'actual') {
-      header = [...(isCc ? ['Project'] : []), 'Employee', 'FTE %', 'Cost (DKK)'];
-      rows = drawerDetail.flatMap(d => d.actual_lines).map(l => [...(isCc ? [l.project_name ?? ''] : []), l.resource_name, String(l.fte_percent), String(l.cost)]);
+      header = ['Month', ...(isCc ? ['Project'] : []), 'Employee', 'FTE %', 'Cost (DKK)'];
+      rows = drawerDetail.flatMap(d => {
+        const monthLabel = `${MF[d.month - 1]} ${d.year}`;
+        return d.actual_lines.map(l => [monthLabel, ...(isCc ? [l.project_name ?? ''] : []), l.resource_name, String(l.fte_percent), String(l.cost)]);
+      });
     } else if (drawerTab === 'oop') {
-      header = ['OoP Resource', 'Notes', 'Total (DKK)'];
-      rows = drawerDetail.flatMap(d => d.external_lines).map(l => [l.resource_name ?? l.description ?? '', l.notes ?? '', String(l.total_cost / 100)]);
+      header = ['Month', 'OoP Resource', 'Notes', 'Total (DKK)'];
+      rows = drawerDetail.flatMap(d => {
+        const monthLabel = `${MF[d.month - 1]} ${d.year}`;
+        return d.external_lines.map(l => [monthLabel, l.resource_name ?? l.description ?? '', l.notes ?? '', String(l.total_cost / 100)]);
+      });
     } else {
-      header = ['Description', 'Cost (DKK)'];
-      rows = drawerDetail.flatMap(d => d.equipment_lines).map(l => [l.description ?? '', String(l.cost / 100)]);
+      header = ['Month', 'Description', 'Cost (DKK)'];
+      rows = drawerDetail.flatMap(d => {
+        const monthLabel = `${MF[d.month - 1]} ${d.year}`;
+        return d.equipment_lines.map(l => [monthLabel, l.description ?? '', String(l.cost / 100)]);
+      });
     }
     const csv = [header, ...rows].map(r => r.map(esc).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `${drawer.title}_${periodLabel}_${drawerTab}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadFullCsv = () => {
+    if (!drawerDetail || !drawer) return;
+    const esc = (v: string | number | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const isCc = drawer.mode === 'cc';
+    const header = ['Month', 'Category', 'Employee/Line Item', 'Project', 'FTE %', 'Cost (DKK)'];
+    const rows: string[][] = [];
+    for (const d of drawerDetail) {
+      const monthLabel = `${MF[d.month - 1]} ${d.year}`;
+      for (const l of d.demand_lines)
+        rows.push([monthLabel, 'Planned', l.resource_name, isCc ? (l.project_name ?? '') : drawer.title, String(l.fte_percent), String(l.cost)]);
+      for (const l of d.actual_lines)
+        rows.push([monthLabel, 'Actual', l.resource_name, isCc ? (l.project_name ?? '') : drawer.title, String(l.fte_percent), String(l.cost)]);
+      if (drawer.mode !== 'cc') {
+        for (const l of d.external_lines)
+          rows.push([monthLabel, 'OoP', l.resource_name ?? l.description ?? '', drawer.title, '', String(l.total_cost / 100)]);
+        for (const l of d.equipment_lines)
+          rows.push([monthLabel, 'Equipment', l.description ?? '', drawer.title, '', String(l.cost / 100)]);
+      }
+    }
+    const csv = [header, ...rows].map(r => r.map(esc).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${drawer.title.replace(/[^a-zA-Z0-9\-_]/g, '_')}_all_periods.csv`;
+    a.click();
     URL.revokeObjectURL(url);
   };
 
@@ -782,9 +823,20 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                     {drawer.mode === 'project' ? 'Project' : 'Cost center'} drilldown · {periodRangeLabel}
                   </div>
                 </div>
-                <button onClick={closeDrawer} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: C.ink3, display: 'flex' }}>
-                  <Dismiss20Regular />
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {drawerDetail && (
+                    <button onClick={downloadFullCsv} style={{
+                      display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px',
+                      borderRadius: 6, border: `1px solid ${C.borderStrong}`, background: 'transparent',
+                      color: C.ink2, cursor: 'pointer', fontSize: 12, fontWeight: 500,
+                    }}>
+                      <ArrowDownloadRegular style={{ fontSize: 14 }} /> Export All
+                    </button>
+                  )}
+                  <button onClick={closeDrawer} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: C.ink3, display: 'flex' }}>
+                    <Dismiss20Regular />
+                  </button>
+                </div>
               </div>
               {/* KPI strip */}
               <div style={{ display: 'flex', border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden', marginTop: 14 }}>

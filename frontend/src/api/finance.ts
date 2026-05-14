@@ -96,6 +96,7 @@ export interface DemandLineDetail {
   fte_percent: number;
   cost: number;       // cents
   project_name: string | null;
+  cost_center_name: string | null;
 }
 
 export interface ActualLineDetail {
@@ -103,6 +104,7 @@ export interface ActualLineDetail {
   fte_percent: number;
   cost: number;       // cents
   project_name: string | null;
+  cost_center_name: string | null;
 }
 
 export interface ExternalLineDetail {

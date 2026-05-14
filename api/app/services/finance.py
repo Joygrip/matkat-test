@@ -826,8 +826,9 @@ class FinanceService:
 
         # Demand lines (planned labor) — skip placeholders
         demand_q = (
-            self.db.query(DemandLine, Resource)
+            self.db.query(DemandLine, Resource, CostCenter)
             .join(Resource, DemandLine.resource_id == Resource.id)
+            .outerjoin(CostCenter, Resource.cost_center_id == CostCenter.id)
             .filter(
                 DemandLine.tenant_id == self.current_user.tenant_id,
                 DemandLine.project_id == project_id,
@@ -843,15 +844,17 @@ class FinanceService:
                 resource_name=resource.display_name,
                 fte_percent=line.fte_percent,
                 cost=int(line.fte_percent * monthly_fte_cost // 100),
+                cost_center_name=cc.name if cc else None,
             )
-            for line, resource in demand_rows
+            for line, resource, cc in demand_rows
         ]
 
         # Actual lines — approved only
         approved_subq_proj = self._approved_actual_ids_subq()
         actual_q = (
-            self.db.query(ActualLine, Resource)
+            self.db.query(ActualLine, Resource, CostCenter)
             .join(Resource, ActualLine.resource_id == Resource.id)
+            .outerjoin(CostCenter, Resource.cost_center_id == CostCenter.id)
             .filter(
                 ActualLine.tenant_id == self.current_user.tenant_id,
                 ActualLine.project_id == project_id,
@@ -867,8 +870,9 @@ class FinanceService:
                 resource_name=resource.display_name,
                 fte_percent=line.actual_fte_percent,
                 cost=int(line.actual_fte_percent * monthly_fte_cost // 100),
+                cost_center_name=cc.name if cc else None,
             )
-            for line, resource in actual_rows
+            for line, resource, cc in actual_rows
         ]
 
         # External lines — join Resource for display name, description is the notes field

@@ -87,6 +87,7 @@ class DemandLineDetail(BaseModel):
     fte_percent: int
     cost: int  # cents
     project_name: Optional[str] = None  # populated when drilling from cost center
+    cost_center_name: Optional[str] = None  # populated when drilling from project
 
 
 class ActualLineDetail(BaseModel):
@@ -94,6 +95,7 @@ class ActualLineDetail(BaseModel):
     fte_percent: int  # actual_fte_percent
     cost: int  # cents
     project_name: Optional[str] = None
+    cost_center_name: Optional[str] = None  # populated when drilling from project
 
 
 class ExternalLineDetail(BaseModel):

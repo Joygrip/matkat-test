@@ -1,11 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
-import { makeStyles, tokens, Badge, Spinner } from '@fluentui/react-components';
+import { useNavigate } from 'react-router-dom';
+import { makeStyles, tokens, Spinner } from '@fluentui/react-components';
 import { DashboardSection } from './DashboardSection';
 import { FinanceOverview } from '../shared/FinanceOverview';
 import { getConsolidatedCosts } from '../../api/finance';
 import type { ConsolidatedCostResponse } from '../../api/finance';
-import { actualsApi } from '../../api/actuals';
-import type { ActualLine } from '../../api/actuals';
 import { apiClient } from '../../api/client';
 import { usePeriod } from '../../contexts/PeriodContext';
 import { useToast } from '../../hooks/useToast';
@@ -22,85 +21,21 @@ function fmtCost(v: number): string {
   return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', maximumFractionDigits: 0 }).format(v);
 }
 
-function daysSince(dateStr: string): number {
-  return Math.floor((Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24));
-}
-
-// ─── severity helpers ─────────────────────────────────────────────────────────
-
-type StaffingSev = 'staffed' | 'attention' | 'understaffed';
-type BudgetSev   = 'nodata' | 'ontrack' | 'caution' | 'over';
-type HealthSev   = 'ontrack' | 'atrisk'  | 'critical' | 'pending';
-
-function getStaffingSev(gap: number): StaffingSev {
-  if (gap < -20) return 'understaffed';
-  if (gap < -0.1) return 'attention';
-  return 'staffed';
-}
-
-function getBudgetSev(planned: number, actual: number): BudgetSev {
-  if (actual === 0) return 'nodata';
-  if (planned <= 0) return 'ontrack';
-  if (actual > planned * 1.10) return 'over';
-  if (actual > planned * 1.05) return 'caution';
-  return 'ontrack';
-}
-
-function getHealthSev(staffing: StaffingSev, budget: BudgetSev): HealthSev {
-  if (budget === 'nodata') {
-    if (staffing === 'staffed') return 'pending';
-    return 'atrisk';
-  }
-  const staffingBad = staffing === 'understaffed';
-  const budgetBad   = budget === 'over';
-  if (staffingBad && budgetBad) return 'critical';
-  if (staffingBad || budgetBad) return 'atrisk';
-  return 'ontrack';
-}
-
-const HEALTH_ORDER: Record<HealthSev, number> = { critical: 0, atrisk: 1, pending: 2, ontrack: 3 };
+// ─── colors ───────────────────────────────────────────────────────────────────
 
 const SEV_FG = {
-  good: tokens.colorPaletteGreenForeground2,
-  warn: tokens.colorPaletteMarigoldForeground2,
-  bad:  tokens.colorPaletteRedForeground2,
+  good:   tokens.colorPaletteGreenForeground2,
+  warn:   tokens.colorPaletteMarigoldForeground2,
+  bad:    tokens.colorPaletteRedForeground2,
+  purple: '#7B5EA7',
 };
 
 const SEV_BAR = {
-  good: tokens.colorPaletteGreenBackground2,
-  warn: tokens.colorPaletteMarigoldBackground2,
-  bad:  tokens.colorPaletteRedBackground2,
+  good:   tokens.colorPaletteGreenBackground2,
+  warn:   tokens.colorPaletteMarigoldBackground2,
+  bad:    tokens.colorPaletteRedBackground2,
+  purple: '#C5B3E6',
 };
-
-// ─── badge sub-components ─────────────────────────────────────────────────────
-
-function StaffingBadge({ gap }: { gap: number }) {
-  const sev = getStaffingSev(gap);
-  if (sev === 'understaffed') return <Badge color="danger"  appearance="filled">Understaffed</Badge>;
-  if (sev === 'attention')    return <Badge color="warning" appearance="filled">Attention</Badge>;
-  return                             <Badge color="success" appearance="filled">Staffed</Badge>;
-}
-
-function BudgetBadge({ planned, actual }: { planned: number; actual: number }) {
-  const sev = getBudgetSev(planned, actual);
-  if (sev === 'nodata') return <Badge appearance="outline">No data</Badge>;
-  if (sev === 'over') {
-    const pct = planned > 0 ? Math.round(((actual - planned) / planned) * 100) : 0;
-    return <Badge color="danger"  appearance="filled">Over +{pct}%</Badge>;
-  }
-  if (sev === 'caution') {
-    const pct = planned > 0 ? Math.round(((actual - planned) / planned) * 100) : 0;
-    return <Badge color="warning" appearance="filled">Caution +{pct}%</Badge>;
-  }
-  return <Badge color="success" appearance="filled">On track</Badge>;
-}
-
-function HealthBadge({ health }: { health: HealthSev }) {
-  if (health === 'critical') return <Badge color="danger"  appearance="filled">Critical</Badge>;
-  if (health === 'atrisk')   return <Badge color="warning" appearance="filled">At Risk</Badge>;
-  if (health === 'pending')  return <Badge appearance="outline">Pending</Badge>;
-  return                            <Badge color="success" appearance="filled">On Track</Badge>;
-}
 
 // ─── styles ───────────────────────────────────────────────────────────────────
 
@@ -157,15 +92,64 @@ const useStyles = makeStyles({
     transition: 'width 0.3s ease',
   },
 
-  // Health matrix table
-  matrixTable: {
+  // Period Close Tracker — header layout
+  closeHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    gap: tokens.spacingHorizontalXL,
+  },
+  closeTitleGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexShrink: 0,
+  },
+  closeMiniKpis: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalXL,
+  },
+  closeMiniKpi: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    minWidth: '80px',
+  },
+  closeMiniKpiLabel: {
+    fontSize: '10px',
+    fontWeight: tokens.fontWeightSemibold,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    color: tokens.colorNeutralForeground3,
+  },
+  closeMiniKpiValue: {
+    fontSize: '20px',
+    fontWeight: tokens.fontWeightSemibold,
+    lineHeight: '1.2',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  closeMiniBar: {
+    height: '3px',
+    borderRadius: '2px',
+    backgroundColor: tokens.colorNeutralBackground4,
+    overflow: 'hidden',
+    width: '100%',
+    marginTop: '2px',
+  },
+  closeMiniBarUnit: {
+    fontSize: '10px',
+    color: tokens.colorNeutralForeground3,
+  },
+
+  // Period Close Tracker — table
+  closeTable: {
     width: '100%',
     borderCollapse: 'collapse',
   },
-  matrixThead: {
+  closeThead: {
     borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
   },
-  matrixTh: {
+  closeTh: {
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
     textAlign: 'left',
     fontSize: '11px',
@@ -175,64 +159,39 @@ const useStyles = makeStyles({
     letterSpacing: '0.4px',
     whiteSpace: 'nowrap',
   },
-  matrixTr: {
+  closeTr: {
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    cursor: 'pointer',
+    transition: 'background 0.12s',
     '&:last-child': { borderBottom: 'none' },
+    '&:hover': { backgroundColor: tokens.colorNeutralBackground2 },
   },
-  matrixTd: {
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+  closeTd: {
+    padding: `0 ${tokens.spacingHorizontalM}`,
     verticalAlign: 'middle',
     fontSize: tokens.fontSizeBase300,
+    height: '38px',
+    fontVariantNumeric: 'tabular-nums',
   },
-  projectName: {
+  closeCcName: {
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
+  },
+  closeInlineBar: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  closeInlineBarTrack: {
+    width: '40px',
+    height: '3px',
+    borderRadius: '2px',
+    backgroundColor: tokens.colorNeutralBackground4,
+    overflow: 'hidden',
+    display: 'inline-block',
+    verticalAlign: 'middle',
   },
 
-  // Approval bottleneck
-  bottleneckList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  bottleneckRow: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(200px, 1.8fr) 80px 110px 130px',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
-    borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  bottleneckCCName: {
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground1,
-  },
-  bottleneckManager: {
-    fontSize: '12px',
-    color: tokens.colorNeutralForeground3,
-    marginTop: '2px',
-  },
-  bottleneckStat: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1px',
-  },
-  bottleneckStatValue: {
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase300,
-  },
-  bottleneckStatLabel: {
-    fontSize: '11px',
-    color: tokens.colorNeutralForeground3,
-  },
-  emptySuccess: {
-    textAlign: 'center',
-    color: tokens.colorPaletteGreenForeground2,
-    padding: `${tokens.spacingVerticalXL} 0`,
-    fontSize: tokens.fontSizeBase300,
-  },
   sectionTitleGroup: {
     display: 'flex',
     flexDirection: 'column',
@@ -264,16 +223,16 @@ interface Props {
 
 // ─── component ────────────────────────────────────────────────────────────────
 
-export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
+export function FinanceDashboard({ demandLines, periods }: Props) {
   const styles = useStyles();
+  const navigate = useNavigate();
   const { selectedPeriodId, selectedPeriod } = usePeriod();
   const { showApiError } = useToast();
 
-  const [costs, setCosts]             = useState<ConsolidatedCostResponse | null>(null);
+  const [costs, setCosts]               = useState<ConsolidatedCostResponse | null>(null);
   const [costsLoading, setCostsLoading] = useState(false);
-  const [actualRows, setActualRows]   = useState<FinanceActualRow[]>([]);
-  const [actualLines, setActualLines] = useState<ActualLine[]>([]);
-  const [dataLoading, setDataLoading] = useState(false);
+  const [actualRows, setActualRows]     = useState<FinanceActualRow[]>([]);
+  const [dataLoading, setDataLoading]   = useState(false);
 
   // Resolve current period: prefer context, fall back to earliest open period from props
   const currentPeriod = useMemo(
@@ -285,7 +244,7 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
     [selectedPeriod, periods],
   );
 
-  // Fetch consolidated costs (KPI strip + project budget data)
+  // Fetch consolidated costs (KPI strip)
   useEffect(() => {
     setCostsLoading(true);
     getConsolidatedCosts()
@@ -295,7 +254,7 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch actuals (approval bottleneck)
+  // Fetch actuals for period close tracker
   useEffect(() => {
     if (!currentPeriod) return;
     setDataLoading(true);
@@ -303,21 +262,17 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
       year:  String(currentPeriod.year),
       month: String(currentPeriod.month),
     });
-    Promise.all([
-      apiClient.get<FinanceActualRow[]>(`/finance/actuals-dashboard?${params.toString()}`),
-      actualsApi.getActualLines(selectedPeriodId || undefined),
-    ])
-      .then(([rows, lines]) => { setActualRows(rows); setActualLines(lines); })
+    apiClient.get<FinanceActualRow[]>(`/finance/actuals-dashboard?${params.toString()}`)
+      .then(rows => setActualRows(rows))
       .catch(err => showApiError(err as Error, 'Failed to load actuals data'))
       .finally(() => setDataLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPeriod?.id, selectedPeriodId]);
 
-  // ── Section 1: KPI Strip computations ────────────────────────────────────────
+  // ── Section 1: KPI Strip ──────────────────────────────────────────────────────
 
   const costRows = costs?.data ?? [];
 
-  // Current period rows only — all KPIs scoped to current period
   const currentPeriodRows = useMemo(
     () => currentPeriod
       ? costRows.filter(r => r.year === currentPeriod.year && r.month === currentPeriod.month)
@@ -331,95 +286,101 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
   const periodActualVsPlanPct = periodPlannedLabor > 0 ? (periodActualLabor / periodPlannedLabor) * 100 : 0;
   const totalPeriod           = periodPlannedLabor + periodOoP + periodEquipment;
 
-  // ── Section 2: Project Health Matrix ─────────────────────────────────────────
+  // ── Section 2: Period Close Tracker ──────────────────────────────────────────
 
+  // Demand employees per CC (employees with active demand for this period)
   const pd = useMemo(
     () => currentPeriod ? demandLines.filter(d => d.period_id === currentPeriod.id) : [],
     [demandLines, currentPeriod],
   );
 
-  const ps = useMemo(
-    () => currentPeriod ? supplyLines.filter(s => s.period_id === currentPeriod.id) : [],
-    [supplyLines, currentPeriod],
-  );
-
-  const projectStaffing = useMemo(() => {
-    const map = new Map<string, { name: string; demand: number; supply: number }>();
+  const demandPerCC = useMemo(() => {
+    const map = new Map<string, { ccName: string; employees: Set<string> }>();
     pd.forEach(d => {
-      const ex = map.get(d.project_id);
-      if (ex) ex.demand += d.fte_percent;
-      else map.set(d.project_id, { name: d.project_name ?? d.project_id, demand: d.fte_percent, supply: 0 });
-    });
-    ps.forEach(s => {
-      if (!s.project_id) return;
-      const ex = map.get(s.project_id);
-      if (ex) ex.supply += s.fte_percent;
+      if (!d.resource_id || !d.cost_center_id) return;
+      const ex = map.get(d.cost_center_id);
+      if (ex) ex.employees.add(d.resource_id);
+      else map.set(d.cost_center_id, { ccName: d.cost_center_name ?? d.cost_center_id, employees: new Set([d.resource_id]) });
     });
     return map;
-  }, [pd, ps]);
+  }, [pd]);
 
-  const projectBudget = useMemo(() => {
-    const map = new Map<string, { name: string; planned: number; actual: number }>();
-    currentPeriodRows.forEach(r => {
-      const ex = map.get(r.project_id);
-      if (ex) { ex.planned += r.demand_cost; ex.actual += r.actuals_cost; }
-      else map.set(r.project_id, { name: r.project_name, planned: r.demand_cost, actual: r.actuals_cost });
-    });
-    return map;
-  }, [currentPeriodRows]);
-
-  const projectHealthRows = useMemo(() => {
-    const allIds = new Set([...projectStaffing.keys(), ...projectBudget.keys()]);
-    return Array.from(allIds).map(pid => {
-      const staffing = projectStaffing.get(pid);
-      const budget   = projectBudget.get(pid);
-      const name     = staffing?.name ?? budget?.name ?? pid;
-      const demand   = staffing?.demand ?? 0;
-      const supply   = staffing?.supply ?? 0;
-      const gap      = supply - demand;
-      const planned  = budget?.planned ?? 0;
-      const actual   = budget?.actual  ?? 0;
-      const variance = planned > 0 ? ((actual - planned) / planned) * 100 : 0;
-      const staffingSev = getStaffingSev(gap);
-      const budgetSev   = getBudgetSev(planned, actual);
-      const health      = getHealthSev(staffingSev, budgetSev);
-      return { pid, name, gap, planned, actual, variance, staffingSev, budgetSev, health };
-    }).sort((a, b) => HEALTH_ORDER[a.health] - HEALTH_ORDER[b.health]);
-  }, [projectStaffing, projectBudget]);
-
-  // ── Section 3: Approval Bottleneck ───────────────────────────────────────────
-
-  const actualCreatedAt = useMemo(() => {
-    const map = new Map<string, string>();
-    actualLines.forEach(l => map.set(l.id, l.created_at));
-    return map;
-  }, [actualLines]);
-
-  const bottleneckRows = useMemo(() => {
-    const pending = actualRows.filter(r => r.approval_status === 'pending');
-    const ccMap = new Map<string, {
-      ccName: string; managerName: string;
-      count: number; totalFte: number; oldestDate: string | null;
+  const closePerCC = useMemo(() => {
+    const map = new Map<string, {
+      ccName: string;
+      submittedEmps: Set<string>;
+      totalLines: number;
+      approvedLines: number;
+      pendingLines: number;
+      pendingApprovers: Set<string>;
     }>();
-    pending.forEach(r => {
-      const createdAt = actualCreatedAt.get(r.actual_id) ?? null;
-      const ex = ccMap.get(r.cost_center_id);
+    actualRows.forEach(r => {
+      const isApproved = r.approval_status?.toUpperCase() === 'APPROVED';
+      const isPending  = r.approval_status?.toUpperCase() === 'PENDING';
+      const ex = map.get(r.cost_center_id);
       if (ex) {
-        ex.count++;
-        ex.totalFte += r.fte_percent;
-        if (createdAt && (!ex.oldestDate || createdAt < ex.oldestDate)) ex.oldestDate = createdAt;
+        ex.submittedEmps.add(r.employee_email);
+        ex.totalLines++;
+        if (isApproved) ex.approvedLines++;
+        if (isPending)  { ex.pendingLines++; if (r.current_approver_name) ex.pendingApprovers.add(r.current_approver_name); }
       } else {
-        ccMap.set(r.cost_center_id, {
-          ccName:      r.cost_center_name,
-          managerName: r.current_approver_name ?? '—',
-          count: 1, totalFte: r.fte_percent, oldestDate: createdAt,
+        map.set(r.cost_center_id, {
+          ccName: r.cost_center_name,
+          submittedEmps: new Set([r.employee_email]),
+          totalLines: 1,
+          approvedLines: isApproved ? 1 : 0,
+          pendingLines:  isPending  ? 1 : 0,
+          pendingApprovers: new Set(isPending && r.current_approver_name ? [r.current_approver_name] : []),
         });
       }
     });
-    return Array.from(ccMap.entries())
-      .map(([ccId, v]) => ({ ccId, ...v }))
-      .sort((a, b) => b.count - a.count);
-  }, [actualRows, actualCreatedAt]);
+    return map;
+  }, [actualRows]);
+
+  const closeCCRows = useMemo(() => {
+    const allCCIds = new Set([...demandPerCC.keys(), ...closePerCC.keys()]);
+    return Array.from(allCCIds).map(ccId => {
+      const demand = demandPerCC.get(ccId);
+      const close  = closePerCC.get(ccId);
+      const ccName        = demand?.ccName ?? close?.ccName ?? ccId;
+      const totalEmps     = demand?.employees.size ?? 0;
+      const submittedEmps = close?.submittedEmps.size ?? 0;
+      const missing       = Math.max(0, totalEmps - submittedEmps);
+      const totalLines    = close?.totalLines ?? 0;
+      const approvedLines = close?.approvedLines ?? 0;
+      const pendingLines  = close?.pendingLines ?? 0;
+
+      // Sort: most missing first, then pending, then complete, then not started
+      const sortKey = missing > 0 ? 0 : pendingLines > 0 ? 1 : submittedEmps > 0 ? 2 : 3;
+
+      return { ccId, ccName, totalEmps, submittedEmps, missing, totalLines, approvedLines, pendingLines, sortKey };
+    }).sort((a, b) => a.sortKey - b.sortKey);
+  }, [demandPerCC, closePerCC]);
+
+  // Global KPI totals
+  const globalTotalEmps = useMemo(() => {
+    const s = new Set<string>();
+    pd.filter(d => d.resource_id).forEach(d => s.add(d.resource_id!));
+    return s.size;
+  }, [pd]);
+  const globalSubmittedEmps = useMemo(() => {
+    const s = new Set<string>();
+    actualRows.forEach(r => s.add(r.employee_email));
+    return s.size;
+  }, [actualRows]);
+  const globalApprovedLines = useMemo(
+    () => actualRows.filter(r => r.approval_status?.toUpperCase() === 'APPROVED').length,
+    [actualRows],
+  );
+  const globalTotalLines  = actualRows.length;
+  const globalMissing     = Math.max(0, globalTotalEmps - globalSubmittedEmps);
+  const globalBlockedMgrs = useMemo(() => {
+    const s = new Set<string>();
+    actualRows
+      .filter(r => r.approval_status?.toUpperCase() === 'PENDING' && r.current_approver_name)
+      .forEach(r => s.add(r.current_approver_name!));
+    return s.size;
+  }, [actualRows]);
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
@@ -516,84 +477,87 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
 
       </div>
 
-      {/* ── Section 2: Project Health Matrix ── */}
+      {/* ── Section 2: Period Close Tracker ── */}
       <DashboardSection
         title={
-          <div className={styles.sectionTitleGroup}>
-            <span>
-              Project Health Matrix{' '}
-              <span style={{ color: tokens.colorNeutralForeground3, fontWeight: tokens.fontWeightRegular }}>
-                ({projectHealthRows.length})
-              </span>
-            </span>
-            <span className={styles.sectionSubtitle}>Staffing × Budget cross-reference</span>
-          </div>
-        }
-      >
-        {costsLoading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: tokens.spacingVerticalL }}>
-            <Spinner size="small" />
-          </div>
-        ) : projectHealthRows.length === 0 ? (
-          <div style={{ textAlign: 'center', color: tokens.colorNeutralForeground3, padding: `${tokens.spacingVerticalXL} 0` }}>
-            No project data available
-          </div>
-        ) : (
-          <table className={styles.matrixTable}>
-            <thead className={styles.matrixThead}>
-              <tr>
-                <th className={styles.matrixTh}>Project</th>
-                <th className={styles.matrixTh}>Staffing</th>
-                <th className={styles.matrixTh}>Budget</th>
-                <th className={styles.matrixTh}>Health</th>
-                <th className={styles.matrixTh}>Gap (FTE%)</th>
-                <th className={styles.matrixTh}>Variance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {projectHealthRows.map(row => (
-                <tr key={row.pid} className={styles.matrixTr}>
-                  <td className={styles.matrixTd}>
-                    <span className={styles.projectName}>{row.name}</span>
-                  </td>
-                  <td className={styles.matrixTd}>
-                    <StaffingBadge gap={row.gap} />
-                  </td>
-                  <td className={styles.matrixTd}>
-                    <BudgetBadge planned={row.planned} actual={row.actual} />
-                  </td>
-                  <td className={styles.matrixTd}>
-                    <HealthBadge health={row.health} />
-                  </td>
-                  <td className={styles.matrixTd} style={{
-                    color: row.gap < -0.1 ? SEV_FG.bad : row.gap > 0.1 ? SEV_FG.warn : SEV_FG.good,
-                    fontWeight: tokens.fontWeightSemibold,
-                  }}>
-                    {row.gap >= 0 ? '+' : ''}{Math.round(row.gap * 10) / 10}%
-                  </td>
-                  <td className={styles.matrixTd} style={{
-                    color: row.actual === 0
-                      ? tokens.colorNeutralForeground3
-                      : row.variance > 5 ? SEV_FG.bad : row.variance < -5 ? SEV_FG.good : tokens.colorNeutralForeground2,
-                    fontWeight: tokens.fontWeightSemibold,
-                  }}>
-                    {row.actual === 0
-                      ? 'No data'
-                      : row.planned > 0 ? `${row.variance >= 0 ? '+' : ''}${Math.round(row.variance * 10) / 10}%` : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </DashboardSection>
+          <div className={styles.closeHeader}>
+            <div className={styles.closeTitleGroup}>
+              <span>Period Close · {periodLabel}</span>
+              <span className={styles.sectionSubtitle}>Actuals submission &amp; approval progress</span>
+            </div>
+            <div className={styles.closeMiniKpis}>
 
-      {/* ── Section 3: Approval Bottleneck ── */}
-      <DashboardSection
-        title={
-          <div className={styles.sectionTitleGroup}>
-            <span>Approval Bottleneck</span>
-            <span className={styles.sectionSubtitle}>Managers with pending approvals</span>
+              {/* SUBMITTED */}
+              <div className={styles.closeMiniKpi}>
+                <span className={styles.closeMiniKpiLabel}>Submitted</span>
+                <span className={styles.closeMiniKpiValue} style={{ color: SEV_FG.good }}>
+                  {globalSubmittedEmps}/{globalTotalEmps}
+                </span>
+                <div className={styles.closeMiniBar}>
+                  <div style={{
+                    height: '100%',
+                    width: globalTotalEmps > 0 ? `${(globalSubmittedEmps / globalTotalEmps) * 100}%` : '0%',
+                    backgroundColor: SEV_BAR.good,
+                    borderRadius: '2px',
+                  }} />
+                </div>
+                <span className={styles.closeMiniBarUnit}>employees</span>
+              </div>
+
+              {/* APPROVED */}
+              <div className={styles.closeMiniKpi}>
+                <span className={styles.closeMiniKpiLabel}>Approved</span>
+                <span className={styles.closeMiniKpiValue} style={{
+                  color: globalApprovedLines === globalTotalLines && globalTotalLines > 0 ? SEV_FG.good : tokens.colorNeutralForeground1,
+                }}>
+                  {globalApprovedLines}/{globalTotalLines}
+                </span>
+                <div className={styles.closeMiniBar}>
+                  <div style={{
+                    height: '100%',
+                    width: globalTotalLines > 0 ? `${(globalApprovedLines / globalTotalLines) * 100}%` : '0%',
+                    backgroundColor: SEV_BAR.good,
+                    borderRadius: '2px',
+                  }} />
+                </div>
+                <span className={styles.closeMiniBarUnit}>lines</span>
+              </div>
+
+              {/* MISSING */}
+              <div className={styles.closeMiniKpi}>
+                <span className={styles.closeMiniKpiLabel}>Missing</span>
+                <span className={styles.closeMiniKpiValue} style={{ color: globalMissing > 0 ? SEV_FG.bad : SEV_FG.good }}>
+                  {globalMissing}
+                </span>
+                <div className={styles.closeMiniBar}>
+                  <div style={{
+                    height: '100%',
+                    width: globalTotalEmps > 0 ? `${(globalMissing / globalTotalEmps) * 100}%` : '0%',
+                    backgroundColor: globalMissing > 0 ? SEV_BAR.bad : SEV_BAR.good,
+                    borderRadius: '2px',
+                  }} />
+                </div>
+                <span className={styles.closeMiniBarUnit}>employees</span>
+              </div>
+
+              {/* BLOCKED BY */}
+              <div className={styles.closeMiniKpi}>
+                <span className={styles.closeMiniKpiLabel}>Blocked By</span>
+                <span className={styles.closeMiniKpiValue} style={{ color: globalBlockedMgrs > 0 ? SEV_FG.purple : SEV_FG.good }}>
+                  {globalBlockedMgrs}
+                </span>
+                <div className={styles.closeMiniBar}>
+                  <div style={{
+                    height: '100%',
+                    width: globalBlockedMgrs > 0 ? '100%' : '0%',
+                    backgroundColor: globalBlockedMgrs > 0 ? SEV_BAR.purple : SEV_BAR.good,
+                    borderRadius: '2px',
+                  }} />
+                </div>
+                <span className={styles.closeMiniBarUnit}>managers</span>
+              </div>
+
+            </div>
           </div>
         }
       >
@@ -601,57 +565,100 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
           <div style={{ display: 'flex', justifyContent: 'center', padding: tokens.spacingVerticalL }}>
             <Spinner size="small" />
           </div>
-        ) : bottleneckRows.length === 0 ? (
-          <div className={styles.emptySuccess}>
-            All actuals approved — no bottlenecks ✓
+        ) : closeCCRows.length === 0 ? (
+          <div style={{ textAlign: 'center', color: tokens.colorNeutralForeground3, padding: `${tokens.spacingVerticalXL} 0` }}>
+            No cost center data available
           </div>
         ) : (
-          <div className={styles.bottleneckList}>
-            {bottleneckRows.map(row => {
-              const oldestDays = row.oldestDate ? daysSince(row.oldestDate) : null;
-              const isRed    = row.count > 10;
-              const isAmber  = !isRed && (row.count > 5 || (oldestDays !== null && oldestDays > 3));
-              const highlight = isRed
-                ? { background: '#ffebee', borderColor: '#f5c6cb' }
-                : isAmber
-                  ? { background: '#fff8e1', borderColor: '#ffe082' }
-                  : {};
-              return (
-                <div key={row.ccId} className={styles.bottleneckRow} style={highlight}>
-                  <div>
-                    <div className={styles.bottleneckCCName}>{row.ccName}</div>
-                    <div className={styles.bottleneckManager}>{row.managerName}</div>
-                  </div>
-                  <div className={styles.bottleneckStat}>
-                    <div className={styles.bottleneckStatValue} style={{
-                      color: isRed ? SEV_FG.bad : isAmber ? SEV_FG.warn : tokens.colorNeutralForeground1,
-                    }}>
-                      {row.count}
-                    </div>
-                    <div className={styles.bottleneckStatLabel}>pending</div>
-                  </div>
-                  <div className={styles.bottleneckStat}>
-                    <div className={styles.bottleneckStatValue}>
-                      {Math.round(row.totalFte * 10) / 10}%
-                    </div>
-                    <div className={styles.bottleneckStatLabel}>total FTE</div>
-                  </div>
-                  <div className={styles.bottleneckStat}>
-                    <div className={styles.bottleneckStatValue} style={{
-                      color: oldestDays !== null && oldestDays > 3 ? SEV_FG.warn : tokens.colorNeutralForeground1,
-                    }}>
-                      {oldestDays !== null ? `${oldestDays}d ago` : periodLabel}
-                    </div>
-                    <div className={styles.bottleneckStatLabel}>oldest pending</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <table className={styles.closeTable}>
+            <thead className={styles.closeThead}>
+              <tr>
+                <th style={{ width: '3px', padding: 0 }} />
+                <th className={styles.closeTh}>Cost Center</th>
+                <th className={styles.closeTh}>Submitted</th>
+                <th className={styles.closeTh}>Approved</th>
+                <th className={styles.closeTh}>Missing</th>
+                <th className={styles.closeTh}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {closeCCRows.map(row => {
+                const accentColor = row.missing > 0
+                  ? SEV_BAR.bad
+                  : row.pendingLines > 0
+                    ? SEV_BAR.purple
+                    : row.submittedEmps > 0
+                      ? SEV_BAR.good
+                      : tokens.colorNeutralBackground4;
+
+                const statusText = row.submittedEmps === 0 && row.totalEmps === 0
+                  ? 'Not started'
+                  : row.submittedEmps === row.totalEmps && row.pendingLines === 0 && row.approvedLines === row.totalLines && row.totalLines > 0
+                    ? 'Complete ✓'
+                  : row.submittedEmps === row.totalEmps && row.totalEmps > 0 && row.pendingLines > 0
+                    ? `${row.pendingLines} pending approval`
+                  : row.missing > 0 && row.pendingLines > 0
+                    ? `${row.missing} awaiting submission, ${row.pendingLines} pending`
+                  : row.missing > 0
+                    ? `${row.missing} awaiting submission`
+                  : row.pendingLines > 0
+                    ? `${row.pendingLines} pending approval`
+                    : 'Not started';
+
+                const statusColor = statusText === 'Complete ✓'
+                  ? SEV_FG.good
+                  : statusText === 'Not started'
+                    ? tokens.colorNeutralForeground3
+                    : row.missing > 0
+                      ? SEV_FG.bad
+                      : SEV_FG.purple;
+
+                const submittedPct = row.totalEmps > 0 ? (row.submittedEmps / row.totalEmps) * 100 : 0;
+
+                return (
+                  <tr key={row.ccId} className={styles.closeTr} onClick={() => navigate('/actuals')}>
+                    <td style={{ padding: 0, width: '3px', verticalAlign: 'middle' }}>
+                      <div style={{ width: '3px', height: '38px', backgroundColor: accentColor, borderRadius: '0 2px 2px 0' }} />
+                    </td>
+                    <td className={styles.closeTd}>
+                      <span className={styles.closeCcName}>{row.ccName}</span>
+                    </td>
+                    <td className={styles.closeTd}>
+                      <div className={styles.closeInlineBar}>
+                        <span style={{ color: row.submittedEmps === row.totalEmps && row.totalEmps > 0 ? SEV_FG.good : tokens.colorNeutralForeground1 }}>
+                          {row.submittedEmps}/{row.totalEmps}
+                          {row.submittedEmps === row.totalEmps && row.totalEmps > 0 ? ' ✓' : ''}
+                        </span>
+                        <span className={styles.closeInlineBarTrack}>
+                          <span style={{ display: 'block', height: '100%', width: `${submittedPct}%`, backgroundColor: SEV_BAR.good, borderRadius: '2px' }} />
+                        </span>
+                      </div>
+                    </td>
+                    <td className={styles.closeTd}>
+                      <span style={{ color: row.approvedLines === row.totalLines && row.totalLines > 0 ? SEV_FG.good : tokens.colorNeutralForeground1 }}>
+                        {row.approvedLines}/{row.totalLines}
+                      </span>
+                    </td>
+                    <td className={styles.closeTd}>
+                      <span style={{
+                        color: row.missing > 0 ? SEV_FG.bad : tokens.colorNeutralForeground3,
+                        fontWeight: row.missing > 0 ? tokens.fontWeightSemibold : tokens.fontWeightRegular,
+                      }}>
+                        {row.missing > 0 ? row.missing : '—'}
+                      </span>
+                    </td>
+                    <td className={styles.closeTd}>
+                      <span style={{ color: statusColor, fontSize: '12px' }}>{statusText}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </DashboardSection>
 
-      {/* ── Section 4: Finance Overview ── */}
+      {/* ── Section 3: Finance Overview ── */}
       <DashboardSection
         title={
           <div>

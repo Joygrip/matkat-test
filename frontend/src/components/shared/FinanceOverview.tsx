@@ -37,17 +37,19 @@ export function FinanceOverview({
   const [loading, setLoading] = useState(false);
   const [localPeriodId, setLocalPeriodId] = useState<string>('');
 
-  // Sort all periods chronologically (oldest → newest) for slider navigation.
+  // Only open periods, sorted chronologically (oldest → newest) for slider navigation.
   const sortedPeriods = useMemo(
-    () => [...periods].sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month),
+    () =>
+      [...periods]
+        .filter(p => p.status === 'open')
+        .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month),
     [periods]
   );
 
   // Initialize to earliest open period once the period list loads.
   useEffect(() => {
     if (!localPeriodId && sortedPeriods.length > 0) {
-      const openPeriods = sortedPeriods.filter(p => p.status === 'open');
-      setLocalPeriodId(openPeriods[0]?.id ?? sortedPeriods[0].id);
+      setLocalPeriodId(sortedPeriods[0].id);
     }
   }, [sortedPeriods, localPeriodId]);
 
@@ -202,7 +204,7 @@ export function FinanceOverview({
               onClick={() => canPrev && setLocalPeriodId(sortedPeriods[localIdx - 1].id)}
             />
 
-            {/* Period label + badge */}
+            {/* Period label */}
             <div style={{
               display: 'flex', alignItems: 'center', gap: 6,
               minWidth: 120, justifyContent: 'center',
@@ -210,18 +212,6 @@ export function FinanceOverview({
               <span style={{ fontSize: 14, fontWeight: 600, color: '#1b1b1a' }}>
                 {localPeriod ? fmtPeriod(localPeriod) : '—'}
               </span>
-              {localPeriod && (
-                <span style={{
-                  fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
-                  padding: '1px 6px', borderRadius: 4,
-                  backgroundColor: localPeriod.status === 'open' ? '#e3efe7' : '#f0f0ee',
-                  color: localPeriod.status === 'open' ? '#2a6f4d' : '#707070',
-                  border: `1px solid ${localPeriod.status === 'open' ? '#b8dac4' : '#d4d3cf'}`,
-                  textTransform: 'uppercase',
-                }}>
-                  {localPeriod.status === 'open' ? 'Open' : 'Locked'}
-                </span>
-              )}
             </div>
 
             {/* Next arrow */}

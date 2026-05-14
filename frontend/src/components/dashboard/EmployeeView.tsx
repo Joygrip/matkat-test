@@ -473,36 +473,63 @@ export function EmployeeView({ periods }: Props) {
       }
 
       // Non-rejected paths
-      let updated: ActualLine;
       if (existing && approvalStatus === 'pending') {
         // Already pending — just update value, signature stays
-        updated = await actualsApi.updateActualLine(existing.id, { actual_fte_percent: ftePct });
+        await actualsApi.updateActualLine(existing.id, { actual_fte_percent: ftePct });
       } else if (existing) {
         // Existing but unsigned — update then sign
-        updated = await actualsApi.updateActualLine(existing.id, { actual_fte_percent: ftePct });
-        await actualsApi.signActuals(updated.id);
+        const updated = await actualsApi.updateActualLine(existing.id, { actual_fte_percent: ftePct });
+        try {
+          await actualsApi.signActuals(updated.id);
+        } catch (signErr: any) {
+          const detail = signErr?.detail ?? signErr?.response?.data?.detail; const msg = (typeof detail === 'string' ? detail : detail?.message ?? signErr?.message ?? '');
+          if (!msg.toLowerCase().includes('already signed')) throw signErr;
+        }
       } else {
-        // New entry — create then sign
-        updated = await actualsApi.createActualLine({
-          period_id: period.id,
-          resource_id: myResourceId,
-          project_id: projectId,
-          year: period.year,
-          month: period.month,
-          actual_fte_percent: ftePct,
-        });
-        await actualsApi.signActuals(updated.id);
+        // New entry — create then sign; handle 409 (already exists) and already-signed gracefully
+        let newLine: ActualLine;
+        try {
+          newLine = await actualsApi.createActualLine({
+            period_id: period.id,
+            resource_id: myResourceId,
+            project_id: projectId,
+            year: period.year,
+            month: period.month,
+            actual_fte_percent: ftePct,
+          });
+        } catch (createErr: any) {
+          if ((createErr?.response?.status ?? createErr?.status) === 409) {
+            // Backend has the record but local lookup is stale — fetch and update
+            const allActuals = await actualsApi.getMyActuals();
+            const existingLine = allActuals.find(
+              a => a.resource_id === myResourceId && a.period_id === period.id && a.project_id === projectId
+            );
+            if (!existingLine) throw createErr;
+            newLine = await actualsApi.updateActualLine(existingLine.id, { actual_fte_percent: ftePct });
+          } else {
+            throw createErr;
+          }
+        }
+        try {
+          await actualsApi.signActuals(newLine!.id);
+        } catch (signErr: any) {
+          const detail = signErr?.detail ?? signErr?.response?.data?.detail; const msg = (typeof detail === 'string' ? detail : detail?.message ?? signErr?.message ?? '');
+          if (!msg.toLowerCase().includes('already signed')) throw signErr;
+        }
       }
 
-      setMyActuals(prev => {
-        const idx = prev.findIndex(a => a.id === updated.id);
-        if (idx >= 0) { const c = [...prev]; c[idx] = updated; return c; }
-        return [...prev, updated];
-      });
+      // Always refresh after any modification so the lookup stays in sync
+      const [refreshedActuals, refreshedStatuses] = await Promise.all([
+        actualsApi.getMyActuals(),
+        actualsApi.getMyApprovalStatuses(),
+      ]);
+      setMyActuals(refreshedActuals);
+      setMyApprovalStatuses(refreshedStatuses);
       setActualsEdits(prev => { const n = { ...prev }; delete n[cellKey]; return n; });
       setSavedCells(prev => new Set(prev).add(cellKey));
       setTimeout(() => setSavedCells(prev => { const n = new Set(prev); n.delete(cellKey); return n; }), 2000);
-    } catch {
+    } catch (err: any) {
+      console.error('ACTUALS SAVE ERROR:', err, err?.response?.data, err?.response?.status);
       showError('Save failed', 'Could not save actuals value. Please try again.');
     } finally {
       setSavingCells(prev => { const n = new Set(prev); n.delete(cellKey); return n; });

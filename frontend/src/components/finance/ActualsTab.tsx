@@ -201,7 +201,7 @@ const useStyles = makeStyles({
   },
   sortBtnActive: {
     background: C.accent,
-    color: '#fff',
+    color: '#ffffff !important',
   },
   toggleRow: {
     display: 'flex',
@@ -672,7 +672,9 @@ export function ActualsTab({
     if (!empStats) return [];
     // Only show MISSING status if not filtering to other statuses exclusively
     if (selectedStatuses.size > 0 && !selectedStatuses.has('MISSING')) return [];
-    const nameSet = new Set(groupedEmployees.map(g => g.employee_name));
+    // Use unfiltered actualsData so employees who submitted (e.g. PENDING) are
+    // never shown as Missing even when the MISSING status filter is active.
+    const nameSet = new Set(actualsData.map(d => d.employee_name));
     const q = searchQuery.trim().toLowerCase();
     return empStats
       .filter(s => s.demand_fte > 0 && s.actuals_fte === 0 && !nameSet.has(s.employee_name))
@@ -690,7 +692,7 @@ export function ActualsTab({
         rows: [],
         isMissingOnly: true,
       }));
-  }, [empStats, groupedEmployees, selectedStatuses, selectedProjectIds, searchQuery]);
+  }, [empStats, actualsData, selectedStatuses, selectedProjectIds, searchQuery]);
 
   const sortedGroups = useMemo(() => {
     const combined = [...groupedEmployees, ...missingGroups];
@@ -1313,7 +1315,7 @@ export function ActualsTab({
                 <span>Demand target</span>
               </div>
             </div>
-            <span>Showing {sortedGroups.length} of {(new Set(actualsData.map(d => d.employee_name)).size) + (empStats?.filter(s => s.demand_fte > 0 && s.actuals_fte === 0).length ?? 0)} employees</span>
+            <span>Showing {sortedGroups.length} of {kpi.totalWithDemand} employees</span>
           </div>
         </div>
       )}

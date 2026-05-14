@@ -240,7 +240,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { path: '/', label: 'Dashboard', icon: Home, section: 'overview' },
   { path: '/resource-planning', label: 'Resource Planning', icon: ResourcePlanningIcon, roles: ['Admin', 'Finance', 'PM', 'Manager'], section: 'planning' },
-  { path: '/actuals', label: 'Actuals', icon: Actuals, roles: ['Admin', 'Finance', 'Manager'], section: 'operations' },
+  { path: '/actuals', label: 'FTE Approval', icon: Actuals, roles: ['Admin', 'Finance', 'Manager'], section: 'operations' },
   { path: '/finance', label: 'Finance', icon: Consolidation, roles: ['Admin', 'Finance', 'Manager', 'PM'], section: 'operations' },
   { path: '/admin?tab=delegates', label: 'My Delegates', icon: PeopleTeamRegular, roles: ['Manager'], section: 'operations' },
   { path: '/admin', label: 'Admin', icon: Admin, roles: ['Admin', 'Finance'], section: 'admin' },
@@ -259,7 +259,7 @@ const pageTitles: Record<string, string> = {
   '/resource-planning': 'Resource Planning',
   '/demand': 'Demand Planning',
   '/supply': 'Supply Planning',
-  '/actuals': 'Actuals Entry',
+  '/actuals': 'FTE Approval',
   '/finance': 'Finance',
   '/project-costs': 'OoP + Equipment',
   '/admin': 'Administration',

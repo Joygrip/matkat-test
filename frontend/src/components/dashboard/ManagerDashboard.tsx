@@ -176,33 +176,6 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
   },
 
-  // Spare capacity
-  capacityList: {
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  capacityRow: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(180px, 1.5fr) 1fr 100px',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    padding: `${tokens.spacingVerticalS} 0`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    '&:last-child': { borderBottom: 'none' },
-  },
-  capacityBarCell: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  capacityAvailLabel: {
-    fontSize: '13px',
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorPaletteGreenForeground2,
-    textAlign: 'right' as const,
-    whiteSpace: 'nowrap',
-  },
-
   emptySuccess: {
     textAlign: 'center',
     color: tokens.colorPaletteGreenForeground2,
@@ -236,19 +209,6 @@ interface Props {
 }
 
 // ─── sub-components ───────────────────────────────────────────────────────────
-
-function CapacityBar({ pct }: { pct: number }) {
-  const filled = Math.min(Math.max(pct, 0), 100);
-  const color = filled < 50 ? '#107c10' : filled < 75 ? '#bc8400' : '#c50f1f';
-  return (
-    <div style={{ position: 'relative', height: 6, borderRadius: 3, background: tokens.colorNeutralBackground4 }}>
-      <div style={{
-        position: 'absolute', top: 0, left: 0, height: '100%',
-        width: `${filled}%`, background: color, borderRadius: 3,
-      }} />
-    </div>
-  );
-}
 
 // ─── component ────────────────────────────────────────────────────────────────
 
@@ -407,17 +367,7 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
     });
   }, [approvalStatuses, actuals, pd, myCc]);
 
-  // ── Spare capacity ──
-  const spareCapacity = useMemo(() => {
-    return resourceAllocations
-      .filter(r => r.supply < 80)
-      .sort((a, b) => a.supply - b.supply)
-      .slice(0, 6);
-  }, [resourceAllocations]);
-
-  const allWellUtilized = resourceAllocations.length > 0 && spareCapacity.length === 0;
-
-  const periodLabel = earliestPeriod
+  const periodLabel =earliestPeriod
     ? `${MONTH_NAMES[earliestPeriod.month - 1]} ${earliestPeriod.year}`
     : '—';
 
@@ -534,52 +484,7 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
         )}
       </div>
 
-      {/* ── Section 3: Spare Capacity ── */}
-      <DashboardSection
-        title={`Spare Capacity — ${periodLabel}`}
-      >
-        {allWellUtilized ? (
-          <div className={styles.emptySuccess}>
-            All team members well utilized — no spare capacity ✓
-          </div>
-        ) : spareCapacity.length === 0 && resourceAllocations.length === 0 ? (
-          <div className={styles.emptyNeutral}>
-            No allocation data for this period
-          </div>
-        ) : (
-          <div className={styles.capacityList}>
-            {spareCapacity.map(r => {
-              const available = 100 - r.supply;
-              return (
-                <div key={r.id} className={styles.capacityRow}>
-                  <div className={styles.resourceCell}>
-                    <div className={styles.avatar} style={{ background: avatarColor(r.name) }}>
-                      {r.initials || initials(r.name)}
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div className={styles.resourceName}>{r.name}</div>
-                      <div className={styles.resourceSub}>{myCc?.name ?? ''}</div>
-                    </div>
-                  </div>
-
-                  <div className={styles.capacityBarCell}>
-                    <CapacityBar pct={r.supply} />
-                    <div style={{ fontSize: '10px', color: tokens.colorNeutralForeground3 }}>
-                      {Math.round(r.supply * 10) / 10}% allocated
-                    </div>
-                  </div>
-
-                  <div className={styles.capacityAvailLabel}>
-                    {Math.round(available * 10) / 10}% available
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </DashboardSection>
-
-      {/* ── Section 4: Finance Overview ── */}
+      {/* ── Section 3: Resource Allocation Overview ── */}
       <DashboardSection
         title={
           <div>

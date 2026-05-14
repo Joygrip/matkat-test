@@ -29,8 +29,8 @@ function daysSince(dateStr: string): number {
 // ─── severity helpers ─────────────────────────────────────────────────────────
 
 type StaffingSev = 'staffed' | 'attention' | 'understaffed';
-type BudgetSev   = 'ontrack' | 'caution' | 'over';
-type HealthSev   = 'ontrack' | 'atrisk'  | 'critical';
+type BudgetSev   = 'nodata' | 'ontrack' | 'caution' | 'over';
+type HealthSev   = 'ontrack' | 'atrisk'  | 'critical' | 'pending';
 
 function getStaffingSev(gap: number): StaffingSev {
   if (gap < -20) return 'understaffed';
@@ -39,6 +39,7 @@ function getStaffingSev(gap: number): StaffingSev {
 }
 
 function getBudgetSev(planned: number, actual: number): BudgetSev {
+  if (actual === 0) return 'nodata';
   if (planned <= 0) return 'ontrack';
   if (actual > planned * 1.10) return 'over';
   if (actual > planned * 1.05) return 'caution';
@@ -46,6 +47,10 @@ function getBudgetSev(planned: number, actual: number): BudgetSev {
 }
 
 function getHealthSev(staffing: StaffingSev, budget: BudgetSev): HealthSev {
+  if (budget === 'nodata') {
+    if (staffing === 'staffed') return 'pending';
+    return 'atrisk';
+  }
   const staffingBad = staffing === 'understaffed';
   const budgetBad   = budget === 'over';
   if (staffingBad && budgetBad) return 'critical';
@@ -53,7 +58,7 @@ function getHealthSev(staffing: StaffingSev, budget: BudgetSev): HealthSev {
   return 'ontrack';
 }
 
-const HEALTH_ORDER: Record<HealthSev, number> = { critical: 0, atrisk: 1, ontrack: 2 };
+const HEALTH_ORDER: Record<HealthSev, number> = { critical: 0, atrisk: 1, pending: 2, ontrack: 3 };
 
 const SEV_FG = {
   good: tokens.colorPaletteGreenForeground2,
@@ -78,6 +83,7 @@ function StaffingBadge({ gap }: { gap: number }) {
 
 function BudgetBadge({ planned, actual }: { planned: number; actual: number }) {
   const sev = getBudgetSev(planned, actual);
+  if (sev === 'nodata') return <Badge appearance="outline">No data</Badge>;
   if (sev === 'over') {
     const pct = planned > 0 ? Math.round(((actual - planned) / planned) * 100) : 0;
     return <Badge color="danger"  appearance="filled">Over +{pct}%</Badge>;
@@ -92,6 +98,7 @@ function BudgetBadge({ planned, actual }: { planned: number; actual: number }) {
 function HealthBadge({ health }: { health: HealthSev }) {
   if (health === 'critical') return <Badge color="danger"  appearance="filled">Critical</Badge>;
   if (health === 'atrisk')   return <Badge color="warning" appearance="filled">At Risk</Badge>;
+  if (health === 'pending')  return <Badge appearance="outline">Pending</Badge>;
   return                            <Badge color="success" appearance="filled">On Track</Badge>;
 }
 
@@ -104,10 +111,10 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalL,
   },
 
-  // KPI strip — 6 columns
+  // KPI strip — 5 columns
   kpiStrip: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(6, 1fr)',
+    gridTemplateColumns: 'repeat(5, 1fr)',
     gap: tokens.spacingHorizontalM,
   },
   kpiCard: {
@@ -310,29 +317,19 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
 
   const costRows = costs?.data ?? [];
 
-  // Baseline FY — sum all months
-  const totalPlannedLabor = useMemo(() => costRows.reduce((s, r) => s + r.demand_cost, 0), [costRows]);
-  const totalActualLabor  = useMemo(() => costRows.reduce((s, r) => s + r.actuals_cost, 0), [costRows]);
-  const totalOoP          = useMemo(() => costRows.reduce((s, r) => s + r.externals_cost / 100, 0), [costRows]);
-  const totalEquipment    = useMemo(() => costRows.reduce((s, r) => s + r.equipment_cost / 100, 0), [costRows]);
-  const variancePct       = totalPlannedLabor > 0
-    ? ((totalActualLabor - totalPlannedLabor) / totalPlannedLabor) * 100
-    : 0;
-  const laborVsPlanPct    = totalPlannedLabor > 0 ? (totalActualLabor / totalPlannedLabor) * 100 : 0;
-  const oopVsPlanPct      = totalPlannedLabor > 0 ? (totalOoP / totalPlannedLabor) * 100 : 0;
-  const equipVsPlanPct    = totalPlannedLabor > 0 ? (totalEquipment / totalPlannedLabor) * 100 : 0;
-
-  // Total Period — current period only
+  // Current period rows only — all KPIs scoped to current period
   const currentPeriodRows = useMemo(
     () => currentPeriod
       ? costRows.filter(r => r.year === currentPeriod.year && r.month === currentPeriod.month)
       : [],
     [costRows, currentPeriod],
   );
-  const periodActualLabor  = useMemo(() => currentPeriodRows.reduce((s, r) => s + r.actuals_cost, 0), [currentPeriodRows]);
-  const periodOoP          = useMemo(() => currentPeriodRows.reduce((s, r) => s + r.externals_cost / 100, 0), [currentPeriodRows]);
-  const periodEquipment    = useMemo(() => currentPeriodRows.reduce((s, r) => s + r.equipment_cost / 100, 0), [currentPeriodRows]);
-  const totalPeriod        = periodActualLabor + periodOoP + periodEquipment;
+  const periodPlannedLabor    = useMemo(() => currentPeriodRows.reduce((s, r) => s + r.demand_cost, 0), [currentPeriodRows]);
+  const periodActualLabor     = useMemo(() => currentPeriodRows.reduce((s, r) => s + r.actuals_cost, 0), [currentPeriodRows]);
+  const periodOoP             = useMemo(() => currentPeriodRows.reduce((s, r) => s + r.externals_cost / 100, 0), [currentPeriodRows]);
+  const periodEquipment       = useMemo(() => currentPeriodRows.reduce((s, r) => s + r.equipment_cost / 100, 0), [currentPeriodRows]);
+  const periodActualVsPlanPct = periodPlannedLabor > 0 ? (periodActualLabor / periodPlannedLabor) * 100 : 0;
+  const totalPeriod           = periodPlannedLabor + periodOoP + periodEquipment;
 
   // ── Section 2: Project Health Matrix ─────────────────────────────────────────
 
@@ -340,6 +337,7 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
     () => currentPeriod ? demandLines.filter(d => d.period_id === currentPeriod.id) : [],
     [demandLines, currentPeriod],
   );
+
   const ps = useMemo(
     () => currentPeriod ? supplyLines.filter(s => s.period_id === currentPeriod.id) : [],
     [supplyLines, currentPeriod],
@@ -362,13 +360,13 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
 
   const projectBudget = useMemo(() => {
     const map = new Map<string, { name: string; planned: number; actual: number }>();
-    costRows.forEach(r => {
+    currentPeriodRows.forEach(r => {
       const ex = map.get(r.project_id);
       if (ex) { ex.planned += r.demand_cost; ex.actual += r.actuals_cost; }
       else map.set(r.project_id, { name: r.project_name, planned: r.demand_cost, actual: r.actuals_cost });
     });
     return map;
-  }, [costRows]);
+  }, [currentPeriodRows]);
 
   const projectHealthRows = useMemo(() => {
     const allIds = new Set([...projectStaffing.keys(), ...projectBudget.keys()]);
@@ -439,9 +437,9 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
         <div className={styles.kpiCard}>
           <div className={styles.kpiLabel}>Planned Labor</div>
           <div className={styles.kpiValue} style={{ color: tokens.colorNeutralForeground1 }}>
-            {costsLoading ? '—' : fmtCost(totalPlannedLabor)}
+            {costsLoading ? '—' : fmtCost(periodPlannedLabor)}
           </div>
-          <div className={styles.kpiSub}>Baseline FY</div>
+          <div className={styles.kpiSub}>{periodLabel}</div>
           <div className={styles.barTrack}>
             <div className={styles.barFill} style={{ width: '100%', backgroundColor: tokens.colorBrandBackground }} />
           </div>
@@ -451,44 +449,46 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
         <div className={styles.kpiCard}>
           <div className={styles.kpiLabel}>Actual Labor</div>
           <div className={styles.kpiValue} style={{
-            color: laborVsPlanPct > 110 ? SEV_FG.bad : laborVsPlanPct > 105 ? SEV_FG.warn : SEV_FG.good,
+            color: periodActualLabor === 0
+              ? tokens.colorNeutralForeground3
+              : periodActualVsPlanPct > 110 ? SEV_FG.bad : periodActualVsPlanPct > 105 ? SEV_FG.warn : SEV_FG.good,
           }}>
-            {costsLoading ? '—' : fmtCost(totalActualLabor)}
+            {costsLoading ? '—' : fmtCost(periodActualLabor)}
           </div>
-          <div className={styles.kpiSub} style={{
-            color: laborVsPlanPct > 110 ? SEV_FG.bad : laborVsPlanPct > 105 ? SEV_FG.warn : SEV_FG.good,
+          <div className={styles.kpiSub} style={periodActualLabor > 0 ? {
+            color: periodActualVsPlanPct > 110 ? SEV_FG.bad : periodActualVsPlanPct > 105 ? SEV_FG.warn : SEV_FG.good,
             fontWeight: tokens.fontWeightSemibold,
-          }}>
-            {costsLoading ? '' : `${Math.round(laborVsPlanPct)}% of plan`}
+          } : {}}>
+            {costsLoading ? '' : periodActualLabor === 0
+              ? 'No actuals reported yet'
+              : `${Math.round(periodActualVsPlanPct)}% of planned`}
           </div>
-          <div className={styles.barTrack}>
-            <div className={styles.barFill} style={{
-              width: `${Math.min(laborVsPlanPct, 100)}%`,
-              backgroundColor: laborVsPlanPct > 110 ? SEV_BAR.bad : laborVsPlanPct > 105 ? SEV_BAR.warn : SEV_BAR.good,
-            }} />
-          </div>
+          {periodActualLabor > 0 && (
+            <div className={styles.barTrack}>
+              <div className={styles.barFill} style={{
+                width: `${Math.min(periodActualVsPlanPct, 100)}%`,
+                backgroundColor: periodActualVsPlanPct > 110 ? SEV_BAR.bad : periodActualVsPlanPct > 105 ? SEV_BAR.warn : SEV_BAR.good,
+              }} />
+            </div>
+          )}
         </div>
 
         {/* OoP */}
         <div className={styles.kpiCard}>
           <div className={styles.kpiLabel}>OoP</div>
           <div className={styles.kpiValue} style={{ color: tokens.colorNeutralForeground1 }}>
-            {costsLoading ? '—' : fmtCost(totalOoP)}
+            {costsLoading ? '—' : fmtCost(periodOoP)}
           </div>
-          <div className={styles.kpiSub}>
-            {costsLoading ? '' : `${Math.round(oopVsPlanPct * 10) / 10}% of labor plan`}
-          </div>
+          <div className={styles.kpiSub}>Out-of-pocket costs</div>
         </div>
 
         {/* Equipment */}
         <div className={styles.kpiCard}>
           <div className={styles.kpiLabel}>Equipment</div>
           <div className={styles.kpiValue} style={{ color: tokens.colorNeutralForeground1 }}>
-            {costsLoading ? '—' : fmtCost(totalEquipment)}
+            {costsLoading ? '—' : fmtCost(periodEquipment)}
           </div>
-          <div className={styles.kpiSub}>
-            {costsLoading ? '' : `${Math.round(equipVsPlanPct * 10) / 10}% of labor plan`}
-          </div>
+          <div className={styles.kpiSub}>Equipment costs</div>
         </div>
 
         {/* Total Period */}
@@ -497,13 +497,13 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
           <div className={styles.kpiValue} style={{ color: tokens.colorNeutralForeground1 }}>
             {costsLoading ? '—' : fmtCost(totalPeriod)}
           </div>
-          <div className={styles.kpiSub}>{periodLabel}</div>
+          <div className={styles.kpiSub}>{periodLabel} · all categories</div>
           {!costsLoading && totalPeriod > 0 && (
             <div className={styles.barTrack}>
               {[
-                { cost: periodActualLabor, color: SEV_BAR.good },
-                { cost: periodOoP,        color: tokens.colorBrandBackground2 },
-                { cost: periodEquipment,  color: SEV_BAR.warn },
+                { cost: periodPlannedLabor, color: SEV_BAR.good },
+                { cost: periodOoP,          color: tokens.colorBrandBackground2 },
+                { cost: periodEquipment,    color: SEV_BAR.warn },
               ].map((seg, i) => (
                 <div key={i} className={styles.barFill} style={{
                   width: `${(seg.cost / totalPeriod) * 100}%`,
@@ -512,19 +512,6 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
               ))}
             </div>
           )}
-        </div>
-
-        {/* Variance */}
-        <div className={styles.kpiCard}>
-          <div className={styles.kpiLabel}>Variance</div>
-          <div className={styles.kpiValue} style={{
-            color: variancePct > 5 ? SEV_FG.bad : variancePct < -5 ? SEV_FG.good : SEV_FG.warn,
-          }}>
-            {costsLoading ? '—' : `${variancePct >= 0 ? '+' : ''}${Math.round(variancePct * 10) / 10}%`}
-          </div>
-          <div className={styles.kpiSub}>
-            {variancePct > 5 ? 'Over budget' : variancePct < -5 ? 'Under budget' : 'On track'}
-          </div>
         </div>
 
       </div>
@@ -585,10 +572,14 @@ export function FinanceDashboard({ demandLines, supplyLines, periods }: Props) {
                     {row.gap >= 0 ? '+' : ''}{Math.round(row.gap * 10) / 10}%
                   </td>
                   <td className={styles.matrixTd} style={{
-                    color: row.variance > 5 ? SEV_FG.bad : row.variance < -5 ? SEV_FG.good : tokens.colorNeutralForeground2,
+                    color: row.actual === 0
+                      ? tokens.colorNeutralForeground3
+                      : row.variance > 5 ? SEV_FG.bad : row.variance < -5 ? SEV_FG.good : tokens.colorNeutralForeground2,
                     fontWeight: tokens.fontWeightSemibold,
                   }}>
-                    {row.planned > 0 ? `${row.variance >= 0 ? '+' : ''}${Math.round(row.variance * 10) / 10}%` : '—'}
+                    {row.actual === 0
+                      ? 'No data'
+                      : row.planned > 0 ? `${row.variance >= 0 ? '+' : ''}${Math.round(row.variance * 10) / 10}%` : '—'}
                   </td>
                 </tr>
               ))}

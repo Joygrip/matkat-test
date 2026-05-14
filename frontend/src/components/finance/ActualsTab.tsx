@@ -1039,7 +1039,6 @@ export function ActualsTab({
                             {group.employee_name}
                           </div>
                           <div style={{ fontSize:11, color:C.ink3 }}>{group.employee_email}</div>
-                          <div style={{ fontSize:10, color:C.ink3 }}>{group.cost_center_name}</div>
                         </div>
                       </div>
                       {group.rows.some(r => r.is_delegated && r.delegated_for) && (

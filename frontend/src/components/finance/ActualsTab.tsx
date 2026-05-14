@@ -490,8 +490,6 @@ export function ActualsTab({
   const [sortBy, setSortBy] = useState<SortBy>('attention');
   const [onlyNeedsAction, setOnlyNeedsAction] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCcIds, setSelectedCcIds] = useState<Set<string>>(new Set());
-  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
   const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(new Set());
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
@@ -609,8 +607,6 @@ export function ActualsTab({
   // ── Filtered actuals ───────────────────────────────────────────────────────
   const filteredActuals = useMemo(() => {
     let out = actualsData;
-    if (selectedCcIds.size > 0) out = out.filter(d => selectedCcIds.has(d.cost_center_id));
-    if (selectedProjectIds.size > 0) out = out.filter(d => selectedProjectIds.has(d.project_id));
     if (selectedStatuses.size > 0) out = out.filter(d => selectedStatuses.has((d.approval_status ?? '').toUpperCase()));
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -624,7 +620,7 @@ export function ActualsTab({
     }
     if (onlyNeedsAction) out = out.filter(d => d.can_action || d.can_proxy_approve_step1);
     return out;
-  }, [actualsData, selectedCcIds, selectedProjectIds, selectedStatuses, searchQuery, onlyNeedsAction]);
+  }, [actualsData, selectedStatuses, searchQuery, onlyNeedsAction]);
 
   // ── Group by employee (employees with actuals) ────────────────────────────
   const groupedEmployees = useMemo((): EmployeeGroup[] => {
@@ -659,10 +655,6 @@ export function ActualsTab({
     return empStats
       .filter(s => s.demand_fte > 0 && s.actuals_fte === 0 && !nameSet.has(s.employee_name))
       .filter(s => !q || s.employee_name.toLowerCase().includes(q) || s.projects.some(p => p.project_name.toLowerCase().includes(q)) || (s.cost_center_name ?? '').toLowerCase().includes(q) || (s.employee_initials ?? '').toLowerCase().includes(q))
-      .filter(s => {
-        if (selectedProjectIds.size === 0) return true;
-        return s.projects.some(p => selectedProjectIds.has(p.project_id));
-      })
       .map(s => ({
         employee_name: s.employee_name,
         employee_email: '',
@@ -672,7 +664,7 @@ export function ActualsTab({
         rows: [],
         isMissingOnly: true,
       }));
-  }, [empStats, actualsData, selectedStatuses, selectedProjectIds, searchQuery]);
+  }, [empStats, actualsData, selectedStatuses, searchQuery]);
 
   const sortedGroups = useMemo(() => {
     const combined = [...groupedEmployees, ...missingGroups];
@@ -855,56 +847,6 @@ export function ActualsTab({
           style={{ minWidth: 260 }}
           size="small"
         />
-
-        {/* CC filter */}
-        <Menu>
-          <MenuTrigger>
-            <Button size="small" appearance="outline" icon={<FilterRegular />}>
-              Cost center
-              <Badge size="tiny" appearance="filled" color="brand" style={{ marginLeft: 4, visibility: selectedCcIds.size > 0 ? 'visible' : 'hidden' }}>
-                {selectedCcIds.size || 1}
-              </Badge>
-            </Button>
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList
-              checkedValues={{ cc: Array.from(selectedCcIds) }}
-              onCheckedValueChange={(_, data) => { if (data.name === 'cc') setSelectedCcIds(new Set(data.checkedItems)); }}
-            >
-              {ccOptions.map(cc => (
-                <MenuItemCheckbox key={cc.id} name="cc" value={cc.id}>
-                  {cc.name}
-                </MenuItemCheckbox>
-              ))}
-              {ccOptions.length === 0 && <div style={{ padding: '8px 12px', fontSize: 12, color: C.ink3 }}>No options</div>}
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-
-        {/* Project filter */}
-        <Menu>
-          <MenuTrigger>
-            <Button size="small" appearance="outline" icon={<FilterRegular />}>
-              Project
-              <Badge size="tiny" appearance="filled" color="brand" style={{ marginLeft: 4, visibility: selectedProjectIds.size > 0 ? 'visible' : 'hidden' }}>
-                {selectedProjectIds.size || 1}
-              </Badge>
-            </Button>
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList
-              checkedValues={{ proj: Array.from(selectedProjectIds) }}
-              onCheckedValueChange={(_, data) => { if (data.name === 'proj') setSelectedProjectIds(new Set(data.checkedItems)); }}
-            >
-              {projectOptions.map(p => (
-                <MenuItemCheckbox key={p.id} name="proj" value={p.id}>
-                  {p.name}
-                </MenuItemCheckbox>
-              ))}
-              {projectOptions.length === 0 && <div style={{ padding: '8px 12px', fontSize: 12, color: C.ink3 }}>No options</div>}
-            </MenuList>
-          </MenuPopover>
-        </Menu>
 
         {/* Status filter */}
         <Menu>

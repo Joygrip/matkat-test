@@ -600,9 +600,6 @@ function CcDetailPanel({
         borderBottom: `1px solid ${C.line}`,
         background: `linear-gradient(180deg, ${sevC.bg} 0%, ${C.surface} 100%)`,
       }}>
-        <div style={{ fontSize: 11, fontWeight: 500, color: C.ink3, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>
-          Cost Center · {cc.cost_center_id ?? '—'}
-        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
           <div style={{ fontSize: 18, fontWeight: 700, color: C.ink }}>{cc.cost_center_name}</div>
           <span style={{

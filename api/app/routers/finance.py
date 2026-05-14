@@ -72,10 +72,10 @@ async def actuals_vs_plan_by_employee(
     return service.get_employee_stats(year, month, cost_center_id, project_id)
 
 
-@router.get("/consolidated-costs/detail", response_model=ConsolidatedCostDetail)
+@router.get("/consolidated-costs/detail", response_model=List[ConsolidatedCostDetail])
 async def consolidated_cost_detail(
-    year: int = Query(...),
-    month: int = Query(...),
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None, ge=1, le=12),
     project_id: Optional[str] = Query(None),
     cost_center_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
@@ -85,18 +85,19 @@ async def consolidated_cost_detail(
     )),
 ):
     """
-    Return per-line detail (demand, actuals, externals, equipment) for one project or cost center + period.
+    Return per-line detail (demand, actuals, externals, equipment) for one project or cost center.
+    When year+month are provided, returns detail for that single period.
+    When both are omitted, returns detail for all open periods.
     Exactly one of project_id or cost_center_id must be provided.
     PM role is restricted to their own projects (403 otherwise).
     Accessible to: Admin, Finance, PM, Director, RO
     """
-    from fastapi import HTTPException
     if not project_id and not cost_center_id:
         raise HTTPException(status_code=422, detail="Provide either project_id or cost_center_id.")
     if project_id and cost_center_id:
         raise HTTPException(status_code=422, detail="Provide only one of project_id or cost_center_id.")
     service = FinanceService(db, current_user)
-    return service.get_consolidated_cost_detail(year, month, project_id=project_id, cost_center_id=cost_center_id)
+    return service.get_consolidated_cost_detail_multi(year, month, project_id=project_id, cost_center_id=cost_center_id)
 
 
 @router.get("/consolidated-costs", response_model=ConsolidatedCostResponse)

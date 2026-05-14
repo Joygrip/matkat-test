@@ -136,16 +136,15 @@ export interface ConsolidatedCostDetail {
 }
 
 export async function getConsolidatedCostDetail(params: {
-  year: number;
-  month: number;
+  year?: number;
+  month?: number;
   project_id?: string;
   cost_center_id?: string;
-}): Promise<ConsolidatedCostDetail> {
-  const query = new URLSearchParams({
-    year: String(params.year),
-    month: String(params.month),
-  });
+}): Promise<ConsolidatedCostDetail[]> {
+  const query = new URLSearchParams();
+  if (params.year != null) query.append('year', String(params.year));
+  if (params.month != null) query.append('month', String(params.month));
   if (params.project_id) query.append('project_id', params.project_id);
   if (params.cost_center_id) query.append('cost_center_id', params.cost_center_id);
-  return apiClient.get<ConsolidatedCostDetail>(`/finance/consolidated-costs/detail?${query.toString()}`);
+  return apiClient.get<ConsolidatedCostDetail[]>(`/finance/consolidated-costs/detail?${query.toString()}`);
 }

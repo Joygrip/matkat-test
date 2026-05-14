@@ -924,6 +924,34 @@ class FinanceService:
             equipment_lines=equipment_lines,
         )
 
+    def get_consolidated_cost_detail_multi(
+        self,
+        year: Optional[int],
+        month: Optional[int],
+        project_id: Optional[str] = None,
+        cost_center_id: Optional[str] = None,
+    ) -> list:
+        """Return detail for a single period (year+month provided) or all open periods."""
+        from api.app.models.core import Period
+        if year is not None and month is not None:
+            return [self.get_consolidated_cost_detail(year, month, project_id, cost_center_id)]
+        periods = (
+            self.db.query(Period)
+            .filter(
+                Period.tenant_id == self.current_user.tenant_id,
+                Period.status == 'open',
+            )
+            .order_by(Period.year, Period.month)
+            .all()
+        )
+        results = []
+        for p in periods:
+            try:
+                results.append(self.get_consolidated_cost_detail(p.year, p.month, project_id, cost_center_id))
+            except Exception:
+                pass
+        return results
+
     def get_setting(self, key: str) -> FinanceSettingResponse:
         """Return a finance setting by key, or a default if not yet configured."""
         row = (

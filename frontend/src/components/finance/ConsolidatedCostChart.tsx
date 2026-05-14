@@ -433,46 +433,22 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
       setDrawerLoading(true);
       const baseParams = mode === 'project' ? { project_id: row.id } : { cost_center_id: ccId! };
 
-      const periodsToFetch = targetYear !== undefined
-        ? [{ year: targetYear, month: targetMonth! }]
-        : Array.from(
-            new Map(entityData.map(r => [`${r.year}-${r.month}`, { year: r.year, month: r.month }])).values()
-          ).sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+      const detailParams = targetYear !== undefined
+        ? { ...baseParams, year: targetYear, month: targetMonth! }
+        : { ...baseParams };
 
-      const detailsPromise = Promise.all(
-        periodsToFetch.map(p => getConsolidatedCostDetail({ ...baseParams, year: p.year, month: p.month }))
+      const detailsPromise = getConsolidatedCostDetail(detailParams);
+
+      // Build resource→CC map from already-loaded entityData — no extra API calls.
+      // Key: `${year}-${month}` → cost_center_name for this project.
+      const ccMap = new Map<string, string>(
+        entityData
+          .filter(r => r.cost_center_name)
+          .map(r => [`${r.year}-${r.month}`, r.cost_center_name!])
       );
 
-      // For project mode: fetch CC-mode detail per unique (CC, period) to build a
-      // resource→CC lookup so we can show the Cost Center column in Planned/Actual tabs.
-      let ccMapPromise: Promise<Map<string, string>> = Promise.resolve(new Map());
-      if (mode === 'project') {
-        const ccPeriods = Array.from(
-          new Map(entityData
-            .filter(r => r.cost_center_id)
-            .map(r => [`${r.year}-${r.month}-${r.cost_center_id}`,
-              { year: r.year, month: r.month, cost_center_id: r.cost_center_id! }])
-          ).values()
-        );
-        if (ccPeriods.length > 0) {
-          ccMapPromise = Promise.all(
-            ccPeriods.map(p => getConsolidatedCostDetail({ cost_center_id: p.cost_center_id, year: p.year, month: p.month }))
-          ).then(ccDetails => {
-            const map = new Map<string, string>();
-            ccDetails.forEach(d => {
-              const ccName = d.cost_center_name ?? '';
-              [...d.demand_lines, ...d.actual_lines].forEach(l => {
-                if (l.project_name === row.name)
-                  map.set(`${d.year}-${d.month}-${l.resource_name}`, ccName);
-              });
-            });
-            return map;
-          }).catch(() => new Map<string, string>());
-        }
-      }
-
-      Promise.all([detailsPromise, ccMapPromise])
-        .then(([details, ccMap]) => {
+      detailsPromise
+        .then(details => {
           if (details.length === 0) { setDrawerDetail(null); return; }
           setDrawerDetail(details);
           setDrawerCcMap(ccMap);
@@ -494,7 +470,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
         const monthLabel = `${MF[d.month - 1]} ${d.year}`;
         return d.demand_lines.map(l => [
           monthLabel,
-          isCc ? (l.project_name ?? '') : (drawerCcMap.get(`${d.year}-${d.month}-${l.resource_name}`) ?? ''),
+          isCc ? (l.project_name ?? '') : (drawerCcMap.get(`${d.year}-${d.month}`) ?? ''),
           l.resource_name,
           String(l.fte_percent),
           String(l.cost),
@@ -506,7 +482,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
         const monthLabel = `${MF[d.month - 1]} ${d.year}`;
         return d.actual_lines.map(l => [
           monthLabel,
-          isCc ? (l.project_name ?? '') : (drawerCcMap.get(`${d.year}-${d.month}-${l.resource_name}`) ?? ''),
+          isCc ? (l.project_name ?? '') : (drawerCcMap.get(`${d.year}-${d.month}`) ?? ''),
           l.resource_name,
           String(l.fte_percent),
           String(l.cost),
@@ -544,11 +520,11 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
       const monthLabel = `${MF[d.month - 1]} ${d.year}`;
       for (const l of d.demand_lines)
         rows.push([monthLabel, 'Planned', l.resource_name,
-          isCc ? (l.project_name ?? '') : (drawerCcMap.get(`${d.year}-${d.month}-${l.resource_name}`) ?? ''),
+          isCc ? (l.project_name ?? '') : (drawerCcMap.get(`${d.year}-${d.month}`) ?? ''),
           String(l.fte_percent), String(l.cost)]);
       for (const l of d.actual_lines)
         rows.push([monthLabel, 'Actual', l.resource_name,
-          isCc ? (l.project_name ?? '') : (drawerCcMap.get(`${d.year}-${d.month}-${l.resource_name}`) ?? ''),
+          isCc ? (l.project_name ?? '') : (drawerCcMap.get(`${d.year}-${d.month}`) ?? ''),
           String(l.fte_percent), String(l.cost)]);
       if (drawer.mode !== 'cc') {
         for (const l of d.external_lines)
@@ -1029,7 +1005,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                                 <td style={{ ...tdStyle, color: C.ink1 }}>{l.resource_name}</td>
                                 {!isCc && (
                                   <td style={{ ...tdStyle, color: C.ink3, fontSize: 12, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {drawerCcMap.get(`${period.year}-${period.month}-${l.resource_name}`) ?? '—'}
+                                    {drawerCcMap.get(`${period.year}-${period.month}`) ?? '—'}
                                   </td>
                                 )}
                                 <td style={{ ...tdStyle, textAlign: 'right' }}>
@@ -1106,7 +1082,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                                 <td style={{ ...tdStyle, color: C.ink1 }}>{l.resource_name}</td>
                                 {!isCc && (
                                   <td style={{ ...tdStyle, color: C.ink3, fontSize: 12, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {drawerCcMap.get(`${period.year}-${period.month}-${l.resource_name}`) ?? '—'}
+                                    {drawerCcMap.get(`${period.year}-${period.month}`) ?? '—'}
                                   </td>
                                 )}
                                 <td style={{ ...tdStyle, textAlign: 'right' }}>

@@ -186,48 +186,42 @@ const useStyles = makeStyles({
     justifyContent: 'flex-end',
     marginTop: tokens.spacingVerticalXXS,
   },
-  // Staffing Gaps section
-  gapTableWrap: {
+  // Staffing Gaps section — compact cards
+  gapCardList: {
     width: '100%',
   },
-  gapTableHeader: {
-    display: 'grid',
-    gridTemplateColumns: '2fr 2fr 70px 70px 90px',
-    gap: tokens.spacingHorizontalS,
-    paddingBottom: '8px',
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    marginBottom: '2px',
-  },
-  gapColHead: {
-    fontSize: '10px',
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground3,
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-  },
-  gapGroup: {
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  gapGroupFirst: {
-    borderTop: 'none',
-  },
-  gapTableRow: {
-    display: 'grid',
-    gridTemplateColumns: '2fr 2fr 70px 70px 90px',
+  gapCard: {
+    display: 'flex',
     alignItems: 'center',
-    minHeight: '36px',
-    gap: tokens.spacingHorizontalS,
+    minHeight: '52px',
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    paddingLeft: '16px',
+    paddingRight: '12px',
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    position: 'relative',
+    ':hover': {
+      background: tokens.colorNeutralBackground2,
+    },
   },
-  gapResourceCell: {
+  gapCardAccent: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: '3px',
+  },
+  gapCardLeft: {
+    width: '200px',
+    flexShrink: 0,
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    minWidth: 0,
     overflow: 'hidden',
   },
   gapAvatar: {
-    width: '28px',
-    height: '28px',
+    width: '30px',
+    height: '30px',
     borderRadius: '50%',
     display: 'flex',
     alignItems: 'center',
@@ -252,21 +246,34 @@ const useStyles = makeStyles({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  gapProjectCell: {
-    fontSize: '13px',
-    color: tokens.colorNeutralForeground2,
+  gapCardMiddle: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
     overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    minWidth: 0,
+    padding: `0 ${tokens.spacingHorizontalM}`,
   },
-  gapNumCell: {
+  projChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    background: tokens.colorNeutralBackground3,
+    borderRadius: '4px',
+    padding: '2px 8px',
+    fontSize: '11px',
     fontFamily: 'monospace',
-    fontSize: '13px',
-    fontWeight: tokens.fontWeightSemibold,
-    textAlign: 'right',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
   },
-  gapChipCell: {
+  projChipDot: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: '11px',
+    flexShrink: 0,
+  },
+  gapCardRight: {
+    width: '80px',
+    flexShrink: 0,
     display: 'flex',
     justifyContent: 'flex-end',
     alignItems: 'center',
@@ -378,7 +385,7 @@ export function PMDashboard({ demandLines, supplyLines, projects, periods }: Pro
   }, [pd, ps]);
 
   // ── grouped gaps — one entry per employee, sorted worst-first ──
-  const { groupedGaps, totalGapRows, visibleGroups } = useMemo(() => {
+  const { groupedGaps, totalGapCount, visibleGroups } = useMemo(() => {
     const byResource = new Map<string, {
       name: string;
       initials: string | null;
@@ -426,21 +433,13 @@ export function PMDashboard({ demandLines, supplyLines, projects, periods }: Pro
           .sort((a, b) => a.gap - b.gap),
       }))
       .filter(emp => emp.projects.length > 0)
-      .map(emp => ({ ...emp, worstGap: emp.projects[0].gap }))
-      .sort((a, b) => a.worstGap - b.worstGap);
+      .map(emp => ({
+        ...emp,
+        totalGap: emp.projects.reduce((s, p) => s + p.gap, 0),
+      }))
+      .sort((a, b) => a.totalGap - b.totalGap);
 
-    const total = grouped.reduce((s, e) => s + e.projects.length, 0);
-
-    let count = 0;
-    const visible: typeof grouped = [];
-    for (const emp of grouped) {
-      if (count >= 8) break;
-      const projSlice = emp.projects.slice(0, 8 - count);
-      visible.push({ ...emp, projects: projSlice });
-      count += projSlice.length;
-    }
-
-    return { groupedGaps: grouped, totalGapRows: total, visibleGroups: visible };
+    return { groupedGaps: grouped, totalGapCount: grouped.length, visibleGroups: grouped.slice(0, 6) };
   }, [pd, ps]);
 
   // ── KPI values ──
@@ -583,11 +582,11 @@ export function PMDashboard({ demandLines, supplyLines, projects, periods }: Pro
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <span>Staffing Gaps</span>
-            {totalGapRows > 0 && (
-              <Badge color="danger" appearance="filled">{totalGapRows}</Badge>
+            {totalGapCount > 0 && (
+              <Badge color="danger" appearance="filled">{totalGapCount}</Badge>
             )}
             <span style={{ fontSize: '12px', fontWeight: 400, color: tokens.colorNeutralForeground3 }}>
-              Resources where demand exceeds supply on your projects
+              Resources where demand exceeds supply
             </span>
           </div>
         }
@@ -595,79 +594,55 @@ export function PMDashboard({ demandLines, supplyLines, projects, periods }: Pro
         {groupedGaps.length === 0 ? (
           <div className={styles.gapEmptyCard}>All resources fully staffed ✓</div>
         ) : (
-          <div className={styles.gapTableWrap}>
-            {/* Column headers */}
-            <div className={styles.gapTableHeader}>
-              <div className={styles.gapColHead}>Resource</div>
-              <div className={styles.gapColHead}>Project</div>
-              <div className={styles.gapColHead} style={{ textAlign: 'right' }}>Demand</div>
-              <div className={styles.gapColHead} style={{ textAlign: 'right' }}>Supply</div>
-              <div className={styles.gapColHead} style={{ textAlign: 'right' }}>Gap</div>
-            </div>
+          <div className={styles.gapCardList} style={{ margin: `-${tokens.spacingHorizontalL}` }}>
+            {visibleGroups.map((emp, ei) => {
+              const accentColor = emp.totalGap <= -50 ? '#c50f1f' : '#d97706';
+              return (
+                <div key={ei} className={styles.gapCard}>
+                  <div className={styles.gapCardAccent} style={{ background: accentColor }} />
 
-            {/* Employee groups */}
-            {visibleGroups.map((emp, ei) => (
-              <div key={ei} className={ei === 0 ? styles.gapGroupFirst : styles.gapGroup}>
-                {emp.projects.map((proj, pi) => (
-                  <div key={pi} className={styles.gapTableRow}>
-
-                    {/* Resource cell — avatar + name only on first sub-row */}
-                    {pi === 0 ? (
-                      <div className={styles.gapResourceCell}>
-                        <div
-                          className={styles.gapAvatar}
-                          style={{ background: avatarGapColor(emp.worstGap) }}
-                        >
-                          {emp.initials || initials(emp.name)}
-                        </div>
-                        <div style={{ minWidth: 0 }}>
-                          <div className={styles.gapResourceName}>{emp.name}</div>
-                          {emp.ccName && (
-                            <div className={styles.gapResourceSub}>{emp.ccName}</div>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div />
-                    )}
-
-                    {/* Project name — indented for sub-rows */}
-                    <div
-                      className={styles.gapProjectCell}
-                      style={pi > 0 ? { paddingLeft: '36px' } : undefined}
-                    >
-                      {proj.projectName}
+                  {/* Left: avatar + name + CC */}
+                  <div className={styles.gapCardLeft}>
+                    <div className={styles.gapAvatar} style={{ background: avatarGapColor(emp.totalGap) }}>
+                      {emp.initials || initials(emp.name)}
                     </div>
-
-                    {/* Demand */}
-                    <div className={styles.gapNumCell} style={{ color: '#d97706' }}>
-                      {Math.round(proj.demand)}%
+                    <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                      <div className={styles.gapResourceName}>{emp.name}</div>
+                      {emp.ccName && <div className={styles.gapResourceSub}>{emp.ccName}</div>}
                     </div>
-
-                    {/* Supply */}
-                    <div className={styles.gapNumCell} style={{ color: '#0d9488' }}>
-                      {Math.round(proj.supply)}%
-                    </div>
-
-                    {/* Gap chip */}
-                    <div className={styles.gapChipCell}>
-                      <GapChip gap={proj.gap} />
-                    </div>
-
                   </div>
-                ))}
-              </div>
-            ))}
+
+                  {/* Middle: project chips inline */}
+                  <div className={styles.gapCardMiddle}>
+                    {emp.projects.map((proj, pi) => (
+                      <span key={pi} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                        {pi > 0 && <span className={styles.projChipDot}>·</span>}
+                        <span className={styles.projChip}>
+                          <span style={{ color: tokens.colorNeutralForeground2, fontFamily: 'inherit' }}>{proj.projectName}</span>
+                          <span style={{ color: '#d97706' }}>D:{Math.round(proj.demand)}%</span>
+                          <span style={{ color: '#0d9488' }}>S:{Math.round(proj.supply)}%</span>
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Right: total gap chip */}
+                  <div className={styles.gapCardRight}>
+                    <GapChip gap={emp.totalGap} />
+                  </div>
+                </div>
+              );
+            })}
 
             {/* View all link */}
-            {totalGapRows > 8 && (
-              <div className={styles.gapViewAll}>
+            {totalGapCount > 6 && (
+              <div className={styles.gapViewAll} style={{ padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}` }}>
                 <Button
                   appearance="transparent"
                   size="small"
                   onClick={() => navigate('/resource-planning')}
                 >
-                  View all {totalGapRows} gaps →
+                  View all {totalGapCount} gaps →
                 </Button>
               </div>
             )}

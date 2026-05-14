@@ -142,7 +142,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
   const [selectedPeriodIds, setSelectedPeriodIds] = useState<Set<string>>(new Set());
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
-  const [showPlanned, setShowPlanned] = useState(true);
+  const showPlanned = true;
   const [showAllProjects, setShowAllProjects] = useState(false);
 
   // Sticky filter bar shadow detection
@@ -537,18 +537,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
           </Combobox>
         </div>
 
-        {/* Planned toggle */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={label11}>Planned</span>
-          <button onClick={() => setShowPlanned(v => !v)} style={{
-            padding: '5px 14px', fontSize: 13, borderRadius: 6, cursor: 'pointer',
-            border: `1px solid ${showPlanned ? C.accent : C.borderStrong}`,
-            background: showPlanned ? C.accentSoft : C.surface,
-            color: showPlanned ? C.accent : C.ink3, fontWeight: showPlanned ? 600 : 400,
-          }}>
-            {showPlanned ? '● On' : 'Off'}
-          </button>
-        </div>
+
 
         <div style={{ flex: 1 }} />
         <button onClick={clearAllFilters} style={{

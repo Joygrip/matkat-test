@@ -363,8 +363,9 @@ function nameInitials(name: string): string {
 function getOverallStatus(rows: FinanceActualRow[]): string {
   const statuses = rows.map(r => (r.approval_status ?? '').toUpperCase());
   if (statuses.some(s => s === 'REJECTED')) return 'REJECTED';
-  if (statuses.some(s => s === 'PENDING')) return 'PENDING';
   if (statuses.length > 0 && statuses.every(s => s === 'APPROVED')) return 'APPROVED';
+  if (statuses.some(s => s === 'APPROVED') && statuses.some(s => s === 'PENDING')) return 'PARTIAL';
+  if (statuses.some(s => s === 'PENDING')) return 'PENDING';
   return 'PENDING';
 }
 
@@ -398,43 +399,28 @@ function StatusBadge({ status }: { status: string }) {
 // ─── Actual vs Demand bar ─────────────────────────────────────────────────────
 
 function ActualDemandBar({ actual, demand }: { actual: number; demand: number }) {
-  // Scale so that the larger of actual or demand fills ~80% of the track,
-  // leaving headroom for over-delivery. Never compress below 100 as baseline.
-  const scale = Math.max(actual, demand, 100);
-  const demandW = demand > 0 ? Math.min(100, (demand / scale) * 100) : 0;
-  const actualW = actual > 0 ? Math.min(100, (actual / scale) * 100) : 0;
+  // Demand = 100% of track width; actual fills proportionally (capped at 100% visually).
+  const actualW = demand > 0 ? Math.min(100, (actual / demand) * 100) : 0;
 
-  const fillColor = demand === 0 ? C.ink3
-    : actual >= demand          ? C.good   // on/over plan → green
-    : actual >= demand * 0.75   ? C.warn   // within 25% short → amber
-    : C.bad;                               // significantly short → red
+  const fillColor = actual === 0 || demand === 0 ? C.ink3
+    : actual >= demand        ? C.good   // on/over plan → green
+    : actual >= demand * 0.75 ? C.warn   // within 25% short → amber
+    : C.bad;                             // significantly short → red
 
-  const label = demand > 0
-    ? `${actual}% of ${demand}%`
-    : `${actual}%`;
-  const pct = demand > 0 ? Math.round((actual / demand) * 100) : null;
+  // Left: "{actual}% of {demand}%"  Right: absolute actual value
+  const label = demand > 0 ? `${actual}% of ${demand}%` : `${actual}%`;
 
   return (
     <div style={{ minWidth: 140 }}>
-      {/* Text row */}
+      {/* Text row: left = "actual% of demand%", right = absolute actual */}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:5, fontSize:11, fontVariantNumeric:'tabular-nums' }}>
         <span style={{ color: C.ink3 }}>{label}</span>
-        {pct !== null && (
-          <span style={{ fontWeight:700, fontSize:11, color: fillColor }}>{pct}%</span>
+        {demand > 0 && (
+          <span style={{ fontWeight:700, fontSize:11, color: actual > 0 ? fillColor : C.ink3 }}>{actual}%</span>
         )}
       </div>
-      {/* Bar */}
-      <div style={{ height:10, background:'#f0efec', borderRadius:5, overflow:'hidden', position:'relative' }}>
-        {/* Demand zone — muted grey fill showing the target */}
-        {demandW > 0 && (
-          <div style={{
-            position:'absolute', left:0, top:0, bottom:0,
-            width:`${demandW}%`,
-            background: '#d6d4cf',
-            borderRadius:5,
-          }} />
-        )}
-        {/* Actual fill — colored, overlaid on demand zone */}
+      {/* Bar: grey track = demand at 100% width; colored fill = actual/demand */}
+      <div style={{ height:10, background:'#d6d4cf', borderRadius:5, overflow:'hidden', position:'relative' }}>
         {actualW > 0 && (
           <div style={{
             position:'absolute', left:0, top:0, bottom:0,
@@ -443,15 +429,6 @@ function ActualDemandBar({ actual, demand }: { actual: number; demand: number })
             borderRadius:5,
             opacity: 0.85,
             transition:'width 0.3s',
-          }} />
-        )}
-        {/* Demand target marker — prominent dark tick */}
-        {demandW > 0 && demandW < 99 && (
-          <div style={{
-            position:'absolute', top:0, bottom:0,
-            left:`calc(${demandW}% - 1px)`,
-            width:2,
-            background: C.ink2,
           }} />
         )}
       </div>
@@ -486,6 +463,7 @@ export function ActualsTab({
   const [approvalComment, setApprovalComment] = useState('');
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [localStatusOverrides, setLocalStatusOverrides] = useState<Map<string, string>>(new Map());
 
   // ── Proxy approve step 1 state (preserved exactly) ─────────────────────────
   const [proxyStep1Row, setProxyStep1Row] = useState<FinanceActualRow | null>(null);
@@ -576,6 +554,8 @@ export function ActualsTab({
           approvalComment.trim(),
         );
       }
+      const newStatus = approvalAction === 'approve' ? 'APPROVED' : 'REJECTED';
+      setLocalStatusOverrides(prev => { const next = new Map(prev); next.set(approvalDialogRow.actual_id, newStatus); return next; });
       closeApprovalDialog();
       onActualsReload?.();
     } catch (err: unknown) {
@@ -718,7 +698,17 @@ export function ActualsTab({
   const kpi = useMemo(() => {
     const totalWithDemand = empStats?.filter(s => s.demand_fte > 0).length ?? 0;
     const submitted = empStats?.filter(s => s.demand_fte > 0 && s.actuals_fte > 0).length ?? 0;
-    const missingCount = empStats?.filter(s => s.demand_fte > 0 && s.actuals_fte === 0).length ?? 0;
+    // An employee is "missing" only if they have ZERO actuals submissions at all.
+    // Use nameSet from actualsData (any submission = not missing) and deduplicate by name
+    // in case empStats has multiple rows per employee (one per demand line/project).
+    const submittedNames = new Set(actualsData.map(d => d.employee_name));
+    const missingCount = empStats
+      ? new Set(
+          empStats
+            .filter(s => s.demand_fte > 0 && s.actuals_fte === 0 && !submittedNames.has(s.employee_name))
+            .map(s => s.employee_name),
+        ).size
+      : 0;
     const pendingLines = actualsData.filter(d => (d.approval_status ?? '').toUpperCase() === 'PENDING');
     const rejectedLines = actualsData.filter(d => (d.approval_status ?? '').toUpperCase() === 'REJECTED');
     const approvedLines = actualsData.filter(d => (d.approval_status ?? '').toUpperCase() === 'APPROVED');
@@ -1006,14 +996,14 @@ export function ActualsTab({
             <tbody>
               {sortedGroups.map(group => {
                 const stat = empStatsByName.get(group.employee_name);
-                const actual = group.isMissingOnly ? 0 : (stat?.actuals_fte ?? group.rows.reduce((s, r) => s + r.fte_percent, 0));
+                const actual = group.isMissingOnly ? 0 : group.rows.reduce((s, r) => s + r.fte_percent, 0);
                 const demand = stat?.demand_fte ?? 0;
                 const gap = actual - demand;
-                const overallStatus = group.isMissingOnly ? 'MISSING' : getOverallStatus(group.rows);
+                const overallStatus = group.isMissingOnly ? 'MISSING' : getOverallStatus(
+                  group.rows.map(r => ({ ...r, approval_status: localStatusOverrides.get(r.actual_id) ?? r.approval_status }))
+                );
                 const isExpanded = expandedRows.has(group.employee_name);
                 const isHovered = hoveredRow === group.employee_name;
-                const firstPending = group.rows.find(r => r.can_action);
-                const firstProxy = group.rows.find(r => r.can_proxy_approve_step1 && r.approval_instance_id && r.step1_id);
                 const firstProject = group.rows[0] ?? null;
                 // For missing-only employees, derive project name from empStats
                 const firstProjectName = firstProject?.project_name
@@ -1123,39 +1113,11 @@ export function ActualsTab({
                       })()}
                     </td>
 
-                    {/* Actions (shown on hover) */}
+                    {/* Actions — expand row to action individual lines */}
                     <td className={styles.td}>
-                      <div style={{ display:'flex', gap:4, opacity: isHovered ? 1 : 0, transition:'opacity 0.15s' }}>
-                        {firstPending && (
-                          <>
-                            <Button
-                              icon={<CheckmarkCircle24Regular />}
-                              appearance="primary"
-                              size="small"
-                              title="Approve"
-                              style={{ background: C.good, border:'none', minWidth:0, padding:'0 8px' }}
-                              onClick={e => { e.stopPropagation(); openApprovalDialog(firstPending, 'approve'); }}
-                            />
-                            <Button
-                              icon={<DismissCircle24Regular />}
-                              appearance="outline"
-                              size="small"
-                              title="Reject"
-                              style={{ color: C.bad, borderColor: C.bad, minWidth:0, padding:'0 8px' }}
-                              onClick={e => { e.stopPropagation(); openApprovalDialog(firstPending, 'reject'); }}
-                            />
-                          </>
-                        )}
-                        {firstProxy && (
-                          <Button
-                            icon={<ArrowForward24Regular />}
-                            appearance="subtle"
-                            size="small"
-                            title="Proxy approve step 1"
-                            onClick={e => { e.stopPropagation(); setProxyStep1Row(firstProxy); setProxyStep1Comment(''); setProxyStep1Error(null); }}
-                          />
-                        )}
-                      </div>
+                      <span style={{ fontSize:11, color:C.ink3, opacity: isHovered ? 1 : 0, transition:'opacity 0.15s', whiteSpace:'nowrap' }}>
+                        ▶ expand to action
+                      </span>
                     </td>
                   </tr>,
 
@@ -1232,13 +1194,13 @@ export function ActualsTab({
                                   const rowGap = sr.rowActual - sr.rowDemand;
                                   const maxAlloc = Math.max(sr.rowDemand, sr.rowActual, 100);
                                   const allocBarW = maxAlloc > 0 ? Math.min(100, (sr.rowDemand / maxAlloc) * 100) : 0;
-                                  const rowCanAction = sr.row && sr.row.approval_status?.toUpperCase() === 'PENDING' && sr.row.approval_instance_id && sr.row.current_step_id && sr.row.can_action;
+                                  const effectiveRowStatus = sr.row ? (localStatusOverrides.get(sr.row.actual_id) ?? sr.row.approval_status) : null;
+                                  const rowCanAction = sr.row && effectiveRowStatus?.toUpperCase() === 'PENDING' && sr.row.approval_instance_id && sr.row.current_step_id && sr.row.can_action;
 
                                   return (
                                     <tr key={sr.key} style={{ background: C.surface, borderBottom: `1px solid ${C.line}` }}>
                                       <td style={{ padding:'10px 12px 10px 52px', verticalAlign:'middle' }}>
                                         <div style={{ fontWeight:600, color:C.ink }}>{sr.projectName}</div>
-                                        {sr.costCenterName && <div style={{ fontSize:11, color:C.ink3 }}>{sr.costCenterName}</div>}
                                       </td>
                                       <td style={{ padding:'10px 12px', verticalAlign:'middle' }}>
                                         <div style={{ flex:1, height:5, background:C.line, borderRadius:3, minWidth:80 }}>
@@ -1258,7 +1220,7 @@ export function ActualsTab({
                                         {sr.rowDemand > 0 ? (rowGap >= 0 ? `+${rowGap}%` : `${rowGap}%`) : '—'}
                                       </td>
                                       <td style={{ padding:'10px 12px', verticalAlign:'middle' }}>
-                                        <StatusBadge status={sr.row ? sr.row.approval_status : 'MISSING'} />
+                                        <StatusBadge status={sr.row ? (localStatusOverrides.get(sr.row.actual_id) ?? sr.row.approval_status) : 'MISSING'} />
                                       </td>
                                       <td style={{ padding:'10px 12px', verticalAlign:'middle' }}>
                                         {sr.row && (

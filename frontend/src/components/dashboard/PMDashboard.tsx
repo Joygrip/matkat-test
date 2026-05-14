@@ -32,13 +32,6 @@ const SEV_ACCENT: Record<Sev, string> = {
   bad:  '#c50f1f',
 };
 
-function avatarColor(name: string): string {
-  const COLORS = ['#0078d4', '#107c10', '#d13438', '#ff8c00', '#8764b8', '#00b294', '#ca5010'];
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) & 0x7fffffff;
-  return COLORS[h % COLORS.length];
-}
-
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
   return parts.length >= 2
@@ -46,20 +39,22 @@ function initials(name: string): string {
     : name.slice(0, 2).toUpperCase();
 }
 
+function avatarGapColor(worstGap: number): string {
+  return worstGap <= -50 ? '#c50f1f' : '#d97706';
+}
+
 function GapChip({ gap }: { gap: number }) {
-  const sev = getSev(gap);
-  const BG: Record<Sev, string> = { good: '#e8f5e9', warn: '#fff8e1', bad: '#ffebee' };
-  const FG: Record<Sev, string> = { good: '#1b5e20', warn: '#e65100', bad: '#b71c1c' };
+  const bg = gap >= 0 ? '#e8f5e9' : gap > -50 ? '#fbe8cf' : '#f6dad7';
+  const fg = gap >= 0 ? '#1b5e20' : gap > -50 ? '#9a5b00' : '#a32f2a';
   return (
     <span style={{
       display: 'inline-flex',
-      width: 'auto',
       padding: '2px 8px',
       borderRadius: '4px',
       fontSize: '12px',
       fontWeight: 600,
-      background: BG[sev],
-      color: FG[sev],
+      background: bg,
+      color: fg,
       whiteSpace: 'nowrap',
       alignSelf: 'center',
     }}>
@@ -191,45 +186,59 @@ const useStyles = makeStyles({
     justifyContent: 'flex-end',
     marginTop: tokens.spacingVerticalXXS,
   },
-  // Worst Gaps section
-  sectionTitle: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
+  // Staffing Gaps section
+  gapTableWrap: {
+    width: '100%',
   },
-  gapList: {
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  gapRow: {
+  gapTableHeader: {
     display: 'grid',
-    gridTemplateColumns: 'minmax(180px, 1.2fr) 1fr auto',
+    gridTemplateColumns: '2fr 2fr 70px 70px 90px',
+    gap: tokens.spacingHorizontalS,
+    paddingBottom: '8px',
+    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+    marginBottom: '2px',
+  },
+  gapColHead: {
+    fontSize: '10px',
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  gapGroup: {
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  gapGroupFirst: {
+    borderTop: 'none',
+  },
+  gapTableRow: {
+    display: 'grid',
+    gridTemplateColumns: '2fr 2fr 70px 70px 90px',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    padding: `${tokens.spacingVerticalS} 0`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    '&:last-child': { borderBottom: 'none' },
+    minHeight: '36px',
+    gap: tokens.spacingHorizontalS,
   },
   gapResourceCell: {
     display: 'flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
+    gap: '8px',
     minWidth: 0,
+    overflow: 'hidden',
   },
-  avatar: {
-    width: '32px',
-    height: '32px',
+  gapAvatar: {
+    width: '28px',
+    height: '28px',
     borderRadius: '50%',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '12px',
+    fontSize: '11px',
     fontWeight: tokens.fontWeightSemibold,
     color: '#fff',
     flexShrink: 0,
   },
   gapResourceName: {
-    fontSize: tokens.fontSizeBase300,
+    fontSize: '13px',
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
     overflow: 'hidden',
@@ -243,20 +252,41 @@ const useStyles = makeStyles({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  gapBarCell: {
+  gapProjectCell: {
+    fontSize: '13px',
+    color: tokens.colorNeutralForeground2,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+  },
+  gapNumCell: {
+    fontFamily: 'monospace',
+    fontSize: '13px',
+    fontWeight: tokens.fontWeightSemibold,
+    textAlign: 'right',
+  },
+  gapChipCell: {
     display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
   },
-  gapBarLegend: {
-    fontSize: '10px',
-    color: tokens.colorNeutralForeground3,
+  gapViewAll: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    paddingTop: tokens.spacingVerticalS,
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+    marginTop: '2px',
   },
-  emptySuccess: {
+  gapEmptyCard: {
+    background: '#f0faf0',
+    border: '1px solid #c8e6c9',
+    borderRadius: '8px',
+    padding: '16px',
     textAlign: 'center',
-    color: tokens.colorPaletteGreenForeground2,
-    padding: `${tokens.spacingVerticalXL} 0`,
+    color: '#1b5e20',
     fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightMedium,
   },
   financeSubtitle: {
     fontSize: '12px',
@@ -318,7 +348,7 @@ export function PMDashboard({ demandLines, supplyLines, projects, periods }: Pro
     }).sort((a, b) => a.gap - b.gap);
   }, [projects, myProjectIds, pd, ps]);
 
-  // ── resource-project gaps (for worst gaps + KPIs) ──
+  // ── resource-project gaps (for KPIs) ──
   const resourceGaps = useMemo(() => {
     const map = new Map<string, {
       name: string; initials: string | null; ccName: string; projectName: string; demand: number; supply: number;
@@ -347,6 +377,72 @@ export function PMDashboard({ demandLines, supplyLines, projects, periods }: Pro
     return Array.from(map.values()).map(r => ({ ...r, gap: r.supply - r.demand }));
   }, [pd, ps]);
 
+  // ── grouped gaps — one entry per employee, sorted worst-first ──
+  const { groupedGaps, totalGapRows, visibleGroups } = useMemo(() => {
+    const byResource = new Map<string, {
+      name: string;
+      initials: string | null;
+      ccName: string;
+      projects: Map<string, { projectName: string; demand: number; supply: number }>;
+    }>();
+
+    pd.filter(d => d.resource_id).forEach(d => {
+      if (!byResource.has(d.resource_id!)) {
+        byResource.set(d.resource_id!, {
+          name: d.resource_name ?? d.resource_id!,
+          initials: d.resource_initials ?? null,
+          ccName: d.cost_center_name ?? '',
+          projects: new Map(),
+        });
+      }
+      const emp = byResource.get(d.resource_id!)!;
+      const existing = emp.projects.get(d.project_id);
+      if (existing) {
+        existing.demand += d.fte_percent;
+      } else {
+        emp.projects.set(d.project_id, {
+          projectName: d.project_name ?? d.project_id,
+          demand: d.fte_percent,
+          supply: 0,
+        });
+      }
+    });
+
+    ps.filter(s => s.resource_id && s.project_id).forEach(s => {
+      const emp = byResource.get(s.resource_id!);
+      if (!emp) return;
+      const proj = emp.projects.get(s.project_id!);
+      if (proj) proj.supply += s.fte_percent;
+    });
+
+    const grouped = Array.from(byResource.values())
+      .map(emp => ({
+        name: emp.name,
+        initials: emp.initials,
+        ccName: emp.ccName,
+        projects: Array.from(emp.projects.values())
+          .map(p => ({ ...p, gap: p.supply - p.demand }))
+          .filter(p => p.gap < -0.1)
+          .sort((a, b) => a.gap - b.gap),
+      }))
+      .filter(emp => emp.projects.length > 0)
+      .map(emp => ({ ...emp, worstGap: emp.projects[0].gap }))
+      .sort((a, b) => a.worstGap - b.worstGap);
+
+    const total = grouped.reduce((s, e) => s + e.projects.length, 0);
+
+    let count = 0;
+    const visible: typeof grouped = [];
+    for (const emp of grouped) {
+      if (count >= 8) break;
+      const projSlice = emp.projects.slice(0, 8 - count);
+      visible.push({ ...emp, projects: projSlice });
+      count += projSlice.length;
+    }
+
+    return { groupedGaps: grouped, totalGapRows: total, visibleGroups: visible };
+  }, [pd, ps]);
+
   // ── KPI values ──
   const totalDemand = useMemo(() => pd.reduce((s, d) => s + d.fte_percent, 0), [pd]);
   const totalSupply = useMemo(() => ps.reduce((s, ln) => s + ln.fte_percent, 0), [ps]);
@@ -361,8 +457,6 @@ export function PMDashboard({ demandLines, supplyLines, projects, periods }: Pro
     () => new Set(pd.filter(d => d.cost_center_id).map(d => d.cost_center_id!)).size,
     [pd],
   );
-  const balancedResources = resourceGaps.filter(r => r.gap >= 0).length;
-  const totalR            = resourceGaps.length || 1;
 
   const onTrack  = projectRows.filter(r => r.gap >= 0).length;
   const atRisk   = projectRows.filter(r => r.gap < -0.1 && r.gap >= -20).length;
@@ -409,11 +503,6 @@ export function PMDashboard({ demandLines, supplyLines, projects, periods }: Pro
       subtitle: `across ${uniqueCostCenters} cost center${uniqueCostCenters !== 1 ? 's' : ''}`,
     },
   ];
-
-  const worstGaps = useMemo(
-    () => resourceGaps.filter(r => r.gap < -0.1).sort((a, b) => a.gap - b.gap).slice(0, 8),
-    [resourceGaps],
-  );
 
   const userProjectIds = useMemo(() => projects.map(p => p.id), [projects]);
 
@@ -489,52 +578,99 @@ export function PMDashboard({ demandLines, supplyLines, projects, periods }: Pro
         )}
       </DashboardSection>
 
-      {/* ── Section 3: Worst Gaps ── */}
+      {/* ── Section 3: Staffing Gaps ── */}
       <DashboardSection
         title={
-          <span className={styles.sectionTitle}>
-            Worst Gaps
-            {worstGaps.length > 0 && (
-              <Badge color="danger" appearance="filled">{worstGaps.length}</Badge>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span>Staffing Gaps</span>
+            {totalGapRows > 0 && (
+              <Badge color="danger" appearance="filled">{totalGapRows}</Badge>
             )}
-          </span>
+            <span style={{ fontSize: '12px', fontWeight: 400, color: tokens.colorNeutralForeground3 }}>
+              Resources where demand exceeds supply on your projects
+            </span>
+          </div>
         }
       >
-        {worstGaps.length === 0 ? (
-          <div className={styles.emptySuccess}>All resources fully staffed ✓</div>
+        {groupedGaps.length === 0 ? (
+          <div className={styles.gapEmptyCard}>All resources fully staffed ✓</div>
         ) : (
-          <div className={styles.gapList}>
-            {worstGaps.map((r, i) => {
-              const sev = getSev(r.gap);
-              const color = avatarColor(r.name);
-              return (
-                <div key={i} className={styles.gapRow}>
-                  <div className={styles.gapResourceCell}>
-                    <div
-                      className={styles.avatar}
-                      style={{ background: color }}
-                    >
-                      {r.initials || initials(r.name)}
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div className={styles.gapResourceName}>{r.name}</div>
-                      <div className={styles.gapResourceSub}>
-                        {[r.ccName, r.projectName].filter(Boolean).join(' · ')}
+          <div className={styles.gapTableWrap}>
+            {/* Column headers */}
+            <div className={styles.gapTableHeader}>
+              <div className={styles.gapColHead}>Resource</div>
+              <div className={styles.gapColHead}>Project</div>
+              <div className={styles.gapColHead} style={{ textAlign: 'right' }}>Demand</div>
+              <div className={styles.gapColHead} style={{ textAlign: 'right' }}>Supply</div>
+              <div className={styles.gapColHead} style={{ textAlign: 'right' }}>Gap</div>
+            </div>
+
+            {/* Employee groups */}
+            {visibleGroups.map((emp, ei) => (
+              <div key={ei} className={ei === 0 ? styles.gapGroupFirst : styles.gapGroup}>
+                {emp.projects.map((proj, pi) => (
+                  <div key={pi} className={styles.gapTableRow}>
+
+                    {/* Resource cell — avatar + name only on first sub-row */}
+                    {pi === 0 ? (
+                      <div className={styles.gapResourceCell}>
+                        <div
+                          className={styles.gapAvatar}
+                          style={{ background: avatarGapColor(emp.worstGap) }}
+                        >
+                          {emp.initials || initials(emp.name)}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div className={styles.gapResourceName}>{emp.name}</div>
+                          {emp.ccName && (
+                            <div className={styles.gapResourceSub}>{emp.ccName}</div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </div>
+                    ) : (
+                      <div />
+                    )}
 
-                  <div className={styles.gapBarCell}>
-                    <AllocationBar demand={r.demand} supply={r.supply} sev={sev} />
-                    <div className={styles.gapBarLegend}>
-                      D {Math.round(r.demand * 10) / 10}% · S {Math.round(r.supply * 10) / 10}%
+                    {/* Project name — indented for sub-rows */}
+                    <div
+                      className={styles.gapProjectCell}
+                      style={pi > 0 ? { paddingLeft: '36px' } : undefined}
+                    >
+                      {proj.projectName}
                     </div>
-                  </div>
 
-                  <GapChip gap={r.gap} />
-                </div>
-              );
-            })}
+                    {/* Demand */}
+                    <div className={styles.gapNumCell} style={{ color: '#d97706' }}>
+                      {Math.round(proj.demand)}%
+                    </div>
+
+                    {/* Supply */}
+                    <div className={styles.gapNumCell} style={{ color: '#0d9488' }}>
+                      {Math.round(proj.supply)}%
+                    </div>
+
+                    {/* Gap chip */}
+                    <div className={styles.gapChipCell}>
+                      <GapChip gap={proj.gap} />
+                    </div>
+
+                  </div>
+                ))}
+              </div>
+            ))}
+
+            {/* View all link */}
+            {totalGapRows > 8 && (
+              <div className={styles.gapViewAll}>
+                <Button
+                  appearance="transparent"
+                  size="small"
+                  onClick={() => navigate('/resource-planning')}
+                >
+                  View all {totalGapRows} gaps →
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </DashboardSection>

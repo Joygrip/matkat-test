@@ -140,11 +140,7 @@ export const Finance: React.FC = () => {
             {(canSeeStats || isPM) && <Tab value="costoverview">Cost Overview</Tab>}
             {canSeeProjectCosts && <Tab value="projectcosts">OoP + Equipment</Tab>}
           </TabList>
-          <span className={styles.toolbarMeta}>
-            {latestSnapshot
-              ? `Last snapshot: ${new Date(latestSnapshot.published_at).toLocaleDateString()}`
-              : 'No snapshots yet'}
-          </span>
+
         </div>
       </div>
 
@@ -155,9 +151,6 @@ export const Finance: React.FC = () => {
       )}
       {activeTab === 'costoverview' && (canSeeStats || isPM) && (
         <>
-          <MessageBar intent="info" style={{ marginBottom: 12 }}>
-            <MessageBarBody>Cost figures reflect fully approved actuals only. Pending or rejected actuals are excluded.</MessageBarBody>
-          </MessageBar>
           <ConsolidatedCostChart latestSnapshot={latestSnapshot} />
         </>
       )}

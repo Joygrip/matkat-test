@@ -104,6 +104,8 @@ async def consolidated_cost_detail(
 async def consolidated_costs(
     project_id: Optional[str] = Query(None),
     cost_center_id: Optional[str] = Query(None),
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM,
@@ -113,11 +115,12 @@ async def consolidated_costs(
     """
     Aggregate planned labor, actual labor, external contractor, and equipment costs
     per project per period. Filterable by project and/or cost center.
+    When year+month are provided, returns data for that specific period regardless of lock status.
     PM role is restricted to their own projects.
     Accessible to: Admin, Finance, PM, Director, RO
     """
     service = FinanceService(db, current_user)
-    return service.get_consolidated_costs(project_id, cost_center_id)
+    return service.get_consolidated_costs(project_id, cost_center_id, year=year, month=month)
 
 
 @router.get("/settings/{key}", response_model=FinanceSettingResponse)

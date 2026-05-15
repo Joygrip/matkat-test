@@ -83,10 +83,14 @@ export interface ConsolidatedCostResponse {
 export async function getConsolidatedCosts(params?: {
   project_id?: string;
   cost_center_id?: string;
+  year?: number;
+  month?: number;
 }): Promise<ConsolidatedCostResponse> {
   const query = new URLSearchParams();
   if (params?.project_id) query.append('project_id', params.project_id);
   if (params?.cost_center_id) query.append('cost_center_id', params.cost_center_id);
+  if (params?.year != null) query.append('year', String(params.year));
+  if (params?.month != null) query.append('month', String(params.month));
   const qs = query.toString();
   return apiClient.get<ConsolidatedCostResponse>(`/finance/consolidated-costs${qs ? `?${qs}` : ''}`);
 }

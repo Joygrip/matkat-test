@@ -138,6 +138,10 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
   const [rawData, setRawData] = useState<ConsolidatedCostRow[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // Locked period lazy-fetch cache: "year-month" → rows
+  const lockedCacheRef = useRef(new Map<string, ConsolidatedCostRow[]>());
+  const [lockedRawData, setLockedRawData] = useState<ConsolidatedCostRow[]>([]);
+
   // Filters
   const [selectedPeriodIds, setSelectedPeriodIds] = useState<Set<string>>(new Set());
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -178,6 +182,27 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
       .finally(() => setLoading(false));
   }, []);
 
+  // Lazily fetch data for a selected locked period and cache it
+  useEffect(() => {
+    const lockedPeriod = periods.find(p => selectedPeriodIds.has(p.id) && p.status !== 'open');
+    if (!lockedPeriod) {
+      setLockedRawData([]);
+      return;
+    }
+    const key = `${lockedPeriod.year}-${lockedPeriod.month}`;
+    const cached = lockedCacheRef.current.get(key);
+    if (cached) {
+      setLockedRawData(cached);
+      return;
+    }
+    getConsolidatedCosts({ year: lockedPeriod.year, month: lockedPeriod.month })
+      .then(res => {
+        lockedCacheRef.current.set(key, res.data);
+        setLockedRawData(res.data);
+      })
+      .catch(() => setLockedRawData([]));
+  }, [selectedPeriodIds, periods]);
+
 
   useEffect(() => {
     if (!drawer) return;
@@ -186,6 +211,9 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     return () => window.removeEventListener('keydown', handler);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawer]);
+
+  // Merge open-period base data with any fetched locked-period data
+  const allRawData = useMemo(() => [...rawData, ...lockedRawData], [rawData, lockedRawData]);
 
   // ── Period helpers ────────────────────────────────────────────────────────────
 
@@ -205,49 +233,49 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
 
   const clearAllFilters = () => {
     setSelectedPeriodIds(new Set());
-    setSelectedProjectId(null); setSelectedCostCenterId(null);
-    setShowPlanned(true);
+    setSelectedProjectId(null);
+    setSelectedCostCenterId(null);
   };
 
   // ── Derived data ─────────────────────────────────────────────────────────────
 
   const ccNameToId = useMemo(() => {
     const m = new Map<string, string>();
-    rawData.forEach(r => { if (r.cost_center_id && r.cost_center_name) m.set(r.cost_center_name, r.cost_center_id); });
+    allRawData.forEach(r => { if (r.cost_center_id && r.cost_center_name) m.set(r.cost_center_name, r.cost_center_id); });
     return m;
-  }, [rawData]);
+  }, [allRawData]);
 
   const projectOptions = useMemo(() => {
     const seen = new Set<string>();
     const result: { id: string; name: string }[] = [];
-    rawData.forEach(r => {
+    allRawData.forEach(r => {
       if (!seen.has(r.project_id)) {
         seen.add(r.project_id);
         result.push({ id: r.project_id, name: r.project_name });
       }
     });
     return result.sort((a, b) => a.name.localeCompare(b.name));
-  }, [rawData]);
+  }, [allRawData]);
 
   const costCenterOptions = useMemo(() => {
     const seen = new Set<string>();
     const result: { id: string; name: string }[] = [];
-    rawData.forEach(r => {
+    allRawData.forEach(r => {
       if (r.cost_center_id && !seen.has(r.cost_center_id)) {
         seen.add(r.cost_center_id);
         result.push({ id: r.cost_center_id, name: r.cost_center_name ?? '' });
       }
     });
     return result.sort((a, b) => a.name.localeCompare(b.name));
-  }, [rawData]);
+  }, [allRawData]);
 
   const filteredData = useMemo(() => {
-    let d = rawData;
+    let d = allRawData;
     if (selectedYearMonths) d = d.filter(r => selectedYearMonths.has(`${r.year}-${r.month}`));
     if (selectedProjectId) d = d.filter(r => r.project_id === selectedProjectId);
     if (selectedCostCenterId) d = d.filter(r => r.cost_center_id === selectedCostCenterId);
     return d;
-  }, [rawData, selectedYearMonths, selectedProjectId, selectedCostCenterId]);
+  }, [allRawData, selectedYearMonths, selectedProjectId, selectedCostCenterId]);
 
   const sortedMonths = useMemo(() => {
     const map = new Map<string, { year: number; month: number }>();
@@ -276,7 +304,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
       while (m <= 0) { m += 12; y--; }
       prevIds.push(`${y}-${m}`);
     }
-    let prev = rawData.filter(r => prevIds.includes(`${r.year}-${r.month}`));
+    let prev = allRawData.filter(r => prevIds.includes(`${r.year}-${r.month}`));
     if (selectedProjectId) prev = prev.filter(r => r.project_id === selectedProjectId);
     if (selectedCostCenterId) prev = prev.filter(r => r.cost_center_id === selectedCostCenterId);
     if (prev.length === 0) return null;
@@ -286,7 +314,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
       oop: prev.reduce((s, r) => s + r.externals_cost, 0),
       equipment: prev.reduce((s, r) => s + r.equipment_cost, 0),
     };
-  }, [rawData, selectedPeriodIds, openPeriods, selectedProjectId, selectedCostCenterId]);
+  }, [allRawData, selectedPeriodIds, periods, selectedProjectId, selectedCostCenterId]);
 
   // projectRows: total and monthlyTotals use Planned + OoP + Equipment only (not Actual)
   const projectRows = useMemo((): EntityRow[] => {

@@ -981,6 +981,8 @@ class FinanceService:
         self,
         project_id: Optional[str] = None,
         cost_center_id: Optional[str] = None,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
     ) -> ConsolidatedCostResponse:
         """Aggregate planned labor, actual labor, externals, and equipment costs per project/period."""
         from collections import defaultdict
@@ -993,15 +995,16 @@ class FinanceService:
         setting = self.get_setting("monthly_fte_cost")
         monthly_fte_cost = int(setting.setting_value)
 
-        # 2. Load only open (unlocked) periods for this tenant
-        all_periods = (
-            self.db.query(Period)
-            .filter(
-                Period.tenant_id == self.current_user.tenant_id,
-                Period.status == PeriodStatus.OPEN,
-            )
-            .all()
+        # 2. Load periods — specific month when year+month provided (allows locked periods),
+        #    otherwise only open periods for the default aggregated view.
+        period_q = self.db.query(Period).filter(
+            Period.tenant_id == self.current_user.tenant_id,
         )
+        if year is not None and month is not None:
+            period_q = period_q.filter(Period.year == year, Period.month == month)
+        else:
+            period_q = period_q.filter(Period.status == PeriodStatus.OPEN)
+        all_periods = period_q.all()
         period_ids = [p.id for p in all_periods]
         period_map = {p.id: (p.year, p.month) for p in all_periods}
 

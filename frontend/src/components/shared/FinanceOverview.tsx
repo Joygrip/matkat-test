@@ -187,8 +187,15 @@ export function FinanceOverview({
     return ids;
   }, [scope, scopedDashboard, costCenterId]);
 
-  const handleDashboardChanged = () => {
-    if (localPeriodId) fetchDashboard(localPeriodId);
+  // Silent background refresh after a line edit/add/delete — does NOT set loading=true
+  // so OverviewTab stays rendered and the modal stays open without a flash.
+  const handleDashboardChanged = async () => {
+    if (!localPeriodId) return;
+    try {
+      const data = await consolidationApi.getDashboard(localPeriodId);
+      setDashboard(data);
+      onDashboardLoaded?.(data);
+    } catch { /* best-effort; the optimistic UI already reflects the change */ }
   };
 
   return (

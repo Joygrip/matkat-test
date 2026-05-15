@@ -74,7 +74,7 @@ def _run_sync_background(sync_type: str, tenant_id: str) -> None:
 
 from api.app.models.core import (
     UserRole, User, CostCenter, Project, ProjectPM, Resource, Placeholder, Holiday, Settings,
-    ApprovalDelegate,
+    ApprovalDelegate, ManagerOverride,
 )
 from api.app.schemas.admin import (
     CostCenterCreate, CostCenterUpdate, CostCenterResponse,
@@ -175,7 +175,106 @@ async def update_cost_center(
     db.commit()
     db.refresh(cc)
     log_audit(db, current_user, "update", "CostCenter", cc.id, old_values=old_values, new_values=update_data)
+
+    # Auto-sync Manager Overrides when CC manager/director changes
+    if "ro_user_id" in update_data and update_data["ro_user_id"] != old_values.get("ro_user_id"):
+        _sync_cc_manager_overrides(db, cc, current_user)
+
+    if "director_user_id" in update_data and update_data["director_user_id"] != old_values.get("director_user_id"):
+        _sync_cc_director_override(db, cc, current_user)
+
     return cc
+
+
+def _sync_cc_manager_overrides(db: Session, cc: CostCenter, current_user: CurrentUser) -> None:
+    """Create/update ManagerOverrides for all resources in cc when ro_user_id changes."""
+    new_ro_user = db.query(User).filter(User.id == cc.ro_user_id).first() if cc.ro_user_id else None
+
+    resources = db.query(Resource).filter(
+        and_(Resource.cost_center_id == cc.id, Resource.user_id != None, Resource.is_active == True)
+    ).all()
+
+    changed = 0
+    for resource in resources:
+        if resource.user is None:
+            continue
+        emp_oid = resource.user.object_id
+
+        # Skip self-approval
+        if new_ro_user and emp_oid == new_ro_user.object_id:
+            continue
+
+        existing = db.query(ManagerOverride).filter(
+            and_(
+                ManagerOverride.tenant_id == current_user.tenant_id,
+                ManagerOverride.employee_object_id == emp_oid,
+            )
+        ).first()
+
+        if new_ro_user is None:
+            # Deactivate auto-overrides only (leave manually created ones intact)
+            if existing and existing.note and existing.note.startswith("Auto (from CC:"):
+                existing.is_active = False
+                changed += 1
+        else:
+            if existing:
+                existing.manager_object_id = new_ro_user.object_id
+                existing.is_active = True
+                existing.note = f"Auto (from CC: {cc.name})"
+            else:
+                db.add(ManagerOverride(
+                    tenant_id=current_user.tenant_id,
+                    employee_object_id=emp_oid,
+                    manager_object_id=new_ro_user.object_id,
+                    is_active=True,
+                    note=f"Auto (from CC: {cc.name})",
+                    created_by=current_user.object_id,
+                ))
+            changed += 1
+
+    db.commit()
+    log_audit(db, current_user, "auto_override_from_cc_manager_change", "CostCenter", cc.id,
+              new_values={"ro_user_id": cc.ro_user_id, "overrides_synced": changed})
+
+
+def _sync_cc_director_override(db: Session, cc: CostCenter, current_user: CurrentUser) -> None:
+    """Create/update ManagerOverride for the CC Manager/RO when director_user_id changes."""
+    if not cc.ro_user_id:
+        return
+
+    ro_user = db.query(User).filter(User.id == cc.ro_user_id).first()
+    new_director = db.query(User).filter(User.id == cc.director_user_id).first() if cc.director_user_id else None
+
+    if not ro_user:
+        return
+
+    if new_director is None or ro_user.object_id == new_director.object_id:
+        return
+
+    existing = db.query(ManagerOverride).filter(
+        and_(
+            ManagerOverride.tenant_id == current_user.tenant_id,
+            ManagerOverride.employee_object_id == ro_user.object_id,
+        )
+    ).first()
+
+    if existing:
+        existing.manager_object_id = new_director.object_id
+        existing.is_active = True
+        existing.note = f"Auto (from CC: {cc.name})"
+    else:
+        db.add(ManagerOverride(
+            tenant_id=current_user.tenant_id,
+            employee_object_id=ro_user.object_id,
+            manager_object_id=new_director.object_id,
+            is_active=True,
+            note=f"Auto (from CC: {cc.name})",
+            created_by=current_user.object_id,
+        ))
+
+    db.commit()
+    log_audit(db, current_user, "auto_override_from_cc_manager_change", "CostCenter", cc.id,
+              new_values={"director_user_id": cc.director_user_id, "ro_user_id": cc.ro_user_id})
 
 
 @router.delete("/cost-centers/{cost_center_id}")

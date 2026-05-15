@@ -176,11 +176,13 @@ async def update_cost_center(
     db.refresh(cc)
     log_audit(db, current_user, "update", "CostCenter", cc.id, old_values=old_values, new_values=update_data)
 
-    # Auto-sync Manager Overrides when CC manager/director changes
+    # Auto-sync Manager Overrides when CC manager/director changes.
+    # When manager changes: sync employee→manager overrides AND manager→director override.
+    # When only director changes: sync just the manager→director override.
     if "ro_user_id" in update_data and update_data["ro_user_id"] != old_values.get("ro_user_id"):
         _sync_cc_manager_overrides(db, cc, current_user)
-
-    if "director_user_id" in update_data and update_data["director_user_id"] != old_values.get("director_user_id"):
+        _sync_cc_director_override(db, cc, current_user)
+    elif "director_user_id" in update_data and update_data["director_user_id"] != old_values.get("director_user_id"):
         _sync_cc_director_override(db, cc, current_user)
 
     return cc

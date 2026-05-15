@@ -365,14 +365,19 @@ export function EmployeeView({ periods }: Props) {
   }, [myDemandLines, myActuals, earliestPeriod]);
 
   const approvalStats = useMemo(() => {
-    const statuses = Object.values(myApprovalStatuses);
+    const currentPeriodActualIds = new Set(
+      myActuals.filter(a => earliestPeriod && a.period_id === earliestPeriod.id).map(a => a.id)
+    );
+    const statuses = Object.entries(myApprovalStatuses)
+      .filter(([id]) => currentPeriodActualIds.has(id))
+      .map(([, s]) => s);
     return {
       approved: statuses.filter(s => s.status === 'approved').length,
       pending:  statuses.filter(s => s.status === 'pending').length,
       rejected: statuses.filter(s => s.status === 'rejected').length,
       total:    statuses.length,
     };
-  }, [myApprovalStatuses]);
+  }, [myApprovalStatuses, myActuals, earliestPeriod]);
 
   const gap = Math.round((myDemandThisPeriod - mySupplyThisPeriod) * 10) / 10;
 
@@ -417,7 +422,7 @@ export function EmployeeView({ periods }: Props) {
         label: 'Approval Status',
         value: approvalStats.total > 0
           ? <span style={{ fontSize: '17px', letterSpacing: '-0.3px' }}>
-              {approvalStats.approved} apr · {approvalStats.pending} pend · {approvalStats.rejected} rej
+              {approvalStats.approved} approved · {approvalStats.pending} pending · {approvalStats.rejected} rejected
             </span>
           : 'None',
         subtitle: approvalStats.total > 0

@@ -199,9 +199,9 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
   const selectedYearMonths = useMemo((): Set<string> | null => {
     if (selectedPeriodIds.size === 0) return null;
     const ym = new Set<string>();
-    openPeriods.filter(p => selectedPeriodIds.has(p.id)).forEach(p => ym.add(`${p.year}-${p.month}`));
+    periods.filter(p => selectedPeriodIds.has(p.id)).forEach(p => ym.add(`${p.year}-${p.month}`));
     return ym;
-  }, [selectedPeriodIds, openPeriods]);
+  }, [selectedPeriodIds, periods]);
 
   const clearAllFilters = () => {
     setSelectedPeriodIds(new Set());
@@ -266,7 +266,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
   // Previous period KPIs for delta (same N months immediately before selected range)
   const prevKpis = useMemo(() => {
     if (selectedPeriodIds.size === 0) return null;
-    const selPeriods = openPeriods.filter(p => selectedPeriodIds.has(p.id));
+    const selPeriods = periods.filter(p => selectedPeriodIds.has(p.id));
     if (selPeriods.length === 0) return null;
     const count = selPeriods.length;
     const first = selPeriods[0];
@@ -358,14 +358,21 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     return { top10, cells, globalMax };
   }, [ccRows, filteredData, sortedMonths]);
 
+  const hasLockedSelected = useMemo(
+    () => selectedPeriodIds.size > 0 && periods.some(p => selectedPeriodIds.has(p.id) && p.status !== 'open'),
+    [selectedPeriodIds, periods]
+  );
+
   const periodRangeLabel = useMemo(() => {
     if (selectedPeriodIds.size === 0) return 'All periods';
-    const selPeriods = openPeriods.filter(p => selectedPeriodIds.has(p.id));
+    const selPeriods = periods
+      .filter(p => selectedPeriodIds.has(p.id))
+      .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
     if (selPeriods.length === 0) return 'All periods';
     if (selPeriods.length === 1) return `${MF[selPeriods[0].month - 1]} ${selPeriods[0].year}`;
     const first = selPeriods[0], last = selPeriods[selPeriods.length - 1];
     return `${MS[first.month - 1]} ${first.year} – ${MS[last.month - 1]} ${last.year}`;
-  }, [selectedPeriodIds, openPeriods]);
+  }, [selectedPeriodIds, periods]);
 
   // ── Modal ─────────────────────────────────────────────────────────────────────
 
@@ -568,7 +575,14 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
             periods={openPeriods}
             selectedIds={selectedPeriodIds}
             onChange={setSelectedPeriodIds}
+            allPeriods={periods}
+            allowArchive
           />
+          {hasLockedSelected && (
+            <div style={{ fontSize: 11, color: C.ink3, marginTop: 2 }}>
+              Includes locked period data
+            </div>
+          )}
         </div>
 
         {/* Project */}
@@ -839,15 +853,6 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {drawerDetail && (
-                    <button onClick={downloadFullCsv} style={{
-                      display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px',
-                      borderRadius: 6, border: `1px solid ${C.borderStrong}`, background: 'transparent',
-                      color: C.ink2, cursor: 'pointer', fontSize: 12, fontWeight: 500,
-                    }}>
-                      <ArrowDownloadRegular style={{ fontSize: 14 }} /> Export All
-                    </button>
-                  )}
                   <button onClick={closeDrawer} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: C.ink3, display: 'flex' }}>
                     <Dismiss20Regular />
                   </button>
@@ -1218,15 +1223,26 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
 
             {/* Modal footer */}
             <div style={{ padding: '14px 24px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', flexShrink: 0, gap: 12 }}>
-              {drawerDetail && drawerTab !== 'bymonth' ? (
-                <button onClick={downloadDrillDownCsv} style={{
-                  display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px',
-                  borderRadius: 6, border: `1px solid ${C.borderStrong}`, background: C.surface,
-                  color: C.ink2, cursor: 'pointer', fontSize: 13,
-                }}>
-                  <ArrowDownloadRegular style={{ fontSize: 16 }} /> Download CSV
-                </button>
-              ) : <div />}
+              <div style={{ display: 'flex', gap: 8 }}>
+                {drawerDetail && drawerTab !== 'bymonth' && (
+                  <button onClick={downloadDrillDownCsv} style={{
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px',
+                    borderRadius: 6, border: `1px solid ${C.borderStrong}`, background: C.surface,
+                    color: C.ink2, cursor: 'pointer', fontSize: 13,
+                  }}>
+                    <ArrowDownloadRegular style={{ fontSize: 16 }} /> Download CSV
+                  </button>
+                )}
+                {drawerDetail && (
+                  <button onClick={downloadFullCsv} style={{
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px',
+                    borderRadius: 6, border: `1px solid ${C.borderStrong}`, background: C.surface,
+                    color: C.ink2, cursor: 'pointer', fontSize: 13,
+                  }}>
+                    <ArrowDownloadRegular style={{ fontSize: 16 }} /> Export All
+                  </button>
+                )}
+              </div>
               <button onClick={closeDrawer} style={{
                 padding: '7px 22px', borderRadius: 6, border: 'none',
                 background: C.accent, color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600,

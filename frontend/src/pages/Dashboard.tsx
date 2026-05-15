@@ -9,6 +9,7 @@ import {
 import { useAuth, useIsManagerReader } from '../auth/AuthProvider';
 import { planningApi } from '../api/planning';
 import { actualsApi } from '../api/actuals';
+import { lookupsApi } from '../api/lookups';
 import { usePeriod } from '../contexts/PeriodContext';
 import { useAppData } from '../contexts/AppDataContext';
 import type { DemandLine, SupplyLine } from '../api/planning';
@@ -71,6 +72,7 @@ export function Dashboard() {
   const [approvalStatuses, setApprovalStatuses] = useState<Record<string, { status: string }>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [userCcId, setUserCcId] = useState<string | null>(null);
 
   useEffect(() => {
     // Wait for context data to be ready before fetching volatile data
@@ -105,6 +107,20 @@ export function Dashboard() {
       })
       .finally(() => setLoading(false));
   }, [user?.role, periodsLoading, appDataLoading]);
+
+  // Fetch the user's own cost center via their linked resource record.
+  // Uses scoped resources (always includes the manager's own resource even with no supply lines).
+  useEffect(() => {
+    if (!user || user.role !== 'Manager') return;
+    Promise.all([
+      actualsApi.getMyResource(),
+      lookupsApi.listResourcesScoped(),
+    ]).then(([myRes, resources]) => {
+      const rid: string | null = myRes?.resource_id ?? null;
+      const userRes = rid ? resources.find((r: { id: string; cost_center_id: string }) => r.id === rid) : null;
+      setUserCcId(userRes?.cost_center_id ?? null);
+    }).catch(() => {});
+  }, [user?.object_id, user?.role]);
 
   if (!user) return null;
 
@@ -164,6 +180,7 @@ export function Dashboard() {
           periods={periods}
           approvalStatuses={approvalStatuses}
           user={user}
+          userCcId={userCcId}
         />
       )}
 
@@ -176,6 +193,7 @@ export function Dashboard() {
           approvalStatuses={approvalStatuses}
           projects={projects}
           user={user}
+          userCcId={userCcId}
         />
       )}
 

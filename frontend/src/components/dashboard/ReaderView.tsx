@@ -503,6 +503,7 @@ interface Props {
   approvalStatuses: Record<string, { status: string }>;
   projects: Project[];
   user: MeResponse;
+  userCcId?: string | null;
 }
 
 interface CCAttentionItem {
@@ -533,7 +534,7 @@ type AnyAttentionItem = CCAttentionItem | ResAttentionItem;
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ReaderView({
-  demandLines, supplyLines, costCenters, periods, approvalStatuses,
+  demandLines, supplyLines, costCenters, periods, approvalStatuses, userCcId,
 }: Props) {
   const styles   = useStyles();
   const navigate = useNavigate();
@@ -648,7 +649,7 @@ export function ReaderView({
 
   // ── My cost center ──────────────────────────────────────────────────────
 
-  const myCcId = supplyLines[0]?.cost_center_id ?? demandLines[0]?.cost_center_id ?? null;
+  const myCcId = userCcId ?? null;
   const myCc   = costCenters.find(cc => cc.id === myCcId) ?? null;
 
   // ── 6-month trend data ──────────────────────────────────────────────────

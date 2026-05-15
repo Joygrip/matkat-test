@@ -8,6 +8,9 @@ import {
   makeStyles,
 } from '@fluentui/react-components';
 import { planningApi, DemandLine, SupplyLine } from '../api/planning';
+import { actualsApi } from '../api/actuals';
+import { adminApi } from '../api/admin';
+import { lookupsApi } from '../api/lookups';
 import { usePeriod } from '../contexts/PeriodContext';
 import { useAppData } from '../contexts/AppDataContext';
 import { useAuth } from '../auth/AuthProvider';
@@ -181,8 +184,9 @@ export const ResourcePlanning: React.FC = () => {
 
   const canEditDemand = user?.role === 'PM' || user?.role === 'Finance' || user?.role === 'Admin';
   const isManagerReader = user?.role === 'Manager' && user?.secondary_role === 'Reader';
-  const canEditSupply = (user?.role === 'Manager' && !isManagerReader) || user?.role === 'Finance' || user?.role === 'Admin';
+  const canEditSupply = user?.role === 'Manager' || user?.role === 'Finance' || user?.role === 'Admin';
   const isManager = user?.role === 'Manager' && !isManagerReader;
+  const isAnyManager = user?.role === 'Manager';
 
   const { periods: contextPeriods } = usePeriod();
   const { costCenters, projects } = useAppData();
@@ -193,6 +197,8 @@ export const ResourcePlanning: React.FC = () => {
   const [supplyLines, setSupplyLines] = useState<SupplyLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [managerCcId, setManagerCcId] = useState<string | null>(null);
+  const [delegatedCcIds, setDelegatedCcIds] = useState<Set<string>>(new Set());
 
   const [searchResource, setSearchResource] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -220,6 +226,36 @@ export const ResourcePlanning: React.FC = () => {
 
   // Keep ref in sync so reloadLines always has the latest periods without stale closure
   useEffect(() => { openPeriodsRef.current = openPeriods; }, [openPeriods]);
+
+  // Fetch the manager's own CC via their linked resource record (scoped resources always
+  // includes the manager's own resource even when they have no supply lines).
+  // For ManagerReader: also fetch delegations to identify which other CCs are delegated.
+  useEffect(() => {
+    if (!user?.object_id || !isAnyManager) return;
+    const fetches: [Promise<any>, Promise<any>, ...Promise<any>[]] = [
+      actualsApi.getMyResource(),
+      lookupsApi.listResourcesScoped(),
+    ];
+    if (isManagerReader) {
+      fetches.push(adminApi.listDelegatesAsDelegate());
+    }
+    Promise.all(fetches).then(([myRes, resources, delegates]) => {
+      const rid: string | null = myRes?.resource_id ?? null;
+      const userRes = rid ? resources.find((r: { id: string; cost_center_id: string }) => r.id === rid) : null;
+      setManagerCcId(userRes?.cost_center_id ?? null);
+      if (isManagerReader && delegates) {
+        const activeDelegatorIds = new Set(
+          delegates.filter((d: { is_active: boolean; delegator_id: string }) => d.is_active).map((d: { delegator_id: string }) => d.delegator_id)
+        );
+        const ccIds = new Set<string>(
+          resources
+            .filter((r: { user_id: string | null; cost_center_id: string }) => r.user_id && activeDelegatorIds.has(r.user_id))
+            .map((r: { cost_center_id: string }) => r.cost_center_id)
+        );
+        setDelegatedCcIds(ccIds);
+      }
+    }).catch(() => {});
+  }, [user?.object_id, isAnyManager, isManagerReader]);
 
   // Default KPI selection: earliest open period
   useEffect(() => {
@@ -294,12 +330,16 @@ export const ResourcePlanning: React.FC = () => {
     }
   }, []);
 
-  // Manager scoping: derive manager's CC from loaded lines
-  const managerCcId = useMemo(() => {
-    if (!isManager) return null;
-    const first = supplyLines[0] || demandLines[0];
-    return first?.cost_center_id || null;
-  }, [isManager, supplyLines, demandLines]);
+  // CCs the user may write supply lines for (own CC + delegated CCs).
+  // Only needed for ManagerReader — pure Managers already have backend-scoped lines.
+  const editableCcIds = useMemo((): Set<string> | null => {
+    if (!isManagerReader) return null;
+    const ids = new Set<string>();
+    if (managerCcId) ids.add(managerCcId);
+    delegatedCcIds.forEach(id => ids.add(id));
+    // If still loading (managerCcId not yet resolved) return null so filter is skipped
+    return ids.size > 0 ? ids : null;
+  }, [isManagerReader, managerCcId, delegatedCcIds]);
 
   const filteredDemandLines = useMemo(() => {
     return demandLines.filter(d => {
@@ -405,9 +445,9 @@ export const ResourcePlanning: React.FC = () => {
       ...filteredDemandLines.map(d => d.cost_center_id).filter(Boolean),
       ...filteredSupplyLines.map(s => s.cost_center_id).filter(Boolean),
     ]);
-    if (isManager && managerCcId) activeCcIds.add(managerCcId);
+    if (isAnyManager && managerCcId) activeCcIds.add(managerCcId);
     return costCenters.filter(c => activeCcIds.has(c.id));
-  }, [costCenters, filteredDemandLines, filteredSupplyLines, isManager, managerCcId]);
+  }, [costCenters, filteredDemandLines, filteredSupplyLines, isAnyManager, managerCcId]);
 
   if (loading) {
     return <LoadingState message="Loading resource planning data..." />;
@@ -647,6 +687,7 @@ export const ResourcePlanning: React.FC = () => {
           userRole={user?.role ?? ''}
           managerCcId={managerCcId}
           allCostCenters={costCenters}
+          editableCcIds={editableCcIds ?? undefined}
         />
       </Card>
     </div>

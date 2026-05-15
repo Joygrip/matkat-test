@@ -161,6 +161,17 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase300,
     width: '100%',
   },
+  tabBarWrapper: {
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    whiteSpace: 'nowrap',
+    scrollbarWidth: 'thin',
+    WebkitOverflowScrolling: 'touch',
+    boxShadow: 'inset -20px 0 15px -15px rgba(0,0,0,0.06)',
+    '& [role="tab"]': {
+      flexShrink: 0,
+    },
+  },
 });
 
 type TabValue =
@@ -2901,6 +2912,7 @@ export function Admin() {
   return (
     <div className={styles.container}>
       <Card className={styles.card}>
+        <div className={styles.tabBarWrapper}>
         <TabList selectedValue={selectedTab} onTabSelect={handleTabSelect}>
           {canManageMasterData && <Tab value="cost-centers" icon={<OrganizationRegular />}>Cost Centers</Tab>}
           {canManageMasterData && <Tab value="projects" icon={<FolderRegular />}>Projects</Tab>}
@@ -2925,6 +2937,7 @@ export function Admin() {
             <Tab value="notifications" icon={<AlertRegular />}>Notifications</Tab>
           )}
         </TabList>
+        </div>
 
         <div className={styles.tabContent}>
           <div className={styles.header}>

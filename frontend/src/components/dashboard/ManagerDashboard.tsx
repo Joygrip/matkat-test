@@ -207,13 +207,14 @@ interface Props {
   periods: Period[];
   approvalStatuses: Record<string, { status: string }>;
   user: MeResponse;
+  userCcId?: string | null;
 }
 
 // ─── sub-components ───────────────────────────────────────────────────────────
 
 // ─── component ────────────────────────────────────────────────────────────────
 
-export function ManagerDashboard({ demandLines, supplyLines, costCenters, periods, approvalStatuses }: Props) {
+export function ManagerDashboard({ demandLines, supplyLines, costCenters, periods, approvalStatuses, userCcId }: Props) {
   const styles = useStyles();
   const navigate = useNavigate();
 
@@ -236,10 +237,7 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
   );
 
   // ── CC ──
-  const myCcId = useMemo(() => {
-    const first = supplyLines[0] || demandLines[0];
-    return first?.cost_center_id ?? null;
-  }, [supplyLines, demandLines]);
+  const myCcId = userCcId ?? null;
 
   const myCc = useMemo(
     () => costCenters.find(cc => cc.id === myCcId) ?? null,

@@ -422,6 +422,8 @@ export interface ResourcePlanningMatrixProps {
   userRole: string;
   managerCcId: string | null;
   allCostCenters: CostCenter[];
+  /** When set (ManagerReader), restricts the Add Line CC dropdown to own + delegated CCs. */
+  editableCcIds?: Set<string>;
 }
 
 function parseResOrPh(val: string): { resourceId?: string; placeholderId?: string } {
@@ -457,6 +459,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   userRole,
   managerCcId,
   allCostCenters,
+  editableCcIds,
 }) => {
   const styles = useStyles();
   const { showApiError } = useToast();
@@ -1080,7 +1083,13 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
   const openAddLineDialog = useCallback(() => {
     const defaultLineType: 'demand' | 'supply' = isRolePM ? 'demand' : isRoleManager ? 'supply' : 'demand';
-    const defaultCcId = isRoleManager ? (managerCcId || costCenters[0]?.id || '') : '';
+    // Default to own CC; if not available, pick first editable CC (or first visible CC)
+    const editableCostCenters = editableCcIds
+      ? costCenters.filter(c => editableCcIds.has(c.id))
+      : costCenters;
+    const defaultCcId = isRoleManager
+      ? (managerCcId || editableCostCenters[0]?.id || costCenters[0]?.id || '')
+      : '';
     setDlgLineType(defaultLineType);
     setDlgCcId(defaultCcId);
     setDlgResourceQuery('');
@@ -1103,7 +1112,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       }
     }
     setAddLineDialogOpen(true);
-  }, [isRolePM, isRoleManager, managerCcId, costCenters, loadCcData]);
+  }, [isRolePM, isRoleManager, managerCcId, costCenters, editableCcIds, loadCcData]);
 
   const handleDlgSave = useCallback(async () => {
     const fteVal = Number(dlgFte);
@@ -1585,7 +1594,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                     const sVal = sLine?.fte_percent ?? 0;
                                     const existingCellKey = `s-${row.key}-${period.id}`;
                                     const dragCellKey = buildCellKey('supply', row.resourceId, row.placeholderId, row.projectId, period.id);
-                                    const isSelectable = canEditSupply && !row.isPlaceholder;
+                                    const isSelectable = canEditSupply && !row.isPlaceholder && (!editableCcIds || editableCcIds.has(group.ccId));
                                     const canEdit = isSelectable && !isDragging;
                                     const isSelected = selectedCells.has(dragCellKey);
                                     const isDimmed = isDragging && dragType !== 'supply' && dragStart?.ccId === group.ccId;
@@ -1965,9 +1974,13 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                       }}
                       style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', backgroundColor: tokens.colorNeutralBackground1 }}
                     >
-                      {costCenters.map(c => (
-                        <option key={c.id} value={c.id}>{c.name}{c.id === managerCcId ? ' (My CC)' : ' (Delegated)'}</option>
-                      ))}
+                      {costCenters
+                        .filter(c => !editableCcIds || editableCcIds.has(c.id))
+                        .map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}{c.id === managerCcId ? ' (My CC)' : managerCcId ? ' (Delegated)' : ''}
+                          </option>
+                        ))}
                     </select>
                   ) : (
                     <div style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, backgroundColor: tokens.colorNeutralBackground3, fontSize: tokens.fontSizeBase300 }}>

@@ -9,7 +9,8 @@ from sqlalchemy import and_, func
 from api.app.models.core import Period, Project, Resource, Placeholder, CostCenter, User, ApprovalDelegate
 from api.app.models.planning import DemandLine, SupplyLine
 from api.app.models.actuals import ActualLine
-from api.app.models.consolidation import OopLine, PublishSnapshot, PublishSnapshotLine
+from api.app.models.consolidation import PublishSnapshot, PublishSnapshotLine
+from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
 
@@ -382,10 +383,18 @@ class ConsolidationService:
         ).all()
 
         # Copy OoP lines
-        oops = self.db.query(OopLine).filter(
+        oops = self.db.query(ProjectExternalLine).filter(
             and_(
-                OopLine.tenant_id == self.current_user.tenant_id,
-                OopLine.period_id == period_id,
+                ProjectExternalLine.tenant_id == self.current_user.tenant_id,
+                ProjectExternalLine.period_id == period_id,
+            )
+        ).all()
+
+        # Copy equipment lines
+        equips = self.db.query(ProjectEquipmentLine).filter(
+            and_(
+                ProjectEquipmentLine.tenant_id == self.current_user.tenant_id,
+                ProjectEquipmentLine.period_id == period_id,
             )
         ).all()
 
@@ -395,12 +404,13 @@ class ConsolidationService:
             {d.project_id for d in demands if d.project_id}
             | {a.project_id for a in actuals if a.project_id}
             | {o.project_id for o in oops if o.project_id}
+            | {e.project_id for e in equips if e.project_id}
         )
         _resource_ids = (
             {d.resource_id for d in demands if d.resource_id}
             | {s.resource_id for s in supplies if s.resource_id}
             | {a.resource_id for a in actuals if a.resource_id}
-            | {o.resource_id for o in oops if o.resource_id}
+            | {o.resource_id for o in oops if o.resource_id}  # resource_id optional on ProjectExternalLine
         )
         _placeholder_ids = {d.placeholder_id for d in demands if d.placeholder_id}
 
@@ -500,16 +510,41 @@ class ConsolidationService:
                 project_id=o.project_id,
                 project_name=project.name if project else None,
                 resource_id=o.resource_id,
-                resource_name=resource.display_name if resource else None,
+                resource_name=resource.display_name if resource else o.description,
+                placeholder_id=None,
+                placeholder_name=None,
                 cost_center_id=cc_id,
                 cost_center_name=cc_name,
-                year=o.year,
-                month=o.month,
-                hours=o.hours,
-                cost=o.total_cost,
+                year=period.year,
+                month=period.month,
+                fte_percent=None,
+                hours=None,
+                cost=o.cost,
             )
             self.db.add(line)
-        
+
+        for e in equips:
+            project = snap_project_map.get(e.project_id)
+
+            line = PublishSnapshotLine(
+                snapshot_id=snapshot.id,
+                line_type="equipment",
+                project_id=e.project_id,
+                project_name=project.name if project else None,
+                resource_id=None,
+                resource_name=e.description,
+                placeholder_id=None,
+                placeholder_name=None,
+                cost_center_id=None,
+                cost_center_name=None,
+                year=period.year,
+                month=period.month,
+                fte_percent=None,
+                hours=None,
+                cost=e.cost,
+            )
+            self.db.add(line)
+
         self.db.commit()
         self.db.refresh(snapshot)
         

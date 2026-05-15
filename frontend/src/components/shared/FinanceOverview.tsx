@@ -174,6 +174,19 @@ export function FinanceOverview({
     return dashboard;
   }, [dashboard, scope, projectIds, costCenterId]);
 
+  // For manager scope: all CCs in the (already-scoped) dashboard except the user's own CC
+  // are delegated CCs. Build the set so OverviewTab can label them accurately.
+  const delegatedCcIds = useMemo((): Set<string> | undefined => {
+    if (scope !== 'manager' || !scopedDashboard || !costCenterId) return undefined;
+    const ids = new Set<string>();
+    for (const cc of scopedDashboard.cost_centers) {
+      if (cc.cost_center_id && cc.cost_center_id !== costCenterId) {
+        ids.add(cc.cost_center_id);
+      }
+    }
+    return ids;
+  }, [scope, scopedDashboard, costCenterId]);
+
   const handleDashboardChanged = () => {
     if (localPeriodId) fetchDashboard(localPeriodId);
   };
@@ -219,6 +232,7 @@ export function FinanceOverview({
         onDashboardChanged={handleDashboardChanged}
         readerOwnCcId={scope === 'reader' && costCenterId ? costCenterId : undefined}
         managerOwnCcId={scope === 'manager' && costCenterId ? costCenterId : undefined}
+        delegatedCcIds={delegatedCcIds}
       />
     </>
   );

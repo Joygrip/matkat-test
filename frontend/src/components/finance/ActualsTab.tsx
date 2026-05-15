@@ -488,7 +488,6 @@ export function ActualsTab({
   // ── New toolbar / table state ──────────────────────────────────────────────
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<SortBy>('attention');
-  const [onlyNeedsAction, setOnlyNeedsAction] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(new Set());
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
@@ -618,9 +617,8 @@ export function ActualsTab({
         (d.employee_initials != null && d.employee_initials.toLowerCase().includes(q)),
       );
     }
-    if (onlyNeedsAction) out = out.filter(d => d.can_action || d.can_proxy_approve_step1);
     return out;
-  }, [actualsData, selectedStatuses, searchQuery, onlyNeedsAction]);
+  }, [actualsData, selectedStatuses, searchQuery]);
 
   // ── Group by employee (employees with actuals) ────────────────────────────
   const groupedEmployees = useMemo((): EmployeeGroup[] => {
@@ -646,7 +644,6 @@ export function ActualsTab({
   // ── Missing employees: have demand but zero actuals (from empStats only) ──
   const missingGroups = useMemo((): EmployeeGroup[] => {
     if (!empStats) return [];
-    // Only show MISSING status if not filtering to other statuses exclusively
     if (selectedStatuses.size > 0 && !selectedStatuses.has('MISSING')) return [];
     // Use unfiltered actualsData so employees who submitted (e.g. PENDING) are
     // never shown as Missing even when the MISSING status filter is active.
@@ -781,7 +778,11 @@ export function ActualsTab({
       {/* ── KPI Row ─────────────────────────────────────────────────────── */}
       <div className={styles.kpiRow}>
         {/* 1. Submission progress */}
-        <div className={styles.kpiCard}>
+        <div
+          className={`${styles.kpiCard} ${selectedStatuses.size > 0 ? styles.kpiCardClickable : ''}`}
+          onClick={() => setSelectedStatuses(new Set())}
+          style={selectedStatuses.size > 0 ? { cursor: 'pointer' } : undefined}
+        >
           <div className={styles.kpiLabel}>Submission progress</div>
           <div className={styles.kpiValue} style={{ fontSize: 22 }}>
             {kpi.submittedPct}%
@@ -797,8 +798,9 @@ export function ActualsTab({
 
         {/* 2. Missing */}
         <div
-          className={`${styles.kpiCard} ${styles.kpiCardClickable} ${selectedStatuses.has('MISSING') ? styles.kpiCardActive : ''} ${styles.kpiCardBad}`}
-          onClick={() => setSelectedStatuses(prev => toggleSetItem(prev, 'MISSING'))}
+          className={`${styles.kpiCard} ${styles.kpiCardClickable} ${styles.kpiCardBad}`}
+          onClick={() => setSelectedStatuses(prev => { const n = new Set(prev); n.has('MISSING') ? n.delete('MISSING') : (n.clear(), n.add('MISSING')); return n; })}
+          style={selectedStatuses.has('MISSING') ? { borderBottom: `2px solid ${C.accent}` } : undefined}
         >
           <div className={styles.kpiLabel} style={{ color: C.bad }}>Missing</div>
           <div className={styles.kpiValue} style={{ color: C.bad }}>{kpi.missingCount}</div>
@@ -807,8 +809,9 @@ export function ActualsTab({
 
         {/* 3. Pending */}
         <div
-          className={`${styles.kpiCard} ${styles.kpiCardClickable} ${selectedStatuses.has('PENDING') ? styles.kpiCardActive : ''} ${styles.kpiCardWarn}`}
-          onClick={() => setSelectedStatuses(prev => toggleSetItem(prev, 'PENDING'))}
+          className={`${styles.kpiCard} ${styles.kpiCardClickable} ${styles.kpiCardWarn}`}
+          onClick={() => setSelectedStatuses(prev => prev.has('PENDING') ? new Set() : new Set(['PENDING']))}
+          style={selectedStatuses.has('PENDING') ? { borderBottom: `2px solid ${C.accent}` } : undefined}
         >
           <div className={styles.kpiLabel} style={{ color: C.warn }}>Pending approval</div>
           <div className={styles.kpiValue} style={{ color: C.warn }}>{kpi.pendingLines}</div>
@@ -817,8 +820,9 @@ export function ActualsTab({
 
         {/* 4. Rejected */}
         <div
-          className={`${styles.kpiCard} ${styles.kpiCardClickable} ${selectedStatuses.has('REJECTED') ? styles.kpiCardActive : ''}`}
-          onClick={() => setSelectedStatuses(prev => toggleSetItem(prev, 'REJECTED'))}
+          className={`${styles.kpiCard} ${styles.kpiCardClickable}`}
+          onClick={() => setSelectedStatuses(prev => prev.has('REJECTED') ? new Set() : new Set(['REJECTED']))}
+          style={selectedStatuses.has('REJECTED') ? { borderBottom: `2px solid ${C.accent}` } : undefined}
         >
           <div className={styles.kpiLabel}>Rejected</div>
           <div className={styles.kpiValue} style={{ color: C.bad }}>{kpi.rejectedLines}</div>
@@ -827,8 +831,9 @@ export function ActualsTab({
 
         {/* 5. Approved */}
         <div
-          className={`${styles.kpiCard} ${styles.kpiCardClickable} ${selectedStatuses.has('APPROVED') ? styles.kpiCardActive : ''}`}
-          onClick={() => setSelectedStatuses(prev => toggleSetItem(prev, 'APPROVED'))}
+          className={`${styles.kpiCard} ${styles.kpiCardClickable}`}
+          onClick={() => setSelectedStatuses(prev => prev.has('APPROVED') ? new Set() : new Set(['APPROVED']))}
+          style={selectedStatuses.has('APPROVED') ? { borderBottom: `2px solid ${C.accent}` } : undefined}
         >
           <div className={styles.kpiLabel}>Approved</div>
           <div className={styles.kpiValue} style={{ color: C.good }}>{kpi.approvedLines}</div>
@@ -847,47 +852,14 @@ export function ActualsTab({
           style={{ minWidth: 260 }}
           size="small"
         />
-
-        {/* Status filter */}
-        <Menu>
-          <MenuTrigger>
-            <Button size="small" appearance="outline" icon={<FilterRegular />}>
-              Status
-              <Badge size="tiny" appearance="filled" color="brand" style={{ marginLeft: 4, visibility: selectedStatuses.size > 0 ? 'visible' : 'hidden' }}>
-                {selectedStatuses.size || 1}
-              </Badge>
-            </Button>
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList
-              checkedValues={{ status: Array.from(selectedStatuses) }}
-              onCheckedValueChange={(_, data) => { if (data.name === 'status') setSelectedStatuses(new Set(data.checkedItems)); }}
-            >
-              {['PENDING','APPROVED','REJECTED'].map(s => (
-                <MenuItemCheckbox key={s} name="status" value={s}>
-                  {s.charAt(0) + s.slice(1).toLowerCase()}
-                </MenuItemCheckbox>
-              ))}
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-
-        {/* Only needs action toggle */}
-        <div className={styles.toggleRow} onClick={() => setOnlyNeedsAction(v => !v)}>
-          <div style={{
-            width: 32, height: 18, borderRadius: 9, flexShrink: 0,
-            background: onlyNeedsAction ? C.accent : C.surface2,
-            border: `1.5px solid ${onlyNeedsAction ? C.accent : C.line}`,
-            display: 'flex', alignItems: 'center',
-            padding: '2px 3px',
-            justifyContent: onlyNeedsAction ? 'flex-end' : 'flex-start',
-            transition: 'background 0.15s, border-color 0.15s',
-            boxSizing: 'border-box',
-          }}>
-            <div style={{ width: 12, height: 12, borderRadius: '50%', background: 'white', boxShadow: '0 1px 2px rgba(0,0,0,0.25)', flexShrink: 0 }} />
-          </div>
-          Only needs action
-        </div>
+        {selectedStatuses.size > 0 && (
+          <button
+            onClick={() => setSelectedStatuses(new Set())}
+            style={{ background: 'none', border: 'none', padding: '0 4px', fontSize: 12, color: C.accent, cursor: 'pointer', textDecoration: 'underline', whiteSpace: 'nowrap' }}
+          >
+            Clear filter
+          </button>
+        )}
 
         {/* Spacer */}
         <div style={{ flex: 1 }} />

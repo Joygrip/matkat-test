@@ -18,7 +18,7 @@ import { EmployeeView } from '../components/dashboard/EmployeeView';
 import { PMDashboard } from '../components/dashboard/PMDashboard';
 import { ManagerDashboard } from '../components/dashboard/ManagerDashboard';
 import { FinanceDashboard } from '../components/dashboard/FinanceDashboard';
-import { ExecutiveDashboard } from '../components/dashboard/ExecutiveDashboard';
+import { ReaderView } from '../components/dashboard/ReaderView';
 import { AdminView } from '../components/dashboard/AdminView';
 
 const useStyles = makeStyles({
@@ -168,12 +168,13 @@ export function Dashboard() {
       )}
 
       {isManagerReader && (
-        <ExecutiveDashboard
+        <ReaderView
           demandLines={allDemandLines}
           supplyLines={allSupplyLines}
           costCenters={costCenters}
           periods={periods}
           approvalStatuses={approvalStatuses}
+          projects={projects}
           user={user}
         />
       )}

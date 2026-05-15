@@ -230,6 +230,7 @@ export function FinanceOverview({
         projectId={projectId}
         scopeProjectIds={scope === 'pm' ? projectIds : undefined}
         onDashboardChanged={handleDashboardChanged}
+        readerOwnCcId={scope === 'reader' && costCenterId ? costCenterId : undefined}
       />
     </>
   );

@@ -395,10 +395,12 @@ function AlertBanner({
 function CcNavCard({
   cc,
   selected,
+  isOwnCc,
   onClick,
 }: {
   cc: DashboardCostCenter;
   selected: boolean;
+  isOwnCc?: boolean;
   onClick: () => void;
 }) {
   const sev = ccSeverity(cc);
@@ -437,6 +439,18 @@ function CcNavCard({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: C.ink, wordBreak: 'break-word', flex: 1 }}>
             {cc.cost_center_name}
+            {isOwnCc && (
+              <span style={{
+                display: 'inline-block', marginLeft: 6,
+                fontSize: 9, fontWeight: 700,
+                padding: '1px 5px', borderRadius: 3,
+                backgroundColor: '#e6f0fb', color: '#1e3a5f',
+                border: '1px solid #c5d9f1',
+                verticalAlign: 'middle',
+              }}>
+                ★ My CC
+              </span>
+            )}
           </div>
           <span style={{
             fontSize: 11, fontWeight: 600, padding: '1px 6px', borderRadius: 10, flexShrink: 0,
@@ -825,6 +839,8 @@ export interface OverviewTabProps {
   /** When set (PM scope), restricts the project dropdown and CC navigator to these project IDs */
   scopeProjectIds?: string[];
   onDashboardChanged?: () => void;
+  /** Reader+Manager scope: the reader's own CC ID. Enables supply editing only for that CC and shows a "My CC" indicator. */
+  readerOwnCcId?: string;
 }
 
 type CcSortKey = 'gap' | 'name' | 'demand' | 'supply';
@@ -835,7 +851,7 @@ const SORT_OPTIONS: { key: CcSortKey; label: string }[] = [
   { key: 'demand', label: 'Demand'   },
 ];
 
-export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, onDashboardChanged }: OverviewTabProps) {
+export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, onDashboardChanged, readerOwnCcId }: OverviewTabProps) {
   const canEditDemand = useHasRole('Finance', 'PM');
   const canEditSupply = useHasRole('Finance', 'Manager');
   const isPM          = useHasRole('PM');
@@ -856,6 +872,10 @@ export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, on
 
   const [sortBy, setSortBy] = useState<CcSortKey>('gap');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  // When reader scope: supply editing is allowed only for the reader's own CC.
+  // Demand editing is already blocked by role (reader is not Finance/PM).
+  const effectiveCanEditSupply = canEditSupply && (!readerOwnCcId || selectedCcId === readerOwnCcId);
 
   const handleSortClick = (key: CcSortKey) => {
     if (sortBy === key) {
@@ -1301,6 +1321,7 @@ export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, on
                   key={ccKey}
                   cc={cc}
                   selected={selectedCcId === ccKey}
+                  isOwnCc={readerOwnCcId ? ccKey === readerOwnCcId : false}
                   onClick={() => setSelectedCcId(ccKey)}
                 />
               );
@@ -1349,7 +1370,7 @@ export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, on
         loading={resourceDetailLoading}
         periodId={dashboard?.period_id ?? null}
         canEditDemand={canEditDemand}
-        canEditSupply={canEditSupply}
+        canEditSupply={effectiveCanEditSupply}
         isPM={isPM}
         scopeProjectIds={scopeProjectIds}
         onClose={() => setDrillOpen(false)}

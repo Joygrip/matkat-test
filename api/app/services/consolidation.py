@@ -246,7 +246,8 @@ class ConsolidationService:
 
         # Manager restriction: filter to cost centers they manage (ro_user_id or director_user_id)
         # Also include cost centers of any delegators who have granted this manager delegation
-        if self.current_user.role == "Manager":
+        # Manager+Reader combo users (is_manager_reader) bypass this filter to see the full org.
+        if self.current_user.role == "Manager" and not self.current_user.is_manager_reader:
             manager_user = self.db.query(User).filter(
                 and_(
                     User.tenant_id == self.current_user.tenant_id,

@@ -48,8 +48,9 @@ import {
   ArrowUndo24Regular,
 } from '@fluentui/react-icons';
 import { actualsApi, ActualLine, ActualApprovalStatus, CreateActualLine } from '../api/actuals';
-import { lookupsApi, Project, Resource, CostCenter } from '../api/lookups';
+import { lookupsApi, Resource } from '../api/lookups';
 import { usePeriod } from '../contexts/PeriodContext';
+import { useAppData } from '../contexts/AppDataContext';
 import { planningApi, DemandLine, SupplyLine } from '../api/planning';
 import { useToast } from '../hooks/useToast';
 import { formatApiError } from '../utils/errors';
@@ -278,6 +279,7 @@ export const Actuals: React.FC = () => {
   const canSeeStats = useHasRole('Finance', 'Manager', 'Admin');
 
   const { selectedPeriodId, selectedPeriod: ctxPeriod } = usePeriod();
+  const { costCenters, projects, appDataLoading } = useAppData();
 
   const isEmployee = user?.role === 'Employee';
   const isManager = user?.role === 'Manager';
@@ -285,8 +287,6 @@ export const Actuals: React.FC = () => {
   // ── Employee-view state ──────────────────────────────────────────────────────
 
   const [actuals, setActuals] = useState<ActualLine[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -370,14 +370,10 @@ export const Actuals: React.FC = () => {
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const [projectsData, resourcesData, costCentersData] = await Promise.all([
-        lookupsApi.listProjects(),
-        isManager ? lookupsApi.listResourcesScoped() : lookupsApi.listResources(),
-        lookupsApi.listCostCenters(),
-      ]);
-      setProjects(projectsData);
+      const resourcesData = await (isManager
+        ? lookupsApi.listResourcesScoped()
+        : lookupsApi.listResources());
       setResources(resourcesData);
-      setCostCenters(costCentersData);
     } catch (err: unknown) {
       setError(formatApiError(err, 'Failed to load data'));
     } finally {
@@ -565,7 +561,7 @@ export const Actuals: React.FC = () => {
   const isLocked = currentPeriod?.status === 'locked';
   const hasRejectedActuals = isEmployee && Object.values(approvalStatuses).some(s => s.status === 'rejected');
 
-  if (loading) {
+  if (loading || appDataLoading) {
     return (
       <div className={styles.loading}>
         <Spinner size="large" label="Loading..." />

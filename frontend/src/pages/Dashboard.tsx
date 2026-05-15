@@ -8,11 +8,10 @@ import {
 } from '@fluentui/react-components';
 import { useAuth, useIsManagerReader } from '../auth/AuthProvider';
 import { planningApi } from '../api/planning';
-import { lookupsApi } from '../api/lookups';
-import { periodsApi } from '../api/periods';
 import { actualsApi } from '../api/actuals';
+import { usePeriod } from '../contexts/PeriodContext';
+import { useAppData } from '../contexts/AppDataContext';
 import type { DemandLine, SupplyLine } from '../api/planning';
-import type { CostCenter, Project } from '../api/admin';
 import type { Period } from '../types/index';
 
 import { EmployeeView } from '../components/dashboard/EmployeeView';
@@ -59,67 +58,45 @@ const useStyles = makeStyles({
   },
 });
 
-const ROLE_LABELS: Record<string, string> = {
-  Employee: 'Employee Dashboard',
-  PM: 'Project Manager Dashboard',
-  Manager: 'Manager Dashboard',
-  Finance: 'Finance Dashboard',
-  Admin: 'Admin Dashboard',
-};
 
 export function Dashboard() {
   const styles = useStyles();
   const { user } = useAuth();
   const isManagerReader = useIsManagerReader();
+  const { periods, loading: periodsLoading } = usePeriod();
+  const { costCenters, projects, appDataLoading } = useAppData();
 
   const [allDemandLines, setAllDemandLines] = useState<DemandLine[]>([]);
   const [allSupplyLines, setAllSupplyLines] = useState<SupplyLine[]>([]);
-  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [periods, setPeriods] = useState<Period[]>([]);
   const [approvalStatuses, setApprovalStatuses] = useState<Record<string, { status: string }>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) return;
+    // Wait for context data to be ready before fetching volatile data
+    if (!user || periodsLoading || appDataLoading) return;
     setLoading(true);
 
     const role = user.role;
     const isEmployee = role === 'Employee';
 
-    // PMs only see their projects via scoped endpoint; Manager is not allowed on scoped so uses listProjects
-    const projectsFetch = (role === 'PM' || role === 'Finance' || role === 'Admin')
-      ? lookupsApi.listProjectsScoped()
-      : lookupsApi.listProjects();
+    const openSorted = (periods as Period[])
+      .filter(p => p.status === 'open')
+      .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+    const earliest = openSorted[0];
 
     const fetches: Promise<any>[] = [
       planningApi.getAllDemandLines(),
       planningApi.getAllSupplyLines(),
-      lookupsApi.listCostCenters(),
-      projectsFetch,
-      periodsApi.list(),
     ];
+    if (earliest && !isEmployee) {
+      fetches.push(actualsApi.getApprovalStatuses(earliest.year, earliest.month));
+    }
 
     Promise.all(fetches)
-      .then(([demand, supply, ccs, projs, allPeriods]) => {
+      .then(([demand, supply, statuses]) => {
         setAllDemandLines(demand);
         setAllSupplyLines(supply);
-        setCostCenters(ccs);
-        setProjects(projs);
-        setPeriods(allPeriods);
-
-        // Fetch approval statuses for the earliest open period
-        const openSorted = (allPeriods as Period[])
-          .filter(p => p.status === 'open')
-          .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
-        const earliest = openSorted[0];
-        if (earliest && !isEmployee) {
-          return actualsApi.getApprovalStatuses(earliest.year, earliest.month);
-        }
-        return {};
-      })
-      .then((statuses) => {
         setApprovalStatuses(statuses ?? {});
       })
       .catch((err) => {
@@ -127,11 +104,11 @@ export function Dashboard() {
         setError('Failed to load dashboard data. Please refresh the page.');
       })
       .finally(() => setLoading(false));
-  }, [user?.role]);
+  }, [user?.role, periodsLoading, appDataLoading]);
 
   if (!user) return null;
 
-  if (loading) {
+  if (loading || periodsLoading || appDataLoading) {
     return (
       <div className={styles.container}>
         <Skeleton style={{ height: 40, width: '30%', marginBottom: tokens.spacingVerticalM }}>
@@ -157,10 +134,6 @@ export function Dashboard() {
       </div>
     );
   }
-
-  const roleLabel = isManagerReader
-    ? 'Executive View'
-    : (ROLE_LABELS[user.role] ?? 'Dashboard');
 
   return (
     <div className={styles.container}>

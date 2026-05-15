@@ -6,6 +6,7 @@ import { Spinner, makeStyles } from '@fluentui/react-components';
 import { useAuth } from './auth/AuthProvider';
 import { ToastProvider } from './hooks/useToast';
 import { PeriodProvider } from './contexts/PeriodContext';
+import { AppDataProvider } from './contexts/AppDataContext';
 import { AppShell } from './components/AppShell';
 import { DevLoginPanel } from './components/DevLoginPanel';
 import { Dashboard } from './pages/Dashboard';
@@ -80,6 +81,7 @@ function App() {
   return (
     <ToastProvider>
       <PeriodProvider>
+      <AppDataProvider>
       <AppShell>
         <Routes>
           <Route path="/" element={<Dashboard />} />
@@ -97,6 +99,7 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppShell>
+      </AppDataProvider>
       </PeriodProvider>
     </ToastProvider>
   );

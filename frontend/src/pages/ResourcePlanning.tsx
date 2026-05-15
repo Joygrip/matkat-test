@@ -8,8 +8,8 @@ import {
   makeStyles,
 } from '@fluentui/react-components';
 import { planningApi, DemandLine, SupplyLine } from '../api/planning';
-import { lookupsApi, Project, CostCenter } from '../api/lookups';
 import { usePeriod } from '../contexts/PeriodContext';
+import { useAppData } from '../contexts/AppDataContext';
 import { useAuth } from '../auth/AuthProvider';
 import { formatApiError } from '../utils/errors';
 import { SearchableFilter } from '../components/SearchableFilter';
@@ -18,7 +18,6 @@ import { StatusBanner } from '../components/StatusBanner';
 import { ResourcePlanningMatrix } from '../components/ResourcePlanningMatrix';
 import { PeriodPillSelector } from '../components/shared/PeriodPillSelector';
 import { Period } from '../types/index';
-import { periodsApi } from '../api/periods';
 import {
   ComposedChart, Line, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea,
@@ -26,17 +25,14 @@ import {
 
 // Module-level cache — persists across MSAL-triggered remounts so duplicate
 // fetches caused by acquireTokenPopup re-initializing the component are skipped.
+// Only caches demand/supply lines; projects, cost-centers, and periods come from context.
 const _cache: {
   demandLines: DemandLine[] | null
   supplyLines: SupplyLine[] | null
-  projects: Project[] | null
-  costCenters: CostCenter[] | null
-  openPeriods: Period[] | null
   loadedAt: number | null
   tenantId: string | null
 } = {
-  demandLines: null, supplyLines: null, projects: null,
-  costCenters: null, openPeriods: null,
+  demandLines: null, supplyLines: null,
   loadedAt: null, tenantId: null,
 }
 const CACHE_TTL_MS = 60_000
@@ -189,13 +185,12 @@ export const ResourcePlanning: React.FC = () => {
   const isManager = user?.role === 'Manager' && !isManagerReader;
 
   const { periods: contextPeriods } = usePeriod();
+  const { costCenters, projects } = useAppData();
 
   const [openPeriods, setOpenPeriods] = useState<Period[]>([]);
   const openPeriodsRef = useRef<Period[]>([]);
   const [demandLines, setDemandLines] = useState<DemandLine[]>([]);
   const [supplyLines, setSupplyLines] = useState<SupplyLine[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -204,23 +199,27 @@ export const ResourcePlanning: React.FC = () => {
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
   const [selectedPeriodIds, setSelectedPeriodIds] = useState<Set<string>>(new Set());
 
+  // Derive open periods from context whenever it updates
   useEffect(() => {
-    if (!user?.tenant_id) return;
-    loadAll();
-  }, [user?.tenant_id]);
-
-  // Keep ref in sync so reloadLines always has the latest periods without stale closure
-  useEffect(() => { openPeriodsRef.current = openPeriods; }, [openPeriods]);
-
-  // When contextPeriods loads, derive open periods only if loadAll hasn't populated them yet
-  useEffect(() => {
-    if (contextPeriods.length > 0 && openPeriods.length === 0 && _cache.loadedAt === null) {
+    if (contextPeriods.length > 0) {
       const open = contextPeriods
         .filter(p => p.status === 'open')
         .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
       setOpenPeriods(open);
     }
   }, [contextPeriods]);
+
+  // Trigger line fetch once both user and context periods are ready
+  useEffect(() => {
+    if (!user?.tenant_id || contextPeriods.length === 0) return;
+    const open = contextPeriods
+      .filter(p => p.status === 'open')
+      .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
+    loadAll(open);
+  }, [user?.tenant_id, contextPeriods.length > 0 ? 'ready' : 'waiting']);
+
+  // Keep ref in sync so reloadLines always has the latest periods without stale closure
+  useEffect(() => { openPeriodsRef.current = openPeriods; }, [openPeriods]);
 
   // Default KPI selection: earliest open period
   useEffect(() => {
@@ -229,9 +228,7 @@ export const ResourcePlanning: React.FC = () => {
     }
   }, [openPeriods]);
 
-  const isPM = user?.role === 'PM';
-
-  const loadAll = async () => {
+  const loadAll = async (open: Period[]) => {
     if (!user?.tenant_id) return;
     const now = Date.now();
     const cacheValid =
@@ -243,46 +240,23 @@ export const ResourcePlanning: React.FC = () => {
     if (cacheValid) {
       setDemandLines(_cache.demandLines!);
       setSupplyLines(_cache.supplyLines!);
-      setProjects(_cache.projects!);
-      setCostCenters(_cache.costCenters!);
-      setOpenPeriods(_cache.openPeriods!);
+      setLoading(false);
+      return;
+    }
+
+    if (open.length === 0) {
+      setDemandLines([]);
+      setSupplyLines([]);
+      _cache.demandLines = [];
+      _cache.supplyLines = [];
+      _cache.tenantId = user?.tenant_id ?? null;
+      _cache.loadedAt = _cache.tenantId ? Date.now() : null;
       setLoading(false);
       return;
     }
 
     try {
       setLoading(true);
-      // PMs only see their assigned projects; Finance/Admin see all via scoped too.
-      // Manager is not allowed on the scoped endpoint so falls back to listProjects.
-      const projectsFetch = (isPM || user?.role === 'Finance' || user?.role === 'Admin')
-        ? lookupsApi.listProjectsScoped()
-        : lookupsApi.listProjects();
-      const [periodsData, projectsData, costCentersData] = await Promise.all([
-        periodsApi.list(),
-        projectsFetch,
-        lookupsApi.listCostCenters(),
-      ]);
-
-      const open = periodsData
-        .filter((p: Period) => p.status === 'open')
-        .sort((a: Period, b: Period) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
-      setOpenPeriods(open);
-      setProjects(projectsData);
-      setCostCenters(costCentersData);
-
-      if (open.length === 0) {
-        setDemandLines([]);
-        setSupplyLines([]);
-        _cache.demandLines = [];
-        _cache.supplyLines = [];
-        _cache.projects = projectsData;
-        _cache.costCenters = costCentersData;
-        _cache.openPeriods = open;
-        _cache.tenantId = user?.tenant_id ?? null;
-        _cache.loadedAt = _cache.tenantId ? Date.now() : null;
-        return;
-      }
-
       const [demandData, supplyData] = await Promise.all([
         planningApi.getAllDemandLines(),
         planningApi.getAllSupplyLines(),
@@ -293,9 +267,6 @@ export const ResourcePlanning: React.FC = () => {
 
       _cache.demandLines = demandData;
       _cache.supplyLines = supplyData;
-      _cache.projects = projectsData;
-      _cache.costCenters = costCentersData;
-      _cache.openPeriods = open;
       _cache.tenantId = user?.tenant_id ?? null;
       _cache.loadedAt = _cache.tenantId ? Date.now() : null;
     } catch (err: unknown) {

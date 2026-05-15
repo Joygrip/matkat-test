@@ -220,7 +220,18 @@ async def list_users(
     if role:
         query = query.filter(User.role == role)
     users = query.order_by(User.display_name).all()
+    cc_ids = {u.cost_center_id for u in users if u.cost_center_id}
+    cc_name_map: dict[str, str] = {}
+    if cc_ids:
+        for cc in db.query(CostCenter.id, CostCenter.name).filter(CostCenter.id.in_(cc_ids)).all():
+            cc_name_map[cc.id] = cc.name
     return [
-        {"id": u.id, "display_name": u.display_name, "email": u.email, "role": u.role}
+        {
+            "id": u.id,
+            "display_name": u.display_name,
+            "email": u.email,
+            "role": u.role,
+            "cost_center_name": cc_name_map.get(u.cost_center_id) if u.cost_center_id else None,
+        }
         for u in users
     ]

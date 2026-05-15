@@ -166,22 +166,9 @@ export function FinanceOverview({
       };
     }
 
-    if (scope === 'manager' && costCenterId) {
-      const ccs = dashboard.cost_centers.filter(
-        cc => (cc.cost_center_id ?? '__none__') === costCenterId
-      );
-      const ccIdSet = new Set(ccs.map(cc => cc.cost_center_id ?? '__none__'));
-      return {
-        ...dashboard,
-        cost_centers: ccs,
-        over_allocations: dashboard.over_allocations.filter(
-          oa => ccIdSet.has(oa.cost_center_id ?? '__none__')
-        ),
-        summary: {
-          ...dashboard.summary,
-          total_cost_centers: ccs.length,
-        },
-      };
+    if (scope === 'manager') {
+      // Backend already scopes to own CC + delegated CCs — no frontend filter needed.
+      return dashboard;
     }
 
     return dashboard;
@@ -231,6 +218,7 @@ export function FinanceOverview({
         scopeProjectIds={scope === 'pm' ? projectIds : undefined}
         onDashboardChanged={handleDashboardChanged}
         readerOwnCcId={scope === 'reader' && costCenterId ? costCenterId : undefined}
+        managerOwnCcId={scope === 'manager' && costCenterId ? costCenterId : undefined}
       />
     </>
   );

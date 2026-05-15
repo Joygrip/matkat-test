@@ -102,6 +102,7 @@ export interface AdminUser {
   display_name: string;
   email: string;
   role: string;
+  cost_center_name?: string | null;
 }
 
 export interface AdminUserDetail {
@@ -211,6 +212,8 @@ export const adminApi = {
   // Approval Delegates
   listDelegates: () =>
     apiClient.get<ApprovalDelegate[]>('/admin/delegates'),
+  listDelegatesAsDelegate: () =>
+    apiClient.get<ApprovalDelegate[]>('/admin/delegates?as_delegate=true'),
   createDelegate: (data: { delegator_id?: string; delegate_id: string; note?: string }) =>
     apiClient.post<ApprovalDelegate>('/admin/delegates', data),
   patchDelegate: (id: string, data: { is_active?: boolean; note?: string }) =>

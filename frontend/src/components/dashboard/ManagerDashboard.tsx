@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { makeStyles, tokens, Badge } from '@fluentui/react-components';
+import { makeStyles, tokens, Badge, MessageBar, MessageBarBody } from '@fluentui/react-components';
 import { DashboardKPIStrip } from '../shared/DashboardKPIStrip';
 import type { KPIStripItem } from '../shared/DashboardKPIStrip';
 import { DashboardSection } from './DashboardSection';
@@ -8,7 +8,8 @@ import { FinanceOverview } from '../shared/FinanceOverview';
 import { actualsApi } from '../../api/actuals';
 import type { ActualLine } from '../../api/actuals';
 import type { DemandLine, SupplyLine } from '../../api/planning';
-import type { CostCenter } from '../../api/admin';
+import type { CostCenter, ApprovalDelegate } from '../../api/admin';
+import { adminApi } from '../../api/admin';
 import type { Period, MeResponse } from '../../types/index';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -218,6 +219,13 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
 
   const [actuals, setActuals] = useState<ActualLine[]>([]);
   const [actualsLoading, setActualsLoading] = useState(false);
+  const [activeDelegations, setActiveDelegations] = useState<ApprovalDelegate[]>([]);
+
+  useEffect(() => {
+    adminApi.listDelegatesAsDelegate()
+      .then(dels => setActiveDelegations(dels.filter(d => d.is_active)))
+      .catch(() => {});
+  }, []);
 
   // ── Period ──
   const earliestPeriod = useMemo(
@@ -373,6 +381,16 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
 
   return (
     <div className={styles.sections}>
+
+      {/* ── Delegation notices ── */}
+      {activeDelegations.map(d => (
+        <MessageBar key={d.id} intent="info">
+          <MessageBarBody>
+            You are acting as delegate for <strong>{d.delegator_name ?? 'a manager'}</strong>
+            {d.note ? ` — ${d.note}` : ''}
+          </MessageBarBody>
+        </MessageBar>
+      ))}
 
       {/* ── Section 1: KPI Strip ── */}
       <DashboardKPIStrip items={kpiItems} />

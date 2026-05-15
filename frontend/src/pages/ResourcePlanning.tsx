@@ -303,7 +303,6 @@ export const ResourcePlanning: React.FC = () => {
 
   const filteredDemandLines = useMemo(() => {
     return demandLines.filter(d => {
-      if (isManager && managerCcId && d.cost_center_id !== managerCcId) return false;
       if (selectedProjectId && d.project_id !== selectedProjectId) return false;
       if (selectedCostCenterId && d.cost_center_id !== selectedCostCenterId) return false;
       if (searchResource) {
@@ -314,11 +313,10 @@ export const ResourcePlanning: React.FC = () => {
       }
       return true;
     });
-  }, [demandLines, isManager, managerCcId, selectedProjectId, selectedCostCenterId, searchResource]);
+  }, [demandLines, selectedProjectId, selectedCostCenterId, searchResource]);
 
   const filteredSupplyLines = useMemo(() => {
     return supplyLines.filter(s => {
-      if (isManager && managerCcId && s.cost_center_id !== managerCcId) return false;
       if (selectedProjectId && s.project_id !== selectedProjectId) return false;
       if (selectedCostCenterId && s.cost_center_id !== selectedCostCenterId) return false;
       if (searchResource) {
@@ -329,7 +327,7 @@ export const ResourcePlanning: React.FC = () => {
       }
       return true;
     });
-  }, [supplyLines, isManager, managerCcId, selectedProjectId, selectedCostCenterId, searchResource]);
+  }, [supplyLines, selectedProjectId, selectedCostCenterId, searchResource]);
 
   const selectedDemandLines = useMemo(
     () => filteredDemandLines.filter(d => selectedPeriodIds.has(d.period_id)),
@@ -400,17 +398,14 @@ export const ResourcePlanning: React.FC = () => {
     });
   }, [filteredDemandLines, filteredSupplyLines, openPeriods, selectedPeriodIds]);
 
-  // Managers always see their own CC even if empty.
-  // All other roles only see CCs that have at least one demand or supply line
-  // (matching any active filters), so the matrix never shows empty rows.
+  // Only show CCs that have at least one demand or supply line (matching active filters).
+  // For managers: always include managerCcId even if empty (own CC), plus any delegated CCs with lines.
   const visibleCostCenters = useMemo(() => {
-    if (isManager && managerCcId) {
-      return costCenters.filter(c => c.id === managerCcId);
-    }
     const activeCcIds = new Set([
       ...filteredDemandLines.map(d => d.cost_center_id).filter(Boolean),
       ...filteredSupplyLines.map(s => s.cost_center_id).filter(Boolean),
     ]);
+    if (isManager && managerCcId) activeCcIds.add(managerCcId);
     return costCenters.filter(c => activeCcIds.has(c.id));
   }, [costCenters, filteredDemandLines, filteredSupplyLines, isManager, managerCcId]);
 

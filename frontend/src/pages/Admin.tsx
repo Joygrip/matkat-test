@@ -31,6 +31,8 @@ import {
   Title3,
   SelectTabEventHandler,
   Select,
+  Combobox,
+  Option,
   MessageBar,
   MessageBarBody,
   Body1,
@@ -1516,6 +1518,32 @@ export function Admin() {
   const [filterCostCenter, setFilterCostCenter] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
 
+  // Delegate combobox search state
+  const [delegatorSearch, setDelegatorSearch] = useState('');
+  const [delegateSearch, setDelegateSearch] = useState('');
+
+  const delegateUserInitials = (name: string) => {
+    const parts = name.trim().split(/\s+/);
+    return parts.length >= 2
+      ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+      : name.slice(0, 2).toUpperCase();
+  };
+
+  const delegateOptionLabel = (u: AdminUser) => {
+    const ini = delegateUserInitials(u.display_name);
+    const cc = u.cost_center_name ? ` — ${u.cost_center_name}` : '';
+    return `${ini} ${u.display_name} (${u.role})${cc}`;
+  };
+
+  const filterDelegateUsers = (users: AdminUser[], query: string) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter(u =>
+      u.display_name.toLowerCase().includes(q) ||
+      delegateUserInitials(u.display_name).toLowerCase().includes(q)
+    );
+  };
+
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<unknown>(null);
@@ -1642,6 +1670,8 @@ export function Admin() {
   const openCreateDialog = () => {
     setEditItem(null);
     setFormData({});
+    setDelegatorSearch('');
+    setDelegateSearch('');
     setDialogOpen(true);
   };
 
@@ -2634,15 +2664,30 @@ export function Admin() {
                 {user?.role !== 'Manager' && (
                   <div className={styles.dialogField}>
                     <Label required>Delegator (whose approvals to delegate)</Label>
-                    <Select
-                      value={String(formData.delegator_id || '')}
-                      onChange={(_, d) => setFormData({ ...formData, delegator_id: d.value })}
+                    <Combobox
+                      placeholder="Search by name or initials…"
+                      value={delegatorSearch}
+                      onInput={(e) => {
+                        const q = (e.target as HTMLInputElement).value;
+                        setDelegatorSearch(q);
+                        if (!q) setFormData({ ...formData, delegator_id: '' });
+                      }}
+                      onOptionSelect={(_, d) => {
+                        setFormData({ ...formData, delegator_id: d.optionValue ?? '' });
+                        const picked = pmUsers.find(u => u.id === d.optionValue);
+                        setDelegatorSearch(picked ? delegateOptionLabel(picked) : '');
+                      }}
+                      selectedOptions={formData.delegator_id ? [String(formData.delegator_id)] : []}
                     >
-                      <option value="">— select manager —</option>
-                      {pmUsers.filter((u) => u.role === 'Manager' || u.role === 'Admin').map((u) => (
-                        <option key={u.id} value={u.id}>{u.display_name}</option>
+                      {filterDelegateUsers(
+                        pmUsers.filter(u => u.role === 'Manager' || u.role === 'Admin'),
+                        delegatorSearch
+                      ).map(u => (
+                        <Option key={u.id} value={u.id} text={delegateOptionLabel(u)}>
+                          {delegateOptionLabel(u)}
+                        </Option>
                       ))}
-                    </Select>
+                    </Combobox>
                   </div>
                 )}
                 {user?.role === 'Manager' && (
@@ -2653,15 +2698,30 @@ export function Admin() {
                 )}
                 <div className={styles.dialogField}>
                   <Label required>Delegate (who will approve on their behalf)</Label>
-                  <Select
-                    value={String(formData.delegate_id || '')}
-                    onChange={(_, d) => setFormData({ ...formData, delegate_id: d.value })}
+                  <Combobox
+                    placeholder="Search by name or initials…"
+                    value={delegateSearch}
+                    onInput={(e) => {
+                      const q = (e.target as HTMLInputElement).value;
+                      setDelegateSearch(q);
+                      if (!q) setFormData({ ...formData, delegate_id: '' });
+                    }}
+                    onOptionSelect={(_, d) => {
+                      setFormData({ ...formData, delegate_id: d.optionValue ?? '' });
+                      const picked = pmUsers.find(u => u.id === d.optionValue);
+                      setDelegateSearch(picked ? delegateOptionLabel(picked) : '');
+                    }}
+                    selectedOptions={formData.delegate_id ? [String(formData.delegate_id)] : []}
                   >
-                    <option value="">— select delegate —</option>
-                    {pmUsers.map((u) => (
-                      <option key={u.id} value={u.id}>{u.display_name} ({u.role})</option>
+                    {filterDelegateUsers(
+                      pmUsers.filter(u => u.role === 'Manager' || u.role === 'Admin'),
+                      delegateSearch
+                    ).map(u => (
+                      <Option key={u.id} value={u.id} text={delegateOptionLabel(u)}>
+                        {delegateOptionLabel(u)}
+                      </Option>
                     ))}
-                  </Select>
+                  </Combobox>
                 </div>
               </>
             ) : (

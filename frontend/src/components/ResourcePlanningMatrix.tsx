@@ -1955,9 +1955,25 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
               {isRoleManager ? (
                 <div>
                   <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>Cost Center</div>
-                  <div style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, backgroundColor: tokens.colorNeutralBackground3, fontSize: tokens.fontSizeBase300 }}>
-                    {allCostCenters.find(c => c.id === dlgCcId)?.name || costCenters[0]?.name || '—'}
-                  </div>
+                  {costCenters.length > 1 ? (
+                    <select
+                      value={dlgCcId}
+                      onChange={e => {
+                        setDlgCcId(e.target.value);
+                        setDlgSelectedResources([]);
+                        setDlgResourceQuery('');
+                      }}
+                      style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', backgroundColor: tokens.colorNeutralBackground1 }}
+                    >
+                      {costCenters.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}{c.id === managerCcId ? ' (My CC)' : ' (Delegated)'}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, backgroundColor: tokens.colorNeutralBackground3, fontSize: tokens.fontSizeBase300 }}>
+                      {allCostCenters.find(c => c.id === dlgCcId)?.name || costCenters[0]?.name || '—'}
+                    </div>
+                  )}
                 </div>
               ) : dlgSelectedResources.length > 0 ? (
                 <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>

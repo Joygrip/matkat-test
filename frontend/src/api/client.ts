@@ -73,6 +73,7 @@ class ApiClient {
       throw new ApiError(problem);
     }
 
+    if (response.status === 204) return undefined as T;
     return response.json();
   }
 

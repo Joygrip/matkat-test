@@ -396,11 +396,13 @@ function CcNavCard({
   cc,
   selected,
   isOwnCc,
+  isDelegatedCc,
   onClick,
 }: {
   cc: DashboardCostCenter;
   selected: boolean;
   isOwnCc?: boolean;
+  isDelegatedCc?: boolean;
   onClick: () => void;
 }) {
   const sev = ccSeverity(cc);
@@ -449,6 +451,18 @@ function CcNavCard({
                 verticalAlign: 'middle',
               }}>
                 ★ My CC
+              </span>
+            )}
+            {isDelegatedCc && (
+              <span style={{
+                display: 'inline-block', marginLeft: 6,
+                fontSize: 9, fontWeight: 700,
+                padding: '1px 5px', borderRadius: 3,
+                backgroundColor: '#f3eeff', color: '#6b4eb8',
+                border: '1px solid #d4c8f0',
+                verticalAlign: 'middle',
+              }}>
+                Delegated
               </span>
             )}
           </div>
@@ -839,8 +853,10 @@ export interface OverviewTabProps {
   /** When set (PM scope), restricts the project dropdown and CC navigator to these project IDs */
   scopeProjectIds?: string[];
   onDashboardChanged?: () => void;
-  /** Reader+Manager scope: the reader's own CC ID. Enables supply editing only for that CC and shows a "My CC" indicator. */
+  /** Reader scope: the reader's own CC ID. Enables supply editing only for that CC and shows a "My CC" indicator. */
   readerOwnCcId?: string;
+  /** Manager scope: the manager's own CC ID. Shows "My CC" on their CC; other CCs in scope show "Delegated". */
+  managerOwnCcId?: string;
 }
 
 type CcSortKey = 'gap' | 'name' | 'demand' | 'supply';
@@ -851,7 +867,7 @@ const SORT_OPTIONS: { key: CcSortKey; label: string }[] = [
   { key: 'demand', label: 'Demand'   },
 ];
 
-export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, onDashboardChanged, readerOwnCcId }: OverviewTabProps) {
+export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, onDashboardChanged, readerOwnCcId, managerOwnCcId }: OverviewTabProps) {
   const canEditDemand = useHasRole('Finance', 'PM');
   const canEditSupply = useHasRole('Finance', 'Manager');
   const isPM          = useHasRole('PM');
@@ -1321,7 +1337,12 @@ export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, on
                   key={ccKey}
                   cc={cc}
                   selected={selectedCcId === ccKey}
-                  isOwnCc={readerOwnCcId ? ccKey === readerOwnCcId : false}
+                  isOwnCc={
+                    readerOwnCcId ? ccKey === readerOwnCcId :
+                    managerOwnCcId ? ccKey === managerOwnCcId :
+                    false
+                  }
+                  isDelegatedCc={!!managerOwnCcId && ccKey !== managerOwnCcId}
                   onClick={() => setSelectedCcId(ccKey)}
                 />
               );

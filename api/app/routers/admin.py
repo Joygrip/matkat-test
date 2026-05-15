@@ -2,7 +2,7 @@
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Body
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from typing import Optional
@@ -999,17 +999,23 @@ def _build_user_map(db: Session, tenant_id: str) -> dict:
 
 @router.get("/delegates", response_model=list[ApprovalDelegateResponse])
 async def list_delegates(
+    as_delegate: bool = Query(False, description="When true, return delegations where the current user is the delegate"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(*DELEGATE_ROLES)),
 ):
-    """List approval delegates. Admin/Finance see all; Manager sees only their own."""
+    """List approval delegates. Admin/Finance see all; Manager sees only their own (as delegator).
+    Pass as_delegate=true to get delegations where the current user is the delegate."""
     query = db.query(ApprovalDelegate).filter(
         ApprovalDelegate.tenant_id == current_user.tenant_id
     )
-    if current_user.role == UserRole.MANAGER:
-        me = db.query(User).filter(
-            and_(User.tenant_id == current_user.tenant_id, User.object_id == current_user.object_id)
-        ).first()
+    me = db.query(User).filter(
+        and_(User.tenant_id == current_user.tenant_id, User.object_id == current_user.object_id)
+    ).first()
+    if as_delegate:
+        if not me:
+            return []
+        query = query.filter(ApprovalDelegate.delegate_id == me.id)
+    elif current_user.role == UserRole.MANAGER:
         if not me:
             return []
         query = query.filter(ApprovalDelegate.delegator_id == me.id)

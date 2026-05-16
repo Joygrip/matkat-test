@@ -40,7 +40,8 @@ import {
 import { Add24Regular, Delete24Regular } from '@fluentui/react-icons';
 import { planningApi, DemandLine, CreateDemandLine } from '../api/planning';
 import { usePeriod } from '../contexts/PeriodContext';
-import { lookupsApi, Project, Resource, Placeholder, CostCenter } from '../api/lookups';
+import { useAppData } from '../contexts/AppDataContext';
+import { lookupsApi, Resource, Placeholder } from '../api/lookups';
 import { useToast } from '../hooks/useToast';
 import { formatApiError } from '../utils/errors';
 import { MONTH_NAMES } from '../utils/format';
@@ -55,6 +56,15 @@ import { Period } from '../types';
 import { SearchableFilter } from '../components/SearchableFilter';
 import { SearchableMultiselect } from '../components/SearchableMultiselect';
 import { Dropdown, Option } from '@fluentui/react-components';
+
+interface DemandBulkPreviewLine {
+  project_id: string;
+  year: number;
+  month: number;
+  resource_id?: string;
+  placeholder_id?: string;
+  fte_percent: number;
+}
 
 const useStyles = makeStyles({
   container: {
@@ -213,12 +223,11 @@ export const Demand: React.FC = () => {
   const { user } = useAuth();
   
   const { selectedPeriodId, selectedPeriod: currentPeriod } = usePeriod();
-  
+  const { projects, costCenters } = useAppData();
+
   const [demands, setDemands] = useState<DemandLine[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
   const [placeholders, setPlaceholders] = useState<Placeholder[]>([]);
-  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null);
@@ -252,7 +261,7 @@ export const Demand: React.FC = () => {
   const [bulkAddResourceIds, setBulkAddResourceIds] = useState<string[]>([]);
   const [bulkAddPeriods, setBulkAddPeriods] = useState<Period[]>([]);
   const [bulkAddFte, setBulkAddFte] = useState<number>(50);
-  const [bulkAddPreview, setBulkAddPreview] = useState<any[]>([]);
+  const [bulkAddPreview, setBulkAddPreview] = useState<DemandBulkPreviewLine[]>([]);
   const [openPeriods, setOpenPeriods] = useState<Period[]>([]);
 
   const filteredDemands = useMemo(() => {
@@ -352,17 +361,12 @@ export const Demand: React.FC = () => {
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const [projectsData, resourcesData, placeholdersData, costCentersData] = await Promise.all([
-        user?.role === 'PM' ? lookupsApi.listProjectsScoped() : lookupsApi.listProjects(),
+      const [resourcesData, placeholdersData] = await Promise.all([
         lookupsApi.listResources(),
         lookupsApi.listPlaceholders(),
-        lookupsApi.listCostCenters(),
       ]);
-      
-      setProjects(projectsData);
       setResources(resourcesData);
       setPlaceholders(placeholdersData);
-      setCostCenters(costCentersData);
     } catch (err: unknown) {
       setError(formatApiError(err, 'Failed to load data'));
     } finally {
@@ -429,8 +433,8 @@ export const Demand: React.FC = () => {
       loadDemands();
       setFormData({ period_id: selectedPeriodId, project_id: '', fte_percent: 50 });
       setDialogCostCenterId('');
-    } catch (err: any) {
-      showApiError(err, 'Failed to create demand line');
+    } catch (err) {
+      showApiError(err as Error, 'Failed to create demand line');
     }
   };
   
@@ -478,8 +482,8 @@ export const Demand: React.FC = () => {
       loadDemands();
       setFormData({ period_id: selectedPeriodId, project_id: '', fte_percent: 50 });
       setDialogCostCenterId('');
-    } catch (err: any) {
-      showApiError(err, 'Failed to update demand line');
+    } catch (err) {
+      showApiError(err as Error, 'Failed to update demand line');
     }
   };
   
@@ -488,13 +492,13 @@ export const Demand: React.FC = () => {
   const handleBulkDelete = async () => {
     if (!window.confirm(`Delete ${selectedIds.length} demand lines?`)) return;
     try {
-      const actions = selectedIds.map(id => ({ action: 'delete', data: { id } }));
+      const actions = selectedIds.map(id => ({ action: 'delete' as const, data: { id } }));
       await planningApi.bulkDemandLines({ actions, all_or_nothing: true });
       showSuccess('Bulk delete successful');
       setSelectedIds([]);
       loadDemands();
     } catch (err) {
-      showApiError(err, 'Bulk delete failed');
+      showApiError(err as Error, 'Bulk delete failed');
     }
   };
 
@@ -512,7 +516,7 @@ export const Demand: React.FC = () => {
     }
     try {
       const actions = selectedIds.map(id => ({
-        action: 'update',
+        action: 'update' as const,
         data: {
           id,
           ...bulkEditForm,
@@ -526,7 +530,7 @@ export const Demand: React.FC = () => {
       setSelectedIds([]);
       loadDemands();
     } catch (err) {
-      showApiError(err, 'Bulk edit failed');
+      showApiError(err as Error, 'Bulk edit failed');
     }
   };
 
@@ -556,14 +560,14 @@ export const Demand: React.FC = () => {
       return;
     }
     try {
-      const actions = bulkAddPreview.map(line => ({ action: 'create', data: line }));
+      const actions = bulkAddPreview.map(line => ({ action: 'create' as const, data: line }));
       await planningApi.bulkDemandLines({ actions, all_or_nothing: true });
       showSuccess('Bulk demand lines created');
       setIsDialogOpen(false);
       setAddMode('single');
       loadDemands();
     } catch (err) {
-      showApiError(err, 'Bulk add failed');
+      showApiError(err as Error, 'Bulk add failed');
     }
   };
   

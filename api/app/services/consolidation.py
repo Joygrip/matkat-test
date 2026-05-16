@@ -13,6 +13,7 @@ from api.app.models.consolidation import PublishSnapshot, PublishSnapshotLine
 from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
+from api.app.services.period import PeriodService
 
 
 class ConsolidationService:
@@ -54,12 +55,7 @@ class ConsolidationService:
         Returns a cost-center list with per-resource/placeholder breakdowns
         plus flat over-allocations for quick scanning.
         """
-        period = self.db.query(Period).filter(
-            and_(
-                Period.id == period_id,
-                Period.tenant_id == self.current_user.tenant_id,
-            )
-        ).first()
+        period = PeriodService(self.db, self.current_user).get_by_id(period_id)
 
         if not period:
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Period not found"})
@@ -313,12 +309,7 @@ class ConsolidationService:
         Create an immutable snapshot of planning data for a period.
         """
         # Verify period exists
-        period = self.db.query(Period).filter(
-            and_(
-                Period.id == period_id,
-                Period.tenant_id == self.current_user.tenant_id,
-            )
-        ).first()
+        period = PeriodService(self.db, self.current_user).get_by_id(period_id)
         
         if not period:
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Period not found"})
@@ -587,12 +578,7 @@ class ConsolidationService:
         """
         Get per-assignment demand and supply breakdown for a single resource in a period.
         """
-        period = self.db.query(Period).filter(
-            and_(
-                Period.id == period_id,
-                Period.tenant_id == self.current_user.tenant_id,
-            )
-        ).first()
+        period = PeriodService(self.db, self.current_user).get_by_id(period_id)
         if not period:
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Period not found"})
 

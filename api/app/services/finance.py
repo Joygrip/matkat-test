@@ -8,6 +8,7 @@ from sqlalchemy import exists as sa_exists
 from api.app.models.core import User, Project, ProjectPM, Resource, CostCenter
 from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalStatus, StepStatus
 from api.app.models.finance import FinanceSetting
+from api.app.services.period import PeriodService
 from api.app.schemas.finance import (
     FinanceActualsDashboardResponse,
     FinanceCostCenterStatsResponse,
@@ -593,19 +594,11 @@ class FinanceService:
         from api.app.models.planning import DemandLine
         from api.app.models.actuals import ActualLine
         from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
-        from api.app.models.core import Period, Project, Resource, CostCenter
+        from api.app.models.core import Project, Resource, CostCenter
         from fastapi import HTTPException
 
         # Resolve period UUID
-        period = (
-            self.db.query(Period)
-            .filter(
-                Period.tenant_id == self.current_user.tenant_id,
-                Period.year == year,
-                Period.month == month,
-            )
-            .first()
-        )
+        period = PeriodService(self.db, self.current_user).get_by_year_month(year, month)
         if period is None:
             raise HTTPException(status_code=404, detail="Period not found.")
 
@@ -936,17 +929,11 @@ class FinanceService:
         cost_center_id: Optional[str] = None,
     ) -> list:
         """Return detail for a single period (year+month provided) or all open periods."""
-        from api.app.models.core import Period
         if year is not None and month is not None:
             return [self.get_consolidated_cost_detail(year, month, project_id, cost_center_id)]
-        periods = (
-            self.db.query(Period)
-            .filter(
-                Period.tenant_id == self.current_user.tenant_id,
-                Period.status == 'open',
-            )
-            .order_by(Period.year, Period.month)
-            .all()
+        periods = sorted(
+            PeriodService(self.db, self.current_user).list_open(),
+            key=lambda p: (p.year, p.month),
         )
         results = []
         for p in periods:
@@ -989,7 +976,7 @@ class FinanceService:
         from api.app.models.planning import DemandLine
         from api.app.models.actuals import ActualLine
         from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
-        from api.app.models.core import Period, Project, PeriodStatus
+        from api.app.models.core import Project
 
         # 1. Resolve monthly FTE cost setting
         setting = self.get_setting("monthly_fte_cost")
@@ -997,14 +984,12 @@ class FinanceService:
 
         # 2. Load periods — specific month when year+month provided (allows locked periods),
         #    otherwise only open periods for the default aggregated view.
-        period_q = self.db.query(Period).filter(
-            Period.tenant_id == self.current_user.tenant_id,
-        )
+        period_svc = PeriodService(self.db, self.current_user)
         if year is not None and month is not None:
-            period_q = period_q.filter(Period.year == year, Period.month == month)
+            p = period_svc.get_by_year_month(year, month)
+            all_periods = [p] if p else []
         else:
-            period_q = period_q.filter(Period.status == PeriodStatus.OPEN)
-        all_periods = period_q.all()
+            all_periods = period_svc.list_open()
         period_ids = [p.id for p in all_periods]
         period_map = {p.id: (p.year, p.month) for p in all_periods}
 

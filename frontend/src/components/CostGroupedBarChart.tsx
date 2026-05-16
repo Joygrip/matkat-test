@@ -108,12 +108,15 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const TOOLTIP_CATEGORIES = ['planned', 'actual', 'oop', 'equipment'];
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+interface TooltipEntry { dataKey: string; value: number; }
+interface CostTooltipProps { active?: boolean; payload?: TooltipEntry[]; label?: string; }
+
+const CustomTooltip = ({ active, payload, label }: CostTooltipProps) => {
   if (!active || !payload || !payload.length) return null;
 
   // Group by entity name (everything before the last underscore)
   const rows: Record<string, Record<string, number>> = {};
-  payload.forEach((entry: any) => {
+  payload.forEach((entry: TooltipEntry) => {
     const lastUnderscore = entry.dataKey.lastIndexOf('_');
     const entity = entry.dataKey.slice(0, lastUnderscore);
     const category = entry.dataKey.slice(lastUnderscore + 1);
@@ -198,7 +201,7 @@ export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, 
           <YAxis tickFormatter={dkkCompact} width={72} />
           <Tooltip content={<CustomTooltip />} position={tooltipPos} wrapperStyle={{ pointerEvents: 'none' }} />
           {entityNames.flatMap((entity) =>
-            SUFFIXES.filter((suffix) => !hiddenCategories.includes(suffix.slice(1) as any)).map((suffix, idx, visibleSuffixes) => (
+            SUFFIXES.filter((suffix) => !hiddenCategories.includes(suffix.slice(1) as 'planned' | 'actual' | 'oop' | 'equipment')).map((suffix, idx, visibleSuffixes) => (
               <Bar
                 key={`${entity}${suffix}`}
                 dataKey={`${entity}${suffix}`}
@@ -208,7 +211,7 @@ export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, 
                 radius={idx === visibleSuffixes.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
                 barSize={24}
                 style={{ cursor: onBarClick ? 'pointer' : 'default' }}
-                onClick={(barData: any) => onBarClick?.(entity, String(barData.label))}
+                onClick={(barData) => onBarClick?.(entity, String((barData as unknown as GroupedBarChartDatum).label))}
               />
             ))
           )}
@@ -226,7 +229,7 @@ export const CostGroupedBarChart: React.FC<CostGroupedBarChartProps> = ({ data, 
       </div>
       {/* Legend: Section B — cost type shade key (only visible categories) */}
       <div className={styles.legendTypes}>
-        {SUFFIXES.filter((suffix) => !hiddenCategories.includes(suffix.slice(1) as any)).map((suffix) => (
+        {SUFFIXES.filter((suffix) => !hiddenCategories.includes(suffix.slice(1) as 'planned' | 'actual' | 'oop' | 'equipment')).map((suffix) => (
           <div key={suffix} className={styles.legendTypeItem}>
             <span
               className={styles.legendTypeSwatch}

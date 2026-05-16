@@ -231,6 +231,7 @@ export const ResourcePlanning: React.FC = () => {
   useEffect(() => {
     if (!user?.object_id || !isAnyManager || !myResource) return;
     const rid: string | null = myResource.resource_id;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const fetches: Promise<any>[] = [lookupsApi.listResourcesScoped()];
     if (isManagerReader) {
       fetches.push(adminApi.listDelegatesAsDelegate());

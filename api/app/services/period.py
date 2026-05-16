@@ -22,6 +22,15 @@ class PeriodService:
         return self.db.query(Period).filter(
             Period.tenant_id == self.current_user.tenant_id
         ).order_by(Period.year.desc(), Period.month.desc()).all()
+
+    def list_open(self) -> list[Period]:
+        """Get all open periods for the current tenant."""
+        return self.db.query(Period).filter(
+            and_(
+                Period.tenant_id == self.current_user.tenant_id,
+                Period.status == PeriodStatus.OPEN,
+            )
+        ).all()
     
     def get_by_id(self, period_id: str) -> Optional[Period]:
         """Get a period by ID."""

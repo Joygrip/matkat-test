@@ -17,13 +17,12 @@ import {
   Spinner,
 } from '@fluentui/react-components';
 import { usePeriod } from '../contexts/PeriodContext';
-import { lookupsApi } from '../api/lookups';
+import { useAppData } from '../contexts/AppDataContext';
 import { projectCostsApi, ProjectCostSummary } from '../api/projectCosts';
 import { useToast } from '../hooks/useToast';
 import { FinanceKpiStrip } from '../components/finance/FinanceKpiStrip';
 import { ExternalsPanel } from '../components/project-costs/ExternalsPanel';
 import { EquipmentPanel } from '../components/project-costs/EquipmentPanel';
-import type { Project } from '../api/lookups';
 import { formatDKKFromCents } from '../utils/format';
 
 type ActiveTab = 'externals' | 'equipment';
@@ -85,16 +84,12 @@ export const ProjectCosts: React.FC = () => {
   const styles = useStyles();
   const { showApiError } = useToast();
   const { selectedPeriodId } = usePeriod();
+  const { projects } = useAppData();
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('externals');
   const [selectedProjectId, setSelectedProjectId] = useState('');
-  const [projects, setProjects] = useState<Project[]>([]);
   const [summary, setSummary] = useState<ProjectCostSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
-
-  useEffect(() => {
-    lookupsApi.listProjects().then(setProjects).catch(() => {});
-  }, []);
 
   const loadSummary = useCallback(async () => {
     if (!selectedPeriodId) return;

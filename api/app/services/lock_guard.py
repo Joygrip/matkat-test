@@ -6,6 +6,7 @@ from sqlalchemy import and_
 from api.app.db.engine import get_db
 from api.app.auth.dependencies import get_current_user, CurrentUser
 from api.app.models.core import Period, PeriodStatus
+from api.app.services.period import PeriodService
 
 
 def check_period_not_locked(
@@ -73,12 +74,7 @@ class PeriodLockGuard:
     
     def check_period_id(self, period_id: str) -> None:
         """Check if a period (by ID) is locked."""
-        period = self.db.query(Period).filter(
-            and_(
-                Period.id == period_id,
-                Period.tenant_id == self.current_user.tenant_id,
-            )
-        ).first()
+        period = PeriodService(self.db, self.current_user).get_by_id(period_id)
         
         if not period:
             raise HTTPException(

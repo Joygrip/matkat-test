@@ -488,8 +488,11 @@ export function EmployeeView({ periods }: Props) {
         const updated = await actualsApi.updateActualLine(existing.id, { actual_fte_percent: ftePct });
         try {
           await actualsApi.signActuals(updated.id);
-        } catch (signErr: any) {
-          const detail = signErr?.detail ?? signErr?.response?.data?.detail; const msg = (typeof detail === 'string' ? detail : detail?.message ?? signErr?.message ?? '');
+        } catch (signErr) {
+          type SignErrShape = { detail?: string | { message?: string }; response?: { data?: { detail?: string | { message?: string } } }; message?: string };
+          const se = signErr as SignErrShape;
+          const detail = se?.detail ?? se?.response?.data?.detail;
+          const msg = (typeof detail === 'string' ? detail : detail?.message ?? se?.message ?? '');
           if (!msg.toLowerCase().includes('already signed')) throw signErr;
         }
       } else {
@@ -504,8 +507,9 @@ export function EmployeeView({ periods }: Props) {
             month: period.month,
             actual_fte_percent: ftePct,
           });
-        } catch (createErr: any) {
-          if ((createErr?.response?.status ?? createErr?.status) === 409) {
+        } catch (createErr) {
+          const ce = createErr as { response?: { status?: number }; status?: number };
+          if ((ce?.response?.status ?? ce?.status) === 409) {
             // Backend has the record but local lookup is stale — fetch and update
             const allActuals = await actualsApi.getMyActuals();
             const existingLine = allActuals.find(
@@ -519,8 +523,11 @@ export function EmployeeView({ periods }: Props) {
         }
         try {
           await actualsApi.signActuals(newLine!.id);
-        } catch (signErr: any) {
-          const detail = signErr?.detail ?? signErr?.response?.data?.detail; const msg = (typeof detail === 'string' ? detail : detail?.message ?? signErr?.message ?? '');
+        } catch (signErr) {
+          type SignErrShape = { detail?: string | { message?: string }; response?: { data?: { detail?: string | { message?: string } } }; message?: string };
+          const se = signErr as SignErrShape;
+          const detail = se?.detail ?? se?.response?.data?.detail;
+          const msg = (typeof detail === 'string' ? detail : detail?.message ?? se?.message ?? '');
           if (!msg.toLowerCase().includes('already signed')) throw signErr;
         }
       }
@@ -535,8 +542,9 @@ export function EmployeeView({ periods }: Props) {
       setActualsEdits(prev => { const n = { ...prev }; delete n[cellKey]; return n; });
       setSavedCells(prev => new Set(prev).add(cellKey));
       setTimeout(() => setSavedCells(prev => { const n = new Set(prev); n.delete(cellKey); return n; }), 2000);
-    } catch (err: any) {
-      console.error('ACTUALS SAVE ERROR:', err, err?.response?.data, err?.response?.status);
+    } catch (err) {
+      const e = err as { response?: { data?: unknown; status?: number } };
+      console.error('ACTUALS SAVE ERROR:', err, e?.response?.data, e?.response?.status);
       showError('Save failed', 'Could not save actuals value. Please try again.');
     } finally {
       setSavingCells(prev => { const n = new Set(prev); n.delete(cellKey); return n; });

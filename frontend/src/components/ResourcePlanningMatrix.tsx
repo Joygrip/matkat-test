@@ -693,8 +693,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         });
       }
       onReload();
-    } catch (err: any) {
-      showApiError(err, 'Failed to save demand');
+    } catch (err) {
+      showApiError(err as Error, 'Failed to save demand');
     } finally {
       setSavingCells(prev => { const s = new Set(prev); s.delete(cellKey); return s; });
       setEditingCell(null);
@@ -725,8 +725,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         });
       }
       onReload();
-    } catch (err: any) {
-      showApiError(err, 'Failed to save supply');
+    } catch (err) {
+      showApiError(err as Error, 'Failed to save supply');
     } finally {
       setSavingCells(prev => { const s = new Set(prev); s.delete(cellKey); return s; });
       setEditingCell(null);
@@ -935,7 +935,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setEditError(null);
 
     try {
-      const actions: Array<{ action: string; data: Record<string, unknown> }> = [];
+      const actions: Array<{ action: 'create' | 'update' | 'delete'; data: Record<string, unknown> }> = [];
 
       for (const cellKey of selectedCells) {
         const { type, resourceId, placeholderId, projectId, periodId } = parseCellKey(cellKey);
@@ -1018,7 +1018,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setEditError(null);
 
     try {
-      const actions: Array<{ action: string; data: Record<string, unknown> }> = [];
+      const actions: Array<{ action: 'create' | 'update' | 'delete'; data: Record<string, unknown> }> = [];
 
       for (const cellKey of selectedCells) {
         const { type, resourceId, placeholderId, projectId, periodId } = parseCellKey(cellKey);
@@ -1125,7 +1125,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDlgSaving(true);
     setDlgError(null);
     try {
-      const actions: Array<{ action: string; data: Record<string, unknown> }> = [];
+      const actions: Array<{ action: 'create' | 'update' | 'delete'; data: Record<string, unknown> }> = [];
       for (const res of dlgSelectedResources) {
         for (const periodId of dlgSelectedPeriods) {
           const period = periods.find(p => p.id === periodId);

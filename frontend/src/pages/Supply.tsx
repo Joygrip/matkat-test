@@ -43,7 +43,8 @@ import {
 import { Add24Regular, Delete24Regular, PeopleRegular, Edit24Regular, ChevronRight20Regular, ChevronDown20Regular } from '@fluentui/react-icons';
 import { planningApi, SupplyLine, CreateSupplyLine } from '../api/planning';
 import { usePeriod } from '../contexts/PeriodContext';
-import { lookupsApi, Resource, CostCenter, Project } from '../api/lookups';
+import { useAppData } from '../contexts/AppDataContext';
+import { lookupsApi, Resource } from '../api/lookups';
 import { useToast } from '../hooks/useToast';
 import { formatApiError } from '../utils/errors';
 import { MONTH_NAMES } from '../utils/format';
@@ -56,6 +57,14 @@ import { LoadingState } from '../components/LoadingState';
 import { ResourcePicker } from '../components/ResourcePicker';
 import { periodsApi } from '../api/periods';
 import { Period } from '../types';
+
+interface SupplyBulkPreviewLine {
+  resource_id: string;
+  year: number;
+  month: number;
+  project_id?: string;
+  fte_percent: number;
+}
 
 const useStyles = makeStyles({
   container: {
@@ -79,6 +88,7 @@ const useStyles = makeStyles({
     marginBottom: tokens.spacingVerticalL,
     flexWrap: 'wrap' as const,
   },
+
   kpiRow: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
@@ -236,11 +246,10 @@ export const Supply: React.FC = () => {
   const { user } = useAuth();
   
   const { selectedPeriodId, selectedPeriod: currentPeriod } = usePeriod();
-  
+  const { projects, costCenters } = useAppData();
+
   const [supplies, setSupplies] = useState<SupplyLine[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null);
@@ -266,7 +275,7 @@ export const Supply: React.FC = () => {
   const [bulkAddPeriods, setBulkAddPeriods] = useState<Period[]>([]);
   const [bulkAddProjectId, setBulkAddProjectId] = useState<string>('');
   const [bulkAddFte, setBulkAddFte] = useState<number>(100);
-  const [bulkAddPreview, setBulkAddPreview] = useState<any[]>([]);
+  const [bulkAddPreview, setBulkAddPreview] = useState<SupplyBulkPreviewLine[]>([]);
   const [openPeriods, setOpenPeriods] = useState<Period[]>([]);
   const [addMode, setAddMode] = useState<'single' | 'bulk'>('single');
 
@@ -389,15 +398,10 @@ export const Supply: React.FC = () => {
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const [resourcesData, projectsData, costCentersData] = await Promise.all([
-        user?.role === 'Manager' ? lookupsApi.listResourcesScoped() : lookupsApi.listResources(),
-        lookupsApi.listProjects(),
-        lookupsApi.listCostCenters(),
-      ]);
-      
+      const resourcesData = await (user?.role === 'Manager'
+        ? lookupsApi.listResourcesScoped()
+        : lookupsApi.listResources());
       setResources(resourcesData);
-      setProjects(projectsData);
-      setCostCenters(costCentersData);
     } catch (err: unknown) {
       setError(formatApiError(err, 'Failed to load data'));
     } finally {
@@ -491,8 +495,8 @@ export const Supply: React.FC = () => {
       setEditId(null);
       loadSupplies();
       setFormData({ period_id: selectedPeriodId, resource_id: '', project_id: '', fte_percent: 100 });
-    } catch (err: any) {
-      showApiError(err, 'Failed to update supply line');
+    } catch (err) {
+      showApiError(err as Error, 'Failed to update supply line');
     }
   };
   
@@ -518,26 +522,26 @@ export const Supply: React.FC = () => {
   const handleBulkDelete = async () => {
     if (!window.confirm(`Delete ${selectedIds.length} supply lines?`)) return;
     try {
-      const actions = selectedIds.map(id => ({ action: 'delete', data: { id } }));
+      const actions = selectedIds.map(id => ({ action: 'delete' as const, data: { id } }));
       await planningApi.bulkSupplyLines({ actions, all_or_nothing: true });
       showSuccess('Bulk delete successful');
       setSelectedIds([]);
       loadSupplies();
     } catch (err) {
-      showApiError(err, 'Bulk delete failed');
+      showApiError(err as Error, 'Bulk delete failed');
     }
   };
-  
+
   const handleBulkEdit = async () => {
     try {
-      const actions = selectedIds.map(id => ({ action: 'update', data: { id, fte_percent: bulkEditFte } }));
+      const actions = selectedIds.map(id => ({ action: 'update' as const, data: { id, fte_percent: bulkEditFte } }));
       await planningApi.bulkSupplyLines({ actions, all_or_nothing: true });
       showSuccess('Bulk edit successful');
       setSelectedIds([]);
       setIsBulkEditOpen(false);
       loadSupplies();
     } catch (err) {
-      showApiError(err, 'Bulk edit failed');
+      showApiError(err as Error, 'Bulk edit failed');
     }
   };
 
@@ -564,14 +568,14 @@ export const Supply: React.FC = () => {
       return;
     }
     try {
-      const actions = bulkAddPreview.map(line => ({ action: 'create', data: line }));
+      const actions = bulkAddPreview.map(line => ({ action: 'create' as const, data: line }));
       await planningApi.bulkSupplyLines({ actions, all_or_nothing: true });
       showSuccess('Bulk supply lines created');
       setIsDialogOpen(false);
       setAddMode('single');
       loadSupplies();
     } catch (err) {
-      showApiError(err, 'Bulk add failed');
+      showApiError(err as Error, 'Bulk add failed');
     }
   };
 

@@ -298,12 +298,12 @@ export function BreakdownChart({ rows, demandOnly, supplyOnly, maxValue: maxValu
           <span className={styles.summaryLabel}>Total</span>
           <div className={styles.barGroup}>
             {!supplyOnly && (
-              <span style={{ fontSize: tokens.fontSizeBase300, fontWeight: tokens.fontWeightBold as any, color: '#4f6bed' }}>
+              <span style={{ fontSize: tokens.fontSizeBase300, fontWeight: tokens.fontWeightBold as string, color: '#4f6bed' }}>
                 {expanded ? totalDemandAll : totalDemand}% demand
               </span>
             )}
             {!demandOnly && (
-              <span style={{ fontSize: tokens.fontSizeBase300, fontWeight: tokens.fontWeightBold as any, color: '#0ea573' }}>
+              <span style={{ fontSize: tokens.fontSizeBase300, fontWeight: tokens.fontWeightBold as string, color: '#0ea573' }}>
                 {expanded ? totalSupplyAll : totalSupply}% supply
               </span>
             )}

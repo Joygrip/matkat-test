@@ -64,11 +64,14 @@ function lighten(color: string, percent: number) {
 }
 
 // Custom tooltip for grouped bars
-const CustomTooltip = ({ active, payload, label }: any) => {
+interface TooltipEntry { dataKey: string; value: number; }
+interface TooltipProps { active?: boolean; payload?: TooltipEntry[]; label?: string; }
+
+const CustomTooltip = ({ active, payload, label }: TooltipProps) => {
   if (!active || !payload || !payload.length) return null;
   // Group by project
-  const rows: Record<string, { demand?: number; supply?: number }> = {};
-  payload.forEach((entry: any) => {
+  const rows: Record<string, Record<string, number>> = {};
+  payload.forEach((entry: TooltipEntry) => {
     const [project, type] = entry.dataKey.split('_');
     if (!rows[project]) rows[project] = {};
     rows[project][type] = entry.value;

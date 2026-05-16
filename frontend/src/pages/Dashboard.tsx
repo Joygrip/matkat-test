@@ -87,6 +87,7 @@ export function Dashboard() {
       .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
     const earliest = openSorted[0];
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const fetches: Promise<any>[] = [
       planningApi.getAllDemandLines(),
       planningApi.getAllSupplyLines(),

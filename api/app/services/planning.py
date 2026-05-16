@@ -10,6 +10,7 @@ from api.app.models.planning import DemandLine, SupplyLine
 from api.app.models.core import Period, Project, ProjectPM, Resource, Placeholder, User, PeriodStatus, UserRole
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
+from api.app.services.period import PeriodService
 from api.app.schemas.common import ErrorCode
 
 _SCOPED_ROLES = (UserRole.MANAGER,)
@@ -45,13 +46,7 @@ class DemandService:
     
     def _check_period_open(self, year: int, month: int) -> Period:
         """Check if the period exists and is open."""
-        period = self.db.query(Period).filter(
-            and_(
-                Period.tenant_id == self.current_user.tenant_id,
-                Period.year == year,
-                Period.month == month,
-            )
-        ).first()
+        period = PeriodService(self.db, self.current_user).get_by_year_month(year, month)
         
         if not period:
             raise HTTPException(
@@ -545,13 +540,7 @@ class SupplyService:
 
     def _check_period_open(self, year: int, month: int) -> Period:
         """Check if the period exists and is open."""
-        period = self.db.query(Period).filter(
-            and_(
-                Period.tenant_id == self.current_user.tenant_id,
-                Period.year == year,
-                Period.month == month,
-            )
-        ).first()
+        period = PeriodService(self.db, self.current_user).get_by_year_month(year, month)
         
         if not period:
             raise HTTPException(

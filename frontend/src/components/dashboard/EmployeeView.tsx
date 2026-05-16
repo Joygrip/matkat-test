@@ -25,6 +25,7 @@ import { DashboardKPIStrip, KPIStripItem } from '../shared/DashboardKPIStrip';
 import { DashboardSection } from './DashboardSection';
 import { actualsApi, ActualLine, ActualApprovalStatus } from '../../api/actuals';
 import { planningApi, DemandLine, SupplyLine } from '../../api/planning';
+import { useAppData } from '../../contexts/AppDataContext';
 import { useToast } from '../../hooks/useToast';
 import type { Period, MeResponse } from '../../types/index';
 
@@ -232,8 +233,11 @@ function ApprovalDot({ status }: { status?: string }) {
 export function EmployeeView({ periods }: Props) {
   const styles = useStyles();
   const { showSuccess, showError } = useToast();
+  const { myResource, appDataLoading } = useAppData();
 
-  const [myResourceId, setMyResourceId] = useState<string | null>(null);
+  // Derived from context — no per-component fetch needed
+  const myResourceId = myResource?.resource_id ?? null;
+
   const [myDemandLines, setMyDemandLines] = useState<DemandLine[]>([]);
   const [mySupplyLines, setMySupplyLines] = useState<SupplyLine[]>([]);
   const [myActuals, setMyActuals] = useState<ActualLine[]>([]);
@@ -256,23 +260,21 @@ export function EmployeeView({ periods }: Props) {
   const earliestPeriod = openPeriods[0] ?? null;
 
   useEffect(() => {
-    if (!periods.length) { setLoading(false); return; }
+    // Wait for context to resolve before fetching volatile data
+    if (!periods.length || appDataLoading) { setLoading(appDataLoading); return; }
 
+    const resource_id = myResource?.resource_id ?? null;
     setLoading(true);
-    actualsApi.getMyResource()
-      .then(({ resource_id }) => {
-        setMyResourceId(resource_id);
-        return Promise.all([
-          resource_id
-            ? planningApi.getDemandLines(undefined, { resourceId: resource_id })
-            : Promise.resolve([] as DemandLine[]),
-          resource_id
-            ? planningApi.getSupplyLines(undefined, { resourceId: resource_id })
-            : Promise.resolve([] as SupplyLine[]),
-          actualsApi.getMyActuals(),          // all periods
-          actualsApi.getMyApprovalStatuses(), // all periods
-        ]);
-      })
+    Promise.all([
+      resource_id
+        ? planningApi.getDemandLines(undefined, { resourceId: resource_id })
+        : Promise.resolve([] as DemandLine[]),
+      resource_id
+        ? planningApi.getSupplyLines(undefined, { resourceId: resource_id })
+        : Promise.resolve([] as SupplyLine[]),
+      actualsApi.getMyActuals(),          // all periods
+      actualsApi.getMyApprovalStatuses(), // all periods
+    ])
       .then(([demand, supply, actuals, statuses]) => {
         setMyDemandLines(demand as DemandLine[]);
         setMySupplyLines(supply as SupplyLine[]);
@@ -281,7 +283,7 @@ export function EmployeeView({ periods }: Props) {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [periods.length]);
+  }, [periods.length, appDataLoading, myResource?.resource_id]);
 
   const periodName = earliestPeriod ? fmtPeriod(earliestPeriod) : '—';
 

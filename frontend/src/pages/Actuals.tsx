@@ -279,7 +279,7 @@ export const Actuals: React.FC = () => {
   const canSeeStats = useHasRole('Finance', 'Manager', 'Admin');
 
   const { selectedPeriodId, selectedPeriod: ctxPeriod } = usePeriod();
-  const { costCenters, projects, appDataLoading } = useAppData();
+  const { costCenters, projects, myResource, appDataLoading } = useAppData();
 
   const isEmployee = user?.role === 'Employee';
   const isManager = user?.role === 'Manager';
@@ -305,8 +305,8 @@ export const Actuals: React.FC = () => {
     project_id: '',
     actual_fte_percent: 50,
   });
-  const [myResourceId, setMyResourceId] = useState<string | null>(null);
-  const [myResourceLoading, setMyResourceLoading] = useState(false);
+  // myResourceId is cached at app level via AppDataContext — no per-page fetch needed
+  const myResourceId = myResource?.resource_id ?? null;
 
   // Edit dialog state
   const [editActual, setEditActual] = useState<ActualLine | null>(null);
@@ -342,17 +342,6 @@ export const Actuals: React.FC = () => {
     loadInitialData();
   }, []);
 
-  // Load current user's resource ID (employees: identity; managers: detect self-entry)
-  useEffect(() => {
-    if (isEmployee || isManager) {
-      setMyResourceLoading(true);
-      actualsApi.getMyResource()
-        .then(data => setMyResourceId(data.resource_id))
-        .catch(() => setMyResourceId(null))
-        .finally(() => setMyResourceLoading(false));
-    }
-  }, [isEmployee, isManager]);
-
   // Employee: load own actuals when period or resource changes
   useEffect(() => {
     if (isEmployee && selectedPeriodId) {
@@ -368,6 +357,11 @@ export const Actuals: React.FC = () => {
   }, [selectedPeriodId, isEmployee, actualsProjectId]);
 
   const loadInitialData = async () => {
+    // Employees only enter their own actuals — they don't need the full resource list
+    if (isEmployee) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       const resourcesData = await (isManager
@@ -609,13 +603,13 @@ export const Actuals: React.FC = () => {
             <div className={styles.formField}>
               <label>Resource</label>
               {isEmployee ? (
-                myResourceLoading ? (
+                appDataLoading ? (
                   <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
                     Identifying your resource...
                   </Body1>
                 ) : myResourceId ? (
                   <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground1, fontWeight: tokens.fontWeightSemibold }}>
-                    {resources.find(r => r.id === myResourceId)?.display_name || 'You'}
+                    {user?.display_name || 'You'}
                   </Body1>
                 ) : (
                   <>

@@ -8,7 +8,6 @@ import {
   makeStyles,
 } from '@fluentui/react-components';
 import { planningApi, DemandLine, SupplyLine } from '../api/planning';
-import { actualsApi } from '../api/actuals';
 import { adminApi } from '../api/admin';
 import { lookupsApi } from '../api/lookups';
 import { usePeriod } from '../contexts/PeriodContext';
@@ -189,7 +188,7 @@ export const ResourcePlanning: React.FC = () => {
   const isAnyManager = user?.role === 'Manager';
 
   const { periods: contextPeriods } = usePeriod();
-  const { costCenters, projects } = useAppData();
+  const { costCenters, projects, myResource } = useAppData();
 
   const [openPeriods, setOpenPeriods] = useState<Period[]>([]);
   const openPeriodsRef = useRef<Period[]>([]);
@@ -227,20 +226,17 @@ export const ResourcePlanning: React.FC = () => {
   // Keep ref in sync so reloadLines always has the latest periods without stale closure
   useEffect(() => { openPeriodsRef.current = openPeriods; }, [openPeriods]);
 
-  // Fetch the manager's own CC via their linked resource record (scoped resources always
-  // includes the manager's own resource even when they have no supply lines).
+  // Derive the manager's own CC from the cached resource record (context) + scoped resources list.
+  // Scoped resources always includes the manager's own resource even when they have no supply lines.
   // For ManagerReader: also fetch delegations to identify which other CCs are delegated.
   useEffect(() => {
-    if (!user?.object_id || !isAnyManager) return;
-    const fetches: [Promise<any>, Promise<any>, ...Promise<any>[]] = [
-      actualsApi.getMyResource(),
-      lookupsApi.listResourcesScoped(),
-    ];
+    if (!user?.object_id || !isAnyManager || !myResource) return;
+    const rid: string | null = myResource.resource_id;
+    const fetches: Promise<any>[] = [lookupsApi.listResourcesScoped()];
     if (isManagerReader) {
       fetches.push(adminApi.listDelegatesAsDelegate());
     }
-    Promise.all(fetches).then(([myRes, resources, delegates]) => {
-      const rid: string | null = myRes?.resource_id ?? null;
+    Promise.all(fetches).then(([resources, delegates]) => {
       const userRes = rid ? resources.find((r: { id: string; cost_center_id: string }) => r.id === rid) : null;
       setManagerCcId(userRes?.cost_center_id ?? null);
       if (isManagerReader && delegates) {
@@ -255,7 +251,7 @@ export const ResourcePlanning: React.FC = () => {
         setDelegatedCcIds(ccIds);
       }
     }).catch(() => {});
-  }, [user?.object_id, isAnyManager, isManagerReader]);
+  }, [user?.object_id, isAnyManager, isManagerReader, myResource]);
 
   // Default KPI selection: earliest open period
   useEffect(() => {

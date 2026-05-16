@@ -1,11 +1,13 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { lookupsApi } from '../api/lookups';
+import { actualsApi } from '../api/actuals';
 import { useAuth } from '../auth/AuthProvider';
 import type { CostCenter, Project } from '../api/admin';
 
 interface AppDataContextValue {
   costCenters: CostCenter[];
   projects: Project[];
+  myResource: { resource_id: string | null } | null;
   appDataLoading: boolean;
   refreshAppData: () => void;
 }
@@ -16,6 +18,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [myResource, setMyResource] = useState<{ resource_id: string | null } | null>(null);
   const [appDataLoading, setAppDataLoading] = useState(true);
 
   const load = () => {
@@ -27,10 +30,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         : lookupsApi.listProjects();
 
     setAppDataLoading(true);
-    Promise.all([lookupsApi.listCostCenters(), projectsFetch])
-      .then(([ccs, projs]) => {
+    Promise.all([lookupsApi.listCostCenters(), projectsFetch, actualsApi.getMyResource()])
+      .then(([ccs, projs, myRes]) => {
         setCostCenters(ccs);
         setProjects(projs);
+        setMyResource(myRes);
       })
       .catch((err) => console.error('[AppDataContext] Failed to load shared data:', err))
       .finally(() => setAppDataLoading(false));
@@ -41,7 +45,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   }, [user?.role]);
 
   return (
-    <AppDataContext.Provider value={{ costCenters, projects, appDataLoading, refreshAppData: load }}>
+    <AppDataContext.Provider value={{ costCenters, projects, myResource, appDataLoading, refreshAppData: load }}>
       {children}
     </AppDataContext.Provider>
   );

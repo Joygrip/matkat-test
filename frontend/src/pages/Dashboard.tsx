@@ -65,7 +65,7 @@ export function Dashboard() {
   const { user } = useAuth();
   const isManagerReader = useIsManagerReader();
   const { periods, loading: periodsLoading } = usePeriod();
-  const { costCenters, projects, appDataLoading } = useAppData();
+  const { costCenters, projects, myResource, appDataLoading } = useAppData();
 
   const [allDemandLines, setAllDemandLines] = useState<DemandLine[]>([]);
   const [allSupplyLines, setAllSupplyLines] = useState<SupplyLine[]>([]);
@@ -108,19 +108,19 @@ export function Dashboard() {
       .finally(() => setLoading(false));
   }, [user?.role, periodsLoading, appDataLoading]);
 
-  // Fetch the user's own cost center via their linked resource record.
-  // Uses scoped resources (always includes the manager's own resource even with no supply lines).
+  // Derive the manager's own cost center from their linked resource record (already cached in context)
+  // and the scoped resources list (includes the manager's own resource even with no supply lines).
   useEffect(() => {
-    if (!user || user.role !== 'Manager') return;
-    Promise.all([
-      actualsApi.getMyResource(),
-      lookupsApi.listResourcesScoped(),
-    ]).then(([myRes, resources]) => {
-      const rid: string | null = myRes?.resource_id ?? null;
-      const userRes = rid ? resources.find((r: { id: string; cost_center_id: string }) => r.id === rid) : null;
-      setUserCcId(userRes?.cost_center_id ?? null);
-    }).catch(() => {});
-  }, [user?.object_id, user?.role]);
+    if (!user || user.role !== 'Manager' || !myResource) return;
+    const rid = myResource.resource_id;
+    if (!rid) { setUserCcId(null); return; }
+    lookupsApi.listResourcesScoped()
+      .then(resources => {
+        const userRes = resources.find((r: { id: string; cost_center_id: string }) => r.id === rid);
+        setUserCcId(userRes?.cost_center_id ?? null);
+      })
+      .catch(() => {});
+  }, [user?.object_id, user?.role, myResource]);
 
   if (!user) return null;
 

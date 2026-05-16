@@ -1,5 +1,5 @@
 """Audit log API endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
 from api.app.db.engine import get_db

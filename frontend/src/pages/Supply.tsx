@@ -477,7 +477,7 @@ export const Supply: React.FC = () => {
       return;
     }
     try {
-      const data: any = {
+      const data: Partial<CreateSupplyLine> & { id?: string } = {
         id: editId,
         resource_id: formData.resource_id,
         project_id: formData.project_id || undefined,

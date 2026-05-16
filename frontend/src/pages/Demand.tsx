@@ -457,7 +457,7 @@ export const Demand: React.FC = () => {
       return;
     }
     try {
-      const data: any = {
+      const data: Partial<CreateDemandLine> & { id?: string } = {
         id: editId,
         project_id: formData.project_id,
         fte_percent: formData.fte_percent,

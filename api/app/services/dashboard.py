@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from api.app.models.planning import DemandLine, SupplyLine
 from api.app.models.core import CostCenter, Project, PeriodStatus, Period
 from collections import defaultdict
-from typing import Dict, Tuple, Any, Optional
+from typing import Dict, Tuple, Optional
 from api.app.schemas.dashboard import DemandSupplyAggregationResponse, DemandSupplyByCostCenter, DemandSupplyByProject
 
 def get_demand_supply_aggregation(db: Session, user) -> DemandSupplyAggregationResponse:

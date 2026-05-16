@@ -70,6 +70,20 @@ export interface PlanningFilters {
   resourceId?: string;
 }
 
+export interface BulkAction<TCreate> {
+  action: 'create' | 'update' | 'delete';
+  data: Partial<TCreate> & { id?: string };
+}
+
+export interface BulkRequest<TCreate> {
+  actions: BulkAction<TCreate>[];
+  all_or_nothing?: boolean;
+}
+
+export interface BulkResponse {
+  results?: Array<{ status: string; error?: string | null }>;
+}
+
 export const planningApi = {
   // Demand Lines
   async getAllDemandLines(): Promise<DemandLine[]> {
@@ -105,8 +119,8 @@ export const planningApi = {
     return apiClient.delete(`/demand-lines/${id}`);
   },
   
-  async bulkDemandLines(body: any): Promise<any> {
-    return apiClient.post('/demand-lines/bulk', body);
+  async bulkDemandLines(body: BulkRequest<CreateDemandLine>): Promise<BulkResponse> {
+    return apiClient.post<BulkResponse>('/demand-lines/bulk', body);
   },
   
   // Supply Lines
@@ -131,8 +145,8 @@ export const planningApi = {
     return apiClient.delete(`/supply-lines/${id}`);
   },
   
-  async bulkSupplyLines(body: any): Promise<any> {
-    return apiClient.post('/supply-lines/bulk', body);
+  async bulkSupplyLines(body: BulkRequest<CreateSupplyLine>): Promise<BulkResponse> {
+    return apiClient.post<BulkResponse>('/supply-lines/bulk', body);
   },
   
 };

@@ -111,7 +111,7 @@ const useStyles = makeStyles({
     letterSpacing: '0.5px',
   },
   kpiValue: {
-    fontSize: tokens.fontSizeHero600,
+    fontSize: tokens.fontSizeHero700,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
@@ -748,7 +748,7 @@ export const Supply: React.FC = () => {
                   min={5}
                   max={100}
                   step={5}
-                  value={bulkEditFte}
+                  value={String(bulkEditFte)}
                   onChange={e => setBulkEditFte(Number(e.target.value))}
                   style={{ width: 120 }}
                 />

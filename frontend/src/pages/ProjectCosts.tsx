@@ -14,7 +14,6 @@ import {
   TabList,
   Select,
   Label,
-  Spinner,
 } from '@fluentui/react-components';
 import { usePeriod } from '../contexts/PeriodContext';
 import { useAppData } from '../contexts/AppDataContext';

@@ -35,7 +35,6 @@ import {
   bundleIcon,
 } from '@fluentui/react-icons';
 import { useAuth } from '../auth/AuthProvider';
-import { config } from '../config';
 import { PeriodSelector } from './PeriodSelector';
 
 const Home = bundleIcon(HomeFilled, HomeRegular);

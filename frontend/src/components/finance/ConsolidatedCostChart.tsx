@@ -130,7 +130,7 @@ interface DrawerState {
 
 interface Props { latestSnapshot?: Snapshot | null; }
 
-export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
+export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latestSnapshot }) => {
   const { periods } = usePeriod();
 
   // Data

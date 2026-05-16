@@ -10,8 +10,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Spinner,
   makeStyles,
-  MessageBar,
-  MessageBarBody,
   Tab,
   TabList,
   tokens,

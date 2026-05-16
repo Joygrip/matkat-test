@@ -1,7 +1,7 @@
 /**
  * Searchable resource picker: type name or initials to filter; select to set resource_id.
  */
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { Input, makeStyles, tokens } from '@fluentui/react-components';
 import type { Resource } from '../api/admin';
 
@@ -12,8 +12,8 @@ const useStyles = makeStyles({
     left: 0,
     right: 0,
     top: '100%',
-    marginTop: 2,
-    maxHeight: 220,
+    marginTop: '2px',
+    maxHeight: '220px',
     overflowY: 'auto',
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke1}`,

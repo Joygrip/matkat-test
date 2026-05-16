@@ -110,7 +110,7 @@ const useStyles = makeStyles({
     letterSpacing: '0.5px',
   },
   kpiValue: {
-    fontSize: tokens.fontSizeHero600,
+    fontSize: tokens.fontSizeHero700,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
@@ -885,7 +885,7 @@ export const Demand: React.FC = () => {
                 </div>
                 <div className={styles.formField}>
                   <label className={styles.formLabel}>Assignment Type</label>
-                  <Select value={bulkAddResourceType} onChange={(_, data) => { setBulkAddResourceType(data.value); setBulkAddResourceIds([]); }}>
+                  <Select value={bulkAddResourceType} onChange={(_, data) => { setBulkAddResourceType(data.value as '' | 'resource' | 'placeholder'); setBulkAddResourceIds([]); }}>
                     <option value="">Select...</option>
                     <option value="resource">Named Resource</option>
                     <option value="placeholder">Placeholder (TBD)</option>

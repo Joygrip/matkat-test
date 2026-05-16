@@ -102,14 +102,14 @@ export function SearchableMultiselect({
 }
 
 const useStyles = makeStyles({
-  root: { position: 'relative', width: '100%', minWidth: 180 },
+  root: { position: 'relative', width: '100%', minWidth: '180px' },
   list: {
     position: 'absolute',
     left: 0,
     right: 0,
     top: '100%',
-    marginTop: 2,
-    maxHeight: 220,
+    marginTop: '2px',
+    maxHeight: '220px',
     overflowY: 'auto',
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke1}`,

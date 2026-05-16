@@ -284,7 +284,7 @@ export function DevLoginPanel() {
                   }}
                 >
                   {resources.map((resource) => (
-                    <Option key={resource.resource_id} value={resource.resource_id}>
+                    <Option key={resource.resource_id} value={resource.resource_id} text={`${resource.display_name} (${resource.employee_id})`}>
                       {resource.display_name} ({resource.employee_id})
                     </Option>
                   ))}
@@ -322,7 +322,7 @@ export function DevLoginPanel() {
                   }}
                 >
                   {managerUsers.map((u) => (
-                    <Option key={u.object_id} value={u.object_id}>
+                    <Option key={u.object_id} value={u.object_id} text={u.display_name}>
                       {u.display_name} ({u.object_id})
                     </Option>
                   ))}

@@ -38,8 +38,6 @@ const DEMAND_TYPE_BG  = 'rgba(217, 119, 6, 0.10)';
 const SUPPLY_TYPE_BG  = 'rgba(13, 148, 136, 0.10)';
 const DEMAND_ACCENT   = '#d97706';
 const SUPPLY_ACCENT   = '#0d9488';
-const CURRENT_PERIOD_BG = 'rgba(227, 234, 242, 0.15)';
-const COL_HOVER_BG    = 'rgba(30, 58, 95, 0.06)';
 const COL_HOVER_HDR_BG = 'rgba(30, 58, 95, 0.12)';
 
 
@@ -1299,7 +1297,6 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
               TYPE
             </th>
             {periods.map((p, colIdx) => {
-              const isCur = isCurrentPeriod(p);
               const isHov = hoveredColIdx === colIdx;
               return (
                 <th
@@ -1365,7 +1362,6 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                   <td className={styles.summaryProject} />
                   <td className={styles.summaryType} />
                   {periodTotals.map(({ dSum, sSum }, i) => {
-                    const isCur = isCurrentPeriod(periods[i]);
                     const isHov = hoveredColIdx === i;
                     const pipColor = getPipColor(dSum, sSum);
                     return (
@@ -1705,7 +1701,6 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                               const statusColor = (dSum === 0 && sSum === 0)
                                 ? '#e5e4e0'
                                 : diff >= 0 ? '#22c55e' : '#ef4444';
-                              const isCurPeriod = isCurrentPeriod(periods[i]);
                               const isColHov = hoveredColIdx === i;
                               const cellBg = isColHov ? 'rgba(30,58,95,0.08)' : '#f6f5f2';
 

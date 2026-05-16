@@ -60,6 +60,7 @@ export interface Resource {
   hourly_cost: number | null;
   is_active: boolean;
   is_oop: boolean;
+  user_role?: string | null;
   created_at: string;
   updated_at: string;
 }

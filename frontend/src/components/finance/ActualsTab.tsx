@@ -17,11 +17,6 @@ import {
   DialogContent,
   DialogActions,
   Textarea,
-  Menu,
-  MenuTrigger,
-  MenuPopover,
-  MenuList,
-  MenuItemCheckbox,
 } from '@fluentui/react-components';
 import {
   SearchRegular,
@@ -29,7 +24,6 @@ import {
   CheckmarkCircle24Regular,
   DismissCircle24Regular,
   ArrowForward24Regular,
-  FilterRegular,
 } from '@fluentui/react-icons';
 import { approvalsApi } from '../../api/approvals';
 import { getInitials } from '../../utils/avatar';
@@ -108,6 +102,7 @@ type EmpSortKey = 'name' | 'demand' | 'actuals' | 'status';
 interface EmployeeGroup {
   employee_name: string;
   employee_email: string;
+  employee_initials?: string | null;
   cost_center_id: string;
   cost_center_name: string;
   rows: FinanceActualRow[];
@@ -444,8 +439,6 @@ export function ActualsTab({
   actualsData,
   actualsLoading,
   actualsError,
-  projects,
-  costCenters,
   actualsProjectId,
   year,
   month,
@@ -577,29 +570,6 @@ export function ActualsTab({
 
   // ── Derived filter options — prefer lookup lists so filters are always populated
   //    even when no actuals exist for the selected period yet.
-  const ccOptions = useMemo(() => {
-    if (costCenters.length > 0) {
-      return costCenters.map(cc => ({ id: cc.id, name: cc.name }));
-    }
-    // Fallback: derive from actuals data + empStats when lookups not available
-    const map = new Map<string, string>();
-    for (const r of actualsData) map.set(r.cost_center_id, r.cost_center_name);
-    for (const s of empStats ?? []) {
-      if (s.cost_center_id && s.cost_center_name) map.set(s.cost_center_id, s.cost_center_name);
-    }
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [costCenters, actualsData]);
-
-  const projectOptions = useMemo(() => {
-    if (projects.length > 0) {
-      return projects.map(p => ({ id: p.id, name: p.name }));
-    }
-    // Fallback: derive from actuals data when lookups not available
-    const map = new Map<string, string>();
-    for (const r of actualsData) map.set(r.project_id, r.project_name);
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [projects, actualsData]);
-
   // ── Filtered actuals ───────────────────────────────────────────────────────
   const filteredActuals = useMemo(() => {
     let out = actualsData;
@@ -738,12 +708,6 @@ export function ActualsTab({
       next.has(key) ? next.delete(key) : next.add(key);
       return next;
     });
-  };
-
-  const toggleSetItem = (set: Set<string>, id: string): Set<string> => {
-    const next = new Set(set);
-    next.has(id) ? next.delete(id) : next.add(id);
-    return next;
   };
 
   const getRowBorderColor = (status: string): string => {

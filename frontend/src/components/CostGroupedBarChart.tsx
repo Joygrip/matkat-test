@@ -106,8 +106,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   equipment: 'Equipment',
 };
 
-const TOOLTIP_CATEGORIES = ['planned', 'actual', 'oop', 'equipment'];
-
 interface TooltipEntry { dataKey: string; value: number; }
 interface CostTooltipProps { active?: boolean; payload?: TooltipEntry[]; label?: string; }
 

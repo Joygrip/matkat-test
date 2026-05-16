@@ -19,7 +19,6 @@ import {
   DismissRegular,
 } from '@fluentui/react-icons';
 import type { ResourceDetail } from '../../api/consolidation';
-import { consolidationApi } from '../../api/consolidation';
 import { planningApi, type DemandLine, type SupplyLine } from '../../api/planning';
 import { lookupsApi, type Project } from '../../api/lookups';
 import { getInitials } from '../../utils/avatar';

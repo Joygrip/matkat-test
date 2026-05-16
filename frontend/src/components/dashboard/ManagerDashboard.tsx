@@ -354,10 +354,6 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
     });
   }, [approvalStatuses, actuals, pd, myCc]);
 
-  const periodLabel =earliestPeriod
-    ? `${MONTH_SHORT[earliestPeriod.month - 1]} ${earliestPeriod.year}`
-    : '—';
-
   return (
     <div className={styles.sections}>
 

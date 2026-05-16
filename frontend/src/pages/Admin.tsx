@@ -64,6 +64,7 @@ import {
   CostCenterHierarchy,
   Project,
   Resource,
+  ResourceType,
   Placeholder,
   ManagerOverride,
   ApprovalDelegate,
@@ -199,7 +200,7 @@ function DevSeedResetButton() {
       const result = await apiClient.seedReset();
       showSuccess(result.message || 'Seed reset complete. Refresh the page.');
     } catch (err) {
-      showApiError(err);
+      showApiError(err as Error);
     } finally {
       setLoading(false);
     }
@@ -1482,7 +1483,7 @@ export function Admin() {
   const { showSuccess, showError, showApiError } = useToast();
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
-  const [selectedTab, setSelectedTab] = useState<TabValue>(searchParams.get('tab') ?? 'cost-centers');
+  const [selectedTab, setSelectedTab] = useState<TabValue>((searchParams.get('tab') ?? 'cost-centers') as TabValue);
   const [loading, setLoading] = useState(true);
 
   const canManageMasterData = user?.role === 'Admin' || user?.role === 'Finance';
@@ -1744,7 +1745,7 @@ export function Admin() {
               employee_id: string;
               display_name: string;
               initials?: string;
-              resource_type?: string;
+              resource_type?: ResourceType;
             });
           }
           break;
@@ -1945,7 +1946,7 @@ export function Admin() {
           </div>
           <CostReportTab
             selectedPeriodId={selectedPeriodId}
-            currentPeriod={currentPeriod}
+            currentPeriod={currentPeriod ?? null}
             showSuccess={showSuccess}
             showError={showError}
             showApiError={showApiError}
@@ -2067,7 +2068,7 @@ export function Admin() {
                                 );
                                 showSuccess('Status updated');
                               } catch (err) {
-                                showApiError(err);
+                                showApiError(err as Error);
                               }
                             }}
                             style={{ minWidth: 100 }}

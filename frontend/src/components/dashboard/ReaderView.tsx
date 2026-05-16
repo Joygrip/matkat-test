@@ -12,7 +12,7 @@ import type { Period, MeResponse } from '../../types/index';
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
-const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+import { MONTH_SHORT } from '../../utils/format';
 
 const C_BAD       = '#a32f2a';
 const C_WARN      = '#9a5b00';

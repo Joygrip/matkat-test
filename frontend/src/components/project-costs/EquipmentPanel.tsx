@@ -21,17 +21,13 @@ import { projectCostsApi, EquipmentLine } from '../../api/projectCosts';
 import { useHasRole } from '../../auth/AuthProvider';
 import { useToast } from '../../hooks/useToast';
 import type { Project } from '../../api/lookups';
+import { formatDKKFromCents } from '../../utils/format';
 
 interface Props {
   periodId: string;
   projectId: string;
   projects: Project[];
 }
-
-const formatDKK = (cents: number) =>
-  new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', maximumFractionDigits: 0 }).format(
-    cents / 100,
-  );
 
 const useStyles = makeStyles({
   toolbar: {
@@ -294,7 +290,7 @@ export const EquipmentPanel: React.FC<Props> = ({ periodId, projectId, projects 
                 <tr key={line.id} className={styles.trHover}>
                   <td className={styles.td}>{line.project_name ?? line.project_id}</td>
                   <td className={styles.td}>{line.description ?? <span className={styles.muted}>—</span>}</td>
-                  <td className={styles.tdRight}>{formatDKK(line.cost)}</td>
+                  <td className={styles.tdRight}>{formatDKKFromCents(line.cost)}</td>
                   {canEdit && (
                     <td className={styles.tdActions}>
                       <div className={styles.actions}>
@@ -307,7 +303,7 @@ export const EquipmentPanel: React.FC<Props> = ({ periodId, projectId, projects 
               ))}
               <tr>
                 <td className={styles.totalTd} colSpan={2}>Total Equipment</td>
-                <td className={styles.totalTdRight}>{formatDKK(grandTotal)}</td>
+                <td className={styles.totalTdRight}>{formatDKKFromCents(grandTotal)}</td>
                 {canEdit && <td className={styles.totalTd} />}
               </tr>
             </tbody>

@@ -46,6 +46,7 @@ import { usePeriod } from '../contexts/PeriodContext';
 import { lookupsApi, Resource, CostCenter, Project } from '../api/lookups';
 import { useToast } from '../hooks/useToast';
 import { formatApiError } from '../utils/errors';
+import { MONTH_NAMES } from '../utils/format';
 import { useAuth } from '../auth/AuthProvider';
 import { EmptyState } from '../components/EmptyState';
 import { StatusBanner } from '../components/StatusBanner';
@@ -274,7 +275,6 @@ export const Supply: React.FC = () => {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
-  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const isLocked = currentPeriod?.status === 'locked';
   const canEdit = user?.role === 'Finance' || user?.role === 'Manager';
 
@@ -622,7 +622,7 @@ export const Supply: React.FC = () => {
           <span className={styles.filterLabel}>Period</span>
           <Body1>
             {currentPeriod
-              ? `${monthNames[currentPeriod.month - 1]} ${currentPeriod.year}`
+              ? `${MONTH_NAMES[currentPeriod.month - 1]} ${currentPeriod.year}`
               : 'No period selected'}
           </Body1>
         </div>
@@ -801,7 +801,7 @@ export const Supply: React.FC = () => {
                   <div className={styles.formField}>
                     <label className={styles.formLabel}>Period</label>
                     <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
-                      {monthNames[currentPeriod.month - 1]} {currentPeriod.year} ({currentPeriod.status})
+                      {MONTH_NAMES[currentPeriod.month - 1]} {currentPeriod.year} ({currentPeriod.status})
                     </Body1>
                   </div>
                 )}
@@ -878,8 +878,8 @@ export const Supply: React.FC = () => {
                     placeholder="Select open periods..."
                   >
                     {openPeriods.map(p => (
-                      <Option key={p.id} value={p.id} text={`${monthNames[p.month - 1]} ${p.year}`}>
-                        {monthNames[p.month - 1]} {p.year}
+                      <Option key={p.id} value={p.id} text={`${MONTH_NAMES[p.month - 1]} ${p.year}`}>
+                        {MONTH_NAMES[p.month - 1]} {p.year}
                       </Option>
                     ))}
                   </Dropdown>

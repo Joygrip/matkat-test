@@ -11,27 +11,8 @@ import type { DemandLine, SupplyLine } from '../../api/planning';
 import type { CostCenter, ApprovalDelegate } from '../../api/admin';
 import { adminApi } from '../../api/admin';
 import type { Period, MeResponse } from '../../types/index';
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
-const MONTH_NAMES = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-];
-
-function avatarColor(name: string): string {
-  const COLORS = ['#0078d4', '#107c10', '#d13438', '#ff8c00', '#8764b8', '#00b294', '#ca5010'];
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) & 0x7fffffff;
-  return COLORS[h % COLORS.length];
-}
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  return parts.length >= 2
-    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-    : name.slice(0, 2).toUpperCase();
-}
+import { MONTH_SHORT } from '../../utils/format';
+import { avatarColor, getInitials } from '../../utils/avatar';
 
 // ─── styles ───────────────────────────────────────────────────────────────────
 
@@ -327,7 +308,7 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
       label: 'Pending Approvals',
       value: pendingCount,
       subtitle: earliestPeriod
-        ? `due end of ${MONTH_NAMES[earliestPeriod.month - 1]}`
+        ? `due end of ${MONTH_SHORT[earliestPeriod.month - 1]}`
         : 'no open period',
       severity: pendingCount > 0 ? 'pending' : 'default',
     },
@@ -374,7 +355,7 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
   }, [approvalStatuses, actuals, pd, myCc]);
 
   const periodLabel =earliestPeriod
-    ? `${MONTH_NAMES[earliestPeriod.month - 1]} ${earliestPeriod.year}`
+    ? `${MONTH_SHORT[earliestPeriod.month - 1]} ${earliestPeriod.year}`
     : '—';
 
   return (
@@ -440,7 +421,7 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
                   {/* Col 1: Avatar + name + CC */}
                   <div className={styles.resourceCell}>
                     <div className={styles.avatar} style={{ background: color }}>
-                      {row.resourceInitials || initials(row.resourceName)}
+                      {getInitials(row.resourceName, row.resourceInitials)}
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <div className={styles.resourceName}>{row.resourceName}</div>

@@ -43,6 +43,7 @@ import { usePeriod } from '../contexts/PeriodContext';
 import { lookupsApi, Project, Resource, Placeholder, CostCenter } from '../api/lookups';
 import { useToast } from '../hooks/useToast';
 import { formatApiError } from '../utils/errors';
+import { MONTH_NAMES } from '../utils/format';
 import { useAuth } from '../auth/AuthProvider';
 import { StatusBanner } from '../components/StatusBanner';
 import { LoadingState } from '../components/LoadingState';
@@ -254,8 +255,6 @@ export const Demand: React.FC = () => {
   const [bulkAddPreview, setBulkAddPreview] = useState<any[]>([]);
   const [openPeriods, setOpenPeriods] = useState<Period[]>([]);
 
-  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  
   const filteredDemands = useMemo(() => {
     return demands.filter((d) => {
       if (selectedProjectId && d.project_id !== selectedProjectId) {
@@ -598,7 +597,7 @@ export const Demand: React.FC = () => {
           <span className={styles.filterLabel}>Period</span>
           <Body1>
             {currentPeriod
-              ? `${monthNames[currentPeriod.month - 1]} ${currentPeriod.year}`
+              ? `${MONTH_NAMES[currentPeriod.month - 1]} ${currentPeriod.year}`
               : 'No period selected'}
           </Body1>
         </div>
@@ -921,8 +920,8 @@ export const Demand: React.FC = () => {
                     placeholder="Select open periods..."
                   >
                     {openPeriods.map(p => (
-                      <Option key={p.id} value={p.id} text={`${monthNames[p.month - 1]} ${p.year}`}>
-                        {monthNames[p.month - 1]} {p.year}
+                      <Option key={p.id} value={p.id} text={`${MONTH_NAMES[p.month - 1]} ${p.year}`}>
+                        {MONTH_NAMES[p.month - 1]} {p.year}
                       </Option>
                     ))}
                   </Dropdown>

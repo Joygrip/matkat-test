@@ -15,6 +15,7 @@ import {
 } from '../../api/finance';
 import { usePeriod } from '../../contexts/PeriodContext';
 import type { Snapshot } from '../../api/consolidation';
+import { MONTH_SHORT, MONTH_NAMES } from '../../utils/format';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -32,8 +33,6 @@ const C = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const MF = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 
@@ -397,9 +396,9 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
       .filter(p => selectedPeriodIds.has(p.id))
       .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
     if (selPeriods.length === 0) return 'All periods';
-    if (selPeriods.length === 1) return `${MF[selPeriods[0].month - 1]} ${selPeriods[0].year}`;
+    if (selPeriods.length === 1) return `${MONTH_NAMES[selPeriods[0].month - 1]} ${selPeriods[0].year}`;
     const first = selPeriods[0], last = selPeriods[selPeriods.length - 1];
-    return `${MS[first.month - 1]} ${first.year} – ${MS[last.month - 1]} ${last.year}`;
+    return `${MONTH_SHORT[first.month - 1]} ${first.year} – ${MONTH_SHORT[last.month - 1]} ${last.year}`;
   }, [selectedPeriodIds, periods]);
 
   // ── Modal ─────────────────────────────────────────────────────────────────────
@@ -484,12 +483,12 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     if (!drawerDetail || !drawer) return;
     const esc = (v: string | number | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const isCc = drawer.mode === 'cc';
-    const periodLabel = `${MF[drawer.month - 1]}_${drawer.year}`;
+    const periodLabel = `${MONTH_NAMES[drawer.month - 1]}_${drawer.year}`;
     let header: string[], rows: string[][];
     if (drawerTab === 'planned') {
       header = ['Month', ...(isCc ? ['Project'] : ['Cost Center']), 'Employee', 'FTE %', 'Cost (DKK)'];
       rows = drawerDetail.flatMap(d => {
-        const monthLabel = `${MF[d.month - 1]} ${d.year}`;
+        const monthLabel = `${MONTH_NAMES[d.month - 1]} ${d.year}`;
         return d.demand_lines.map(l => [
           monthLabel,
           isCc ? (l.project_name ?? '') : (l.cost_center_name ?? ''),
@@ -501,7 +500,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     } else if (drawerTab === 'actual') {
       header = ['Month', ...(isCc ? ['Project'] : ['Cost Center']), 'Employee', 'FTE %', 'Cost (DKK)'];
       rows = drawerDetail.flatMap(d => {
-        const monthLabel = `${MF[d.month - 1]} ${d.year}`;
+        const monthLabel = `${MONTH_NAMES[d.month - 1]} ${d.year}`;
         return d.actual_lines.map(l => [
           monthLabel,
           isCc ? (l.project_name ?? '') : (l.cost_center_name ?? ''),
@@ -513,13 +512,13 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
     } else if (drawerTab === 'oop') {
       header = ['Month', 'OoP Resource', 'Notes', 'Total (DKK)'];
       rows = drawerDetail.flatMap(d => {
-        const monthLabel = `${MF[d.month - 1]} ${d.year}`;
+        const monthLabel = `${MONTH_NAMES[d.month - 1]} ${d.year}`;
         return d.external_lines.map(l => [monthLabel, l.resource_name ?? l.description ?? '', l.notes ?? '', String(l.total_cost / 100)]);
       });
     } else {
       header = ['Month', 'Description', 'Cost (DKK)'];
       rows = drawerDetail.flatMap(d => {
-        const monthLabel = `${MF[d.month - 1]} ${d.year}`;
+        const monthLabel = `${MONTH_NAMES[d.month - 1]} ${d.year}`;
         return d.equipment_lines.map(l => [monthLabel, l.description ?? '', String(l.cost / 100)]);
       });
     }
@@ -539,7 +538,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
       : ['Month', 'Category', 'Employee/Line Item', 'Cost Center', 'FTE %', 'Cost (DKK)'];
     const rows: string[][] = [];
     for (const d of drawerDetail) {
-      const monthLabel = `${MF[d.month - 1]} ${d.year}`;
+      const monthLabel = `${MONTH_NAMES[d.month - 1]} ${d.year}`;
       for (const l of d.demand_lines)
         rows.push([monthLabel, 'Planned', l.resource_name,
           isCc ? (l.project_name ?? '') : (l.cost_center_name ?? ''),
@@ -780,7 +779,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                     <div />
                     {sortedMonths.map(m => (
                       <div key={`h-${m.year}-${m.month}`} style={{ fontSize: 10, color: C.ink4, textAlign: 'center', fontWeight: 600, paddingBottom: 3 }}>
-                        {MS[m.month - 1]}
+                        {MONTH_SHORT[m.month - 1]}
                       </div>
                     ))}
                     {heatmapMatrix.top10.map(row => (
@@ -792,7 +791,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                           return (
                             <div
                               key={`${m.year}-${m.month}`}
-                              title={`${row.name} · ${MS[m.month - 1]} ${m.year}: ${dkk(val)}`}
+                              title={`${row.name} · ${MONTH_SHORT[m.month - 1]} ${m.year}: ${dkk(val)}`}
                               onClick={() => val > 0 && openDrawerFor('cc', row, m.year, m.month)}
                               style={{
                                 height: 22, borderRadius: 2,
@@ -944,7 +943,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                                 {segs.map((s, si) => <div key={si} style={{ flex: s.val, background: s.color }} />)}
                               </div>
                             </div>
-                            <div style={{ fontSize: 10, color: C.ink4, marginTop: 4 }}>{MS[m.month - 1]}</div>
+                            <div style={{ fontSize: 10, color: C.ink4, marginTop: 4 }}>{MONTH_SHORT[m.month - 1]}</div>
                           </div>
                         );
                       })}
@@ -966,7 +965,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                       <tbody>
                         {drawer.monthlyData.map((m, i) => (
                           <tr key={i} onMouseEnter={e => (e.currentTarget.style.background = C.rowHover)} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                            <td style={{ ...tdStyle, color: C.ink2 }}>{MF[m.month - 1]} {m.year}</td>
+                            <td style={{ ...tdStyle, color: C.ink2 }}>{MONTH_NAMES[m.month - 1]} {m.year}</td>
                             {showPlanned && <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.planned)}</td>}
                             <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.actual)}</td>
                             {!isCc && <td style={{ ...tdStyle, textAlign: 'right', color: C.ink2 }}>{dkk(m.oop)}</td>}
@@ -1013,7 +1012,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                             <tr style={{ background: C.periodHeader, cursor: 'pointer' }} onClick={() => togglePeriod(key)}>
                               <td colSpan={colSpan} style={{ padding: '7px 10px', fontWeight: 700, color: C.ink1, fontSize: 13 }}>
                                 <span style={{ marginRight: 8, fontSize: 11 }}>{isCollapsed ? '▶' : '▼'}</span>
-                                {MF[period.month - 1]} {period.year}
+                                {MONTH_NAMES[period.month - 1]} {period.year}
                                 <span style={{ float: 'right', fontWeight: 600, color: C.ink2 }}>
                                   {period.demand_lines.length} line{period.demand_lines.length !== 1 ? 's' : ''} · {dkk(periodTotal)}
                                 </span>
@@ -1090,7 +1089,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                             <tr style={{ background: C.periodHeader, cursor: 'pointer' }} onClick={() => togglePeriod(key)}>
                               <td colSpan={colSpan} style={{ padding: '7px 10px', fontWeight: 700, color: C.ink1, fontSize: 13 }}>
                                 <span style={{ marginRight: 8, fontSize: 11 }}>{isCollapsed ? '▶' : '▼'}</span>
-                                {MF[period.month - 1]} {period.year}
+                                {MONTH_NAMES[period.month - 1]} {period.year}
                                 <span style={{ float: 'right', fontWeight: 600, color: C.ink2 }}>
                                   {period.actual_lines.length} line{period.actual_lines.length !== 1 ? 's' : ''} · {dkk(periodTotal)}
                                 </span>
@@ -1163,7 +1162,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                             <tr style={{ background: C.periodHeader, cursor: 'pointer' }} onClick={() => togglePeriod(key)}>
                               <td colSpan={3} style={{ padding: '7px 10px', fontWeight: 700, color: C.ink1, fontSize: 13 }}>
                                 <span style={{ marginRight: 8, fontSize: 11 }}>{isCollapsed ? '▶' : '▼'}</span>
-                                {MF[period.month - 1]} {period.year}
+                                {MONTH_NAMES[period.month - 1]} {period.year}
                                 <span style={{ float: 'right', fontWeight: 600, color: C.ink2 }}>
                                   {period.external_lines.length} line{period.external_lines.length !== 1 ? 's' : ''} · {dkk(periodTotal)}
                                 </span>
@@ -1218,7 +1217,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot }) => {
                             <tr style={{ background: C.periodHeader, cursor: 'pointer' }} onClick={() => togglePeriod(key)}>
                               <td colSpan={2} style={{ padding: '7px 10px', fontWeight: 700, color: C.ink1, fontSize: 13 }}>
                                 <span style={{ marginRight: 8, fontSize: 11 }}>{isCollapsed ? '▶' : '▼'}</span>
-                                {MF[period.month - 1]} {period.year}
+                                {MONTH_NAMES[period.month - 1]} {period.year}
                                 <span style={{ float: 'right', fontWeight: 600, color: C.ink2 }}>
                                   {period.equipment_lines.length} line{period.equipment_lines.length !== 1 ? 's' : ''} · {dkk(periodTotal)}
                                 </span>

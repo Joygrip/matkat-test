@@ -32,6 +32,7 @@ import {
   FilterRegular,
 } from '@fluentui/react-icons';
 import { approvalsApi } from '../../api/approvals';
+import { getInitials } from '../../utils/avatar';
 import { EmptyState } from '../EmptyState';
 import { useEmployeeStats } from '../../hooks/useEmployeeStats';
 // ApprovalBadge available if needed for future use
@@ -354,10 +355,6 @@ function nameColor(name: string): string {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
   return palette[Math.abs(h) % palette.length];
-}
-
-function nameInitials(name: string): string {
-  return name.split(' ').map(w => w[0] ?? '').join('').toUpperCase().slice(0, 2);
 }
 
 function getOverallStatus(rows: FinanceActualRow[]): string {
@@ -946,7 +943,7 @@ export function ActualsTab({
                     <td className={styles.td}>
                       <div style={{ display:'flex', alignItems:'center', gap:9 }}>
                         <div className={styles.avatar} style={{ background: nameColor(group.employee_name) }}>
-                          {group.employee_initials || nameInitials(group.employee_name)}
+                          {getInitials(group.employee_name, group.employee_initials)}
                         </div>
                         <div style={{ minWidth:0 }}>
                           <div style={{ fontWeight:600, fontSize:13, color:C.ink, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
@@ -1349,7 +1346,7 @@ export function ActualsTab({
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px', flexWrap: 'wrap' }}>
                       <div style={{ width:36, height:36, borderRadius:'50%', background:nameColor(row.employee_name), color:'white', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', fontWeight:600, flexShrink:0, userSelect:'none' }}>
-                        {row.employee_initials || nameInitials(row.employee_name)}
+                        {getInitials(row.employee_name, row.employee_initials)}
                       </div>
                       <div style={{ flex:'1 1 120px', minWidth:0 }}>
                         <div style={{ fontSize:'14px', fontWeight:600, lineHeight:'1.2' }}>{row.employee_name}</div>

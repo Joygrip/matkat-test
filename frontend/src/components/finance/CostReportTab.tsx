@@ -10,6 +10,7 @@ import { CheckmarkCircleRegular, ArrowDownloadRegular } from '@fluentui/react-ic
 import { getFinanceSetting, updateFinanceSetting } from '../../api/finance';
 import { apiClient } from '../../api/client';
 import type { FinanceActualRow } from './ActualsTab';
+import { formatDKK } from '../../utils/format';
 
 const COST_SETTING_KEY = 'monthly_fte_cost';
 const DEFAULT_MONTHLY_FTE_COST = 99000;
@@ -57,8 +58,6 @@ const useStyles = makeStyles({
   },
 });
 
-const formatDKK = (n: number): string =>
-  new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', maximumFractionDigits: 0 }).format(n);
 
 function toCsv(rows: FinanceActualRow[], monthlyFteCost: number): string {
   const header = ['Employee', 'Project', 'Month', 'Actual %', 'Monthly FTE Cost', 'Cost (DKK)'];

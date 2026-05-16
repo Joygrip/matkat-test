@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { Period } from '../../types/index';
+import { MONTH_SHORT, MONTH_NAMES } from '../../utils/format';
 
-const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const fmtPeriodShort = (p: Period) => `${MONTH_ABBR[p.month - 1]} '${String(p.year).slice(2)}`;
-const fmtPeriodLong = (p: Period) => `${MONTH_FULL[p.month - 1]} ${p.year}`;
+const fmtPeriodShort = (p: Period) => `${MONTH_SHORT[p.month - 1]} '${String(p.year).slice(2)}`;
+const fmtPeriodLong = (p: Period) => `${MONTH_NAMES[p.month - 1]} ${p.year}`;
 
 const LockIcon = ({ size = 10 }: { size?: number }) => (
   <svg

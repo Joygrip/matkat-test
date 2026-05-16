@@ -14,6 +14,7 @@ import { usePeriod } from '../contexts/PeriodContext';
 import { useAppData } from '../contexts/AppDataContext';
 import { useAuth } from '../auth/AuthProvider';
 import { formatApiError } from '../utils/errors';
+import { MONTH_NAMES, MONTH_SHORT } from '../utils/format';
 import { SearchableFilter } from '../components/SearchableFilter';
 import { LoadingState } from '../components/LoadingState';
 import { StatusBanner } from '../components/StatusBanner';
@@ -39,10 +40,8 @@ const _cache: {
 }
 const CACHE_TTL_MS = 60_000
 
-const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const MONTH_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const fmtPeriodShort = (p: Period) => `${MONTH_ABBR[p.month - 1]} '${String(p.year).slice(2)}`;
-const fmtPeriodFull = (p: Period) => `${MONTH_FULL[p.month - 1]} ${p.year}`;
+const fmtPeriodShort = (p: Period) => `${MONTH_SHORT[p.month - 1]} '${String(p.year).slice(2)}`;
+const fmtPeriodFull = (p: Period) => `${MONTH_NAMES[p.month - 1]} ${p.year}`;
 
 const useStyles = makeStyles({
   container: {

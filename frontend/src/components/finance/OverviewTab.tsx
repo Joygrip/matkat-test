@@ -26,6 +26,7 @@ import type {
 import { consolidationApi } from '../../api/consolidation';
 import { lookupsApi } from '../../api/lookups';
 import type { Project } from '../../api/lookups';
+import { getInitials } from '../../utils/avatar';
 import { useHasRole } from '../../auth/AuthProvider';
 import { ResourceDetailModal } from './ResourceDetailModal';
 
@@ -79,10 +80,6 @@ function resourceSeverity(r: DashboardResource): Severity {
   if (r.status === 'under') return r.gap_fte < -20 ? 'bad' : 'warn';
   if (r.status === 'over')  return 'over';
   return 'good';
-}
-
-function getInitials(name: string): string {
-  return name.split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('');
 }
 
 function fmtGap(gap: number): string {
@@ -508,7 +505,7 @@ function ResourceRow({
   const [hovered, setHovered] = useState(false);
   const sev  = resourceSeverity(resource);
   const sevC = SEV[sev];
-  const initials = resource.initials || getInitials(resource.resource_name);
+  const initials = getInitials(resource.resource_name, resource.initials);
   const COLS = 'minmax(200px,1.6fr) 80px 80px minmax(160px,1.8fr) 96px 124px';
 
   return (
@@ -1074,7 +1071,7 @@ export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, on
         if (cc.cost_center_name.toLowerCase().includes(q)) return true;
         return cc.resources.some(r =>
           r.resource_name.toLowerCase().includes(q) ||
-          (r.initials || getInitials(r.resource_name)).toLowerCase().includes(q)
+          getInitials(r.resource_name, r.initials).toLowerCase().includes(q)
         );
       });
     }

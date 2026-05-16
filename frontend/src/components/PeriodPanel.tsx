@@ -29,11 +29,7 @@ import { periodsApi } from '../api/periods';
 import { useToast } from '../hooks/useToast';
 import { useAuth } from '../auth/AuthProvider';
 import { usePeriod } from '../contexts/PeriodContext';
-
-const monthNames = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
+import { MONTH_NAMES } from '../utils/format';
 
 const useStyles = makeStyles({
   root: {
@@ -247,7 +243,7 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
     setActionLoading(periodToLock.id);
     try {
       await periodsApi.lock(periodToLock.id);
-      showSuccess('Period Locked', `${monthNames[periodToLock.month - 1]} ${periodToLock.year} has been locked.`);
+      showSuccess('Period Locked', `${MONTH_NAMES[periodToLock.month - 1]} ${periodToLock.year} has been locked.`);
       loadPeriods();
       refreshContextPeriods();
     } catch (error) {
@@ -270,7 +266,7 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
     setUnlockDialogOpen(false);
     try {
       await periodsApi.unlock(selectedPeriod.id, unlockReason);
-      showSuccess('Period Unlocked', `${monthNames[selectedPeriod.month - 1]} ${selectedPeriod.year} has been unlocked.`);
+      showSuccess('Period Unlocked', `${MONTH_NAMES[selectedPeriod.month - 1]} ${selectedPeriod.year} has been unlocked.`);
       loadPeriods();
       refreshContextPeriods();
     } catch (error) {
@@ -290,7 +286,7 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
         await periodsApi.create(year, month);
         created++;
       } catch (error) {
-        showApiError(error as Error, `Failed to create ${monthNames[month - 1]} ${year}`);
+        showApiError(error as Error, `Failed to create ${MONTH_NAMES[month - 1]} ${year}`);
       }
     }
     setBulkCreating(false);
@@ -413,7 +409,7 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
                 }
               }}
             >
-              <Text className={styles.monthName}>{monthNames[month - 1]}</Text>
+              <Text className={styles.monthName}>{MONTH_NAMES[month - 1]}</Text>
 
               {period ? (
                 <>
@@ -476,7 +472,7 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
               <Body1 style={{ marginBottom: tokens.spacingVerticalM }}>
                 Locking{' '}
                 <strong>
-                  {periodToLock && `${monthNames[periodToLock.month - 1]} ${periodToLock.year}`}
+                  {periodToLock && `${MONTH_NAMES[periodToLock.month - 1]} ${periodToLock.year}`}
                 </strong>
                 {' '}will prevent further edits to planning data for this period. Continue?
               </Body1>
@@ -498,7 +494,7 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
               <Body1 style={{ marginBottom: tokens.spacingVerticalM }}>
                 You are about to unlock{' '}
                 <strong>
-                  {selectedPeriod && `${monthNames[selectedPeriod.month - 1]} ${selectedPeriod.year}`}
+                  {selectedPeriod && `${MONTH_NAMES[selectedPeriod.month - 1]} ${selectedPeriod.year}`}
                 </strong>
                 . Please provide a reason.
               </Body1>
@@ -559,7 +555,7 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
                     onChange={e => setBulkFromMonth(Number(e.target.value))}
                   >
                     {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                      <option key={m} value={m}>{monthNames[m - 1]}</option>
+                      <option key={m} value={m}>{MONTH_NAMES[m - 1]}</option>
                     ))}
                   </select>
                 </div>
@@ -572,7 +568,7 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
                     onChange={e => setBulkToMonth(Number(e.target.value))}
                   >
                     {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                      <option key={m} value={m}>{monthNames[m - 1]}</option>
+                      <option key={m} value={m}>{MONTH_NAMES[m - 1]}</option>
                     ))}
                   </select>
                 </div>
@@ -596,7 +592,7 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
                       key={`${year}-${month}`}
                       className={exists ? styles.previewItemExists : styles.previewItem}
                     >
-                      {monthNames[month - 1]} {year}{exists ? ' (exists)' : ''}
+                      {MONTH_NAMES[month - 1]} {year}{exists ? ' (exists)' : ''}
                     </div>
                   ))}
                 </div>

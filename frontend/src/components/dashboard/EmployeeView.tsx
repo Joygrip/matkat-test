@@ -28,6 +28,7 @@ import { planningApi, DemandLine, SupplyLine } from '../../api/planning';
 import { useAppData } from '../../contexts/AppDataContext';
 import { useToast } from '../../hooks/useToast';
 import type { Period, MeResponse } from '../../types/index';
+import { MONTH_SHORT } from '../../utils/format';
 
 const DEMAND_COLOR = '#d97706';
 const SUPPLY_COLOR = '#0d9488';
@@ -202,8 +203,7 @@ interface Props {
   user: MeResponse;
 }
 
-const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-function fmtPeriod(p: Period) { return `${MONTH_NAMES[p.month - 1]} ${p.year}`; }
+function fmtPeriod(p: Period) { return `${MONTH_SHORT[p.month - 1]} ${p.year}`; }
 
 function ApprovalDot({ status }: { status?: string }) {
   if (!status) return null;

@@ -14,6 +14,7 @@ import { periodsApi } from '../../api/periods';
 import { useAuth } from '../../auth/AuthProvider';
 import { useToast } from '../../hooks/useToast';
 import type { Period } from '../../types';
+import { MONTH_SHORT } from '../../utils/format';
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
@@ -27,8 +28,6 @@ const TYPE_COL_PX = `${TYPE_COL_WIDTH}px`;
 const PERIOD_COL_PX = `${PERIOD_COL_WIDTH}px`;
 const DESC_LEFT_PX = `${PROJECT_COL_WIDTH}px`;
 const TYPE_LEFT_PX = `${PROJECT_COL_WIDTH + DESC_COL_WIDTH}px`;
-
-const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 const C = {
   oopAccent:    '#9a5b00',

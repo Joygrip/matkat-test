@@ -10,6 +10,7 @@ import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular } from '@flue
 import { planningApi, DemandLine } from '../api/planning';
 import { lookupsApi, Project, Resource, CostCenter } from '../api/lookups';
 import { Period } from '../types';
+import { MONTH_SHORT } from '../utils/format';
 
 const PERIOD_COL_WIDTH = 90; // used in inline styles (React auto-appends px)
 const RESOURCE_COL_WIDTH = 200;
@@ -199,8 +200,6 @@ function getCellFg(fte: number): string {
   if (fte <= 100) return tokens.colorPaletteMarigoldForeground2;
   return tokens.colorPaletteRedForeground2;
 }
-
-const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export interface DemandMatrixProps {
   demandLines: DemandLine[];

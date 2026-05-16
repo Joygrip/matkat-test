@@ -8,6 +8,7 @@ import { FinanceOverview } from '../shared/FinanceOverview';
 import type { DemandLine, SupplyLine } from '../../api/planning';
 import type { Project } from '../../api/admin';
 import type { Period, MeResponse } from '../../types/index';
+import { getInitials } from '../../utils/avatar';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -31,13 +32,6 @@ const SEV_ACCENT: Record<Sev, string> = {
   warn: '#bc8400',
   bad:  '#c50f1f',
 };
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  return parts.length >= 2
-    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-    : name.slice(0, 2).toUpperCase();
-}
 
 function avatarGapColor(worstGap: number): string {
   return worstGap <= -50 ? '#c50f1f' : '#d97706';
@@ -604,7 +598,7 @@ export function PMDashboard({ demandLines, supplyLines, projects, periods }: Pro
                   {/* Left: avatar + name + CC */}
                   <div className={styles.gapCardLeft}>
                     <div className={styles.gapAvatar} style={{ background: avatarGapColor(emp.totalGap) }}>
-                      {emp.initials || initials(emp.name)}
+                      {getInitials(emp.name, emp.initials)}
                     </div>
                     <div style={{ minWidth: 0, overflow: 'hidden' }}>
                       <div className={styles.gapResourceName}>{emp.name}</div>

@@ -11,15 +11,7 @@ import {
   SearchRegular,
 } from '@fluentui/react-icons';
 import type { Period } from '../types';
-
-const MONTH_NAMES = [
-  'January','February','March','April','May','June',
-  'July','August','September','October','November','December',
-];
-const SHORT_MONTH = [
-  'Jan','Feb','Mar','Apr','May','Jun',
-  'Jul','Aug','Sep','Oct','Nov','Dec',
-];
+import { MONTH_NAMES, MONTH_SHORT } from '../utils/format';
 
 export interface PeriodSelectorProps {
   periods: Period[];
@@ -49,7 +41,7 @@ export function PeriodSelector({ periods, selectedId, onSelect, align = 'left' }
   // ── selected period label ────────────────────────────────────
   const selected = useMemo(() => periods.find((p) => p.id === selectedId), [periods, selectedId]);
   const triggerLabel = selected
-    ? `${SHORT_MONTH[selected.month - 1]} ${selected.year}`
+    ? `${MONTH_SHORT[selected.month - 1]} ${selected.year}`
     : 'Select period';
 
   // ── filter + group by year (descending) ──────────────────────

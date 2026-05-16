@@ -5,6 +5,7 @@ import { usePeriod } from '../../contexts/PeriodContext';
 import { useToast } from '../../hooks/useToast';
 import { OverviewTab } from '../finance/OverviewTab';
 import type { Period } from '../../types';
+import { MONTH_SHORT } from '../../utils/format';
 
 export interface FinanceOverviewProps {
   scope: 'pm' | 'manager' | 'finance' | 'admin' | 'reader';
@@ -17,8 +18,6 @@ export interface FinanceOverviewProps {
   /** Callback fired whenever dashboard is loaded or refreshed */
   onDashboardLoaded?: (dashboard: ConsolidationDashboard | null) => void;
 }
-
-const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 function fmtPeriod(p: Period): string {
   return `${MONTH_SHORT[p.month - 1]} ${p.year}`;

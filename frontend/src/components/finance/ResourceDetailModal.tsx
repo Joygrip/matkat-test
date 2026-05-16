@@ -22,6 +22,7 @@ import type { ResourceDetail } from '../../api/consolidation';
 import { consolidationApi } from '../../api/consolidation';
 import { planningApi, type DemandLine, type SupplyLine } from '../../api/planning';
 import { lookupsApi, type Project } from '../../api/lookups';
+import { getInitials } from '../../utils/avatar';
 import { useToast } from '../../hooks/useToast';
 import { usePeriod } from '../../contexts/PeriodContext';
 
@@ -56,10 +57,6 @@ function gapSev(gap: number): Severity {
   if (gap < 0)   return 'warn';
   if (gap > 15)  return 'over';
   return 'good';
-}
-
-function getInitials(name: string): string {
-  return name.split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('');
 }
 
 function fmtGap(gap: number): string {
@@ -667,7 +664,7 @@ export function ResourceDetailModal({
   const gap = activeDetail?.gap_fte ?? 0;
   const gapSeverity = gapSev(gap);
   const gapColors = SEV[gapSeverity];
-  const initials = resourceInitials || getInitials(resourceName);
+  const initials = getInitials(resourceName, resourceInitials);
 
   // When scoped, derive gap from visible lines so the summary strip reflects PM's projects
   const scopedGap = totalSupplyPct - totalDemandPct;

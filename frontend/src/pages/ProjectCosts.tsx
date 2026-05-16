@@ -24,13 +24,9 @@ import { FinanceKpiStrip } from '../components/finance/FinanceKpiStrip';
 import { ExternalsPanel } from '../components/project-costs/ExternalsPanel';
 import { EquipmentPanel } from '../components/project-costs/EquipmentPanel';
 import type { Project } from '../api/lookups';
+import { formatDKKFromCents } from '../utils/format';
 
 type ActiveTab = 'externals' | 'equipment';
-
-const formatDKK = (cents: number) =>
-  new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', maximumFractionDigits: 0 }).format(
-    cents / 100,
-  );
 
 const useStyles = makeStyles({
   container: {
@@ -121,15 +117,15 @@ export const ProjectCosts: React.FC = () => {
   const kpiTiles = [
     {
       label: 'OoP Total',
-      value: summary ? formatDKK(summary.externals_total) : '—',
+      value: summary ? formatDKKFromCents(summary.externals_total) : '—',
     },
     {
       label: 'Equipment Total',
-      value: summary ? formatDKK(summary.equipment_total) : '—',
+      value: summary ? formatDKKFromCents(summary.equipment_total) : '—',
     },
     {
       label: 'Combined Total',
-      value: summary ? formatDKK(summary.combined_total) : '—',
+      value: summary ? formatDKKFromCents(summary.combined_total) : '—',
       color: 'default' as const,
     },
   ];

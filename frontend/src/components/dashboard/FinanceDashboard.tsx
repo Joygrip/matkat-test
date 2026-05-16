@@ -12,14 +12,7 @@ import type { FinanceActualRow } from '../finance/ActualsTab';
 import type { DemandLine, SupplyLine } from '../../api/planning';
 import type { CostCenter } from '../../api/admin';
 import type { Period, MeResponse } from '../../types/index';
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
-const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-function fmtCost(v: number): string {
-  return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', maximumFractionDigits: 0 }).format(v);
-}
+import { MONTH_SHORT, formatDKK } from '../../utils/format';
 
 // ─── colors ───────────────────────────────────────────────────────────────────
 
@@ -385,7 +378,7 @@ export function FinanceDashboard({ demandLines, periods }: Props) {
   // ── Render ────────────────────────────────────────────────────────────────────
 
   const periodLabel = currentPeriod
-    ? `${MONTH_NAMES[currentPeriod.month - 1]} ${currentPeriod.year}`
+    ? `${MONTH_SHORT[currentPeriod.month - 1]} ${currentPeriod.year}`
     : '—';
 
   return (
@@ -398,7 +391,7 @@ export function FinanceDashboard({ demandLines, periods }: Props) {
         <div className={styles.kpiCard}>
           <div className={styles.kpiLabel}>Planned Labor</div>
           <div className={styles.kpiValue} style={{ color: tokens.colorNeutralForeground1 }}>
-            {costsLoading ? '—' : fmtCost(periodPlannedLabor)}
+            {costsLoading ? '—' : formatDKK(periodPlannedLabor)}
           </div>
           <div className={styles.kpiSub}>{periodLabel}</div>
           <div className={styles.barTrack}>
@@ -414,7 +407,7 @@ export function FinanceDashboard({ demandLines, periods }: Props) {
               ? tokens.colorNeutralForeground3
               : periodActualVsPlanPct > 110 ? SEV_FG.bad : periodActualVsPlanPct > 105 ? SEV_FG.warn : SEV_FG.good,
           }}>
-            {costsLoading ? '—' : fmtCost(periodActualLabor)}
+            {costsLoading ? '—' : formatDKK(periodActualLabor)}
           </div>
           <div className={styles.kpiSub} style={periodActualLabor > 0 ? {
             color: periodActualVsPlanPct > 110 ? SEV_FG.bad : periodActualVsPlanPct > 105 ? SEV_FG.warn : SEV_FG.good,
@@ -438,7 +431,7 @@ export function FinanceDashboard({ demandLines, periods }: Props) {
         <div className={styles.kpiCard}>
           <div className={styles.kpiLabel}>OoP</div>
           <div className={styles.kpiValue} style={{ color: tokens.colorNeutralForeground1 }}>
-            {costsLoading ? '—' : fmtCost(periodOoP)}
+            {costsLoading ? '—' : formatDKK(periodOoP)}
           </div>
           <div className={styles.kpiSub}>Out-of-pocket costs</div>
         </div>
@@ -447,7 +440,7 @@ export function FinanceDashboard({ demandLines, periods }: Props) {
         <div className={styles.kpiCard}>
           <div className={styles.kpiLabel}>Equipment</div>
           <div className={styles.kpiValue} style={{ color: tokens.colorNeutralForeground1 }}>
-            {costsLoading ? '—' : fmtCost(periodEquipment)}
+            {costsLoading ? '—' : formatDKK(periodEquipment)}
           </div>
           <div className={styles.kpiSub}>Equipment costs</div>
         </div>
@@ -456,7 +449,7 @@ export function FinanceDashboard({ demandLines, periods }: Props) {
         <div className={styles.kpiCard}>
           <div className={styles.kpiLabel}>Total Period</div>
           <div className={styles.kpiValue} style={{ color: tokens.colorNeutralForeground1 }}>
-            {costsLoading ? '—' : fmtCost(totalPeriod)}
+            {costsLoading ? '—' : formatDKK(totalPeriod)}
           </div>
           <div className={styles.kpiSub}>{periodLabel} · all categories</div>
           {!costsLoading && totalPeriod > 0 && (

@@ -54,6 +54,7 @@ import { useAppData } from '../contexts/AppDataContext';
 import { planningApi, DemandLine, SupplyLine } from '../api/planning';
 import { useToast } from '../hooks/useToast';
 import { formatApiError } from '../utils/errors';
+import { MONTH_NAMES } from '../utils/format';
 import { config } from '../config';
 import { ApiError } from '../types';
 import { EmptyState } from '../components/EmptyState';
@@ -269,7 +270,6 @@ const useStyles = makeStyles({
   },
 });
 
-const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 
 export const Actuals: React.FC = () => {
@@ -595,7 +595,7 @@ export const Actuals: React.FC = () => {
               <div className={styles.formField} style={{ marginBottom: tokens.spacingVerticalM }}>
                 <label>Period</label>
                 <Body1 style={{ padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
-                  {monthNames[currentPeriod.month - 1]} {currentPeriod.year} ({currentPeriod.status})
+                  {MONTH_NAMES[currentPeriod.month - 1]} {currentPeriod.year} ({currentPeriod.status})
                 </Body1>
               </div>
             )}

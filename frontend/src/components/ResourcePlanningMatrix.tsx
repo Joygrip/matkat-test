@@ -19,6 +19,7 @@ import { planningApi, DemandLine, SupplyLine } from '../api/planning';
 import { useToast } from '../hooks/useToast';
 import { lookupsApi, Project, CostCenter, Resource, Placeholder } from '../api/lookups';
 import { Period } from '../types/index';
+import { MONTH_SHORT } from '../utils/format';
 
 const RESOURCE_COL_WIDTH = 180;
 const PROJECT_COL_WIDTH = 150;
@@ -64,7 +65,6 @@ function getPipColor(dSum: number, sSum: number): string {
   return (dSum - sSum) / dSum >= 0.5 ? '#ef4444' : '#f59e0b';
 }
 
-const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function getFteColor(val: number): { background: string; color: string } | undefined {
   if (val === 0) return undefined;
   if (val <= 49) return { background: tokens.colorPaletteGreenBackground2, color: tokens.colorPaletteGreenForeground2 };

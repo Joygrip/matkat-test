@@ -357,10 +357,10 @@ def import_departments_from_graph(db: Session, settings: Settings, tenant_id: st
     if not graph_users:
         return {"error": "No users returned from Graph or Graph call failed"}
 
-    unique_departments = {
-        u.get("department")
+    unique_departments: set[str] = {
+        dept
         for u in graph_users
-        if u.get("department")
+        if (dept := u.get("department")) is not None
     }
 
     created = 0
@@ -378,19 +378,30 @@ def import_departments_from_graph(db: Session, settings: Settings, tenant_id: st
                 skipped += 1
                 continue
 
+            base_code = department[:5].upper()
+            code = base_code
+            counter = 2
+            while db.query(CostCenter).filter(
+                CostCenter.tenant_id == tenant_id,
+                CostCenter.code == code,
+            ).first():
+                code = f"{base_code[:4]}{counter}"
+                counter += 1
+
             new_cc = CostCenter(
                 id=generate_uuid(),
                 tenant_id=tenant_id,
                 name=department,
                 graph_department_name=department,
-                code=department[:5].upper(),
+                code=code,
                 is_active=True,
             )
             db.add(new_cc)
             db.flush()
             created += 1
-            logger.info("import_departments: created cost_center name=%s", department)
+            logger.info("import_departments: created cost_center name=%s code=%s", department, code)
         except Exception as exc:
+            db.rollback()
             logger.error(
                 "import_departments: error processing department=%s: %s", department, exc
             )

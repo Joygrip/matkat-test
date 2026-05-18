@@ -1028,6 +1028,22 @@ async def check_graph_list(
     }
 
 
+@router.post("/sync/debug-import-departments")
+async def debug_import_departments(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    """Temporary: run import_departments synchronously to see errors."""
+    from api.app.services.background_sync import import_departments_from_graph
+    settings = get_settings()
+    try:
+        result = import_departments_from_graph(db, settings, current_user.tenant_id)
+        return {"status": "ok", "result": result}
+    except Exception as exc:
+        import traceback
+        return {"status": "error", "error": str(exc), "traceback": traceback.format_exc()}
+
+
 # ============== USERS ==============
 
 def _enrich_user(user: User) -> dict:

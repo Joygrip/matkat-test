@@ -602,8 +602,8 @@ export const ResourcePlanning: React.FC = () => {
                 <Area type="monotone" dataKey="gap_under" stackId="gap" fill="#fee2e2" fillOpacity={0.4} stroke="none" legendType="none" name="Understaffed gap" isAnimationActive={false} />
                 <Area type="monotone" dataKey="gap_over" stackId="gap" fill="#dcfce7" fillOpacity={0.4} stroke="none" legendType="none" name="Overstaffed gap" isAnimationActive={false} />
                 {/* Lines on top */}
-                <Line type="monotone" dataKey="demand" stroke="#d97706" strokeWidth={2.5} dot={false} name="Total Demand" unit="%" connectNulls={false} />
-                <Line type="monotone" dataKey="supply" stroke="#0d9488" strokeWidth={2.5} dot={false} name="Total Supply" unit="%" connectNulls={false} />
+                <Line type="monotone" dataKey="demand" stroke="#d97706" strokeWidth={2.5} dot={false} name="Total Demand" unit="%" connectNulls={true} />
+                <Line type="monotone" dataKey="supply" stroke="#0d9488" strokeWidth={2.5} dot={false} name="Total Supply" unit="%" connectNulls={true} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>

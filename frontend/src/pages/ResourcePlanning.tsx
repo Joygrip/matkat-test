@@ -196,6 +196,7 @@ export const ResourcePlanning: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [managerCcId, setManagerCcId] = useState<string | null>(null);
+  const [dbUserId, setDbUserId] = useState<string | null>(null);
   const [delegatedCcIds, setDelegatedCcIds] = useState<Set<string>>(new Set());
   const [scopedCcIds, setScopedCcIds] = useState<Set<string>>(new Set());
 
@@ -238,8 +239,9 @@ export const ResourcePlanning: React.FC = () => {
       fetches.push(adminApi.listDelegatesAsDelegate());
     }
     Promise.all(fetches).then(([resources, delegates]) => {
-      const userRes = rid ? resources.find((r: { id: string; cost_center_id: string }) => r.id === rid) : null;
+      const userRes = rid ? resources.find((r: { id: string; cost_center_id: string; user_id?: string | null }) => r.id === rid) : null;
       setManagerCcId(userRes?.cost_center_id ?? null);
+      setDbUserId(userRes?.user_id ?? null);
       setScopedCcIds(new Set(resources.map((r: { cost_center_id: string }) => r.cost_center_id).filter(Boolean)));
       if (isManagerReader && delegates) {
         const activeDelegatorIds = new Set(
@@ -347,6 +349,15 @@ export const ResourcePlanning: React.FC = () => {
     return ids.size > 0 ? ids : null;
   }, [isAnyManager, isManagerReader, managerCcId, delegatedCcIds, supplyLines, demandLines, scopedCcIds]);
 
+  const managedCcIds = useMemo(() => {
+    if (!isManager || !dbUserId) return new Set<string>();
+    return new Set(
+      costCenters
+        .filter(cc => cc.ro_user_id === dbUserId || cc.director_user_id === dbUserId)
+        .map(cc => cc.id)
+    );
+  }, [costCenters, dbUserId, isManager]);
+
   const filteredDemandLines = useMemo(() => {
     return demandLines.filter(d => {
       if (selectedProjectId && d.project_id !== selectedProjectId) return false;
@@ -431,8 +442,8 @@ export const ResourcePlanning: React.FC = () => {
       const label = fmtPeriodShort(p);
       const rawDemand = demandByPeriod.get(p.id);
       const rawSupply = supplyByPeriod.get(p.id);
-      const demand = rawDemand !== undefined ? Math.round(rawDemand * 10) / 10 : null;
-      const supply = rawSupply !== undefined ? Math.round(rawSupply * 10) / 10 : null;
+      const demand = rawDemand !== undefined ? Math.round(rawDemand * 10) / 10 : 0;
+      const supply = rawSupply !== undefined ? Math.round(rawSupply * 10) / 10 : 0;
       // For gap area: treat missing supply as 0 when demand exists, so understaffed fill covers full demand
       const supplyForArea = supply !== null ? supply : (demand !== null ? 0 : null);
       const base = demand !== null && supplyForArea !== null ? Math.round(Math.min(demand, supplyForArea) * 10) / 10 : null;
@@ -457,8 +468,9 @@ export const ResourcePlanning: React.FC = () => {
       ...filteredSupplyLines.map(s => s.cost_center_id).filter(Boolean),
     ]);
     if (isAnyManager && managerCcId) activeCcIds.add(managerCcId);
+    managedCcIds.forEach(id => activeCcIds.add(id));
     return costCenters.filter(c => activeCcIds.has(c.id));
-  }, [costCenters, filteredDemandLines, filteredSupplyLines, isAnyManager, managerCcId]);
+  }, [costCenters, filteredDemandLines, filteredSupplyLines, isAnyManager, managerCcId, managedCcIds]);
 
   if (loading) {
     return <LoadingState message="Loading resource planning data..." />;
@@ -710,7 +722,7 @@ export const ResourcePlanning: React.FC = () => {
           canEditSupply={canEditSupply}
           onReload={reloadLines}
           userRole={user?.role ?? ''}
-          managerCcId={managerCcId}
+          managedCcIds={managedCcIds}
           allCostCenters={costCenters}
           editableCcIds={editableCcIds ?? undefined}
         />

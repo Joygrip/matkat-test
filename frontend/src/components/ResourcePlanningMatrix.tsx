@@ -418,7 +418,7 @@ export interface ResourcePlanningMatrixProps {
   canEditSupply: boolean;
   onReload: () => void;
   userRole: string;
-  managerCcId: string | null;
+  managedCcIds: Set<string>;
   allCostCenters: CostCenter[];
   /** When set (ManagerReader), restricts the Add Line CC dropdown to own + delegated CCs. */
   editableCcIds?: Set<string>;
@@ -455,7 +455,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   canEditSupply,
   onReload,
   userRole,
-  managerCcId,
+  managedCcIds,
   allCostCenters,
   editableCcIds,
 }) => {
@@ -1087,7 +1087,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       ? allCostCenters.filter(c => editableCcIds.has(c.id))
       : costCenters;
     const defaultCcId = isRoleManager
-      ? (managerCcId || editableCostCenters[0]?.id || costCenters[0]?.id || '')
+      ? ([...managedCcIds][0] || editableCostCenters[0]?.id || costCenters[0]?.id || '')
       : '';
     setDlgLineType(defaultLineType);
     setDlgCcId(defaultCcId);
@@ -1111,7 +1111,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       }
     }
     setAddLineDialogOpen(true);
-  }, [isRolePM, isRoleManager, managerCcId, costCenters, allCostCenters, editableCcIds, loadCcData]);
+  }, [isRolePM, isRoleManager, managedCcIds, costCenters, allCostCenters, editableCcIds, loadCcData]);
 
   const handleDlgSave = useCallback(async () => {
     const fteVal = Number(dlgFte);
@@ -1973,7 +1973,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                       {(editableCcIds ? allCostCenters.filter(c => editableCcIds.has(c.id)) : costCenters)
                         .map(c => (
                           <option key={c.id} value={c.id}>
-                            {c.name}{c.id === managerCcId ? ' (My CC)' : ''}
+                            {c.name}{managedCcIds.has(c.id) ? ' (My CC)' : ''}
                           </option>
                         ))}
                     </select>

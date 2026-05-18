@@ -1,8 +1,9 @@
 """Admin CRUD endpoints for master data."""
 import logging
+import threading
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from typing import Optional
@@ -19,6 +20,7 @@ _sync_status: dict = {
     "status": "never",
     "sync_type": None,
 }
+_sync_lock = threading.Lock()
 
 
 def _run_sync_background(sync_type: str, tenant_id: str) -> None:
@@ -32,6 +34,10 @@ def _run_sync_background(sync_type: str, tenant_id: str) -> None:
         assign_cost_center_managers,
         run_graph_sync,
     )
+
+    if not _sync_lock.acquire(blocking=False):
+        logger.warning("background_sync: another sync is already running, skipping")
+        return
 
     _sync_status["status"] = "running"
     _sync_status["sync_type"] = sync_type
@@ -70,6 +76,7 @@ def _run_sync_background(sync_type: str, tenant_id: str) -> None:
         logger.error("background_sync: %s sync failed: %s", sync_type, exc)
     finally:
         db.close()
+        _sync_lock.release()
 
 
 from api.app.models.core import (
@@ -867,11 +874,10 @@ async def get_sync_status(
 
 @router.post("/sync/graph-users")
 async def trigger_graph_sync(
-    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN)),
 ):
     """Trigger an on-demand Graph profile + reporting-cache sync in the background."""
-    background_tasks.add_task(_run_sync_background, "graph-users", current_user.tenant_id)
+    threading.Thread(target=_run_sync_background, args=("graph-users", current_user.tenant_id), daemon=True).start()
     return {
         "status": "started",
         "message": "Graph user sync started in background.",
@@ -881,11 +887,10 @@ async def trigger_graph_sync(
 
 @router.post("/sync/import-graph-users")
 async def import_users_from_graph_endpoint(
-    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Bulk import all enabled Entra users into the DB as Employee role. Admin only."""
-    background_tasks.add_task(_run_sync_background, "users", current_user.tenant_id)
+    threading.Thread(target=_run_sync_background, args=("users", current_user.tenant_id), daemon=True).start()
     return {
         "status": "started",
         "message": "User import started in background.",
@@ -895,11 +900,10 @@ async def import_users_from_graph_endpoint(
 
 @router.post("/sync/import-departments")
 async def import_departments_endpoint(
-    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Import unique Graph departments as CostCenters. Code field left blank for admin to fill."""
-    background_tasks.add_task(_run_sync_background, "departments", current_user.tenant_id)
+    threading.Thread(target=_run_sync_background, args=("departments", current_user.tenant_id), daemon=True).start()
     return {
         "status": "started",
         "message": "Department import started in background.",
@@ -909,11 +913,10 @@ async def import_departments_endpoint(
 
 @router.post("/sync/assign-user-departments")
 async def assign_user_departments_endpoint(
-    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Re-run Graph sync to assign users to cost centers based on department name matching."""
-    background_tasks.add_task(_run_sync_background, "graph-users", current_user.tenant_id)
+    threading.Thread(target=_run_sync_background, args=("graph-users", current_user.tenant_id), daemon=True).start()
     return {
         "status": "started",
         "message": "Department assignment started in background.",
@@ -923,11 +926,10 @@ async def assign_user_departments_endpoint(
 
 @router.post("/sync/promote-managers")
 async def promote_managers_endpoint(
-    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Promote users to Manager role if they manage at least one other user in Graph."""
-    background_tasks.add_task(_run_sync_background, "managers", current_user.tenant_id)
+    threading.Thread(target=_run_sync_background, args=("managers", current_user.tenant_id), daemon=True).start()
     return {
         "status": "started",
         "message": "Manager promotion started in background.",
@@ -937,11 +939,10 @@ async def promote_managers_endpoint(
 
 @router.post("/sync/create-resources")
 async def create_resources_endpoint(
-    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Create Resource entries for all active Employee and Manager users that don't have one yet."""
-    background_tasks.add_task(_run_sync_background, "resources", current_user.tenant_id)
+    threading.Thread(target=_run_sync_background, args=("resources", current_user.tenant_id), daemon=True).start()
     return {
         "status": "started",
         "message": "Resource creation started in background.",
@@ -951,11 +952,10 @@ async def create_resources_endpoint(
 
 @router.post("/sync/assign-cost-center-managers")
 async def assign_cost_center_managers_endpoint(
-    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Assign RO (1st level) and Director (2nd level) managers to each cost center based on user hierarchy."""
-    background_tasks.add_task(_run_sync_background, "cc-managers", current_user.tenant_id)
+    threading.Thread(target=_run_sync_background, args=("cc-managers", current_user.tenant_id), daemon=True).start()
     return {
         "status": "started",
         "message": "Cost center manager assignment started in background.",
@@ -965,11 +965,10 @@ async def assign_cost_center_managers_endpoint(
 
 @router.post("/sync/full")
 async def full_sync_endpoint(
-    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Run all Graph sync steps in sequence in the background. Admin only."""
-    background_tasks.add_task(_run_sync_background, "full", current_user.tenant_id)
+    threading.Thread(target=_run_sync_background, args=("full", current_user.tenant_id), daemon=True).start()
     return {
         "status": "started",
         "message": "Full sync started in background. This may take a few minutes.",

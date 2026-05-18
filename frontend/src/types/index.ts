@@ -10,6 +10,7 @@ export type PeriodStatus = 'open' | 'locked';
 
 // Current user info
 export interface MeResponse {
+  id: string;
   tenant_id: string;
   object_id: string;
   email: string;

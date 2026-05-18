@@ -37,6 +37,7 @@ def _get_azure_scheme() -> SingleTenantAzureAuthorizationCodeBearer:
 
 class CurrentUser(BaseModel):
     """Current authenticated user context."""
+    id: str
     tenant_id: str
     object_id: str
     email: str
@@ -127,6 +128,7 @@ async def get_current_user(
             db.commit()
 
         return CurrentUser(
+            id=db_user.id,
             tenant_id=dev_tenant,
             object_id=dev_user_id,
             email=dev_email,
@@ -184,6 +186,7 @@ async def get_current_user(
     )
 
     return CurrentUser(
+        id=db_user.id,
         tenant_id=db_user.tenant_id,
         object_id=object_id,
         email=db_user.email,

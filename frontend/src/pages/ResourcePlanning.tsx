@@ -196,7 +196,6 @@ export const ResourcePlanning: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [managerCcId, setManagerCcId] = useState<string | null>(null);
-  const [dbUserId, setDbUserId] = useState<string | null>(null);
   const [delegatedCcIds, setDelegatedCcIds] = useState<Set<string>>(new Set());
   const [scopedCcIds, setScopedCcIds] = useState<Set<string>>(new Set());
 
@@ -241,7 +240,6 @@ export const ResourcePlanning: React.FC = () => {
     Promise.all(fetches).then(([resources, delegates]) => {
       const userRes = rid ? resources.find((r: { id: string; cost_center_id: string; user_id?: string | null }) => r.id === rid) : null;
       setManagerCcId(userRes?.cost_center_id ?? null);
-      setDbUserId(userRes?.user_id ?? null);
       setScopedCcIds(new Set(resources.map((r: { cost_center_id: string }) => r.cost_center_id).filter(Boolean)));
       if (isManagerReader && delegates) {
         const activeDelegatorIds = new Set(
@@ -350,13 +348,13 @@ export const ResourcePlanning: React.FC = () => {
   }, [isAnyManager, isManagerReader, managerCcId, delegatedCcIds, supplyLines, demandLines, scopedCcIds]);
 
   const managedCcIds = useMemo(() => {
-    if (!isManager || !dbUserId) return new Set<string>();
+    if (!isManager || !user?.id) return new Set<string>();
     return new Set(
       costCenters
-        .filter(cc => cc.ro_user_id === dbUserId || cc.director_user_id === dbUserId)
+        .filter(cc => cc.ro_user_id === user.id || cc.director_user_id === user.id)
         .map(cc => cc.id)
     );
-  }, [costCenters, dbUserId, isManager]);
+  }, [costCenters, user?.id, isManager]);
 
   const filteredDemandLines = useMemo(() => {
     return demandLines.filter(d => {
@@ -444,18 +442,16 @@ export const ResourcePlanning: React.FC = () => {
       const rawSupply = supplyByPeriod.get(p.id);
       const demand = rawDemand !== undefined ? Math.round(rawDemand * 10) / 10 : 0;
       const supply = rawSupply !== undefined ? Math.round(rawSupply * 10) / 10 : 0;
-      // For gap area: treat missing supply as 0 when demand exists, so understaffed fill covers full demand
-      const supplyForArea = supply !== null ? supply : (demand !== null ? 0 : null);
-      const base = demand !== null && supplyForArea !== null ? Math.round(Math.min(demand, supplyForArea) * 10) / 10 : null;
+      const base = Math.round(Math.min(demand, supply) * 10) / 10;
       return {
         label,
         periodId: p.id,
         demand,
         supply,
-        supplyForArea,
         base,
-        gap_under: demand !== null && supplyForArea !== null && demand > supplyForArea ? Math.round((demand - supplyForArea) * 10) / 10 : null,
-        gap_over: demand !== null && supplyForArea !== null && supplyForArea > demand ? Math.round((supplyForArea - demand) * 10) / 10 : null,
+        // Use 0 (not null) so Recharts stacked areas accumulate correctly and both colours show.
+        gap_under: demand > supply ? Math.round((demand - supply) * 10) / 10 : 0,
+        gap_over: supply > demand ? Math.round((supply - demand) * 10) / 10 : 0,
       };
     });
   }, [filteredDemandLines, filteredSupplyLines, openPeriods, selectedPeriodIds]);

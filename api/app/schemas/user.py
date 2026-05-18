@@ -45,6 +45,7 @@ class UserResponse(UserBase):
 
 class MeResponse(BaseModel):
     """Current user info response."""
+    id: str
     tenant_id: str
     object_id: str
     email: str

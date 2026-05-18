@@ -79,6 +79,7 @@ async def get_me(current_user: CurrentUser = Depends(get_current_user)):
     Get current authenticated user information.
     """
     return MeResponse(
+        id=current_user.id,
         tenant_id=current_user.tenant_id,
         object_id=current_user.object_id,
         email=current_user.email,

@@ -1341,7 +1341,7 @@ export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, on
                     managerOwnCcId ? ccKey === managerOwnCcId :
                     false
                   }
-                  isDelegatedCc={delegatedCcIds ? delegatedCcIds.has(ccKey) : (!!managerOwnCcId && ccKey !== managerOwnCcId)}
+                  isDelegatedCc={delegatedCcIds ? delegatedCcIds.has(ccKey) : false}
                   onClick={() => setSelectedCcId(ccKey)}
                 />
               );

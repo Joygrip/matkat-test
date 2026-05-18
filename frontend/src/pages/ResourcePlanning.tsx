@@ -540,9 +540,13 @@ export const ResourcePlanning: React.FC = () => {
           </div>
           <div className={styles.overviewCardBody}>
             <ResponsiveContainer width="100%" height={220}>
-              <ComposedChart data={overviewChartData} margin={{ top: 8, right: 24, left: 0, bottom: 8 }}>
+              <ComposedChart data={overviewChartData} margin={{ top: 8, right: 24, left: 0, bottom: 40 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                <XAxis
+                  dataKey="label"
+                  interval={Math.max(0, Math.ceil(overviewChartData.length / 8) - 1)}
+                  tick={{ fontSize: 11, angle: -45, textAnchor: 'end', dy: 4 }}
+                />
                 <YAxis tick={{ fontSize: 12 }} unit="%" />
                 <Tooltip
                   content={({ active, payload, label }) => {

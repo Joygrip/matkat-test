@@ -433,15 +433,18 @@ export const ResourcePlanning: React.FC = () => {
       const rawSupply = supplyByPeriod.get(p.id);
       const demand = rawDemand !== undefined ? Math.round(rawDemand * 10) / 10 : null;
       const supply = rawSupply !== undefined ? Math.round(rawSupply * 10) / 10 : null;
-      const base = demand !== null && supply !== null ? Math.round(Math.min(demand, supply) * 10) / 10 : null;
+      // For gap area: treat missing supply as 0 when demand exists, so understaffed fill covers full demand
+      const supplyForArea = supply !== null ? supply : (demand !== null ? 0 : null);
+      const base = demand !== null && supplyForArea !== null ? Math.round(Math.min(demand, supplyForArea) * 10) / 10 : null;
       return {
         label,
         periodId: p.id,
         demand,
         supply,
+        supplyForArea,
         base,
-        gap_under: demand !== null && supply !== null && demand > supply ? Math.round((demand - supply) * 10) / 10 : null,
-        gap_over: demand !== null && supply !== null && supply > demand ? Math.round((supply - demand) * 10) / 10 : null,
+        gap_under: demand !== null && supplyForArea !== null && demand > supplyForArea ? Math.round((demand - supplyForArea) * 10) / 10 : null,
+        gap_over: demand !== null && supplyForArea !== null && supplyForArea > demand ? Math.round((supplyForArea - demand) * 10) / 10 : null,
       };
     });
   }, [filteredDemandLines, filteredSupplyLines, openPeriods, selectedPeriodIds]);

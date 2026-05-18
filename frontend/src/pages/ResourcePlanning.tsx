@@ -197,6 +197,7 @@ export const ResourcePlanning: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [managerCcId, setManagerCcId] = useState<string | null>(null);
   const [delegatedCcIds, setDelegatedCcIds] = useState<Set<string>>(new Set());
+  const [scopedCcIds, setScopedCcIds] = useState<Set<string>>(new Set());
 
   const [searchResource, setSearchResource] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -239,6 +240,7 @@ export const ResourcePlanning: React.FC = () => {
     Promise.all(fetches).then(([resources, delegates]) => {
       const userRes = rid ? resources.find((r: { id: string; cost_center_id: string }) => r.id === rid) : null;
       setManagerCcId(userRes?.cost_center_id ?? null);
+      setScopedCcIds(new Set(resources.map((r: { cost_center_id: string }) => r.cost_center_id).filter(Boolean)));
       if (isManagerReader && delegates) {
         const activeDelegatorIds = new Set(
           delegates.filter((d: { is_active: boolean; delegator_id: string }) => d.is_active).map((d: { delegator_id: string }) => d.delegator_id)
@@ -339,9 +341,11 @@ export const ResourcePlanning: React.FC = () => {
     // All managers: include every CC present in backend-scoped data
     supplyLines.forEach(s => { if (s.cost_center_id) ids.add(s.cost_center_id); });
     demandLines.forEach(d => { if (d.cost_center_id) ids.add(d.cost_center_id); });
+    // Also include all CCs from scoped resources (managed CCs that may have no lines yet)
+    scopedCcIds.forEach(id => ids.add(id));
     // Return null only while still loading (nothing resolved yet)
     return ids.size > 0 ? ids : null;
-  }, [isAnyManager, isManagerReader, managerCcId, delegatedCcIds, supplyLines, demandLines]);
+  }, [isAnyManager, isManagerReader, managerCcId, delegatedCcIds, supplyLines, demandLines, scopedCcIds]);
 
   const filteredDemandLines = useMemo(() => {
     return demandLines.filter(d => {

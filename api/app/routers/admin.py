@@ -76,7 +76,8 @@ def _run_sync_background(sync_type: str, tenant_id: str) -> None:
         logger.error("background_sync: %s sync failed: %s", sync_type, exc)
     finally:
         db.close()
-        _sync_lock.release()
+        if _sync_lock.locked():
+            _sync_lock.release()
 
 
 from api.app.models.core import (

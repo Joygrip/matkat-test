@@ -990,6 +990,44 @@ async def check_graph_user(
     return {"object_id": object_id, "graph_response": result}
 
 
+@router.get("/sync/check-graph-list/{email}")
+async def check_graph_list(
+    email: str,
+    _current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    """Temporary diagnostic: check what list_all_users returns for a specific email."""
+    from api.app.services.graph_app_client import GraphAppClient
+    settings = get_settings()
+    graph = GraphAppClient(settings)
+    all_users = graph.list_all_users()
+
+    found = None
+    for u in all_users:
+        mail = u.get("mail") or u.get("userPrincipalName") or ""
+        if mail.lower() == email.lower():
+            found = u
+            break
+
+    dept_counts = {}
+    no_dept = 0
+    for u in all_users:
+        dept = u.get("department")
+        if dept:
+            dept_counts[dept] = dept_counts.get(dept, 0) + 1
+        else:
+            no_dept += 1
+
+    return {
+        "total_users_in_list": len(all_users),
+        "users_with_department": len(all_users) - no_dept,
+        "users_without_department": no_dept,
+        "unique_departments": len(dept_counts),
+        "searched_email": email,
+        "found_user": found,
+        "all_departments": dept_counts,
+    }
+
+
 # ============== USERS ==============
 
 def _enrich_user(user: User) -> dict:

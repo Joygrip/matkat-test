@@ -1,4 +1,6 @@
 """FastAPI Application - Resource Allocation API."""
+import fcntl
+import logging
 from http import HTTPStatus
 from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +12,10 @@ from api.app.routers import health, me, dev, periods, admin, planning, actuals, 
 from api.app.routers import finance, audit, dashboard, reporting, project_costs
 from api.app.routers import notification_schedules
 from api.app.services import scheduler as notification_scheduler
+
+_logger = logging.getLogger(__name__)
+# Held open for process lifetime so the OS releases the lock if this worker dies.
+_scheduler_lock_fd = None
 
 # Create FastAPI app
 app = FastAPI(
@@ -179,7 +185,17 @@ async def startup_event():
             "Set DATABASE_URL to a SQL Server connection string in Azure App Service."
         )
 
-    notification_scheduler.start()
+    global _scheduler_lock_fd
+    try:
+        _scheduler_lock_fd = open("/tmp/scheduler.lock", "w")
+        fcntl.flock(_scheduler_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        notification_scheduler.start()
+    except OSError:
+        # Another worker already holds the lock — skip the scheduler on this worker.
+        if _scheduler_lock_fd:
+            _scheduler_lock_fd.close()
+            _scheduler_lock_fd = None
+        _logger.info("Scheduler not started: already running in another worker")
 
     if settings.dev_auth_bypass:
         print("WARNING: DEV_AUTH_BYPASS is enabled. Do not use in production!")
@@ -198,5 +214,6 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown."""
-    notification_scheduler.shutdown()
+    if _scheduler_lock_fd is not None:
+        notification_scheduler.shutdown()
     print("Shutting down Resource Allocation API")

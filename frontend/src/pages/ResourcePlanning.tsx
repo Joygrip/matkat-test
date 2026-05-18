@@ -429,17 +429,19 @@ export const ResourcePlanning: React.FC = () => {
       : openPeriods;
     return periodsToShow.map(p => {
       const label = fmtPeriodShort(p);
-      const demand = Math.round((demandByPeriod.get(p.id) ?? 0) * 10) / 10;
-      const supply = Math.round((supplyByPeriod.get(p.id) ?? 0) * 10) / 10;
-      const base = Math.min(demand, supply);
+      const rawDemand = demandByPeriod.get(p.id);
+      const rawSupply = supplyByPeriod.get(p.id);
+      const demand = rawDemand !== undefined ? Math.round(rawDemand * 10) / 10 : null;
+      const supply = rawSupply !== undefined ? Math.round(rawSupply * 10) / 10 : null;
+      const base = demand !== null && supply !== null ? Math.round(Math.min(demand, supply) * 10) / 10 : null;
       return {
         label,
         periodId: p.id,
         demand,
         supply,
-        base: Math.round(base * 10) / 10,
-        gap_under: demand > supply ? Math.round((demand - supply) * 10) / 10 : 0,
-        gap_over: supply > demand ? Math.round((supply - demand) * 10) / 10 : 0,
+        base,
+        gap_under: demand !== null && supply !== null && demand > supply ? Math.round((demand - supply) * 10) / 10 : null,
+        gap_over: demand !== null && supply !== null && supply > demand ? Math.round((supply - demand) * 10) / 10 : null,
       };
     });
   }, [filteredDemandLines, filteredSupplyLines, openPeriods, selectedPeriodIds]);
@@ -544,8 +546,18 @@ export const ResourcePlanning: React.FC = () => {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
                 <XAxis
                   dataKey="label"
-                  interval={Math.max(0, Math.ceil(overviewChartData.length / 8) - 1)}
-                  tick={{ fontSize: 11, angle: -45, textAnchor: 'end', dy: 4 }}
+                  interval={0}
+                  height={60}
+                  tick={(props) => {
+                    const { x, y, payload } = props as { x: number; y: number; payload: { value: string } };
+                    return (
+                      <g transform={`translate(${x},${y})`}>
+                        <text x={0} y={0} dy={4} textAnchor="end" fill="#666" fontSize={11} transform="rotate(-45)">
+                          {payload.value}
+                        </text>
+                      </g>
+                    );
+                  }}
                 />
                 <YAxis tick={{ fontSize: 12 }} unit="%" />
                 <Tooltip
@@ -590,8 +602,8 @@ export const ResourcePlanning: React.FC = () => {
                 <Area type="monotone" dataKey="gap_under" stackId="gap" fill="#fee2e2" fillOpacity={0.4} stroke="none" legendType="none" name="Understaffed gap" isAnimationActive={false} />
                 <Area type="monotone" dataKey="gap_over" stackId="gap" fill="#dcfce7" fillOpacity={0.4} stroke="none" legendType="none" name="Overstaffed gap" isAnimationActive={false} />
                 {/* Lines on top */}
-                <Line type="monotone" dataKey="demand" stroke="#d97706" strokeWidth={2.5} dot={false} name="Total Demand" unit="%" />
-                <Line type="monotone" dataKey="supply" stroke="#0d9488" strokeWidth={2.5} dot={false} name="Total Supply" unit="%" />
+                <Line type="monotone" dataKey="demand" stroke="#d97706" strokeWidth={2.5} dot={false} name="Total Demand" unit="%" connectNulls={false} />
+                <Line type="monotone" dataKey="supply" stroke="#0d9488" strokeWidth={2.5} dot={false} name="Total Supply" unit="%" connectNulls={false} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>

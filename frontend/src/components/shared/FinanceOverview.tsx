@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { ConsolidationDashboard, DashboardResource, OverAllocation } from '../../api/consolidation';
 import { consolidationApi } from '../../api/consolidation';
+import { adminApi } from '../../api/admin';
+import { lookupsApi } from '../../api/lookups';
 import { usePeriod } from '../../contexts/PeriodContext';
 import { useToast } from '../../hooks/useToast';
 import { OverviewTab } from '../finance/OverviewTab';
@@ -35,6 +37,7 @@ export function FinanceOverview({
   const [dashboard, setDashboard] = useState<ConsolidationDashboard | null>(null);
   const [loading, setLoading] = useState(false);
   const [localPeriodId, setLocalPeriodId] = useState<string>('');
+  const [delegatedCcIds, setDelegatedCcIds] = useState<Set<string> | undefined>(undefined);
 
   // Only open periods, sorted chronologically (oldest → newest) for slider navigation.
   const sortedPeriods = useMemo(
@@ -173,18 +176,30 @@ export function FinanceOverview({
     return dashboard;
   }, [dashboard, scope, projectIds, costCenterId]);
 
-  // For manager scope: all CCs in the (already-scoped) dashboard except the user's own CC
-  // are delegated CCs. Build the set so OverviewTab can label them accurately.
-  const delegatedCcIds = useMemo((): Set<string> | undefined => {
-    if (scope !== 'manager' || !scopedDashboard || !costCenterId) return undefined;
-    const ids = new Set<string>();
-    for (const cc of scopedDashboard.cost_centers) {
-      if (cc.cost_center_id && cc.cost_center_id !== costCenterId) {
-        ids.add(cc.cost_center_id);
-      }
+  // For manager scope: resolve which CCs are truly delegated (via ApprovalDelegate records)
+  // vs directly managed (RO/Director). Only CCs from actual delegation records get the label.
+  useEffect(() => {
+    if (scope !== 'manager') {
+      setDelegatedCcIds(undefined);
+      return;
     }
-    return ids;
-  }, [scope, scopedDashboard, costCenterId]);
+    Promise.all([
+      adminApi.listDelegatesAsDelegate(),
+      lookupsApi.listResourcesScoped(),
+    ]).then(([delegates, resources]) => {
+      const activeDelegatorIds = new Set(
+        delegates.filter(d => d.is_active).map(d => d.delegator_id)
+      );
+      const ccIds = new Set<string>(
+        resources
+          .filter(r => r.user_id && activeDelegatorIds.has(r.user_id))
+          .map(r => r.cost_center_id)
+      );
+      setDelegatedCcIds(ccIds.size > 0 ? ccIds : undefined);
+    }).catch(() => {
+      setDelegatedCcIds(undefined);
+    });
+  }, [scope]);
 
   // Silent background refresh after a line edit/add/delete — does NOT set loading=true
   // so OverviewTab stays rendered and the modal stays open without a flash.

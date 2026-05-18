@@ -38,6 +38,7 @@ export function FinanceOverview({
   const [loading, setLoading] = useState(false);
   const [localPeriodId, setLocalPeriodId] = useState<string>('');
   const [delegatedCcIds, setDelegatedCcIds] = useState<Set<string> | undefined>(undefined);
+  const [managedCcIds, setManagedCcIds] = useState<Set<string> | undefined>(undefined);
 
   // Only open periods, sorted chronologically (oldest → newest) for slider navigation.
   const sortedPeriods = useMemo(
@@ -181,6 +182,7 @@ export function FinanceOverview({
   useEffect(() => {
     if (scope !== 'manager') {
       setDelegatedCcIds(undefined);
+      setManagedCcIds(undefined);
       return;
     }
     Promise.all([
@@ -190,14 +192,21 @@ export function FinanceOverview({
       const activeDelegatorIds = new Set(
         delegates.filter(d => d.is_active).map(d => d.delegator_id)
       );
-      const ccIds = new Set<string>(
+      const delegated = new Set<string>(
         resources
           .filter(r => r.user_id && activeDelegatorIds.has(r.user_id))
           .map(r => r.cost_center_id)
       );
-      setDelegatedCcIds(ccIds.size > 0 ? ccIds : undefined);
+      setDelegatedCcIds(delegated.size > 0 ? delegated : undefined);
+      // All scoped CCs that are not from delegation = directly managed (RO/Director) CCs
+      const allScopedCcIds = new Set<string>(
+        resources.map(r => r.cost_center_id).filter(Boolean)
+      );
+      const managed = new Set<string>([...allScopedCcIds].filter(id => !delegated.has(id)));
+      setManagedCcIds(managed.size > 0 ? managed : undefined);
     }).catch(() => {
       setDelegatedCcIds(undefined);
+      setManagedCcIds(undefined);
     });
   }, [scope]);
 
@@ -254,6 +263,7 @@ export function FinanceOverview({
         readerOwnCcId={scope === 'reader' && costCenterId ? costCenterId : undefined}
         managerOwnCcId={scope === 'manager' && costCenterId ? costCenterId : undefined}
         delegatedCcIds={delegatedCcIds}
+        managedCcIds={managedCcIds}
       />
     </>
   );

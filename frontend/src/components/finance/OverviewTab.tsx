@@ -856,6 +856,8 @@ export interface OverviewTabProps {
   managerOwnCcId?: string;
   /** Manager scope: explicit set of delegated CC IDs. When provided, only CCs in this set get the "Delegated" label. */
   delegatedCcIds?: Set<string>;
+  /** Manager scope: set of all directly-managed CC IDs (RO/Director). When provided, shows "My CC" on all of them. */
+  managedCcIds?: Set<string>;
 }
 
 type CcSortKey = 'gap' | 'name' | 'demand' | 'supply';
@@ -866,7 +868,7 @@ const SORT_OPTIONS: { key: CcSortKey; label: string }[] = [
   { key: 'demand', label: 'Demand'   },
 ];
 
-export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, onDashboardChanged, readerOwnCcId, managerOwnCcId, delegatedCcIds }: OverviewTabProps) {
+export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, onDashboardChanged, readerOwnCcId, managerOwnCcId, delegatedCcIds, managedCcIds }: OverviewTabProps) {
   const canEditDemand = useHasRole('Finance', 'PM');
   const canEditSupply = useHasRole('Finance', 'Manager');
   const isPM          = useHasRole('PM');
@@ -1337,6 +1339,7 @@ export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, on
                   cc={cc}
                   selected={selectedCcId === ccKey}
                   isOwnCc={
+                    managedCcIds ? managedCcIds.has(ccKey) :
                     readerOwnCcId ? ccKey === readerOwnCcId :
                     managerOwnCcId ? ccKey === managerOwnCcId :
                     false

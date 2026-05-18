@@ -1081,9 +1081,10 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
   const openAddLineDialog = useCallback(() => {
     const defaultLineType: 'demand' | 'supply' = isRolePM ? 'demand' : isRoleManager ? 'supply' : 'demand';
-    // Default to own CC; if not available, pick first editable CC (or first visible CC)
+    // Default to own CC; if not available, pick first editable CC (or first visible CC).
+    // Use allCostCenters so managers see every managed CC, not just those visible under current filters.
     const editableCostCenters = editableCcIds
-      ? costCenters.filter(c => editableCcIds.has(c.id))
+      ? allCostCenters.filter(c => editableCcIds.has(c.id))
       : costCenters;
     const defaultCcId = isRoleManager
       ? (managerCcId || editableCostCenters[0]?.id || costCenters[0]?.id || '')
@@ -1110,7 +1111,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       }
     }
     setAddLineDialogOpen(true);
-  }, [isRolePM, isRoleManager, managerCcId, costCenters, editableCcIds, loadCcData]);
+  }, [isRolePM, isRoleManager, managerCcId, costCenters, allCostCenters, editableCcIds, loadCcData]);
 
   const handleDlgSave = useCallback(async () => {
     const fteVal = Number(dlgFte);
@@ -1969,8 +1970,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                       }}
                       style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', backgroundColor: tokens.colorNeutralBackground1 }}
                     >
-                      {costCenters
-                        .filter(c => !editableCcIds || editableCcIds.has(c.id))
+                      {(editableCcIds ? allCostCenters.filter(c => editableCcIds.has(c.id)) : costCenters)
                         .map(c => (
                           <option key={c.id} value={c.id}>
                             {c.name}{c.id === managerCcId ? ' (My CC)' : managerCcId ? ' (Delegated)' : ''}

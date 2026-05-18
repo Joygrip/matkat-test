@@ -326,16 +326,22 @@ export const ResourcePlanning: React.FC = () => {
     }
   }, []);
 
-  // CCs the user may write supply lines for (own CC + delegated CCs).
-  // Only needed for ManagerReader — pure Managers already have backend-scoped lines.
+  // CCs the user may write supply lines for.
+  // Backend scoping is authoritative — every CC present in the loaded supply/demand data is manageable.
+  // We also include own CC (always) and delegated CCs (ManagerReader) so the dropdown is correct even
+  // when no lines exist yet for those CCs.
   const editableCcIds = useMemo((): Set<string> | null => {
-    if (!isManagerReader) return null;
+    if (!isAnyManager) return null;
     const ids = new Set<string>();
     if (managerCcId) ids.add(managerCcId);
-    delegatedCcIds.forEach(id => ids.add(id));
-    // If still loading (managerCcId not yet resolved) return null so filter is skipped
+    // ManagerReader: also add explicitly delegated CCs (may have no lines yet)
+    if (isManagerReader) delegatedCcIds.forEach(id => ids.add(id));
+    // All managers: include every CC present in backend-scoped data
+    supplyLines.forEach(s => { if (s.cost_center_id) ids.add(s.cost_center_id); });
+    demandLines.forEach(d => { if (d.cost_center_id) ids.add(d.cost_center_id); });
+    // Return null only while still loading (nothing resolved yet)
     return ids.size > 0 ? ids : null;
-  }, [isManagerReader, managerCcId, delegatedCcIds]);
+  }, [isAnyManager, isManagerReader, managerCcId, delegatedCcIds, supplyLines, demandLines]);
 
   const filteredDemandLines = useMemo(() => {
     return demandLines.filter(d => {

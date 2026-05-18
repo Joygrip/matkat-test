@@ -976,6 +976,20 @@ async def full_sync_endpoint(
         "hint": "Refresh the page in 2-3 minutes to see updated data.",
     }
 
+
+@router.get("/sync/check-graph-user/{object_id}")
+async def check_graph_user(
+    object_id: str,
+    _current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    """Temporary diagnostic: return raw Graph profile for a user."""
+    from api.app.services.graph_app_client import GraphAppClient
+    settings = get_settings()
+    graph = GraphAppClient(settings)
+    result = graph.get_user(object_id)
+    return {"object_id": object_id, "graph_response": result}
+
+
 # ============== USERS ==============
 
 def _enrich_user(user: User) -> dict:

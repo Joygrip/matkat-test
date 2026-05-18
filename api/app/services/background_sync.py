@@ -90,9 +90,28 @@ def run_graph_sync(db: Session, settings: Settings, tenant_id: str) -> SyncResul
         "background_sync: starting for tenant=%s, user_count=%d", tenant_id, len(users)
     )
 
+    # Batch-fetch all Graph users in one call instead of 501 individual calls
+    all_graph_users = graph.list_all_users()
+    if not all_graph_users:
+        logger.warning("background_sync: list_all_users returned empty — skipping sync")
+        result.finished_at = datetime.utcnow()
+        return result
+
+    graph_users_by_oid = {gu.get("id"): gu for gu in all_graph_users if gu.get("id")}
+    logger.info("background_sync: fetched %d users from Graph in batch", len(graph_users_by_oid))
+
+    # Batch-fetch all managers (~25 batch requests instead of 501 individual calls)
+    all_oids: list[str] = [oid for oid in graph_users_by_oid.keys() if oid]
+    manager_map = graph.batch_get_managers(all_oids)
+    logger.info("background_sync: fetched %d manager mappings in batch", len(manager_map))
+
     for user in users:
         try:
-            _sync_user(db, graph, settings, user, result)
+            prefetched = graph_users_by_oid.get(user.object_id)
+            manager_oid = manager_map.get(user.object_id, FETCH_FAILED)
+            _sync_user(db, graph, settings, user, result,
+                       prefetched_graph_user=prefetched,
+                       prefetched_manager_oid=manager_oid)
         except Exception as exc:
             logger.error(
                 "background_sync: unexpected error processing user object_id=%s: %s",
@@ -130,12 +149,14 @@ def _sync_user(
     settings: Settings,
     user: User,
     result: SyncResult,
+    prefetched_graph_user=None,
+    prefetched_manager_oid=FETCH_FAILED,
 ) -> None:
     """Process a single user: refresh profile and manager from Graph."""
     oid = user.object_id
 
     # --- Profile ---
-    graph_user = graph.get_user(oid)
+    graph_user = prefetched_graph_user if prefetched_graph_user is not None else graph.get_user(oid)
 
     if graph_user is FETCH_FAILED:
         # Network / auth error — skip this user entirely, count as error
@@ -215,7 +236,11 @@ def _sync_user(
             )
 
     # --- Manager ---
-    new_manager_oid = graph.get_user_manager_id(oid)
+    new_manager_oid = (
+        prefetched_manager_oid
+        if prefetched_manager_oid is not FETCH_FAILED
+        else graph.get_user_manager_id(oid)
+    )
 
     if new_manager_oid is FETCH_FAILED:
         # Manager call failed — don't touch manager_object_id; already counted in errors above

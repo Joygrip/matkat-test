@@ -1973,7 +1973,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                       {(editableCcIds ? allCostCenters.filter(c => editableCcIds.has(c.id)) : costCenters)
                         .map(c => (
                           <option key={c.id} value={c.id}>
-                            {c.name}{c.id === managerCcId ? ' (My CC)' : managerCcId ? ' (Delegated)' : ''}
+                            {c.name}{c.id === managerCcId ? ' (My CC)' : ''}
                           </option>
                         ))}
                     </select>

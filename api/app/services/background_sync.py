@@ -623,6 +623,55 @@ def promote_managers_from_graph(db: Session, settings: Settings, tenant_id: str)
     }
 
 
+def _reassign_users_to_departments(db, settings, tenant_id):
+    """Re-assign users without a cost_center_id by matching their Graph department to cost centers."""
+    graph = GraphAppClient(settings)
+
+    if not (settings.graph_client_id and settings.graph_client_secret and settings.azure_tenant_id):
+        return {"error": "Graph credentials not configured"}
+
+    graph_users = graph.list_all_users()
+    if not graph_users:
+        return {"error": "No users returned from Graph"}
+
+    cc_by_dept = {}
+    for cc in db.query(CostCenter).filter(CostCenter.tenant_id == tenant_id, CostCenter.is_active == True).all():
+        if cc.graph_department_name:
+            cc_by_dept[cc.graph_department_name] = cc
+
+    dept_by_oid = {}
+    for gu in graph_users:
+        oid = gu.get("id")
+        dept = gu.get("department")
+        if oid and dept:
+            dept_by_oid[oid] = dept
+
+    users_without_cc = db.query(User).filter(
+        User.tenant_id == tenant_id,
+        User.cost_center_id == None,
+        User.is_active == True,
+    ).all()
+
+    assigned = 0
+    skipped = 0
+
+    for user in users_without_cc:
+        dept = dept_by_oid.get(user.object_id)
+        if not dept:
+            skipped += 1
+            continue
+        cc = cc_by_dept.get(dept)
+        if not cc:
+            skipped += 1
+            continue
+        user.cost_center_id = cc.id
+        assigned += 1
+
+    db.commit()
+    logger.info("reassign_users: assigned=%d skipped=%d", assigned, skipped)
+    return {"assigned": assigned, "skipped": skipped}
+
+
 def run_full_sync(db: Session, settings: Settings, tenant_id: str) -> dict:
     """Run all 6 Graph sync steps in sequence. Each step failure is caught independently."""
     started_at = datetime.utcnow()
@@ -661,6 +710,15 @@ def run_full_sync(db: Session, settings: Settings, tenant_id: str) -> dict:
         steps["import_departments"] = {"error": str(exc)}
         total_errors += 1
 
+    # Step 3b: Re-assign users to newly created cost centers
+    try:
+        steps["reassign_users"] = _reassign_users_to_departments(db, settings, tenant_id)
+        total_errors += steps["reassign_users"].get("errors", 0)
+    except Exception as exc:
+        logger.error("full_sync: step reassign_users failed: %s", exc)
+        steps["reassign_users"] = {"error": str(exc)}
+        total_errors += 1
+
     # Step 4: Promote managers
     try:
         steps["promote_managers"] = promote_managers_from_graph(db, settings, tenant_id)
@@ -677,6 +735,15 @@ def run_full_sync(db: Session, settings: Settings, tenant_id: str) -> dict:
     except Exception as exc:
         logger.error("full_sync: step create_resources failed: %s", exc)
         steps["create_resources"] = {"error": str(exc)}
+        total_errors += 1
+
+    # Step 5b: Create resources for newly assigned users
+    try:
+        steps["create_resources_2"] = create_resources_from_users(db, settings, tenant_id)
+        total_errors += steps["create_resources_2"].get("errors", 0)
+    except Exception as exc:
+        logger.error("full_sync: step create_resources_2 failed: %s", exc)
+        steps["create_resources_2"] = {"error": str(exc)}
         total_errors += 1
 
     # Step 6: Assign cost center managers (force=True to refresh existing assignments)

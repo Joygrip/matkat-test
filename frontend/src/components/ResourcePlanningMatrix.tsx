@@ -1960,7 +1960,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
               {isRoleManager ? (
                 <div>
                   <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>Cost Center</div>
-                  {costCenters.length > 1 ? (
+                  {(editableCcIds ? editableCcIds.size > 1 : costCenters.length > 1) ? (
                     <select
                       value={dlgCcId}
                       onChange={e => {

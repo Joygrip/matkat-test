@@ -344,7 +344,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
   // ccRows: total and monthlyTotals use Planned + OoP + Equipment only (not Actual)
   const ccRows = useMemo((): EntityRow[] => {
     const map = new Map<string, EntityRow>();
-    filteredData.forEach(r => {
+    filteredData.filter(r => r.cost_center_name != null && r.cost_center_name !== 'Unassigned').forEach(r => {
       const name = r.cost_center_name ?? 'Unassigned';
       let row = map.get(name);
       if (!row) {

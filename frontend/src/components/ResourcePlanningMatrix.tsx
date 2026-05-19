@@ -1279,7 +1279,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     <div style={{ position: 'relative' }}>
     {/* Sticky header — lives outside the overflow-x container so vertical sticky works */}
     <div ref={headerWrapRef} className={styles.headerWrap} onMouseLeave={() => { setHoveredColIdx(null); setHoveredProject(null); }}>
-      <table className={styles.table} style={{ tableLayout: 'fixed' }}>
+      <table className={styles.table} style={{ tableLayout: 'fixed', width: RESOURCE_COL_WIDTH + PROJECT_COL_WIDTH + TYPE_COL_WIDTH + periods.length * PERIOD_COL_WIDTH, minWidth: RESOURCE_COL_WIDTH + PROJECT_COL_WIDTH + TYPE_COL_WIDTH + periods.length * PERIOD_COL_WIDTH }}>
         <colgroup>
           <col style={{ width: RESOURCE_COL_PX, minWidth: RESOURCE_COL_PX }} />
           <col style={{ width: PROJECT_COL_PX, minWidth: PROJECT_COL_PX }} />
@@ -1326,7 +1326,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     </div>
     {/* Body scroll container — overflow-x: auto without breaking vertical sticky */}
     <div ref={scrollContainerRef} className={mergeClasses(styles.wrapper, isDragging && styles.matrixContainerSelecting)} onMouseLeave={() => { setHoveredColIdx(null); setHoveredProject(null); }}>
-      <table ref={tableRef} className={styles.table} style={{ tableLayout: 'fixed' }}>
+      <table ref={tableRef} className={styles.table} style={{ tableLayout: 'fixed', width: RESOURCE_COL_WIDTH + PROJECT_COL_WIDTH + TYPE_COL_WIDTH + periods.length * PERIOD_COL_WIDTH, minWidth: RESOURCE_COL_WIDTH + PROJECT_COL_WIDTH + TYPE_COL_WIDTH + periods.length * PERIOD_COL_WIDTH }}>
         <colgroup>
           <col style={{ width: RESOURCE_COL_PX, minWidth: RESOURCE_COL_PX }} />
           <col style={{ width: PROJECT_COL_PX, minWidth: PROJECT_COL_PX }} />

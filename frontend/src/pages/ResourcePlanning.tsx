@@ -558,10 +558,10 @@ export const ResourcePlanning: React.FC = () => {
                 <XAxis
                   dataKey="label"
                   tick={{ fontSize: 11, fill: '#666' }}
-                  interval={0}
-                  angle={-35}
-                  textAnchor="end"
-                  height={50}
+                  interval="preserveStartEnd"
+                  angle={0}
+                  textAnchor="middle"
+                  height={30}
                 />
                 <YAxis tick={{ fontSize: 12 }} unit="%" />
                 <Tooltip

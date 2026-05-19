@@ -593,7 +593,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
           ? '0 4px 10px -2px rgba(0,0,0,0.14)'
           : '0 1px 4px rgba(0,0,0,0.06)',
         padding: '14px 20px',
-        display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-end',
+        display: 'flex', flexDirection: 'column', gap: 12,
       }}>
         {/* Period */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -612,6 +612,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
           )}
         </div>
 
+        <div style={{ display: 'flex', gap: 20, alignItems: 'flex-end' }}>
         {/* Project */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={label11}>Project</span>
@@ -641,6 +642,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
           fontSize: 13, padding: '5px 12px', borderRadius: 6,
           border: `1px solid ${C.border}`, background: C.surface, color: C.ink3, cursor: 'pointer',
         }}>Clear filters</button>
+        </div>
       </div>
 
       {/* Section 3 — KPI strip (6 cards) */}

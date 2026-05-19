@@ -557,18 +557,11 @@ export const ResourcePlanning: React.FC = () => {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
                 <XAxis
                   dataKey="label"
-                  interval={0}
+                  angle={-45}
+                  textAnchor="end"
                   height={60}
-                  tick={(props) => {
-                    const { x, y, payload } = props as { x: number; y: number; payload: { value: string } };
-                    return (
-                      <g transform={`translate(${x},${y})`}>
-                        <text x={0} y={0} dy={4} textAnchor="end" fill="#666" fontSize={11} transform="rotate(-45)">
-                          {payload.value}
-                        </text>
-                      </g>
-                    );
-                  }}
+                  tick={{ fontSize: 11 }}
+                  interval={0}
                 />
                 <YAxis tick={{ fontSize: 12 }} unit="%" />
                 <Tooltip

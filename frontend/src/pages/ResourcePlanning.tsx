@@ -552,7 +552,7 @@ export const ResourcePlanning: React.FC = () => {
             </strong>
           </div>
           <div className={styles.overviewCardBody}>
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={280}>
               <ComposedChart data={overviewChartData} margin={{ top: 8, right: 24, left: 0, bottom: 40 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
                 <XAxis

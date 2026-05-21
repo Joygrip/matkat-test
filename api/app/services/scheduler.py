@@ -77,9 +77,8 @@ def _should_fire(schedule: NotificationSchedule, now_local: datetime, db) -> boo
     trigger = schedule.trigger_type
 
     if trigger == TriggerType.DAY_OF_MONTH:
-    if trigger == TriggerType.DAY_OF_MONTH:
         result = today.day == schedule.trigger_value
-        print(f"[SCHEDULER] _should_fire: day={today.day} == trigger={schedule.trigger_value}? {result}, time={current_hhmm} >= {schedule.time_of_day}? {current_hhmm >= schedule.time_of_day}, last_run={schedule.last_run_at}")
+        print(f"[SCHEDULER] _should_fire: day={today.day}==trigger={schedule.trigger_value}? {result}, time={current_hhmm}>={schedule.time_of_day}? {current_hhmm >= schedule.time_of_day}, last_run={schedule.last_run_at}")
         return result
 
     if trigger == TriggerType.DAY_OF_WEEK:
@@ -141,15 +140,14 @@ def _run_tick() -> None:
     try:
         # All time comparisons use UTC+2; last_run_at is stored as UTC
         now_local = datetime.now(tz=_UTC2)
-        now_local = datetime.now(tz=_UTC2)
         print(f"[SCHEDULER TICK] {now_local.isoformat()}")
+
         schedules = (
             db.query(NotificationSchedule)
             .filter(NotificationSchedule.is_active == True)  # noqa: E712
             .all()
         )
-        )
-        print(f"[SCHEDULER] Found {len(schedules)} active schedule(s)")
+
         for schedule in schedules:
             try:
                 if not _should_fire(schedule, now_local, db):
@@ -167,6 +165,7 @@ def _run_tick() -> None:
                 year, month = period_ym
 
                 system_user = CurrentUser(
+                    id="00000000-0000-0000-0000-000000000000",
                     tenant_id=schedule.tenant_id,
                     object_id="scheduler-system",
                     email="scheduler@system.local",
@@ -189,9 +188,9 @@ def _run_tick() -> None:
                     month,
                     result,
                 )
-            except Exception:
             except Exception as e:
                 print(f"[SCHEDULER ERROR] schedule={schedule.id}: {e}")
+                logger.exception(
                     "scheduler: error processing schedule %s (type=%s tenant=%s)",
                     schedule.id,
                     schedule.notification_type.value,
@@ -210,7 +209,7 @@ def start() -> None:
         replace_existing=True,
     )
     _scheduler.start()
-    _scheduler.start()
+    logger.info("Notification scheduler started (interval: 15 minutes)")
     print("[SCHEDULER] Notification scheduler started (interval: 15 minutes)")
 
 

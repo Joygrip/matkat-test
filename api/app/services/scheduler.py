@@ -77,7 +77,10 @@ def _should_fire(schedule: NotificationSchedule, now_local: datetime, db) -> boo
     trigger = schedule.trigger_type
 
     if trigger == TriggerType.DAY_OF_MONTH:
-        return today.day == schedule.trigger_value
+    if trigger == TriggerType.DAY_OF_MONTH:
+        result = today.day == schedule.trigger_value
+        print(f"[SCHEDULER] _should_fire: day={today.day} == trigger={schedule.trigger_value}? {result}, time={current_hhmm} >= {schedule.time_of_day}? {current_hhmm >= schedule.time_of_day}, last_run={schedule.last_run_at}")
+        return result
 
     if trigger == TriggerType.DAY_OF_WEEK:
         # 0=Monday … 6=Sunday, matching Python's weekday()
@@ -138,13 +141,15 @@ def _run_tick() -> None:
     try:
         # All time comparisons use UTC+2; last_run_at is stored as UTC
         now_local = datetime.now(tz=_UTC2)
-
+        now_local = datetime.now(tz=_UTC2)
+        print(f"[SCHEDULER TICK] {now_local.isoformat()}")
         schedules = (
             db.query(NotificationSchedule)
             .filter(NotificationSchedule.is_active == True)  # noqa: E712
             .all()
         )
-
+        )
+        print(f"[SCHEDULER] Found {len(schedules)} active schedule(s)")
         for schedule in schedules:
             try:
                 if not _should_fire(schedule, now_local, db):
@@ -185,7 +190,8 @@ def _run_tick() -> None:
                     result,
                 )
             except Exception:
-                logger.exception(
+            except Exception as e:
+                print(f"[SCHEDULER ERROR] schedule={schedule.id}: {e}")
                     "scheduler: error processing schedule %s (type=%s tenant=%s)",
                     schedule.id,
                     schedule.notification_type.value,
@@ -204,7 +210,8 @@ def start() -> None:
         replace_existing=True,
     )
     _scheduler.start()
-    logger.info("Notification scheduler started (interval: 15 minutes)")
+    _scheduler.start()
+    print("[SCHEDULER] Notification scheduler started (interval: 15 minutes)")
 
 
 def shutdown() -> None:

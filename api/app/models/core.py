@@ -82,10 +82,13 @@ class CostCenter(Base):
     ro_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     director_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     location: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # When True, sync will never reassign users into or out of this CC.
+    # Used for manually split CCs like "QC DK" / "QC PL" that have no unique Graph dept name.
+    sync_protected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Relationships
     users: Mapped[list["User"]] = relationship(
         back_populates="cost_center",

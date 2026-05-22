@@ -295,11 +295,13 @@ def _sync_user(
 
     graph_email = graph_user.get("mail") or graph_user.get("userPrincipalName") or ""
     graph_name = graph_user.get("displayName") or ""
+    graph_country = graph_user.get("country") or None
 
     if graph_email:
         user.email = graph_email
     if graph_name:
         user.display_name = graph_name
+    user.country = graph_country
 
     if graph_user.get("accountEnabled") is False and user.is_active:
         user.is_active = False

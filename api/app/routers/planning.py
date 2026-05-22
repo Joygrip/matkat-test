@@ -1,11 +1,12 @@
 """Planning endpoints - Demand and Supply lines."""
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from api.app.db.engine import get_db
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
-from api.app.models.core import UserRole
+from api.app.models.core import UserRole, Resource, User
+from api.app.config import get_settings
 from api.app.schemas.planning import (
     DemandLineCreate, DemandLineUpdate, DemandLineResponse,
     SupplyLineCreate, SupplyLineUpdate, SupplyLineResponse,
@@ -19,6 +20,32 @@ from api.app.schemas.planning import (
 from api.app.services.planning import DemandService, SupplyService
 
 router = APIRouter(tags=["Planning"])
+
+
+def _check_resource_country(db: Session, resource_id: Optional[str], tenant_id: str) -> None:
+    """Raise 400 if the resource's user country is in the planning exclusion list."""
+    if not resource_id:
+        return
+    excluded = get_settings().planning_excluded_countries_list
+    if not excluded:
+        return
+    resource = db.query(Resource).filter(
+        Resource.id == resource_id,
+        Resource.tenant_id == tenant_id,
+    ).first()
+    if not resource or not resource.user_id:
+        return
+    user = db.query(User).filter(User.id == resource.user_id).first()
+    if not user or not user.country:
+        return
+    if user.country.upper() in [c.upper() for c in excluded]:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "RESOURCE_EXCLUDED",
+                "message": f"Resource {resource.display_name} is excluded from planning (country: {user.country})",
+            },
+        )
 
 
 def _enrich_demand(line) -> DemandLineResponse:
@@ -157,6 +184,7 @@ async def create_demand_line(
     
     Accessible to: PM, Finance
     """
+    _check_resource_country(db, data.resource_id, current_user.tenant_id)
     service = DemandService(db, current_user)
     line = service.create(
         project_id=data.project_id,
@@ -166,7 +194,7 @@ async def create_demand_line(
         resource_id=data.resource_id,
         placeholder_id=data.placeholder_id,
     )
-    
+
     return _enrich_demand(line)
 
 
@@ -219,6 +247,7 @@ async def bulk_demand_lines(
     for action in req.actions:
         try:
             if action.action == 'create' and isinstance(action.data, BulkDemandLineCreate):
+                _check_resource_country(db, action.data.resource_id, current_user.tenant_id)
                 obj = service.create(**action.data.model_dump())
                 results.append(BulkDemandLineResult(action="create", id=getattr(obj, 'id', None), status="success", error=None))
             elif action.action == 'update' and isinstance(action.data, BulkDemandLineUpdate):
@@ -324,6 +353,7 @@ async def create_supply_line(
     
     Accessible to: RO, Finance
     """
+    _check_resource_country(db, data.resource_id, current_user.tenant_id)
     service = SupplyService(db, current_user)
     line = service.create(
         resource_id=data.resource_id,
@@ -332,7 +362,7 @@ async def create_supply_line(
         fte_percent=data.fte_percent,
         project_id=data.project_id,
     )
-    
+
     return _enrich_supply(line)
 
 
@@ -385,6 +415,7 @@ async def bulk_supply_lines(
     for action in req.actions:
         try:
             if action.action == 'create' and isinstance(action.data, BulkSupplyLineCreate):
+                _check_resource_country(db, action.data.resource_id, current_user.tenant_id)
                 obj = service.create(**action.data.model_dump())
                 results.append(BulkSupplyLineResult(action="create", id=getattr(obj, 'id', None), status="success", error=None))
             elif action.action == 'update' and isinstance(action.data, BulkSupplyLineUpdate):

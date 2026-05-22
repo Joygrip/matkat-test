@@ -51,16 +51,17 @@ class User(Base):
     secondary_role: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     manager_object_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     cost_center_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("cost_centers.id"), nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Relationships
     cost_center: Mapped[Optional["CostCenter"]] = relationship(
         back_populates="users",
         foreign_keys=[cost_center_id],
     )
-    
+
     __table_args__ = (
         Index("ix_users_tenant_object", "tenant_id", "object_id", unique=True),
         Index("ix_user_tenant_role", "tenant_id", "role"),

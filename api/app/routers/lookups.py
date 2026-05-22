@@ -2,7 +2,7 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, func
 
 from api.app.db.engine import get_db
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
@@ -10,12 +10,31 @@ from sqlalchemy import exists as sa_exists
 from api.app.models.core import (
     CostCenter, Project, ProjectPM, Resource, Placeholder, User, UserRole
 )
-
-_SCOPED_ROLES = (UserRole.MANAGER,)
+from api.app.config import get_settings
 from api.app.schemas.admin import (
     CostCenterResponse, ProjectResponse,
     ResourceResponse, PlaceholderResponse,
 )
+
+_SCOPED_ROLES = (UserRole.MANAGER,)
+
+
+def _apply_country_exclusion(query, excluded_countries: list[str]):
+    """Exclude resources whose linked user.country is in the excluded list (case-insensitive)."""
+    if not excluded_countries:
+        return query
+    excluded_upper = [c.upper() for c in excluded_countries]
+    return (
+        query
+        .outerjoin(User, Resource.user_id == User.id)
+        .filter(
+            or_(
+                Resource.user_id == None,
+                User.country == None,
+                func.upper(User.country).notin_(excluded_upper),
+            )
+        )
+    )
 
 router = APIRouter(prefix="/lookups", tags=["Lookups"])
 
@@ -103,6 +122,8 @@ async def list_resources(
     )
     if cost_center_id:
         query = query.filter(Resource.cost_center_id == cost_center_id)
+    excluded = get_settings().planning_excluded_countries_list
+    query = _apply_country_exclusion(query, excluded)
     return query.order_by(Resource.display_name).all()
 
 
@@ -180,6 +201,8 @@ async def list_resources_scoped(
     )
     if cost_center_id:
         query = query.filter(Resource.cost_center_id == cost_center_id)
+    excluded = get_settings().planning_excluded_countries_list
+    query = _apply_country_exclusion(query, excluded)
     if current_user.role in _SCOPED_ROLES and not current_user.is_manager_reader:
         from api.app.services.reporting import ReportingService
         scoped_ids = list(ReportingService(db, current_user).get_accessible_resource_ids())

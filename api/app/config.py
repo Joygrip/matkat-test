@@ -47,7 +47,17 @@ class Settings(BaseSettings):
 
     # Azure Application Insights
     appinsights_connection_string: str = ""
-    
+
+    # Planning exclusion filter: comma-separated country names
+    # e.g. PLANNING_EXCLUDED_COUNTRIES=Poland,India → excludes those from planning dropdowns
+    planning_excluded_countries: str = ""
+
+    @property
+    def planning_excluded_countries_list(self) -> list[str]:
+        if not self.planning_excluded_countries:
+            return []
+        return [c.strip() for c in self.planning_excluded_countries.split(",") if c.strip()]
+
     @property
     def is_dev(self) -> bool:
         return self.env == "dev"

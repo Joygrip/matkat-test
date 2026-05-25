@@ -23,11 +23,13 @@ router = APIRouter(tags=["Planning"])
 
 
 def _check_resource_country(db: Session, resource_id: Optional[str], tenant_id: str) -> None:
-    """Raise 400 if the resource's user country is in the planning exclusion list."""
+    """Raise 400 if the resource's user country or email prefix is in the planning exclusion lists."""
     if not resource_id:
         return
-    excluded = get_settings().planning_excluded_countries_list
-    if not excluded:
+    settings = get_settings()
+    excluded_countries = settings.planning_excluded_countries_list
+    excluded_prefixes = settings.planning_excluded_email_prefixes_list
+    if not excluded_countries and not excluded_prefixes:
         return
     resource = db.query(Resource).filter(
         Resource.id == resource_id,
@@ -36,9 +38,9 @@ def _check_resource_country(db: Session, resource_id: Optional[str], tenant_id: 
     if not resource or not resource.user_id:
         return
     user = db.query(User).filter(User.id == resource.user_id).first()
-    if not user or not user.country:
+    if not user:
         return
-    if user.country.upper() in [c.upper() for c in excluded]:
+    if excluded_countries and user.country and user.country.upper() in [c.upper() for c in excluded_countries]:
         raise HTTPException(
             status_code=400,
             detail={
@@ -46,6 +48,16 @@ def _check_resource_country(db: Session, resource_id: Optional[str], tenant_id: 
                 "message": f"Resource {resource.display_name} is excluded from planning (country: {user.country})",
             },
         )
+    if excluded_prefixes and user.email:
+        email_lower = user.email.lower()
+        if any(email_lower.startswith(p) for p in excluded_prefixes):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "RESOURCE_EXCLUDED",
+                    "message": f"Resource {resource.display_name} is excluded from planning (external: {user.email})",
+                },
+            )
 
 
 def _enrich_demand(line) -> DemandLineResponse:

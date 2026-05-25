@@ -52,11 +52,21 @@ class Settings(BaseSettings):
     # e.g. PLANNING_EXCLUDED_COUNTRIES=Poland,India → excludes those from planning dropdowns
     planning_excluded_countries: str = ""
 
+    # Planning exclusion filter: comma-separated email prefixes (case-insensitive)
+    # e.g. PLANNING_EXCLUDED_EMAIL_PREFIXES=x → excludes users whose email starts with "x"
+    planning_excluded_email_prefixes: str = ""
+
     @property
     def planning_excluded_countries_list(self) -> list[str]:
         if not self.planning_excluded_countries:
             return []
         return [c.strip() for c in self.planning_excluded_countries.split(",") if c.strip()]
+
+    @property
+    def planning_excluded_email_prefixes_list(self) -> list[str]:
+        if not self.planning_excluded_email_prefixes:
+            return []
+        return [p.strip().lower() for p in self.planning_excluded_email_prefixes.split(",") if p.strip()]
 
     @property
     def is_dev(self) -> bool:

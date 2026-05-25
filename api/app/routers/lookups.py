@@ -36,6 +36,32 @@ def _apply_country_exclusion(query, excluded_countries: list[str]):
         )
     )
 
+
+def _apply_planning_exclusions(query, excluded_countries: list[str], excluded_prefixes: list[str]):
+    """Apply both country and email-prefix exclusion filters with a single User join."""
+    if not excluded_countries and not excluded_prefixes:
+        return query
+    query = query.outerjoin(User, Resource.user_id == User.id)
+    if excluded_countries:
+        excluded_upper = [c.upper() for c in excluded_countries]
+        query = query.filter(
+            or_(
+                Resource.user_id == None,
+                User.country == None,
+                func.upper(User.country).notin_(excluded_upper),
+            )
+        )
+    if excluded_prefixes:
+        prefix_conditions = [func.lower(User.email).startswith(p) for p in excluded_prefixes]
+        query = query.filter(
+            or_(
+                Resource.user_id == None,
+                User.email == None,
+                ~or_(*prefix_conditions),
+            )
+        )
+    return query
+
 router = APIRouter(prefix="/lookups", tags=["Lookups"])
 
 
@@ -122,8 +148,8 @@ async def list_resources(
     )
     if cost_center_id:
         query = query.filter(Resource.cost_center_id == cost_center_id)
-    excluded = get_settings().planning_excluded_countries_list
-    query = _apply_country_exclusion(query, excluded)
+    settings = get_settings()
+    query = _apply_planning_exclusions(query, settings.planning_excluded_countries_list, settings.planning_excluded_email_prefixes_list)
     return query.order_by(Resource.display_name).all()
 
 
@@ -201,8 +227,8 @@ async def list_resources_scoped(
     )
     if cost_center_id:
         query = query.filter(Resource.cost_center_id == cost_center_id)
-    excluded = get_settings().planning_excluded_countries_list
-    query = _apply_country_exclusion(query, excluded)
+    settings = get_settings()
+    query = _apply_planning_exclusions(query, settings.planning_excluded_countries_list, settings.planning_excluded_email_prefixes_list)
     if current_user.role in _SCOPED_ROLES and not current_user.is_manager_reader:
         from api.app.services.reporting import ReportingService
         scoped_ids = list(ReportingService(db, current_user).get_accessible_resource_ids())

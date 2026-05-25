@@ -1,17 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   makeStyles,
   tokens,
   Badge,
+  Card,
   Skeleton,
   SkeletonItem,
-  Link,
 } from '@fluentui/react-components';
-import { useNavigate } from 'react-router-dom';
-import { DashboardKPIStrip } from '../shared/DashboardKPIStrip';
 import { DashboardSection } from './DashboardSection';
 import { FinanceOverview } from '../shared/FinanceOverview';
 import { adminApi, AdminUserDetail, Resource } from '../../api/admin';
+import { apiClient } from '../../api/client';
 import type { CostCenter } from '../../api/admin';
 import type { Period } from '../../types/index';
 
@@ -28,23 +27,6 @@ function relativeTime(isoString: string | null | undefined): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function syncSeverity(isoString: string | null | undefined, status: string): 'good' | 'warn' | 'bad' | 'default' {
-  if (!isoString || status === 'never') return 'bad';
-  if (status === 'failed') return 'bad';
-  const mins = Math.floor((Date.now() - new Date(isoString).getTime()) / 60_000);
-  if (mins < 30) return 'good';
-  if (mins < 60) return 'warn';
-  return 'bad';
-}
-
-function nextSyncMins(isoString: string | null | undefined): string {
-  if (!isoString) return '—';
-  const msSinceLast = Date.now() - new Date(isoString).getTime();
-  const remaining = Math.max(0, 15 * 60_000 - msSinceLast);
-  const mins = Math.ceil(remaining / 60_000);
-  return mins <= 0 ? 'overdue' : `${mins} min`;
-}
-
 // ─── styles ─────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
@@ -52,68 +34,8 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXL,
-    padding: '18px 28px 60px',
-    maxWidth: '1480px',
-    margin: '0 auto',
-  },
-  sectionLabel: {
-    fontSize: '11px',
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground3,
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-    marginBottom: tokens.spacingVerticalS,
-  },
-  statusGrid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: tokens.spacingHorizontalM,
-  },
-  statusCard: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: '10px',
-    boxShadow: tokens.shadow2,
-    overflow: 'hidden',
-  },
-  statusCardHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  statusCardTitle: {
-    fontSize: tokens.fontSizeBase400,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-    margin: 0,
-  },
-  statusCardBody: {
-    padding: tokens.spacingHorizontalL,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-  },
-  statusRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-  },
-  statusRowLabel: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    textTransform: 'uppercase',
-    letterSpacing: '0.3px',
-  },
-  mono: {
-    fontFamily: 'Consolas, "Courier New", monospace',
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground1,
+    padding: '18px 0 60px',
+    width: '100%',
   },
   overviewHeader: {
     display: 'flex',
@@ -130,20 +52,60 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground3,
   },
+  cardStrip: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gap: '16px',
+    '@media (max-width: 768px)': {
+      gridTemplateColumns: '1fr 1fr',
+    },
+    '@media (max-width: 480px)': {
+      gridTemplateColumns: '1fr',
+    },
+  },
+  card: {
+    padding: '16px 20px',
+    borderRadius: tokens.borderRadiusLarge,
+    boxShadow: tokens.shadow2,
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  cardTitle: {
+    fontSize: '10px',
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.6px',
+    marginBottom: '10px',
+  },
+  cardBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  line: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    lineHeight: '1.4',
+  },
+  bold: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  dot: {
+    display: 'inline-block',
+    width: '7px',
+    height: '7px',
+    borderRadius: '50%',
+    marginRight: '5px',
+    verticalAlign: 'middle',
+  },
+  muted: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    marginTop: '2px',
+  },
 });
-
-// ─── status badge helper ─────────────────────────────────────────────────────
-
-function StatusBadge({ sev }: { sev: 'good' | 'warn' | 'bad' | 'default' }) {
-  const map = {
-    good:    { color: 'success' as const,  label: 'Healthy'  },
-    warn:    { color: 'warning' as const,  label: 'Warning'  },
-    bad:     { color: 'danger'  as const,  label: 'Error'    },
-    default: { color: 'subtle'  as const,  label: 'Unknown'  },
-  };
-  const { color, label } = map[sev];
-  return <Badge color={color} appearance="filled" size="small">{label}</Badge>;
-}
 
 // ─── props ───────────────────────────────────────────────────────────────────
 
@@ -154,9 +116,8 @@ interface Props {
 
 // ─── component ───────────────────────────────────────────────────────────────
 
-export function AdminView({ costCenters, periods }: Props) {
+export function AdminView({ costCenters }: Props) {
   const styles = useStyles();
-  const navigate = useNavigate();
 
   const [adminUsers, setAdminUsers] = useState<AdminUserDetail[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
@@ -165,6 +126,7 @@ export function AdminView({ costCenters, periods }: Props) {
     status: string;
     sync_type: string | null;
   } | null>(null);
+  const [healthOk, setHealthOk] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -172,182 +134,107 @@ export function AdminView({ costCenters, periods }: Props) {
       adminApi.listAdminUsers(),
       adminApi.listResources(),
       adminApi.getSyncStatus(),
+      apiClient.getHealth().then(() => true).catch(() => false),
     ])
-      .then(([users, res, sync]) => {
+      .then(([users, res, sync, health]) => {
         setAdminUsers(users);
         setResources(res);
         setSyncStatus(sync);
+        setHealthOk(health as boolean);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  const openPeriods = useMemo(() => periods.filter(p => p.status === 'open'), [periods]);
-  const activeCostCenters = useMemo(() => costCenters.filter(cc => cc.is_active), [costCenters]);
-
-  const activeUsers   = adminUsers.filter(u => u.is_active).length;
-  const inactiveUsers = adminUsers.filter(u => !u.is_active).length;
-  const activeResources = resources.filter(r => r.is_active).length;
-
-  // Unique cost centers represented by active resources
-  const resourceCostCenterCount = useMemo(() => {
-    const ids = new Set(resources.filter(r => r.is_active).map(r => r.cost_center_id));
-    return ids.size;
-  }, [resources]);
-
-  const syncSev = syncSeverity(syncStatus?.last_sync_at, syncStatus?.status ?? 'never');
-
   if (loading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL, padding: '18px 28px' }}>
-        <Skeleton style={{ height: 88 }}><SkeletonItem /></Skeleton>
-        <Skeleton style={{ height: 160 }}><SkeletonItem /></Skeleton>
+      <div style={{ padding: '18px 0' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+          {[0, 1, 2, 3].map(i => (
+            <Skeleton key={i} style={{ height: 88 }}><SkeletonItem /></Skeleton>
+          ))}
+        </div>
         <Skeleton style={{ height: 400 }}><SkeletonItem /></Skeleton>
       </div>
     );
   }
 
-  // ─── KPI items (6 cards) ──────────────────────────────────────────────────
+  const activeUsers    = adminUsers.filter(u => u.is_active).length;
+  const activeResources = resources.filter(r => r.is_active).length;
+  const activeCostCenters = costCenters.filter(cc => cc.is_active).length;
 
-  const kpiItems = [
-    {
-      label: 'Active Users',
-      value: activeUsers,
-      subtitle: `${adminUsers.length} total in system`,
-    },
-    {
-      label: 'Inactive Users',
-      value: inactiveUsers,
-      severity: inactiveUsers > 0 ? ('warn' as const) : ('default' as const),
-      subtitle: `${inactiveUsers} deactivated`,
-    },
-    {
-      label: 'Last Graph Sync',
-      value: relativeTime(syncStatus?.last_sync_at),
-      severity: syncSev,
-      subtitle: syncStatus?.status === 'running'
-        ? 'Sync in progress…'
-        : `Next in ~${nextSyncMins(syncStatus?.last_sync_at)}`,
-    },
-    {
-      label: 'Open Periods',
-      value: openPeriods.length,
-      subtitle: openPeriods.length > 0
-        ? openPeriods.map(p => `${p.year}-${String(p.month).padStart(2, '0')}`).join(', ')
-        : 'No open periods',
-    },
-    {
-      label: 'Notifications',
-      value: '—',
-      severity: 'default' as const,
-      // TODO: wire up when notification log endpoint is available
-      subtitle: 'No tracking endpoint yet',
-    },
-    {
-      label: 'Active Resources',
-      value: activeResources,
-      subtitle: `across ${resourceCostCenterCount} cost center${resourceCostCenterCount !== 1 ? 's' : ''}`,
-    },
-  ];
-
-  // ─── render ───────────────────────────────────────────────────────────────
+  const syncOk = syncStatus !== null
+    && syncStatus.last_sync_at !== null
+    && syncStatus.status !== 'failed';
 
   return (
     <div className={styles.root}>
+      <div className={styles.cardStrip}>
 
-      {/* ── Section 1: System Health KPI Strip ── */}
-      <div>
-        <div className={styles.sectionLabel}>System Health</div>
-        <DashboardKPIStrip items={kpiItems} columns={6} />
-      </div>
-
-      {/* ── Section 2: System Status Cards ── */}
-      <div>
-        <div className={styles.sectionLabel}>System Status</div>
-        <div className={styles.statusGrid}>
-
-          {/* Left: Graph Sync Details */}
-          <div className={styles.statusCard}>
-            <div className={styles.statusCardHeader}>
-              <h2 className={styles.statusCardTitle}>Microsoft Graph Sync</h2>
-              <StatusBadge sev={syncSev} />
+        {/* Card 1 — System Status */}
+        <Card className={styles.card}>
+          <div className={styles.cardTitle}>System Status</div>
+          <div className={styles.cardBody}>
+            <div>
+              {healthOk === null
+                ? <Badge color="subtle" appearance="filled" size="small">Unknown</Badge>
+                : healthOk
+                  ? <Badge color="success" appearance="filled" size="small">Healthy</Badge>
+                  : <Badge color="danger" appearance="filled" size="small">Error</Badge>
+              }
             </div>
-            <div className={styles.statusCardBody}>
-              <div className={styles.statusRow}>
-                <span className={styles.statusRowLabel}>Last successful sync</span>
-                <span className={styles.mono}>
-                  {syncStatus?.last_sync_at
-                    ? new Date(syncStatus.last_sync_at).toLocaleString()
-                    : 'Never'}
-                </span>
-              </div>
-              <div className={styles.statusRow}>
-                <span className={styles.statusRowLabel}>Sync interval</span>
-                <span>Every 15 minutes</span>
-              </div>
-              <div className={styles.statusRow}>
-                <span className={styles.statusRowLabel}>Last sync type</span>
-                <span>{syncStatus?.sync_type ?? '—'}</span>
-              </div>
-              <div className={styles.statusRow}>
-                <span className={styles.statusRowLabel}>Status</span>
-                <span>{syncStatus?.status ?? 'unknown'}</span>
-              </div>
-              <div className={styles.statusRow}>
-                <span className={styles.statusRowLabel}>Active cost centers</span>
-                <span>{activeCostCenters.length}</span>
-              </div>
-              <div style={{ marginTop: tokens.spacingVerticalXS }}>
-                <Link onClick={() => navigate('/admin?tab=sync')} style={{ fontSize: tokens.fontSizeBase200 }}>
-                  Go to Sync controls →
-                </Link>
-              </div>
+            <div className={styles.muted}>API, DB, Auth</div>
+          </div>
+        </Card>
+
+        {/* Card 2 — Graph Sync */}
+        <Card className={styles.card}>
+          <div className={styles.cardTitle}>Graph Sync</div>
+          <div className={styles.cardBody}>
+            <div className={styles.line}>
+              Last sync: <span className={styles.bold}>{relativeTime(syncStatus?.last_sync_at)}</span>
+            </div>
+            <div className={styles.line}>
+              Status: <span className={styles.bold} style={{ color: syncOk ? tokens.colorPaletteGreenForeground1 : tokens.colorPaletteRedForeground1 }}>
+                {syncOk ? 'OK' : 'Error'}
+              </span>
             </div>
           </div>
+        </Card>
 
-          {/* Right: Notification Status */}
-          <div className={styles.statusCard}>
-            <div className={styles.statusCardHeader}>
-              <h2 className={styles.statusCardTitle}>Email Notifications</h2>
-              {/* TODO: derive from notification log when endpoint is available */}
-              <StatusBadge sev="default" />
+        {/* Card 3 — Notifications */}
+        <Card className={styles.card}>
+          <div className={styles.cardTitle}>Notifications</div>
+          <div className={styles.cardBody}>
+            <div className={styles.line}>
+              <span
+                className={styles.dot}
+                style={{ backgroundColor: tokens.colorPaletteGreenBackground3 }}
+              />
+              <span className={styles.bold}>Scheduler:</span> Running
             </div>
-            <div className={styles.statusCardBody}>
-              <div className={styles.statusRow}>
-                <span className={styles.statusRowLabel}>From address</span>
-                <span className={styles.mono}>matkat-noreply@ferrosanmd.com</span>
-              </div>
-              <div className={styles.statusRow}>
-                <span className={styles.statusRowLabel}>Config status</span>
-                {/* TODO: check NOTIFY_FROM_EMAIL resolution via health endpoint */}
-                <span style={{ color: tokens.colorPaletteMarigoldForeground2 }}>
-                  ⚠ KV reference — verify in Azure
-                </span>
-              </div>
-              <div className={styles.statusRow}>
-                <span className={styles.statusRowLabel}>Emails sent (24h)</span>
-                <span>Not available</span>
-              </div>
-              <div className={styles.statusRow}>
-                <span className={styles.statusRowLabel}>Last notification</span>
-                <span>Not available</span>
-              </div>
-              <div className={styles.statusRow}>
-                <span className={styles.statusRowLabel}>Scheduler</span>
-                <span>Azure Functions (daily 08:00 UTC)</span>
-              </div>
-              <div style={{ marginTop: tokens.spacingVerticalXS }}>
-                <Link onClick={() => navigate('/admin?tab=settings')} style={{ fontSize: tokens.fontSizeBase200 }}>
-                  Go to Notification settings →
-                </Link>
-              </div>
+            <div className={styles.line}>Last sent: <span className={styles.bold}>Not available</span></div>
+          </div>
+        </Card>
+
+        {/* Card 4 — Core Data */}
+        <Card className={styles.card}>
+          <div className={styles.cardTitle}>Core Data</div>
+          <div className={styles.cardBody}>
+            <div className={styles.line}>
+              <span className={styles.bold}>{activeUsers}</span> Users
+              {' · '}
+              <span className={styles.bold}>{activeResources}</span> Resources
+            </div>
+            <div className={styles.line}>
+              <span className={styles.bold}>{activeCostCenters}</span> Cost Centers
             </div>
           </div>
+        </Card>
 
-        </div>
       </div>
 
-      {/* ── Section 3: Resource Allocation Overview ── */}
+      {/* ── Resource Allocation Overview ── */}
       <DashboardSection
         title={
           <div className={styles.overviewHeader}>

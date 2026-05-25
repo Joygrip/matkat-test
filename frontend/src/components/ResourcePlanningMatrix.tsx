@@ -1454,8 +1454,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                           <div style={{
                                             flexShrink: 0,
-                                            width: 26,
-                                            height: 26,
+                                            width: 40,
+                                            height: 40,
+                                            minWidth: 40,
                                             borderRadius: '50%',
                                             backgroundColor: avatarBg,
                                             color: '#ffffff',

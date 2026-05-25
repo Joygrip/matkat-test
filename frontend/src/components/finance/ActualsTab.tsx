@@ -268,8 +268,9 @@ const useStyles = makeStyles({
   },
   // Employee avatar
   avatar: {
-    width: '30px',
-    height: '30px',
+    width: '40px',
+    height: '40px',
+    minWidth: '40px',
     borderRadius: '50%',
     color: '#fff',
     display: 'flex',
@@ -1309,7 +1310,7 @@ export function ActualsTab({
                     onKeyDown={e => e.key === 'Enter' && toggleEmployee(row.resource_id)}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px', flexWrap: 'wrap' }}>
-                      <div style={{ width:36, height:36, borderRadius:'50%', background:nameColor(row.employee_name), color:'white', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', fontWeight:600, flexShrink:0, userSelect:'none' }}>
+                      <div style={{ width:40, height:40, minWidth:40, borderRadius:'50%', background:nameColor(row.employee_name), color:'white', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', fontWeight:600, flexShrink:0, userSelect:'none' }}>
                         {getInitials(row.employee_name, row.employee_initials)}
                       </div>
                       <div style={{ flex:'1 1 120px', minWidth:0 }}>

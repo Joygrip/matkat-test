@@ -14,8 +14,6 @@ import {
   MenuList,
   MenuItem,
   MenuPopover,
-  Badge,
-  Tooltip,
 } from '@fluentui/react-components';
 import {
   HomeRegular,
@@ -29,7 +27,6 @@ import {
   DocumentBulletListRegular,
   DocumentBulletListFilled,
   SignOutRegular,
-  PersonRegular,
   PeopleTeamRegular,
   PeopleTeamFilled,
   bundleIcon,
@@ -379,7 +376,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             </MenuTrigger>
             <MenuPopover>
               <MenuList>
-                <MenuItem icon={<PersonRegular />}>Profile</MenuItem>
                 <MenuItem icon={<SignOutRegular />} onClick={logout}>
                   Sign Out
                 </MenuItem>
@@ -402,17 +398,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             <h1 className={styles.pageTitle}>{pageTitle}</h1>
           </div>
           <div className={styles.headerRight}>
-            <Tooltip content={`Tenant: ${user?.tenant_id}`} relationship="description">
-              <Badge appearance="outline">{user?.tenant_id}</Badge>
-            </Tooltip>
-            <Tooltip content={`Role: ${user?.role}`} relationship="description">
-              <Badge appearance="outline" color="brand">{user?.role}</Badge>
-            </Tooltip>
-            {user?.secondary_role && (
-              <Tooltip content={`Secondary role: ${user.secondary_role}`} relationship="description">
-                <Badge appearance="outline" color="informative">{user.secondary_role}</Badge>
-              </Tooltip>
-            )}
             {/* Period selector: searchable, year-grouped */}
             <PeriodSelector
               periods={visiblePeriods}

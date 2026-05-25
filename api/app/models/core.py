@@ -109,7 +109,7 @@ class CostCenter(Base):
     )
     
     __table_args__ = (
-        Index("ix_cost_centers_tenant_code", "tenant_id", "code", unique=True),
+        Index("ix_cost_centers_tenant_code", "tenant_id", "code", unique=False),
     )
 
 

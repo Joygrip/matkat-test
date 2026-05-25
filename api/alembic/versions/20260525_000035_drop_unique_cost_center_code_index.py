@@ -13,11 +13,25 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade() -> None:
-    op.drop_index("ix_cost_centers_tenant_code", table_name="cost_centers")
-    op.create_index("ix_cost_centers_tenant_code", "cost_centers", ["tenant_id", "code"], unique=False)
+def upgrade():
+    # Drop unique index if it exists (may not exist on all environments)
+    op.execute("""
+        IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_cost_centers_tenant_code' AND object_id = OBJECT_ID('cost_centers'))
+            DROP INDEX ix_cost_centers_tenant_code ON cost_centers
+    """)
+    # Create non-unique index
+    op.execute("""
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_cost_centers_tenant_code' AND object_id = OBJECT_ID('cost_centers'))
+            CREATE INDEX ix_cost_centers_tenant_code ON cost_centers (tenant_id, code)
+    """)
 
 
-def downgrade() -> None:
-    op.drop_index("ix_cost_centers_tenant_code", table_name="cost_centers")
-    op.create_index("ix_cost_centers_tenant_code", "cost_centers", ["tenant_id", "code"], unique=True)
+def downgrade():
+    op.execute("""
+        IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_cost_centers_tenant_code' AND object_id = OBJECT_ID('cost_centers'))
+            DROP INDEX ix_cost_centers_tenant_code ON cost_centers
+    """)
+    op.execute("""
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_cost_centers_tenant_code' AND object_id = OBJECT_ID('cost_centers'))
+            CREATE UNIQUE INDEX ix_cost_centers_tenant_code ON cost_centers (tenant_id, code)
+    """)

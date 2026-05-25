@@ -69,6 +69,7 @@ class ConsolidatedCostByProject(BaseModel):
     project_name: str
     cost_center_id: Optional[str] = None
     cost_center_name: Optional[str] = None
+    cost_center_code: Optional[str] = None
     year: int
     month: int
     demand_cost: int       # planned labor cost in cents

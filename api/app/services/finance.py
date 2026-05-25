@@ -589,6 +589,7 @@ class FinanceService:
         month: int,
         project_id: Optional[str] = None,
         cost_center_id: Optional[str] = None,
+        cost_center_code: Optional[str] = None,
     ) -> ConsolidatedCostDetail:
         """Return per-line detail for one project or cost center + period."""
         from api.app.models.planning import DemandLine
@@ -605,18 +606,38 @@ class FinanceService:
         setting = self.get_setting("monthly_fte_cost")
         monthly_fte_cost = int(setting.setting_value)
 
-        if cost_center_id:
-            # CC mode — filter lines by Resource.cost_center_id (not Project.cost_center_id)
-            cc = (
-                self.db.query(CostCenter)
-                .filter(
-                    CostCenter.tenant_id == self.current_user.tenant_id,
-                    CostCenter.id == cost_center_id,
+        if cost_center_id or cost_center_code:
+            # CC mode — filter lines by Resource.cost_center_id.
+            # Resolve the list of CC IDs and display fields up front.
+            if cost_center_code and not cost_center_id:
+                # Code-grouped mode: collect all CCs that share this code.
+                cc_id_list = [
+                    row.id for row in
+                    self.db.query(CostCenter.id)
+                    .filter(
+                        CostCenter.tenant_id == self.current_user.tenant_id,
+                        CostCenter.code == cost_center_code,
+                    )
+                    .all()
+                ]
+                if not cc_id_list:
+                    raise HTTPException(status_code=404, detail="No cost centers found for that code.")
+                display_id: Optional[str] = None
+                display_name: str = cost_center_code
+            else:
+                cc = (
+                    self.db.query(CostCenter)
+                    .filter(
+                        CostCenter.tenant_id == self.current_user.tenant_id,
+                        CostCenter.id == cost_center_id,
+                    )
+                    .first()
                 )
-                .first()
-            )
-            if cc is None:
-                raise HTTPException(status_code=404, detail="Cost center not found.")
+                if cc is None:
+                    raise HTTPException(status_code=404, detail="Cost center not found.")
+                cc_id_list = [cost_center_id]
+                display_id = cc.id
+                display_name = cc.name
 
             # PM restriction: collect allowed project IDs up front
             cc_pm_project_ids: Optional[list] = None
@@ -664,7 +685,7 @@ class FinanceService:
                     DemandLine.tenant_id == self.current_user.tenant_id,
                     DemandLine.period_id == period.id,
                     DemandLine.resource_id.isnot(None),
-                    Resource.cost_center_id == cost_center_id,
+                    Resource.cost_center_id.in_(cc_id_list),
                 )
             )
             if cc_pm_project_ids is not None:
@@ -682,7 +703,7 @@ class FinanceService:
                     ActualLine.tenant_id == self.current_user.tenant_id,
                     ActualLine.period_id == period.id,
                     ActualLine.id.in_(approved_subq_cc),
-                    Resource.cost_center_id == cost_center_id,
+                    Resource.cost_center_id.in_(cc_id_list),
                 )
             )
             if cc_pm_project_ids is not None:
@@ -698,7 +719,7 @@ class FinanceService:
                 .filter(
                     ProjectExternalLine.tenant_id == self.current_user.tenant_id,
                     ProjectExternalLine.period_id == period.id,
-                    Resource.cost_center_id == cost_center_id,
+                    Resource.cost_center_id.in_(cc_id_list),
                 )
             )
             if cc_pm_project_ids is not None:
@@ -757,8 +778,8 @@ class FinanceService:
             ]
 
             return ConsolidatedCostDetail(
-                cost_center_id=cc.id,
-                cost_center_name=cc.name,
+                cost_center_id=display_id,
+                cost_center_name=display_name,
                 year=year,
                 month=month,
                 monthly_fte_cost=monthly_fte_cost,
@@ -927,10 +948,11 @@ class FinanceService:
         month: Optional[int],
         project_id: Optional[str] = None,
         cost_center_id: Optional[str] = None,
+        cost_center_code: Optional[str] = None,
     ) -> list:
         """Return detail for a single period (year+month provided) or all open periods."""
         if year is not None and month is not None:
-            return [self.get_consolidated_cost_detail(year, month, project_id, cost_center_id)]
+            return [self.get_consolidated_cost_detail(year, month, project_id, cost_center_id, cost_center_code)]
         periods = sorted(
             PeriodService(self.db, self.current_user).list_open(),
             key=lambda p: (p.year, p.month),
@@ -938,7 +960,7 @@ class FinanceService:
         results = []
         for p in periods:
             try:
-                results.append(self.get_consolidated_cost_detail(p.year, p.month, project_id, cost_center_id))
+                results.append(self.get_consolidated_cost_detail(p.year, p.month, project_id, cost_center_id, cost_center_code))
             except Exception:
                 pass
         return results
@@ -970,6 +992,7 @@ class FinanceService:
         cost_center_id: Optional[str] = None,
         year: Optional[int] = None,
         month: Optional[int] = None,
+        group_by: str = "id",
     ) -> ConsolidatedCostResponse:
         """Aggregate planned labor, actual labor, externals, and equipment costs per project/period."""
         from collections import defaultdict
@@ -1041,21 +1064,31 @@ class FinanceService:
         project_name_map = {row.id: row.name for row in proj_rows}
 
         cc_rows = (
-            self.db.query(CostCenter.id, CostCenter.name)
+            self.db.query(CostCenter.id, CostCenter.name, CostCenter.code)
             .filter(CostCenter.tenant_id == self.current_user.tenant_id)
             .all()
         )
         cc_name_map = {row.id: row.name for row in cc_rows}
+        cc_code_map = {row.id: row.code for row in cc_rows}
 
-        # 5. Accumulator: (project_id, cc_id, year, month) → cost buckets
-        #    cc_id comes from demand/actual lines via Resource.cost_center_id,
-        #    so one project can appear in multiple rows if it spans cost centers.
+        # 5. Accumulator: (project_id, cc_key, year, month) → cost buckets
+        #    cc_key is cc_id when group_by="id", or cc_code (with fallback to cc_id
+        #    for empty-code CCs) when group_by="code".
         agg: dict = defaultdict(lambda: {"demand_cost": 0, "actuals_cost": 0, "externals_cost": 0, "equipment_cost": 0})
 
         def _pm_allowed(proj_id: str) -> bool:
             if pm_project_ids is not None and proj_id not in pm_project_ids:
                 return False
             return True
+
+        def _cc_key(cc_id: Optional[str]) -> Optional[str]:
+            """Normalise cost-center identifier for the chosen group_by mode."""
+            if cc_id is None:
+                return None
+            if group_by == "code":
+                code = cc_code_map.get(cc_id, "")
+                return code if code else cc_id  # fallback to UUID when code is empty
+            return cc_id
 
         # 6. Demand lines → planned labor cost, keyed by Resource.cost_center_id
         demand_q = (
@@ -1077,7 +1110,7 @@ class FinanceService:
             if not _pm_allowed(line.project_id):
                 continue
             yr, mo = period_map[line.period_id]
-            agg[(line.project_id, cc_id, yr, mo)]["demand_cost"] += int(line.fte_percent * monthly_fte_cost // 100)
+            agg[(line.project_id, _cc_key(cc_id), yr, mo)]["demand_cost"] += int(line.fte_percent * monthly_fte_cost // 100)
 
         # 7. Actual lines → actual labor cost (approved only), keyed by Resource.cost_center_id
         approved_subq_cons = self._approved_actual_ids_subq()
@@ -1100,7 +1133,7 @@ class FinanceService:
             if not _pm_allowed(line.project_id):
                 continue
             yr, mo = period_map[line.period_id]
-            agg[(line.project_id, cc_id, yr, mo)]["actuals_cost"] += int(line.actual_fte_percent * monthly_fte_cost // 100)
+            agg[(line.project_id, _cc_key(cc_id), yr, mo)]["actuals_cost"] += int(line.actual_fte_percent * monthly_fte_cost // 100)
 
         # 8. External lines → contractor cost, keyed by Resource.cost_center_id when available
         ext_q = (
@@ -1121,7 +1154,7 @@ class FinanceService:
             if not _pm_allowed(line.project_id):
                 continue
             yr, mo = period_map[line.period_id]
-            agg[(line.project_id, cc_id, yr, mo)]["externals_cost"] += line.cost
+            agg[(line.project_id, _cc_key(cc_id), yr, mo)]["externals_cost"] += line.cost
 
         # 9. Equipment lines → equipment cost (no resource link, cc_id=None)
         #    Skip when filtering by cost_center_id since there is no resource to filter on.
@@ -1139,21 +1172,36 @@ class FinanceService:
                 agg[(line.project_id, None, yr, mo)]["equipment_cost"] += line.cost
 
         # 10. Build response
-        data = [
-            ConsolidatedCostByProject(
-                project_id=proj_id,
-                project_name=project_name_map.get(proj_id, proj_id),
-                cost_center_id=cc_id,
-                cost_center_name=cc_name_map.get(cc_id) if cc_id else None,
-                year=yr,
-                month=mo,
-                demand_cost=costs["demand_cost"],
-                actuals_cost=costs["actuals_cost"],
-                externals_cost=costs["externals_cost"],
-                equipment_cost=costs["equipment_cost"],
-            )
-            for (proj_id, cc_id, yr, mo), costs in agg.items()
-        ]
+        data = []
+        for (proj_id, key_cc, yr, mo), costs in agg.items():
+            if group_by == "code":
+                data.append(ConsolidatedCostByProject(
+                    project_id=proj_id,
+                    project_name=project_name_map.get(proj_id, proj_id),
+                    cost_center_id=None,
+                    cost_center_name=key_cc,   # code string becomes the display label
+                    cost_center_code=key_cc,
+                    year=yr,
+                    month=mo,
+                    demand_cost=costs["demand_cost"],
+                    actuals_cost=costs["actuals_cost"],
+                    externals_cost=costs["externals_cost"],
+                    equipment_cost=costs["equipment_cost"],
+                ))
+            else:
+                data.append(ConsolidatedCostByProject(
+                    project_id=proj_id,
+                    project_name=project_name_map.get(proj_id, proj_id),
+                    cost_center_id=key_cc,
+                    cost_center_name=cc_name_map.get(key_cc) if key_cc else None,
+                    cost_center_code=cc_code_map.get(key_cc) if key_cc else None,
+                    year=yr,
+                    month=mo,
+                    demand_cost=costs["demand_cost"],
+                    actuals_cost=costs["actuals_cost"],
+                    externals_cost=costs["externals_cost"],
+                    equipment_cost=costs["equipment_cost"],
+                ))
         return ConsolidatedCostResponse(data=data, monthly_fte_cost=monthly_fte_cost)
 
     def upsert_setting(self, key: str, value: str) -> FinanceSettingResponse:

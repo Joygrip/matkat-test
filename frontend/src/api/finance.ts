@@ -67,6 +67,7 @@ export interface ConsolidatedCostRow {
   project_name: string;
   cost_center_id: string | null;
   cost_center_name: string | null;
+  cost_center_code: string | null;
   year: number;
   month: number;
   demand_cost: number;    // cents — planned labor
@@ -85,12 +86,14 @@ export async function getConsolidatedCosts(params?: {
   cost_center_id?: string;
   year?: number;
   month?: number;
+  group_by?: 'id' | 'code';
 }): Promise<ConsolidatedCostResponse> {
   const query = new URLSearchParams();
   if (params?.project_id) query.append('project_id', params.project_id);
   if (params?.cost_center_id) query.append('cost_center_id', params.cost_center_id);
   if (params?.year != null) query.append('year', String(params.year));
   if (params?.month != null) query.append('month', String(params.month));
+  if (params?.group_by) query.append('group_by', params.group_by);
   const qs = query.toString();
   return apiClient.get<ConsolidatedCostResponse>(`/finance/consolidated-costs${qs ? `?${qs}` : ''}`);
 }
@@ -146,11 +149,13 @@ export async function getConsolidatedCostDetail(params: {
   month?: number;
   project_id?: string;
   cost_center_id?: string;
+  cost_center_code?: string;
 }): Promise<ConsolidatedCostDetail[]> {
   const query = new URLSearchParams();
   if (params.year != null) query.append('year', String(params.year));
   if (params.month != null) query.append('month', String(params.month));
   if (params.project_id) query.append('project_id', params.project_id);
   if (params.cost_center_id) query.append('cost_center_id', params.cost_center_id);
+  if (params.cost_center_code) query.append('cost_center_code', params.cost_center_code);
   return apiClient.get<ConsolidatedCostDetail[]>(`/finance/consolidated-costs/detail?${query.toString()}`);
 }

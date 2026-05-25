@@ -146,6 +146,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string | null>(null);
   const showPlanned = true;
+  const [groupBy, setGroupBy] = useState<'id' | 'code'>('id');
   const [showAllProjects, setShowAllProjects] = useState(false);
 
   // Sticky filter bar shadow detection
@@ -174,12 +175,15 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
   // ── Loaders ──────────────────────────────────────────────────────────────────
 
   useEffect(() => {
+    // Clear locked-period cache when groupBy changes — cached rows used a different grouping.
+    lockedCacheRef.current.clear();
+    setLockedRawData([]);
     setLoading(true);
-    getConsolidatedCosts()
+    getConsolidatedCosts({ group_by: groupBy })
       .then(res => setRawData(res.data))
       .catch(() => setRawData([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [groupBy]);
 
   // Lazily fetch data for a selected locked period and cache it
   useEffect(() => {
@@ -194,13 +198,13 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
       setLockedRawData(cached);
       return;
     }
-    getConsolidatedCosts({ year: lockedPeriod.year, month: lockedPeriod.month })
+    getConsolidatedCosts({ year: lockedPeriod.year, month: lockedPeriod.month, group_by: groupBy })
       .then(res => {
         lockedCacheRef.current.set(key, res.data);
         setLockedRawData(res.data);
       })
       .catch(() => setLockedRawData([]));
-  }, [selectedPeriodIds, periods]);
+  }, [selectedPeriodIds, periods, groupBy]);
 
 
   useEffect(() => {
@@ -450,8 +454,9 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
     const year = targetYear ?? latest.year;
     const month = targetMonth ?? latest.month;
 
+    const drawerTitle = mode === 'cc' && groupBy === 'code' ? `CC ${row.name}` : row.name;
     setDrawer({
-      mode, title: row.name, id: row.id, year, month,
+      mode, title: drawerTitle, id: row.id, year, month,
       monthlyData: buildMonthlyBuckets(filter),
       kpis: { planned: row.planned, actual: row.actual, oop: row.oop, equip: row.equip },
     });
@@ -460,11 +465,19 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
     setCollapsedPeriods(new Set());
     requestAnimationFrame(() => setDrawerVisible(true));
 
-    const ccId = mode === 'cc' ? ccNameToId.get(row.name) : undefined;
-    if (mode === 'project' || ccId) {
-      setDrawerLoading(true);
-      const baseParams = mode === 'project' ? { project_id: row.id } : { cost_center_id: ccId! };
+    let baseParams: Record<string, string | number> | null = null;
+    if (mode === 'project') {
+      baseParams = { project_id: row.id };
+    } else if (groupBy === 'code') {
+      // row.id is the CC code; use cost_center_code so the backend aggregates all family members.
+      baseParams = { cost_center_code: row.id };
+    } else {
+      const ccId = ccNameToId.get(row.name);
+      if (ccId) baseParams = { cost_center_id: ccId };
+    }
 
+    if (baseParams) {
+      setDrawerLoading(true);
       const detailParams = targetYear !== undefined
         ? { ...baseParams, year: targetYear, month: targetMonth! }
         : { ...baseParams };
@@ -475,7 +488,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
           setDrawerDetail(details);
         }).catch(() => setDrawerDetail(null)).finally(() => setDrawerLoading(false));
     }
-  }, [filteredData, buildMonthlyBuckets, ccNameToId]);
+  }, [filteredData, buildMonthlyBuckets, ccNameToId, groupBy]);
 
   // ── CSV export ────────────────────────────────────────────────────────────────
 
@@ -769,8 +782,17 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
 
           {/* Panel B — Costs by Cost Center */}
           <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
-            <div style={{ padding: '14px 20px', borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ padding: '14px 20px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ fontSize: 15, fontWeight: 600, color: C.ink1 }}>Costs by Cost Center</div>
+              <TabList
+                selectedValue={groupBy}
+                onTabSelect={(_, d) => setGroupBy(d.value as 'id' | 'code')}
+                appearance="subtle"
+                size="small"
+              >
+                <Tab value="id">Department</Tab>
+                <Tab value="code">CC Code</Tab>
+              </TabList>
             </div>
             <div style={{ padding: 20 }}>
               {/* Heatmap */}

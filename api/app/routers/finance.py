@@ -78,6 +78,7 @@ async def consolidated_cost_detail(
     month: Optional[int] = Query(None, ge=1, le=12),
     project_id: Optional[str] = Query(None),
     cost_center_id: Optional[str] = Query(None),
+    cost_center_code: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM,
@@ -88,16 +89,27 @@ async def consolidated_cost_detail(
     Return per-line detail (demand, actuals, externals, equipment) for one project or cost center.
     When year+month are provided, returns detail for that single period.
     When both are omitted, returns detail for all open periods.
-    Exactly one of project_id or cost_center_id must be provided.
+    Provide exactly one of: project_id, cost_center_id, or cost_center_code.
+    cost_center_code aggregates all CCs sharing that code (family drill-down).
+    When both cost_center_id and cost_center_code are provided, cost_center_id takes precedence.
     PM role is restricted to their own projects (403 otherwise).
     Accessible to: Admin, Finance, PM, Director, RO
     """
-    if not project_id and not cost_center_id:
-        raise HTTPException(status_code=422, detail="Provide either project_id or cost_center_id.")
-    if project_id and cost_center_id:
-        raise HTTPException(status_code=422, detail="Provide only one of project_id or cost_center_id.")
+    cc_identifier_count = sum([bool(project_id), bool(cost_center_id), bool(cost_center_code)])
+    if cc_identifier_count == 0:
+        raise HTTPException(status_code=422, detail="Provide one of: project_id, cost_center_id, or cost_center_code.")
+    if project_id and (cost_center_id or cost_center_code):
+        raise HTTPException(status_code=422, detail="Provide only one of project_id or a cost-center identifier.")
+    # cost_center_id takes precedence over cost_center_code
+    if cost_center_id and cost_center_code:
+        cost_center_code = None
     service = FinanceService(db, current_user)
-    return service.get_consolidated_cost_detail_multi(year, month, project_id=project_id, cost_center_id=cost_center_id)
+    return service.get_consolidated_cost_detail_multi(
+        year, month,
+        project_id=project_id,
+        cost_center_id=cost_center_id,
+        cost_center_code=cost_center_code,
+    )
 
 
 @router.get("/consolidated-costs", response_model=ConsolidatedCostResponse)
@@ -106,6 +118,7 @@ async def consolidated_costs(
     cost_center_id: Optional[str] = Query(None),
     year: Optional[int] = Query(None),
     month: Optional[int] = Query(None),
+    group_by: str = Query("id"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM,
@@ -116,11 +129,15 @@ async def consolidated_costs(
     Aggregate planned labor, actual labor, external contractor, and equipment costs
     per project per period. Filterable by project and/or cost center.
     When year+month are provided, returns data for that specific period regardless of lock status.
+    group_by=id (default): one row per cost center UUID.
+    group_by=code: rows merged by cost_center.code; cost_center_name returns the code.
     PM role is restricted to their own projects.
     Accessible to: Admin, Finance, PM, Director, RO
     """
+    if group_by not in ("id", "code"):
+        raise HTTPException(status_code=400, detail='group_by must be "id" or "code".')
     service = FinanceService(db, current_user)
-    return service.get_consolidated_costs(project_id, cost_center_id, year=year, month=month)
+    return service.get_consolidated_costs(project_id, cost_center_id, year=year, month=month, group_by=group_by)
 
 
 @router.get("/settings/{key}", response_model=FinanceSettingResponse)

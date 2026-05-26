@@ -1,8 +1,9 @@
 /**
  * Enterprise AppShell with MatKat branding
  */
-import { ReactNode, useState, useEffect, useMemo } from 'react';
+import { ReactNode, useState } from 'react';
 import { usePeriod } from '../contexts/PeriodContext';
+import { MONTH_NAMES } from '../utils/format';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   makeStyles,
@@ -32,7 +33,6 @@ import {
   bundleIcon,
 } from '@fluentui/react-icons';
 import { useAuth } from '../auth/AuthProvider';
-import { PeriodSelector } from './PeriodSelector';
 
 const Home = bundleIcon(HomeFilled, HomeRegular);
 
@@ -223,6 +223,33 @@ const useStyles = makeStyles({
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
     borderTop: '1px solid rgba(255, 255, 255, 0.1)',
   },
+  periodDisplay: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+    userSelect: 'none',
+  },
+  periodLabel: {
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  statusOpen: {
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForegroundOnBrand,
+    fontWeight: tokens.fontWeightSemibold,
+    background: tokens.colorPaletteGreenBackground3,
+    borderRadius: tokens.borderRadiusCircular,
+    padding: '2px 8px',
+  },
+  statusLocked: {
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground3,
+    fontWeight: tokens.fontWeightRegular,
+    background: tokens.colorNeutralBackground4,
+    borderRadius: tokens.borderRadiusCircular,
+    padding: '2px 8px',
+  },
 });
 
 interface NavItem {
@@ -267,23 +294,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  const { periods, selectedPeriodId, setSelectedPeriodId } = usePeriod();
+  const { selectedPeriod } = usePeriod();
   const [sidebarOpen, setSidebarOpen] = useState(true);
-
-  // Only Finance and Admin see locked periods in the dropdown; others see only open periods
-  const visiblePeriods = useMemo(() => {
-    if (user?.role === 'Finance' || user?.role === 'Admin') return periods;
-    return periods.filter((p) => p.status === 'open');
-  }, [periods, user?.role]);
-
-  // If current selection is not in visible list (e.g. user switched to Employee), select first visible period
-  useEffect(() => {
-    if (visiblePeriods.length === 0) return;
-    const isSelectedVisible = visiblePeriods.some((p) => p.id === selectedPeriodId);
-    if (!isSelectedVisible) {
-      setSelectedPeriodId(visiblePeriods[0].id);
-    }
-  }, [visiblePeriods, selectedPeriodId, setSelectedPeriodId]);
 
   const visibleNavItems = navItems.filter((item) => {
     if (!item.roles) return true;
@@ -398,13 +410,16 @@ export function AppShell({ children }: { children: ReactNode }) {
             <h1 className={styles.pageTitle}>{pageTitle}</h1>
           </div>
           <div className={styles.headerRight}>
-            {/* Period selector: searchable, year-grouped */}
-            <PeriodSelector
-              periods={visiblePeriods}
-              selectedId={visiblePeriods.some((p) => p.id === selectedPeriodId) ? selectedPeriodId : visiblePeriods[0]?.id ?? ''}
-              onSelect={setSelectedPeriodId}
-              align="right"
-            />
+            {selectedPeriod && (
+              <div className={styles.periodDisplay}>
+                <span className={styles.periodLabel}>
+                  {MONTH_NAMES[selectedPeriod.month - 1]} {selectedPeriod.year}
+                </span>
+                <span className={selectedPeriod.status === 'open' ? styles.statusOpen : styles.statusLocked}>
+                  {selectedPeriod.status}
+                </span>
+              </div>
+            )}
           </div>
         </header>
 

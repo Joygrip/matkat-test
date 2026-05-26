@@ -243,12 +243,16 @@ export const ResourcePlanning: React.FC = () => {
       setScopedCcIds(new Set(resources.map((r: { cost_center_id: string }) => r.cost_center_id).filter(Boolean)));
       if (user?.role === 'Manager' && delegates) {
         const activeDelegatorIds = new Set(
-          delegates.filter((d: { is_active: boolean; delegator_id: string }) => d.is_active).map((d: { delegator_id: string }) => d.delegator_id)
+          delegates.filter((d: { is_active: boolean }) => d.is_active)
+                   .map((d: { delegator_id: string }) => d.delegator_id)
         );
         const ccIds = new Set<string>(
-          resources
-            .filter((r: { user_id: string | null; cost_center_id: string }) => r.user_id && activeDelegatorIds.has(r.user_id))
-            .map((r: { cost_center_id: string }) => r.cost_center_id)
+          costCenters
+            .filter(cc =>
+              (cc.ro_user_id && activeDelegatorIds.has(cc.ro_user_id)) ||
+              (cc.director_user_id && activeDelegatorIds.has(cc.director_user_id))
+            )
+            .map(cc => cc.id)
         );
         setDelegatedCcIds(ccIds);
       }

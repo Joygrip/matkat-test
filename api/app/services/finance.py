@@ -500,7 +500,6 @@ class FinanceService:
                 ActualLine.tenant_id == self.current_user.tenant_id,
                 ActualLine.year == year,
                 ActualLine.month == month,
-                ActualLine.id.in_(approved_subq_emp),
                 ActualLine.resource_id.in_(result_resource_ids),
             ]
             if project_id:

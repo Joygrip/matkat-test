@@ -19,6 +19,7 @@ export interface ProjectBreakdown {
 export interface EmployeeStats {
   resource_id: string;
   employee_name: string;
+  employee_email?: string;
   demand_fte: number;
   supply_fte: number;
   actuals_fte: number;

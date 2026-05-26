@@ -327,6 +327,7 @@ export const Actuals: React.FC = () => {
   const [actualsLoading, setActualsLoading] = useState(false);
   const [actualsError, setActualsError] = useState<string | null>(null);
   const [actualsProjectId] = useState<string>('');
+  const [empStatsVersion, setEmpStatsVersion] = useState(0);
 
 
   // year/month for chart (derived from finance actuals or period context)
@@ -421,6 +422,7 @@ export const Actuals: React.FC = () => {
         `/finance/actuals-dashboard?${params.toString()}`
       );
       setActualsData(result);
+      setEmpStatsVersion(v => v + 1);
     } catch {
       setActualsError('Failed to load actuals data');
     } finally {
@@ -981,6 +983,7 @@ export const Actuals: React.FC = () => {
           month={month}
           canSeeStats={canSeeStats}
           onActualsReload={loadFinanceActuals}
+          empStatsVersion={empStatsVersion}
         />
       )}
 

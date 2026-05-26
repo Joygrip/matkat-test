@@ -6,7 +6,8 @@ export function useEmployeeStats(
   month: number,
   costCenterId?: string,
   projectId?: string,
-  enabled = true
+  enabled = true,
+  refreshKey = 0,
 ) {
   const [data, setData] = useState<EmployeeStats[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -25,7 +26,7 @@ export function useEmployeeStats(
       .then(setData)
       .catch(e => setError(e.message || 'Failed to load employee stats'))
       .finally(() => setLoading(false));
-  }, [enabled, year, month, costCenterId, projectId]);
+  }, [enabled, year, month, costCenterId, projectId, refreshKey]);
 
   return { data, loading, error };
 }

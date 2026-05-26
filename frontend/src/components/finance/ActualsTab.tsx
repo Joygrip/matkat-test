@@ -94,6 +94,7 @@ export interface ActualsTabProps {
   month: number;
   canSeeStats: boolean;
   onActualsReload?: () => void;
+  empStatsVersion?: number;
 }
 
 type SortBy = 'attention' | 'name' | 'gap';
@@ -445,6 +446,7 @@ export function ActualsTab({
   month,
   canSeeStats,
   onActualsReload,
+  empStatsVersion = 0,
 }: ActualsTabProps) {
   const styles = useStyles();
 
@@ -561,6 +563,7 @@ export function ActualsTab({
     undefined,
     actualsProjectId || undefined,
     year > 0 && month > 0,
+    empStatsVersion,
   );
 
   const empStatsByName = useMemo(() => {
@@ -617,12 +620,18 @@ export function ActualsTab({
     // never shown as Missing even when the MISSING status filter is active.
     const nameSet = new Set(actualsData.map(d => d.employee_name));
     const q = searchQuery.trim().toLowerCase();
+    const seen = new Set<string>();
     return empStats
       .filter(s => s.demand_fte > 0 && s.actuals_fte === 0 && !nameSet.has(s.employee_name))
       .filter(s => !q || s.employee_name.toLowerCase().includes(q) || s.projects.some(p => p.project_name.toLowerCase().includes(q)) || (s.cost_center_name ?? '').toLowerCase().includes(q) || (s.employee_initials ?? '').toLowerCase().includes(q))
+      .filter(s => {
+        if (seen.has(s.employee_name)) return false;
+        seen.add(s.employee_name);
+        return true;
+      })
       .map(s => ({
         employee_name: s.employee_name,
-        employee_email: '',
+        employee_email: s.employee_email ?? '',
         cost_center_id: s.cost_center_id ?? '',
         cost_center_name: s.cost_center_name ?? '',
         employee_initials: s.employee_initials,
@@ -653,11 +662,14 @@ export function ActualsTab({
 
   // ── KPI values ─────────────────────────────────────────────────────────────
   const kpi = useMemo(() => {
-    const totalWithDemand = empStats?.filter(s => s.demand_fte > 0).length ?? 0;
-    const submitted = empStats?.filter(s => s.demand_fte > 0 && s.actuals_fte > 0).length ?? 0;
+    // Unique employees with demand (deduplicated by name in case of duplicate empStats rows)
+    const demandNames = new Set((empStats ?? []).filter(s => s.demand_fte > 0).map(s => s.employee_name));
+    const totalWithDemand = demandNames.size;
+    const submitted = (empStats ?? []).filter(s => s.demand_fte > 0 && s.actuals_fte > 0).length;
+    // Total unique employees visible to this manager: those with demand OR those with actuals
+    const allEmployeeNames = new Set([...actualsData.map(d => d.employee_name), ...demandNames]);
+    const totalEmployees = allEmployeeNames.size;
     // An employee is "missing" only if they have ZERO actuals submissions at all.
-    // Use nameSet from actualsData (any submission = not missing) and deduplicate by name
-    // in case empStats has multiple rows per employee (one per demand line/project).
     const submittedNames = new Set(actualsData.map(d => d.employee_name));
     const missingCount = empStats
       ? new Set(
@@ -671,7 +683,7 @@ export function ActualsTab({
     const approvedLines = actualsData.filter(d => (d.approval_status ?? '').toUpperCase() === 'APPROVED');
     const pendingPeople = new Set(pendingLines.map(d => d.employee_name)).size;
     const submittedPct = totalWithDemand > 0 ? Math.round((submitted / totalWithDemand) * 100) : 0;
-    return { totalWithDemand, submitted, submittedPct, missingCount, pendingLines: pendingLines.length, pendingPeople, rejectedLines: rejectedLines.length, approvedLines: approvedLines.length };
+    return { totalWithDemand, totalEmployees, submitted, submittedPct, missingCount, pendingLines: pendingLines.length, pendingPeople, rejectedLines: rejectedLines.length, approvedLines: approvedLines.length };
   }, [actualsData, empStats]);
 
   // ── Employee sort helpers (preserved for bottom section) ───────────────────
@@ -1152,7 +1164,7 @@ export function ActualsTab({
                 <span>Demand target</span>
               </div>
             </div>
-            <span>Showing {sortedGroups.length} of {kpi.totalWithDemand} employees</span>
+            <span>Showing {sortedGroups.length} of {kpi.totalEmployees} employees</span>
           </div>
         </div>
       )}

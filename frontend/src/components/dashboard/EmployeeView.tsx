@@ -4,11 +4,13 @@ import {
   tokens,
   Badge,
   Button,
+  Combobox,
+  Option,
   Skeleton,
   SkeletonItem,
   Spinner,
 } from '@fluentui/react-components';
-import { Edit16Regular } from '@fluentui/react-icons';
+import { Add16Regular, Edit16Regular } from '@fluentui/react-icons';
 import {
   ComposedChart,
   Line,
@@ -196,6 +198,12 @@ const useStyles = makeStyles({
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
     marginTop: tokens.spacingVerticalS,
   },
+  addProjectRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalS,
+  },
 });
 
 interface Props {
@@ -233,7 +241,7 @@ function ApprovalDot({ status }: { status?: string }) {
 export function EmployeeView({ periods }: Props) {
   const styles = useStyles();
   const { showSuccess, showError } = useToast();
-  const { myResource, appDataLoading } = useAppData();
+  const { myResource, appDataLoading, projects } = useAppData();
 
   // Derived from context — no per-component fetch needed
   const myResourceId = myResource?.resource_id ?? null;
@@ -250,6 +258,10 @@ export function EmployeeView({ periods }: Props) {
   const [savedCells, setSavedCells] = useState<Set<string>>(new Set());
   const [resubmittedCells, setResubmittedCells] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
+
+  const [additionalProjects, setAdditionalProjects] = useState<{ id: string; name: string }[]>([]);
+  const [addProjectOpen, setAddProjectOpen] = useState(false);
+  const [addProjectSearch, setAddProjectSearch] = useState('');
 
   const openPeriods = useMemo(
     () => [...periods]
@@ -290,19 +302,32 @@ export function EmployeeView({ periods }: Props) {
   // ── Matrix period list (open + locked that have demand) ──────────────────
 
   const matrixPeriods = useMemo(() => {
-    const idsWithDemand = new Set(myDemandLines.map(d => d.period_id));
     return [...periods]
-      .filter(p => p.status === 'open' && idsWithDemand.has(p.id))
+      .filter(p => p.status === 'open')
       .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
-  }, [periods, myDemandLines]);
+  }, [periods]);
 
   const matrixProjects = useMemo(() => {
     const map = new Map<string, string>();
     myDemandLines.forEach(d => {
       if (!map.has(d.project_id)) map.set(d.project_id, d.project_name ?? d.project_id);
     });
+    additionalProjects.forEach(p => {
+      if (!map.has(p.id)) map.set(p.id, p.name);
+    });
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [myDemandLines]);
+  }, [myDemandLines, additionalProjects]);
+
+  const availableToAdd = useMemo(() => {
+    const shownIds = new Set(matrixProjects.map(p => p.id));
+    return projects.filter(p => p.is_active && !shownIds.has(p.id));
+  }, [projects, matrixProjects]);
+
+  const handleAddProject = useCallback((projectId: string, projectName: string) => {
+    setAdditionalProjects(prev => [...prev, { id: projectId, name: projectName }]);
+    setAddProjectOpen(false);
+    setAddProjectSearch('');
+  }, []);
 
   // ── Lookups ───────────────────────────────────────────────────────────────
 
@@ -959,6 +984,49 @@ export function EmployeeView({ periods }: Props) {
                   </tr>
                 </tfoot>
               </table>
+            </div>
+
+            {/* Add Project row */}
+            <div className={styles.addProjectRow}>
+              {addProjectOpen ? (
+                <>
+                  <Combobox
+                    value={addProjectSearch}
+                    onChange={e => setAddProjectSearch(e.target.value)}
+                    selectedOptions={[]}
+                    onOptionSelect={(_, data) => {
+                      const project = availableToAdd.find(p => p.id === data.optionValue);
+                      if (project) handleAddProject(project.id, project.name);
+                    }}
+                    placeholder="Search and select a project..."
+                    style={{ minWidth: 260 }}
+                  >
+                    {availableToAdd
+                      .filter(p => !addProjectSearch || p.name.toLowerCase().includes(addProjectSearch.toLowerCase()))
+                      .map(p => (
+                        <Option key={p.id} value={p.id}>{p.name}</Option>
+                      ))}
+                  </Combobox>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    onClick={() => { setAddProjectOpen(false); setAddProjectSearch(''); }}
+                  >
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  appearance="outline"
+                  icon={<Add16Regular />}
+                  size="small"
+                  disabled={availableToAdd.length === 0}
+                  onClick={() => setAddProjectOpen(true)}
+                  style={{ color: tokens.colorNeutralForeground3 }}
+                >
+                  Add Project
+                </Button>
+              )}
             </div>
 
             {/* Submit actuals button */}

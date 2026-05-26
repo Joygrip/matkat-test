@@ -460,6 +460,7 @@ class FinanceService:
             self.db.query(
                 Resource.id.label("resource_id"),
                 Resource.display_name.label("employee_name"),
+                Resource.email.label("employee_email"),
                 Resource.cost_center_id.label("cost_center_id"),
                 CostCenter.name.label("cost_center_name"),
                 Resource.initials.label("initials"),
@@ -572,6 +573,7 @@ class FinanceService:
             FinanceEmployeeStatsResponse(
                 resource_id=row.resource_id,
                 employee_name=row.employee_name,
+                employee_email=row.employee_email or '',
                 cost_center_id=row.cost_center_id,
                 cost_center_name=row.cost_center_name,
                 employee_initials=row.initials,

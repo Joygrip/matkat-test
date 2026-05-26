@@ -216,7 +216,8 @@ const useStyles = makeStyles({
     background: C.surface,
     border: `1px solid ${C.line}`,
     borderRadius: '10px',
-    overflow: 'hidden',
+    overflowX: 'auto',
+    overflowY: 'hidden',
     marginBottom: '16px',
   },
   table: {
@@ -868,16 +869,16 @@ export function ActualsTab({
         />
       ) : (
         <div className={styles.tableWrapper}>
-          <table className={styles.table}>
+          <table className={styles.table} style={{ minWidth: 1180 }}>
             <thead className={styles.thead}>
               <tr>
                 <th className={styles.th} style={{ width: 32 }} />
-                <th className={styles.th}>Employee</th>
+                <th className={styles.th} style={{ maxWidth: 200 }}>Employee</th>
                 <th className={styles.th}>Project · Cost Center</th>
                 <th className={styles.th} style={{ minWidth: 160 }}>Actual vs Demand</th>
                 <th className={styles.th} style={{ width: 70 }}>Gap</th>
                 <th className={styles.th} style={{ width: 110 }}>Status</th>
-                <th className={styles.th}>Approver · Step</th>
+                <th className={styles.th} style={{ maxWidth: 160 }}>Approver · Step</th>
                 <th className={styles.th} style={{ width: 130 }}>Actions</th>
               </tr>
             </thead>
@@ -917,16 +918,16 @@ export function ActualsTab({
                     </td>
 
                     {/* Employee */}
-                    <td className={styles.td}>
-                      <div style={{ display:'flex', alignItems:'center', gap:9 }}>
-                        <div className={styles.avatar} style={{ background: nameColor(group.employee_name) }}>
+                    <td className={styles.td} style={{ maxWidth: 200 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:9, minWidth:0 }}>
+                        <div className={styles.avatar} style={{ background: nameColor(group.employee_name), flexShrink:0 }}>
                           {getInitials(group.employee_name, group.employee_initials)}
                         </div>
-                        <div style={{ minWidth:0 }}>
+                        <div style={{ minWidth:0, overflow:'hidden' }}>
                           <div style={{ fontWeight:600, fontSize:13, color:C.ink, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                             {group.employee_name}
                           </div>
-                          <div style={{ fontSize:11, color:C.ink3 }}>{group.employee_email}</div>
+                          <div style={{ fontSize:11, color:C.ink3, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{group.employee_email}</div>
                         </div>
                       </div>
                       {group.rows.some(r => r.is_delegated && r.delegated_for) && (
@@ -975,13 +976,13 @@ export function ActualsTab({
                     </td>
 
                     {/* Approver · Step */}
-                    <td className={styles.td}>
+                    <td className={styles.td} style={{ maxWidth: 160 }}>
                       {(() => {
                         const approverRow = group.rows.find(r => r.current_approver_name || r.current_approval_step);
                         if (approverRow) {
                           return (
-                            <div>
-                              <div style={{ fontSize:12, color:C.ink2 }}>{approverRow.current_approver_name || '—'}</div>
+                            <div style={{ minWidth:0 }}>
+                              <div style={{ fontSize:12, color:C.ink2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{approverRow.current_approver_name || '—'}</div>
                               {approverRow.current_approval_step && (
                                 <span style={{ background:C.pendingSoft, color:C.pending, fontSize:10, fontWeight:600, padding:'1px 6px', borderRadius:10, marginTop:2, display:'inline-block' }}>
                                   {approverRow.current_approval_step}
@@ -1063,7 +1064,7 @@ export function ActualsTab({
                               });
 
                           return (
-                            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                            <table style={{ width:'100%', minWidth:900, borderCollapse:'collapse', fontSize:12 }}>
                               <thead>
                                 <tr style={{ background: C.surface2 }}>
                                   <th style={{ padding:'5px 12px 5px 52px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'26%' }}>Project</th>
@@ -1072,8 +1073,8 @@ export function ActualsTab({
                                   <th style={{ padding:'5px 12px', textAlign:'right', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'10%' }}>Supply</th>
                                   <th style={{ padding:'5px 12px', textAlign:'right', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'10%' }}>Actual</th>
                                   <th style={{ padding:'5px 12px', textAlign:'right', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:'10%' }}>Gap</th>
-                                  <th style={{ padding:'5px 12px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}` }}>Status</th>
-                                  <th style={{ padding:'5px 12px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}` }} />
+                                  <th style={{ padding:'5px 12px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:90 }}>Status</th>
+                                  <th style={{ padding:'5px 12px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.4px', color:C.ink3, borderBottom:`1px solid ${C.line}`, width:130 }} />
                                 </tr>
                               </thead>
                               <tbody>
@@ -1106,10 +1107,10 @@ export function ActualsTab({
                                       <td style={{ padding:'10px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:700, color: sr.rowDemand > 0 ? (rowGap >= 0 ? C.good : C.bad) : C.ink3, verticalAlign:'middle' }}>
                                         {sr.rowDemand > 0 ? (rowGap >= 0 ? `+${rowGap}%` : `${rowGap}%`) : '—'}
                                       </td>
-                                      <td style={{ padding:'10px 12px', verticalAlign:'middle' }}>
+                                      <td style={{ padding:'10px 12px', verticalAlign:'middle', width:90 }}>
                                         <StatusBadge status={sr.row ? (localStatusOverrides.get(sr.row.actual_id) ?? sr.row.approval_status) : 'MISSING'} />
                                       </td>
-                                      <td style={{ padding:'10px 12px', verticalAlign:'middle' }}>
+                                      <td style={{ padding:'10px 12px', verticalAlign:'middle', width:130 }}>
                                         {sr.row && (
                                           <div style={{ display:'flex', gap:4 }}>
                                             {rowCanAction && (

@@ -173,7 +173,7 @@ const useStyles = makeStyles({
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    overflow: 'hidden',
+    overflow: 'auto',
     background: tokens.colorNeutralBackground2,
   },
   header: {
@@ -204,7 +204,6 @@ const useStyles = makeStyles({
   },
   content: {
     flex: 1,
-    overflow: 'auto',
     padding: tokens.spacingHorizontalXL,
     background: tokens.colorNeutralBackground2,
     position: 'relative',

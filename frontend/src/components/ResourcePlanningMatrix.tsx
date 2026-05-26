@@ -1695,8 +1695,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                               padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
                               whiteSpace: 'nowrap' as const,
                             }}>
-                              <div style={{ color: DEMAND_ACCENT, fontSize: '10px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>D</div>
-                              <div style={{ color: SUPPLY_ACCENT, fontSize: '10px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>S</div>
+                              <div style={{ color: DEMAND_ACCENT, fontSize: '10px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>DEMAND</div>
+                              <div style={{ color: SUPPLY_ACCENT, fontSize: '10px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>SUPPLY</div>
                             </td>
                             {rgPeriodTotals.map(({ dSum, sSum }, i) => {
                               const diff = sSum - dSum;

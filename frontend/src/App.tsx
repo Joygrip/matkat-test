@@ -54,25 +54,89 @@ function App() {
   // Show real login screen for non-dev, non-authenticated users
   if (!isAuthenticated) {
     return (
-      <div className={styles.loading}>
-        <div style={{ textAlign: 'center' }}>
-          <p style={{ marginBottom: '1rem', color: 'var(--colorNeutralForeground2)' }}>
-            Sign in with your Microsoft account to continue.
-          </p>
-          <button
-            onClick={() => login()}
-            style={{
-              padding: '0.6rem 1.4rem',
-              fontSize: '0.95rem',
-              cursor: 'pointer',
-              borderRadius: '4px',
-              border: 'none',
-              background: 'var(--colorBrandBackground)',
-              color: 'var(--colorNeutralForegroundOnBrand)',
-            }}
-          >
-            Sign in with Microsoft
-          </button>
+      <div style={{
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #e8eef5 0%, #dce4f0 40%, #cdd8e8 100%)',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+      }}>
+        <div style={{
+          background: '#ffffff',
+          borderRadius: '16px',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.08)',
+          maxWidth: '480px',
+          width: '90%',
+          overflow: 'hidden',
+        }}>
+          {/* Top section */}
+          <div style={{
+            padding: '48px 48px 40px 48px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+          }}>
+            <img
+              src="/MatKatLog.png"
+              alt="MatKat"
+              style={{ maxWidth: '280px', marginBottom: '32px' }}
+            />
+            <p style={{
+              color: '#5a6577',
+              fontSize: '15px',
+              textAlign: 'center',
+              marginBottom: '28px',
+              margin: '0 0 28px 0',
+            }}>
+              Sign in with your Microsoft account to continue.
+            </p>
+            <button
+              onClick={() => login()}
+              style={{
+                background: '#1a3a5c',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '12px 32px',
+                fontSize: '15px',
+                fontWeight: 500,
+                cursor: 'pointer',
+                minWidth: '240px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '10px',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#243f5f'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#1a3a5c'; }}
+            >
+              <svg width="18" height="18" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+                <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
+                <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+                <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
+                <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+              </svg>
+              Sign in with Microsoft
+            </button>
+          </div>
+
+          {/* Bottom section */}
+          <div style={{
+            background: '#2c4a6e',
+            padding: '24px 48px',
+            textAlign: 'center',
+          }}>
+            <div style={{ color: '#ffffff', fontSize: '22px', fontWeight: 700 }}>Ferrosan</div>
+            <div style={{ color: '#ffffff', fontSize: '16px', fontWeight: 400, opacity: 0.9 }}>Medical Devices</div>
+            <div style={{
+              borderTop: '1px solid rgba(255,255,255,0.2)',
+              margin: '12px auto',
+              width: '60px',
+            }} />
+            <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '12px' }}>
+              © 2026 Ferrosan Medical Devices
+            </div>
+          </div>
         </div>
       </div>
     );

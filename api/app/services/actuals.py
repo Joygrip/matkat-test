@@ -724,10 +724,22 @@ class ActualsService:
                 ApprovalInstance.subject_id == actual.id,
             )
         ).order_by(ApprovalInstance.created_at.desc()).first()
-        # Skip creation only when there is an active (pending or approved) instance.
-        # If the prior instance was rejected, fall through to create a fresh one.
+        # Skip creation only when there is an active (pending or approved) instance
+        # that has at least one actionable (non-SKIPPED) step.
+        # If all steps are SKIPPED the instance is permanently stuck — delete it and
+        # fall through to create a fresh one with the current hierarchy data.
         if existing and existing.status in (ApprovalStatus.PENDING, ApprovalStatus.APPROVED):
-            return
+            has_actionable = any(
+                s.status != StepStatus.SKIPPED
+                for s in existing.steps
+            )
+            if has_actionable:
+                return
+            # All steps were SKIPPED — stale routing, delete and re-create
+            for step in existing.steps:
+                self.db.delete(step)
+            self.db.delete(existing)
+            self.db.flush()
 
         from api.app.services.approvals import ApprovalsService
 

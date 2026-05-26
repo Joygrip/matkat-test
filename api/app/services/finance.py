@@ -389,7 +389,7 @@ class FinanceService:
 
         # Manager restriction: scope to accessible resources via reporting hierarchy
         scoped_resource_ids_emp: Optional[list] = None
-        if self.current_user.role == "Manager":
+        if self.current_user.role == "Manager" and not self.current_user.is_manager_reader:
             from api.app.services.reporting import ReportingService
             scoped_resource_ids_emp = ReportingService(self.db, self.current_user).get_accessible_resource_ids()
             if not scoped_resource_ids_emp:

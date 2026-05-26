@@ -75,7 +75,7 @@ class FinanceService:
         # (same logic as ActualsService — uses reporting_cache + overrides, falls back to cost center RO/Director)
         # Also includes resources accessible via active delegation grants.
         scoped_resource_ids: Optional[list] = None
-        if self.current_user.role == "Manager":
+        if self.current_user.role == "Manager" and not self.current_user.is_manager_reader:
             from api.app.services.reporting import ReportingService
             _rs = ReportingService(self.db, self.current_user)
             _ids = list(_rs.get_accessible_resource_ids())

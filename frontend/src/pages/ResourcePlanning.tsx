@@ -228,20 +228,17 @@ export const ResourcePlanning: React.FC = () => {
 
   // Derive the manager's own CC from the cached resource record (context) + scoped resources list.
   // Scoped resources always includes the manager's own resource even when they have no supply lines.
-  // For ManagerReader: also fetch delegations to identify which other CCs are delegated.
+  // Also fetch delegations for any Manager so delegated CCs appear in the Add Line dropdown.
   useEffect(() => {
     if (!user?.object_id || !isAnyManager || !myResource) return;
     const rid: string | null = myResource.resource_id;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const fetches: Promise<any>[] = [lookupsApi.listResourcesScoped()];
-    if (isManagerReader) {
-      fetches.push(adminApi.listDelegatesAsDelegate());
-    }
+    const fetches: Promise<any>[] = [lookupsApi.listResourcesScoped(), adminApi.listDelegatesAsDelegate()];
     Promise.all(fetches).then(([resources, delegates]) => {
       const userRes = rid ? resources.find((r: { id: string; cost_center_id: string; user_id?: string | null }) => r.id === rid) : null;
       setManagerCcId(userRes?.cost_center_id ?? null);
       setScopedCcIds(new Set(resources.map((r: { cost_center_id: string }) => r.cost_center_id).filter(Boolean)));
-      if (isManagerReader && delegates) {
+      if (delegates) {
         const activeDelegatorIds = new Set(
           delegates.filter((d: { is_active: boolean; delegator_id: string }) => d.is_active).map((d: { delegator_id: string }) => d.delegator_id)
         );
@@ -253,7 +250,7 @@ export const ResourcePlanning: React.FC = () => {
         setDelegatedCcIds(ccIds);
       }
     }).catch(() => {});
-  }, [user?.object_id, isAnyManager, isManagerReader, myResource]);
+  }, [user?.object_id, isAnyManager, myResource]);
 
   // Default KPI selection: earliest open period
   useEffect(() => {
@@ -330,14 +327,14 @@ export const ResourcePlanning: React.FC = () => {
 
   // CCs the user may write supply lines for.
   // Backend scoping is authoritative — every CC present in the loaded supply/demand data is manageable.
-  // We also include own CC (always) and delegated CCs (ManagerReader) so the dropdown is correct even
+  // We also include own CC (always) and delegated CCs so the dropdown is correct even
   // when no lines exist yet for those CCs.
   const editableCcIds = useMemo((): Set<string> | null => {
     if (!isAnyManager) return null;
     const ids = new Set<string>();
     if (managerCcId) ids.add(managerCcId);
-    // ManagerReader: also add explicitly delegated CCs (may have no lines yet)
-    if (isManagerReader) delegatedCcIds.forEach(id => ids.add(id));
+    // Add delegated CCs for any manager who has active delegations (may have no lines yet)
+    delegatedCcIds.forEach(id => ids.add(id));
     // All managers: include every CC present in backend-scoped data
     supplyLines.forEach(s => { if (s.cost_center_id) ids.add(s.cost_center_id); });
     demandLines.forEach(d => { if (d.cost_center_id) ids.add(d.cost_center_id); });
@@ -345,7 +342,7 @@ export const ResourcePlanning: React.FC = () => {
     scopedCcIds.forEach(id => ids.add(id));
     // Return null only while still loading (nothing resolved yet)
     return ids.size > 0 ? ids : null;
-  }, [isAnyManager, isManagerReader, managerCcId, delegatedCcIds, supplyLines, demandLines, scopedCcIds]);
+  }, [isAnyManager, managerCcId, delegatedCcIds, supplyLines, demandLines, scopedCcIds]);
 
   const managedCcIds = useMemo(() => {
     if (!isManager || !user?.id) return new Set<string>();

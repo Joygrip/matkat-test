@@ -137,12 +137,66 @@ class ReportingService:
         ).all()
         return [row[0] for row in resources]
 
+    def _get_subordinate_object_ids_for(self, tenant_id: str, object_id: str) -> set[str]:
+        """Return subordinate Entra object IDs for an arbitrary manager (tenant_id, object_id)."""
+        cache_rows = self.db.query(ReportingCache.employee_object_id).filter(
+            and_(
+                ReportingCache.tenant_id == tenant_id,
+                ReportingCache.manager_object_id == object_id,
+            )
+        ).all()
+
+        override_rows = self.db.query(ManagerOverride.employee_object_id).filter(
+            and_(
+                ManagerOverride.tenant_id == tenant_id,
+                ManagerOverride.manager_object_id == object_id,
+                ManagerOverride.is_active == True,
+            )
+        ).all()
+
+        return {row[0] for row in cache_rows} | {row[0] for row in override_rows}
+
+    def _get_accessible_resource_ids_for_user(self, user: User) -> list[str]:
+        """
+        Mirror of get_accessible_resource_ids() but for an arbitrary User record.
+
+        Used by get_delegated_resource_ids() so that delegation transfers the full
+        set of resources the delegator can see (hierarchy-based), not just the CCs
+        they own via ro_user_id/director_user_id.
+        """
+        subordinate_oids = self._get_subordinate_object_ids_for(user.tenant_id, user.object_id)
+
+        if not subordinate_oids:
+            return self._get_resource_ids_for_user(user)
+
+        users = self.db.query(User.id).filter(
+            and_(
+                User.tenant_id == user.tenant_id,
+                User.object_id.in_(subordinate_oids),
+            )
+        ).all()
+        user_ids = [row[0] for row in users]
+
+        if not user_ids:
+            return []
+
+        resources = self.db.query(Resource.id).filter(
+            and_(
+                Resource.tenant_id == user.tenant_id,
+                Resource.user_id.in_(user_ids),
+                Resource.resource_type == ResourceType.EMPLOYEE,
+                Resource.is_active == True,
+            )
+        ).all()
+
+        return [row[0] for row in resources]
+
     def get_delegated_resource_ids(self, user_db_id: str) -> list[str]:
         """
         Return resource IDs accessible via active delegation grants where user_db_id is the delegate.
 
-        For each delegator the user is actively delegated for, resolve that delegator's
-        cost-center-scoped resources and return the union.
+        For each delegator, resolves the full set of resources they can access via their
+        org hierarchy (same view they see themselves), not just CCs they own as RO/Director.
         """
         from api.app.models.core import ApprovalDelegate
 
@@ -167,7 +221,7 @@ class ReportingService:
             ).first()
             if not delegator:
                 continue
-            for rid in self._get_resource_ids_for_user(delegator):
+            for rid in self._get_accessible_resource_ids_for_user(delegator):
                 if rid not in seen:
                     seen.add(rid)
                     result.append(rid)

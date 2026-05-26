@@ -231,7 +231,8 @@ async def list_resources_scoped(
     query = _apply_planning_exclusions(query, settings.planning_excluded_countries_list, settings.planning_excluded_email_prefixes_list)
     if current_user.role in _SCOPED_ROLES and not current_user.is_manager_reader:
         from api.app.services.reporting import ReportingService
-        scoped_ids = list(ReportingService(db, current_user).get_accessible_resource_ids())
+        svc = ReportingService(db, current_user)
+        scoped_ids = list(svc.get_accessible_resource_ids())
         # Also include the manager's own resource so they can enter their own actuals
         mgr_user = db.query(User).filter(
             and_(User.tenant_id == current_user.tenant_id, User.object_id == current_user.object_id)
@@ -246,6 +247,10 @@ async def list_resources_scoped(
             ).first()
             if own_resource and own_resource.id not in scoped_ids:
                 scoped_ids.append(own_resource.id)
+            # Include resources from delegated CCs so the Add Line dialog shows them
+            for rid in svc.get_delegated_resource_ids(mgr_user.id):
+                if rid not in scoped_ids:
+                    scoped_ids.append(rid)
         query = query.filter(Resource.id.in_(scoped_ids))
     return query.order_by(Resource.display_name).all()
 

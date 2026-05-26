@@ -272,7 +272,7 @@ class FinanceService:
         # Manager restriction: scope to accessible resources via reporting hierarchy
         # Also includes resources accessible via active delegation grants.
         scoped_resource_ids_cc: Optional[list] = None
-        if self.current_user.role == "Manager":
+        if self.current_user.role == "Manager" and not self.current_user.is_manager_reader:
             from api.app.services.reporting import ReportingService
             _rs2 = ReportingService(self.db, self.current_user)
             _ids2 = list(_rs2.get_accessible_resource_ids())
@@ -415,7 +415,6 @@ class FinanceService:
             ActualLine.tenant_id == self.current_user.tenant_id,
             ActualLine.year == year,
             ActualLine.month == month,
-            ActualLine.id.in_(approved_subq_emp),
         ]
         if project_id:
             actuals_filters.append(ActualLine.project_id == project_id)

@@ -6,7 +6,7 @@ import type { KPIStripItem } from '../shared/DashboardKPIStrip';
 import { DashboardSection } from './DashboardSection';
 import { FinanceOverview } from '../shared/FinanceOverview';
 import { actualsApi } from '../../api/actuals';
-import type { ActualLine } from '../../api/actuals';
+import type { ActualLine, ActualApprovalStatus } from '../../api/actuals';
 import type { DemandLine, SupplyLine } from '../../api/planning';
 import type { CostCenter, ApprovalDelegate } from '../../api/admin';
 import { adminApi } from '../../api/admin';
@@ -177,6 +177,42 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightRegular,
     marginTop: '2px',
   },
+
+  rejectionAlert: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '12px',
+    backgroundColor: '#FEF2F2',
+    borderLeft: '4px solid #DC2626',
+    borderRadius: '8px',
+    padding: '16px',
+  },
+  rejectionAlertIcon: {
+    fontSize: '20px',
+    flexShrink: 0,
+    lineHeight: '1.4',
+  },
+  rejectionAlertTitle: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    color: '#991B1B',
+    marginBottom: '2px',
+  },
+  rejectionAlertDesc: {
+    fontSize: tokens.fontSizeBase200,
+    color: '#7F1D1D',
+    marginBottom: '6px',
+  },
+  rejectionAlertLink: {
+    fontSize: tokens.fontSizeBase200,
+    color: '#DC2626',
+    fontWeight: tokens.fontWeightSemibold,
+    cursor: 'pointer',
+    textDecoration: 'underline',
+    background: 'none',
+    border: 'none',
+    padding: 0,
+  },
 });
 
 // ─── props ────────────────────────────────────────────────────────────────────
@@ -202,10 +238,17 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
   const [actuals, setActuals] = useState<ActualLine[]>([]);
   const [actualsLoading, setActualsLoading] = useState(false);
   const [activeDelegations, setActiveDelegations] = useState<ApprovalDelegate[]>([]);
+  const [myApprovalStatuses, setMyApprovalStatuses] = useState<Record<string, ActualApprovalStatus>>({});
 
   useEffect(() => {
     adminApi.listDelegatesAsDelegate()
       .then(dels => setActiveDelegations(dels.filter(d => d.is_active)))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    actualsApi.getMyApprovalStatuses()
+      .then(statuses => setMyApprovalStatuses(statuses))
       .catch(() => {});
   }, []);
 
@@ -275,6 +318,8 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
     [approvalStatuses],
   );
   // approvalQueue.length === pendingCount once actuals load; use pendingCount for badge (available immediately)
+
+  const hasRejectedActuals = Object.values(myApprovalStatuses).some(s => s.status === 'rejected');
 
   // ── KPI strip ──
   const kpiItems: KPIStripItem[] = [
@@ -356,6 +401,25 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
 
   return (
     <div className={styles.sections}>
+
+      {/* ── Rejection alert (own actuals) ── */}
+      {hasRejectedActuals && (
+        <div className={styles.rejectionAlert}>
+          <span className={styles.rejectionAlertIcon}>⚠</span>
+          <div>
+            <div className={styles.rejectionAlertTitle}>Actuals Rejected</div>
+            <div className={styles.rejectionAlertDesc}>
+              One or more of your actuals were rejected and need resubmission.
+            </div>
+            <button
+              className={styles.rejectionAlertLink}
+              onClick={() => navigate('/actuals')}
+            >
+              Go to FTE Approval →
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Delegation notices ── */}
       {activeDelegations.map(d => (

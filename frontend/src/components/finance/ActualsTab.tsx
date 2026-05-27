@@ -1041,6 +1041,9 @@ export function ActualsTab({
                         if (overallStatus === 'MISSING') {
                           return <span style={{ color:C.ink3, fontSize:11 }}>—</span>;
                         }
+                        if (overallStatus === 'REJECTED') {
+                          return <span style={{ color:'#8a99a8', fontSize:11 }}>—</span>;
+                        }
                         return <span style={{ color:C.ink3, fontSize:11 }}>— not yet routed</span>;
                       })()}
                     </td>

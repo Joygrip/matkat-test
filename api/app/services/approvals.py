@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 import logging
+import threading
 
 from api.app.models.approvals import (
     ApprovalInstance, ApprovalStep, ApprovalAction,
@@ -343,29 +344,56 @@ class ApprovalsService:
             reason=comment,
         )
 
-        # Fire-and-forget rejection email — must not block or fail the rejection itself
+        # Fire-and-forget rejection email — runs in background so the user gets an
+        # immediate response regardless of Graph API latency.
         if instance.subject_type == "actuals":
-            try:
-                schedule = self.db.query(NotificationSchedule).filter(
-                    NotificationSchedule.notification_type == NotificationScheduleType.APPROVAL_REJECTION.value,
-                    NotificationSchedule.tenant_id == self.current_user.tenant_id,
-                    NotificationSchedule.is_active == True,  # noqa: E712
-                ).first()
-                if schedule:
-                    actual = self.db.query(ActualLine).filter(
-                        ActualLine.id == instance.subject_id
-                    ).first()
-                    if actual:
-                        excluded = schedule.excluded_emails or []
-                        rejector_name = user.display_name if user else "Unknown"
-                        NotificationsService(self.db, self.current_user).send_rejection_notification(
-                            actual=actual,
-                            rejector_name=rejector_name,
-                            comment=comment,
-                            excluded_emails=excluded,
-                        )
-            except Exception as exc:
-                logging.error("Failed to send rejection notification: %s", exc)
+            _subject_id  = instance.subject_id
+            _step_id     = step.id
+            _approver_id = step.approver_id
+            _tenant_id   = self.current_user.tenant_id
+            _current_user = self.current_user
+
+            def _send_rejection_email():
+                try:
+                    from api.app.db.engine import SessionLocal
+                    bg_db = SessionLocal()
+                    try:
+                        actual = bg_db.query(ActualLine).filter(
+                            ActualLine.id == _subject_id
+                        ).first()
+                        if actual:
+                            rejector = bg_db.query(User).filter(
+                                User.id == _approver_id
+                            ).first()
+                            rejector_name = rejector.display_name if rejector else "Unknown"
+
+                            action = bg_db.query(ApprovalAction).filter(
+                                ApprovalAction.step_id == _step_id,
+                                ApprovalAction.action == "reject",
+                            ).order_by(ApprovalAction.created_at.desc()).first()
+                            bg_comment = action.comment if action else None
+
+                            schedule = bg_db.query(NotificationSchedule).filter(
+                                NotificationSchedule.notification_type == NotificationScheduleType.APPROVAL_REJECTION.value,
+                                NotificationSchedule.tenant_id == _tenant_id,
+                                NotificationSchedule.is_active == True,  # noqa: E712
+                            ).first()
+
+                            if schedule:
+                                excluded = schedule.excluded_emails or []
+                                bg_svc = NotificationsService(bg_db, _current_user)
+                                bg_svc.send_rejection_notification(
+                                    actual=actual,
+                                    rejector_name=rejector_name,
+                                    comment=bg_comment,
+                                    excluded_emails=excluded,
+                                )
+                    finally:
+                        bg_db.close()
+                except Exception as exc:
+                    logging.error("Failed to send rejection notification: %s", exc)
+
+            threading.Thread(target=_send_rejection_email, daemon=True).start()
 
         return instance
 

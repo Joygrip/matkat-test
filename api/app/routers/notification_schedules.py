@@ -26,7 +26,7 @@ _ROLES = (UserRole.ADMIN, UserRole.FINANCE)
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class NotificationScheduleCreate(BaseModel):
-    notification_type: NotificationScheduleType
+    notification_type: str
     trigger_type: TriggerType
     trigger_value: int
     time_of_day: str
@@ -39,7 +39,7 @@ class NotificationScheduleCreate(BaseModel):
 
 
 class NotificationScheduleUpdate(BaseModel):
-    notification_type: Optional[NotificationScheduleType] = None
+    notification_type: Optional[str] = None
     trigger_type: Optional[TriggerType] = None
     trigger_value: Optional[int] = None
     time_of_day: Optional[str] = None
@@ -100,7 +100,7 @@ def _to_response(s: NotificationSchedule) -> NotificationScheduleResponse:
     return NotificationScheduleResponse(
         id=s.id,
         tenant_id=s.tenant_id,
-        notification_type=s.notification_type.value,
+        notification_type=s.notification_type,
         trigger_type=s.trigger_type.value,
         trigger_value=s.trigger_value,
         time_of_day=s.time_of_day,

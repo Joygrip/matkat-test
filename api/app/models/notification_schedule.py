@@ -41,8 +41,8 @@ class NotificationSchedule(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_generate_uuid)
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
 
-    notification_type: Mapped[NotificationScheduleType] = mapped_column(
-        SQLEnum(NotificationScheduleType), nullable=False
+    notification_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
     )
     trigger_type: Mapped[TriggerType] = mapped_column(
         SQLEnum(TriggerType), nullable=False

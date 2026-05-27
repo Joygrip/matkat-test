@@ -231,7 +231,16 @@ async def list_resources_scoped(
     query = _apply_planning_exclusions(query, settings.planning_excluded_countries_list, settings.planning_excluded_email_prefixes_list)
     if current_user.role in _SCOPED_ROLES and not current_user.is_manager_reader:
         from api.app.services.reporting import ReportingService
-        scoped_ids = list(ReportingService(db, current_user).get_accessible_resource_ids())
+        _rs = ReportingService(db, current_user)
+        scoped_ids = list(_rs.get_accessible_resource_ids())
+        _cur_user = db.query(User).filter(
+            User.tenant_id == current_user.tenant_id,
+            User.object_id == current_user.object_id,
+        ).first()
+        if _cur_user:
+            for _rid in _rs.get_delegated_resource_ids(_cur_user.id):
+                if _rid not in scoped_ids:
+                    scoped_ids.append(_rid)
         # Also include the manager's own resource so they can enter their own actuals
         mgr_user = db.query(User).filter(
             and_(User.tenant_id == current_user.tenant_id, User.object_id == current_user.object_id)

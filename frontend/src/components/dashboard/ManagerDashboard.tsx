@@ -326,7 +326,6 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
     {
       label: 'My Team',
       value: teamSize,
-      subtitle: `${teamSize} ${teamSize === 1 ? 'person' : 'people'}`,
     },
     {
       label: 'Demand on Team',

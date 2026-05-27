@@ -388,10 +388,21 @@ class FinanceService:
         from sqlalchemy import func
 
         # Manager restriction: scope to accessible resources via reporting hierarchy
+        # Also includes resources accessible via active delegation grants.
         scoped_resource_ids_emp: Optional[list] = None
         if self.current_user.role == "Manager" and not self.current_user.is_manager_reader:
             from api.app.services.reporting import ReportingService
-            scoped_resource_ids_emp = ReportingService(self.db, self.current_user).get_accessible_resource_ids()
+            _rs = ReportingService(self.db, self.current_user)
+            _ids = list(_rs.get_accessible_resource_ids())
+            _cur_user = self.db.query(User).filter(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            ).first()
+            if _cur_user:
+                for _rid in _rs.get_delegated_resource_ids(_cur_user.id):
+                    if _rid not in _ids:
+                        _ids.append(_rid)
+            scoped_resource_ids_emp = _ids
             if not scoped_resource_ids_emp:
                 return []
 

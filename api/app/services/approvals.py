@@ -12,8 +12,10 @@ from api.app.models.approvals import (
 )
 from api.app.models.actuals import ActualLine
 from api.app.models.core import User, Resource, ManagerOverride, ApprovalDelegate
+from api.app.models.notification_schedule import NotificationSchedule, NotificationScheduleType
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
+from api.app.services.notifications import NotificationsService
 
 
 class ApprovalsService:
@@ -332,7 +334,7 @@ class ApprovalsService:
         
         self.db.commit()
         self.db.refresh(instance)
-        
+
         log_audit(
             self.db, self.current_user,
             action="reject",
@@ -340,7 +342,31 @@ class ApprovalsService:
             entity_id=step_id,
             reason=comment,
         )
-        
+
+        # Fire-and-forget rejection email — must not block or fail the rejection itself
+        if instance.subject_type == "actuals":
+            try:
+                schedule = self.db.query(NotificationSchedule).filter(
+                    NotificationSchedule.notification_type == NotificationScheduleType.APPROVAL_REJECTION,
+                    NotificationSchedule.tenant_id == self.current_user.tenant_id,
+                    NotificationSchedule.is_active == True,  # noqa: E712
+                ).first()
+                if schedule:
+                    actual = self.db.query(ActualLine).filter(
+                        ActualLine.id == instance.subject_id
+                    ).first()
+                    if actual:
+                        excluded = schedule.excluded_emails or []
+                        rejector_name = user.display_name if user else "Unknown"
+                        NotificationsService(self.db, self.current_user).send_rejection_notification(
+                            actual=actual,
+                            rejector_name=rejector_name,
+                            comment=comment,
+                            excluded_emails=excluded,
+                        )
+            except Exception as exc:
+                logging.error("Failed to send rejection notification: %s", exc)
+
         return instance
 
     def _get_user(self) -> Optional[User]:

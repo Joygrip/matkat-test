@@ -406,11 +406,14 @@ interface NotificationLogEntry {
 }
 
 const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
-  conflict_alerts: 'Conflict Alerts',
-  missing_actuals: 'Missing Actuals Reminder',
-  planning_reminder: 'Planning Reminder',
-  approval_reminder: 'Approval Reminder',
+  conflict_alerts:    'Conflict Alerts',
+  missing_actuals:    'Missing Actuals Reminder',
+  planning_reminder:  'Planning Reminder',
+  approval_reminder:  'Approval Reminder',
+  approval_rejection: 'Rejection Notification',
 };
+
+const EVENT_DRIVEN_TYPES = new Set(['approval_rejection']);
 
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -430,6 +433,8 @@ function triggerLabelFull(type: string, value: number, time: string): string {
 }
 
 function computeNextRun(s: NotificationScheduleItem): string {
+  if (EVENT_DRIVEN_TYPES.has(s.notification_type)) return '—';
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -473,6 +478,15 @@ function snapToQuarterHour(time: string): string {
 
 function scheduleSummary(form: Partial<NotificationScheduleItem>): string {
   const typeName = NOTIFICATION_TYPE_LABELS[form.notification_type ?? ''] ?? (form.notification_type ?? 'Notification');
+
+  if (EVENT_DRIVEN_TYPES.has(form.notification_type ?? '')) {
+    const recips: string[] = [];
+    if (form.notify_employee) recips.push('the employee');
+    if (form.notify_manager) recips.push('the proxy signer (if any)');
+    const recipStr = recips.length === 0 ? '' : ` to ${recips.join(' and ')}`;
+    return `${typeName} is sent immediately on each rejection${recipStr}. No schedule applies.`;
+  }
+
   const time = form.time_of_day ?? '00:00';
 
   let triggerDesc = 'on the scheduled trigger';
@@ -819,18 +833,26 @@ function NotificationsPanel() {
               {schedules.map((s) => (
                 <TableRow key={s.id}>
                   <TableCell>{NOTIFICATION_TYPE_LABELS[s.notification_type] ?? s.notification_type}</TableCell>
-                  <TableCell>{triggerLabelFull(s.trigger_type, s.trigger_value, s.time_of_day)}</TableCell>
+                  <TableCell>
+                    {EVENT_DRIVEN_TYPES.has(s.notification_type)
+                      ? <Badge appearance="tint" color="informative" size="small">Event-driven</Badge>
+                      : triggerLabelFull(s.trigger_type, s.trigger_value, s.time_of_day)}
+                  </TableCell>
                   <TableCell>
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {s.notify_pm && <Badge appearance="tint" color="brand" size="small">PM</Badge>}
+                      {s.notify_pm && !EVENT_DRIVEN_TYPES.has(s.notification_type) && (
+                        <Badge appearance="tint" color="brand" size="small">PM</Badge>
+                      )}
                       {s.notify_manager && <Badge appearance="tint" color="warning" size="small">Manager</Badge>}
-                      {s.notify_finance && <Badge appearance="tint" color="success" size="small">Finance</Badge>}
-                      {s.notify_employee && s.notification_type === 'missing_actuals' && (
+                      {s.notify_finance && !EVENT_DRIVEN_TYPES.has(s.notification_type) && (
+                        <Badge appearance="tint" color="success" size="small">Finance</Badge>
+                      )}
+                      {s.notify_employee && (s.notification_type === 'missing_actuals' || EVENT_DRIVEN_TYPES.has(s.notification_type)) && (
                         <Badge appearance="tint" color="informative" size="small">Employee</Badge>
                       )}
                     </div>
                   </TableCell>
-                  <TableCell>{s.time_of_day} CEST</TableCell>
+                  <TableCell>{EVENT_DRIVEN_TYPES.has(s.notification_type) ? '—' : `${s.time_of_day} CEST`}</TableCell>
                   <TableCell>
                     <Badge
                       className={panelStyles.statusBadge}
@@ -1157,10 +1179,30 @@ function NotificationsPanel() {
                   <option value="missing_actuals">Missing Actuals Reminder</option>
                   <option value="planning_reminder">Planning Reminder</option>
                   <option value="approval_reminder">Approval Reminder</option>
+                  <option value="approval_rejection">Rejection Notification</option>
                 </select>
               </div>
 
-              {/* Trigger Type — radio buttons */}
+              {/* Event-driven info banner — shown instead of schedule fields */}
+              {EVENT_DRIVEN_TYPES.has(form.notification_type ?? '') && (
+                <div style={{
+                  padding: '12px 14px',
+                  background: tokens.colorNeutralBackground2,
+                  border: `1px solid ${tokens.colorNeutralStroke1}`,
+                  borderRadius: tokens.borderRadiusMedium,
+                  marginBottom: tokens.spacingVerticalM,
+                }}>
+                  <Text weight="semibold" style={{ display: 'block', marginBottom: '4px' }}>Event-driven notification</Text>
+                  <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                    This notification fires immediately when an approver rejects an actual — not on a schedule.
+                    The trigger type, day, and time settings do not apply.
+                    Use the Active toggle and Excluded Recipients to control who receives it.
+                  </Text>
+                </div>
+              )}
+
+              {/* Trigger Type + pickers + time — hidden for event-driven types */}
+              {!EVENT_DRIVEN_TYPES.has(form.notification_type ?? '') && (<>
               <div className={panelStyles.dialogField}>
                 <Label required>Trigger Type</Label>
                 <RadioGroup
@@ -1297,12 +1339,13 @@ function NotificationsPanel() {
                   Will send at {form.time_of_day ?? '07:00'} CEST
                 </Text>
               </div>
+              </>)}
 
               {/* Recipients */}
               <div className={panelStyles.dialogField}>
                 <Label>Recipients</Label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
-                  {form.notification_type !== 'missing_actuals' && (
+                  {!EVENT_DRIVEN_TYPES.has(form.notification_type ?? '') && form.notification_type !== 'missing_actuals' && (
                     <Checkbox
                       label="Notify PMs (scoped to their projects)"
                       checked={form.notify_pm !== false}
@@ -1310,18 +1353,24 @@ function NotificationsPanel() {
                     />
                   )}
                   <Checkbox
-                    label="Notify Managers / ROs (scoped to their department)"
+                    label={EVENT_DRIVEN_TYPES.has(form.notification_type ?? '')
+                      ? 'Notify the proxy signer (manager who entered actuals on behalf of employee)'
+                      : 'Notify Managers / ROs (scoped to their department)'}
                     checked={form.notify_manager !== false}
                     onChange={(_, d) => setForm({ ...form, notify_manager: d.checked as boolean })}
                   />
-                  <Checkbox
-                    label="Notify Finance & Admin (full overview)"
-                    checked={form.notify_finance !== false}
-                    onChange={(_, d) => setForm({ ...form, notify_finance: d.checked as boolean })}
-                  />
-                  {form.notification_type === 'missing_actuals' && (
+                  {!EVENT_DRIVEN_TYPES.has(form.notification_type ?? '') && (
                     <Checkbox
-                      label="Notify Employees (their own missing actuals)"
+                      label="Notify Finance & Admin (full overview)"
+                      checked={form.notify_finance !== false}
+                      onChange={(_, d) => setForm({ ...form, notify_finance: d.checked as boolean })}
+                    />
+                  )}
+                  {(form.notification_type === 'missing_actuals' || EVENT_DRIVEN_TYPES.has(form.notification_type ?? '')) && (
+                    <Checkbox
+                      label={EVENT_DRIVEN_TYPES.has(form.notification_type ?? '')
+                        ? 'Notify the employee whose actual was rejected'
+                        : 'Notify Employees (their own missing actuals)'}
                       checked={form.notify_employee !== false}
                       onChange={(_, d) => setForm({ ...form, notify_employee: d.checked as boolean })}
                     />

@@ -109,6 +109,12 @@ NOTIFICATION_TEMPLATES: dict[str, dict[str, str]] = {
             "for {resource_name}. Please sign your actual lines as soon as possible."
         ),
     },
+    "approval_rejection": {
+        "subject": "MatKat — Your actual was rejected",
+        "body": (
+            "Your actual for {project_name} ({period}) was rejected by {rejector_name}."
+        ),
+    },
 }
 
 # Sentinel returned when a Graph call fails with a network / auth error.
@@ -121,11 +127,12 @@ FETCH_FAILED = "__GRAPH_MAIL_ERROR__"
 
 _BANNER_CONFIGS: dict[str, tuple[str, str, str]] = {
     # (bg, left_border, title_color)
-    "conflict_alert":    ("#fee2e2", "#dc2626", "#991b1b"),
-    "missing_actuals":   ("#fef9c3", "#ca8a04", "#854d0e"),
-    "planning_reminder": ("#dbeafe", "#2563eb", "#1e40af"),
-    "approval_reminder": ("#ffedd5", "#ea580c", "#9a3412"),
-    "test":              ("#dcfce7", "#16a34a", "#166534"),
+    "conflict_alert":      ("#fee2e2", "#dc2626", "#991b1b"),
+    "missing_actuals":     ("#fef9c3", "#ca8a04", "#854d0e"),
+    "planning_reminder":   ("#dbeafe", "#2563eb", "#1e40af"),
+    "approval_reminder":   ("#ffedd5", "#ea580c", "#9a3412"),
+    "approval_rejection":  ("#fee2e2", "#dc2626", "#991b1b"),
+    "test":                ("#dcfce7", "#16a34a", "#166534"),
 }
 
 
@@ -452,12 +459,89 @@ def _build_test_html(_context: dict) -> str:
     )
 
 
+def _build_approval_rejection_html(context: dict) -> str:
+    employee_name = context.get("employee_name", "")
+    project_name = context.get("project_name", "")
+    period = context.get("period", "")
+    fte_percent = context.get("fte_percent", "")
+    rejector_name = context.get("rejector_name", "")
+    comment = context.get("comment")
+
+    row = (
+        "<tr style='background:#ffffff;'>"
+        f"<td style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        f"color:#111827;border-bottom:1px solid #f3f4f6;'>{_esc(employee_name)}</td>"
+        f"<td style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        f"color:#111827;border-bottom:1px solid #f3f4f6;'>{_esc(project_name)}</td>"
+        f"<td style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        f"color:#111827;border-bottom:1px solid #f3f4f6;'>{_esc(period)}</td>"
+        f"<td style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        f"color:#111827;text-align:right;border-bottom:1px solid #f3f4f6;'>{_esc(fte_percent)}%</td>"
+        f"<td style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        f"color:#111827;border-bottom:1px solid #f3f4f6;'>{_esc(rejector_name)}</td>"
+        "</tr>"
+    )
+
+    table = (
+        "<table width='100%' cellpadding='0' cellspacing='0' "
+        "style='border-collapse:collapse;border:1px solid #e5e7eb;margin:16px 0;'>"
+        "<thead><tr style='background:#f9fafb;'>"
+        "<th style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        "font-weight:bold;color:#6b7280;text-align:left;"
+        "border-bottom:1px solid #e5e7eb;'>Employee</th>"
+        "<th style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        "font-weight:bold;color:#6b7280;text-align:left;"
+        "border-bottom:1px solid #e5e7eb;'>Project</th>"
+        "<th style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        "font-weight:bold;color:#6b7280;text-align:left;"
+        "border-bottom:1px solid #e5e7eb;'>Period</th>"
+        "<th style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        "font-weight:bold;color:#6b7280;text-align:right;"
+        "border-bottom:1px solid #e5e7eb;'>FTE%</th>"
+        "<th style='padding:10px 12px;font-family:Arial,sans-serif;font-size:13px;"
+        "font-weight:bold;color:#6b7280;text-align:left;"
+        "border-bottom:1px solid #e5e7eb;'>Rejected By</th>"
+        f"</tr></thead><tbody>{row}</tbody></table>"
+    )
+
+    comment_html = ""
+    if comment:
+        comment_html = (
+            "<blockquote style='margin:16px 0 0;padding:12px 16px;"
+            "background:#fef2f2;border-left:4px solid #dc2626;"
+            "font-family:Arial,sans-serif;font-size:13px;color:#991b1b;'>"
+            f"<strong>Reason:</strong> {_esc(comment)}"
+            "</blockquote>"
+        )
+
+    body_html = (
+        f"<p style='margin:0 0 16px;font-family:Arial,sans-serif;font-size:14px;color:#374151;'>"
+        f"Your actual for <strong>{_esc(project_name)}</strong> ({_esc(period)}) "
+        f"was rejected by {_esc(rejector_name)}. Please review and resubmit."
+        f"</p>"
+        f"{table}"
+        f"{comment_html}"
+        f"{_cta_button('Review in MatKat →')}"
+    )
+
+    bg, border, title_color = _BANNER_CONFIGS["approval_rejection"]
+    return _build_base_html(
+        banner_bg=bg,
+        banner_border=border,
+        banner_title_color=title_color,
+        banner_title="Actual Rejected",
+        banner_subtitle=f"{project_name} — {period}",
+        body_html=body_html,
+    )
+
+
 _HTML_BUILDERS = {
-    "conflict_alert":    _build_conflict_alert_html,
-    "missing_actuals":   _build_missing_actuals_html,
-    "planning_reminder": _build_planning_reminder_html,
-    "approval_reminder": _build_approval_reminder_html,
-    "test":              _build_test_html,
+    "conflict_alert":     _build_conflict_alert_html,
+    "missing_actuals":    _build_missing_actuals_html,
+    "planning_reminder":  _build_planning_reminder_html,
+    "approval_reminder":  _build_approval_reminder_html,
+    "approval_rejection": _build_approval_rejection_html,
+    "test":               _build_test_html,
 }
 
 
@@ -480,6 +564,16 @@ def build_approval_reminder_html(context: dict) -> str:
         total — total number of pending approvals
     """
     return _build_approval_reminder_html(context)
+
+
+def build_approval_rejection_html(context: dict) -> str:
+    """Build rich card-style HTML for an actual rejection notification.
+
+    context keys:
+        employee_name, project_name, period, fte_percent, rejector_name — rejection details
+        comment — optional rejection reason (may be None)
+    """
+    return _build_approval_rejection_html(context)
 
 
 def build_phase_html(template_key: str, message: str, year: int, month: int) -> str:

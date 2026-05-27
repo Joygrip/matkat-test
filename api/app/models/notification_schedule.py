@@ -21,10 +21,11 @@ def _generate_uuid() -> str:
 
 
 class NotificationScheduleType(str, enum.Enum):
-    CONFLICT_ALERTS = "conflict_alerts"
-    MISSING_ACTUALS = "missing_actuals"
-    PLANNING_REMINDER = "planning_reminder"
-    APPROVAL_REMINDER = "approval_reminder"
+    CONFLICT_ALERTS    = "conflict_alerts"
+    MISSING_ACTUALS    = "missing_actuals"
+    PLANNING_REMINDER  = "planning_reminder"
+    APPROVAL_REMINDER  = "approval_reminder"
+    APPROVAL_REJECTION = "approval_rejection"
 
 
 class TriggerType(str, enum.Enum):

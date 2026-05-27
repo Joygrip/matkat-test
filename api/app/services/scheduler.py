@@ -100,6 +100,8 @@ def _should_fire(schedule: NotificationSchedule, now_local: datetime, db) -> boo
 def _dispatch(service: NotificationsService, schedule: NotificationSchedule, year: int, month: int):
     excluded = schedule.excluded_emails or []
     ntype = schedule.notification_type
+    if ntype == NotificationScheduleType.APPROVAL_REJECTION:
+        return {}  # event-driven only — never fired by the scheduler
     if ntype == NotificationScheduleType.CONFLICT_ALERTS:
         return service.run_conflict_alerts(
             year, month,
@@ -150,6 +152,9 @@ def _run_tick() -> None:
 
         for schedule in schedules:
             try:
+                if schedule.notification_type == NotificationScheduleType.APPROVAL_REJECTION:
+                    continue  # event-driven — never fired by the scheduler
+
                 if not _should_fire(schedule, now_local, db):
                     continue
 

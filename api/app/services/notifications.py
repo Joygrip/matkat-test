@@ -35,6 +35,8 @@ from api.app.services.audit import log_audit
 from api.app.services.conflict_detection import ConflictDetectionService
 from api.app.services.graph_mail import (
     GraphMailService,
+    NOTIFICATION_TEMPLATES,
+    build_approval_rejection_html,
     build_approval_reminder_html,
     build_conflict_alert_html,
     build_phase_html,
@@ -1576,6 +1578,90 @@ class NotificationsService:
             parts.append(resource_id)
         parts.append(recipient_user_id or "")
         return "|".join(parts)
+
+    # ------------------------------------------------------------------
+    # Event-driven: rejection notification
+    # ------------------------------------------------------------------
+
+    def send_rejection_notification(
+        self,
+        actual: ActualLine,
+        rejector_name: str,
+        comment: Optional[str] = None,
+        excluded_emails: Optional[List[str]] = None,
+    ) -> None:
+        """Send an immediate email when an approver rejects an actual.
+
+        Fire-and-forget: exceptions are logged but never re-raised so the
+        rejection itself is never blocked by a mail failure.
+        """
+        try:
+            _excluded = {e.lower() for e in (excluded_emails or [])}
+
+            resource = self.db.query(Resource).filter(
+                Resource.id == actual.resource_id
+            ).first()
+            if not resource or not resource.user_id:
+                logger.warning(
+                    "send_rejection_notification: no resource/user_id for actual %s", actual.id
+                )
+                return
+
+            employee_user = self.db.query(User).filter(User.id == resource.user_id).first()
+            if not employee_user or not employee_user.email:
+                logger.warning(
+                    "send_rejection_notification: no user/email for resource %s", resource.id
+                )
+                return
+
+            project_name = actual.project.name if actual.project else actual.project_id
+            period = f"{actual.year}-{actual.month:02d}"
+
+            context = {
+                "employee_name": employee_user.display_name,
+                "project_name": project_name,
+                "period": period,
+                "fte_percent": actual.actual_fte_percent,
+                "rejector_name": rejector_name,
+                "comment": comment,
+            }
+
+            subject = NOTIFICATION_TEMPLATES["approval_rejection"]["subject"]
+            body_html = build_approval_rejection_html(context)
+
+            recipients: List[str] = []
+            if employee_user.email.lower() not in _excluded:
+                recipients.append(employee_user.email)
+
+            # Also notify the proxy signer (manager who entered it) if different
+            if actual.is_proxy_signed and actual.employee_signed_by:
+                tenant_id = (
+                    self.current_user.tenant_id if self.current_user else actual.tenant_id
+                )
+                proxy_user = self.db.query(User).filter(
+                    User.object_id == actual.employee_signed_by,
+                    User.tenant_id == tenant_id,
+                ).first()
+                if (
+                    proxy_user and proxy_user.email
+                    and proxy_user.email != employee_user.email
+                    and proxy_user.email.lower() not in _excluded
+                ):
+                    recipients.append(proxy_user.email)
+
+            mail = self._get_mail_service()
+            for email in recipients:
+                mail.send_mail(to_email=email, subject=subject, body_html=body_html)
+
+            logger.info(
+                "send_rejection_notification: sent to %s for actual %s",
+                recipients,
+                actual.id,
+            )
+        except Exception as exc:
+            logger.error(
+                "send_rejection_notification failed for actual %s: %s", actual.id, exc
+            )
 
     # ------------------------------------------------------------------
     # Private: mail dispatch

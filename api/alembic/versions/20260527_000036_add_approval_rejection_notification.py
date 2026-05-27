@@ -28,27 +28,10 @@ _ALL_VALUES = (
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    dialect = bind.dialect.name
-
-    if dialect == "mssql":
-        # Step 1: Drop the CHECK constraint
-        op.execute(sa.text(
-            "ALTER TABLE notification_schedules DROP CONSTRAINT ck_ns_notification_type"
-        ))
-
-        # Step 2: Widen the column
-        op.execute(sa.text(
-            "ALTER TABLE notification_schedules ALTER COLUMN notification_type NVARCHAR(50) NOT NULL"
-        ))
-
-        # Step 3: Recreate CHECK constraint with the new value included
-        op.execute(sa.text(
-            "ALTER TABLE notification_schedules ADD CONSTRAINT ck_ns_notification_type "
-            "CHECK (notification_type IN ("
-            "'conflict_alerts', 'missing_actuals', 'planning_reminder', "
-            "'approval_reminder', 'approval_rejection'))"
-        ))
+    # Widen the column
+    op.execute(sa.text(
+        "ALTER TABLE notification_schedules ALTER COLUMN notification_type VARCHAR(50) NOT NULL"
+    ))
 
     # Insert the default approval_rejection schedule if not already present.
     # CURRENT_TIMESTAMP is supported by both SQLite and SQL Server.
@@ -82,19 +65,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Reverse: drop constraint, shrink column, recreate without new value, delete row
     op.execute(sa.text(
         "DELETE FROM notification_schedules WHERE notification_type = 'approval_rejection'"
     ))
     op.execute(sa.text(
-        "ALTER TABLE notification_schedules DROP CONSTRAINT ck_ns_notification_type"
-    ))
-    op.execute(sa.text(
-        "ALTER TABLE notification_schedules ALTER COLUMN notification_type NVARCHAR(50) NOT NULL"
-    ))
-    op.execute(sa.text(
-        "ALTER TABLE notification_schedules ADD CONSTRAINT ck_ns_notification_type "
-        "CHECK (notification_type IN ("
-        "'conflict_alerts', 'missing_actuals', 'planning_reminder', "
-        "'approval_reminder'))"
+        "ALTER TABLE notification_schedules ALTER COLUMN notification_type VARCHAR(17) NOT NULL"
     ))

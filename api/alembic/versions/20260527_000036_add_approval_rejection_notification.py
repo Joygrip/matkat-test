@@ -32,29 +32,22 @@ def upgrade() -> None:
     dialect = bind.dialect.name
 
     if dialect == "mssql":
-        # Drop the existing CHECK constraint (name is auto-generated; find it
-        # via sys.check_constraints) then recreate it with the extended values.
-        op.execute(sa.text("""
-            DECLARE @cn NVARCHAR(256);
-            SELECT @cn = cc.name
-            FROM sys.check_constraints cc
-            JOIN sys.tables      t ON cc.parent_object_id = t.object_id
-            JOIN sys.columns     c ON cc.parent_object_id = c.object_id
-                                  AND cc.parent_column_id = c.column_id
-            WHERE t.name = N'notification_schedules'
-              AND c.name = N'notification_type';
-            IF @cn IS NOT NULL
-                EXEC(N'ALTER TABLE notification_schedules DROP CONSTRAINT [' + @cn + N']')
-        """))
+        # Step 1: Drop the CHECK constraint
         op.execute(sa.text(
-            "ALTER TABLE notification_schedules "
-            "ADD CONSTRAINT ck_ns_notification_type "
-            "CHECK (notification_type IN ("
-            "'conflict_alerts','missing_actuals','planning_reminder',"
-            "'approval_reminder','approval_rejection'))"
+            "ALTER TABLE notification_schedules DROP CONSTRAINT ck_ns_notification_type"
         ))
+
+        # Step 2: Widen the column
         op.execute(sa.text(
             "ALTER TABLE notification_schedules ALTER COLUMN notification_type NVARCHAR(50) NOT NULL"
+        ))
+
+        # Step 3: Recreate CHECK constraint with the new value included
+        op.execute(sa.text(
+            "ALTER TABLE notification_schedules ADD CONSTRAINT ck_ns_notification_type "
+            "CHECK (notification_type IN ("
+            "'conflict_alerts', 'missing_actuals', 'planning_reminder', "
+            "'approval_reminder', 'approval_rejection'))"
         ))
 
     # Insert the default approval_rejection schedule if not already present.
@@ -89,28 +82,19 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    dialect = bind.dialect.name
-
-    # Remove the inserted record
+    # Reverse: drop constraint, shrink column, recreate without new value, delete row
     op.execute(sa.text(
-        f"DELETE FROM notification_schedules WHERE id = '{_RECORD_ID}'"
+        "DELETE FROM notification_schedules WHERE notification_type = 'approval_rejection'"
     ))
-
-    if dialect == "mssql":
-        # Restore the original four-value constraint
-        op.execute(sa.text(
-            "IF EXISTS (SELECT 1 FROM sys.check_constraints "
-            "WHERE name = N'ck_ns_notification_type') "
-            "ALTER TABLE notification_schedules "
-            "DROP CONSTRAINT ck_ns_notification_type"
-        ))
-        op.execute(sa.text(
-            "ALTER TABLE notification_schedules "
-            "ADD CONSTRAINT ck_ns_notification_type "
-            "CHECK (notification_type IN ("
-            "'conflict_alerts','missing_actuals','planning_reminder','approval_reminder'))"
-        ))
-        op.execute(sa.text(
-            "ALTER TABLE notification_schedules ALTER COLUMN notification_type NVARCHAR(17) NOT NULL"
-        ))
+    op.execute(sa.text(
+        "ALTER TABLE notification_schedules DROP CONSTRAINT ck_ns_notification_type"
+    ))
+    op.execute(sa.text(
+        "ALTER TABLE notification_schedules ALTER COLUMN notification_type NVARCHAR(50) NOT NULL"
+    ))
+    op.execute(sa.text(
+        "ALTER TABLE notification_schedules ADD CONSTRAINT ck_ns_notification_type "
+        "CHECK (notification_type IN ("
+        "'conflict_alerts', 'missing_actuals', 'planning_reminder', "
+        "'approval_reminder'))"
+    ))

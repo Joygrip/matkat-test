@@ -24,8 +24,11 @@ import {
   CheckmarkCircle24Regular,
   DismissCircle24Regular,
   ArrowForward24Regular,
+  Edit24Regular,
+  Delete24Regular,
 } from '@fluentui/react-icons';
 import { approvalsApi } from '../../api/approvals';
+import { actualsApi } from '../../api/actuals';
 import { getInitials } from '../../utils/avatar';
 import { EmptyState } from '../EmptyState';
 import { useEmployeeStats } from '../../hooks/useEmployeeStats';
@@ -465,6 +468,12 @@ export function ActualsTab({
   const [proxyStep1Submitting, setProxyStep1Submitting] = useState(false);
   const [proxyStep1Error, setProxyStep1Error] = useState<string | null>(null);
 
+  // ── Edit actual state ──────────────────────────────────────────────────────
+  const [editingRow, setEditingRow] = useState<FinanceActualRow | null>(null);
+  const [editFteValue, setEditFteValue] = useState<number>(0);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
   // ── Employee card expand state (preserved for bottom section) ──────────────
   const [expandedEmployees, setExpandedEmployees] = useState<Set<string>>(new Set());
   const toggleEmployee = useCallback((resourceId: string) => {
@@ -505,6 +514,41 @@ export function ActualsTab({
       setProxyStep1Error(err instanceof Error ? err.message : 'Action failed. Please try again.');
     } finally {
       setProxyStep1Submitting(false);
+    }
+  };
+
+  const handleEditDelete = async () => {
+    if (!editingRow) return;
+    if (!window.confirm(`Delete actual for ${editingRow.employee_name} on ${editingRow.project_name}?`)) return;
+    setEditSubmitting(true);
+    setEditError(null);
+    try {
+      await actualsApi.deleteActualLine(editingRow.actual_id);
+      setEditingRow(null);
+      onActualsReload?.();
+    } catch (err: unknown) {
+      setEditError(err instanceof Error ? err.message : 'Failed to delete actual');
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  const handleEditSave = async () => {
+    if (!editingRow) return;
+    if (editFteValue < 5) {
+      setEditError('FTE must be at least 5%');
+      return;
+    }
+    setEditSubmitting(true);
+    setEditError(null);
+    try {
+      await actualsApi.updateActualLine(editingRow.actual_id, { actual_fte_percent: editFteValue });
+      setEditingRow(null);
+      onActualsReload?.();
+    } catch (err: unknown) {
+      setEditError(err instanceof Error ? err.message : 'Failed to update actual');
+    } finally {
+      setEditSubmitting(false);
     }
   };
 
@@ -1122,6 +1166,16 @@ export function ActualsTab({
                                             {sr.row.can_proxy_approve_step1 && sr.row.approval_instance_id && sr.row.step1_id && (
                                               <Button appearance="subtle" size="small" icon={<ArrowForward24Regular />} title="Proxy approve step 1" onClick={e => { e.stopPropagation(); setProxyStep1Row(sr.row!); setProxyStep1Comment(''); setProxyStep1Error(null); }} />
                                             )}
+                                            {sr.row.actual_id && (effectiveRowStatus?.toUpperCase() === 'PENDING' || effectiveRowStatus?.toUpperCase() === 'REJECTED') && (
+                                              <Button
+                                                appearance="subtle"
+                                                size="small"
+                                                icon={<Edit24Regular />}
+                                                title={effectiveRowStatus?.toUpperCase() === 'REJECTED' ? 'Edit and resubmit' : 'Edit actual value'}
+                                                style={effectiveRowStatus?.toUpperCase() === 'REJECTED' ? { color: C.bad } : undefined}
+                                                onClick={e => { e.stopPropagation(); setEditingRow(sr.row!); setEditFteValue(sr.row!.fte_percent); setEditError(null); }}
+                                              />
+                                            )}
                                           </div>
                                         )}
                                       </td>
@@ -1252,6 +1306,64 @@ export function ActualsTab({
               >
                 {proxyStep1Submitting ? 'Saving...' : 'Proxy Approve'}
               </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
+      {/* ── Edit Actual dialog ────────────────────────────────────────────── */}
+      <Dialog open={!!editingRow} onOpenChange={(_, d) => { if (!d.open) { setEditingRow(null); setEditError(null); } }}>
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Edit Actual</DialogTitle>
+            <DialogContent>
+              {editingRow && (
+                <>
+                  <div style={{ marginBottom: tokens.spacingVerticalM }}>
+                    <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: 2 }}>Employee</div>
+                    <div style={{ fontWeight: 600 }}>{editingRow.employee_name}</div>
+                  </div>
+                  <div style={{ marginBottom: tokens.spacingVerticalM }}>
+                    <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: 2 }}>Project</div>
+                    <div>{editingRow.project_name}</div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS }}>
+                    <label style={{ fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase300 }}>Actual FTE (%)</label>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={100}
+                      step={5}
+                      value={String(editFteValue)}
+                      onChange={(_, d) => setEditFteValue(d.value ? Number(d.value) : 0)}
+                    />
+                  </div>
+                </>
+              )}
+              {editError && (
+                <MessageBar intent="error" style={{ marginTop: tokens.spacingVerticalS }}>
+                  <MessageBarBody>{editError}</MessageBarBody>
+                </MessageBar>
+              )}
+            </DialogContent>
+            <DialogActions style={{ justifyContent: 'space-between' }}>
+              {editingRow && editingRow.approval_status?.toUpperCase() !== 'APPROVED' && (
+                <Button
+                  appearance="outline"
+                  icon={<Delete24Regular />}
+                  style={{ color: C.bad, borderColor: C.bad }}
+                  onClick={handleEditDelete}
+                  disabled={editSubmitting}
+                >
+                  Delete
+                </Button>
+              )}
+              <div style={{ display: 'flex', gap: tokens.spacingHorizontalS }}>
+                <Button onClick={() => { setEditingRow(null); setEditError(null); }} disabled={editSubmitting}>Cancel</Button>
+                <Button appearance="primary" onClick={handleEditSave} disabled={editSubmitting}>
+                  {editSubmitting ? 'Saving...' : 'Save'}
+                </Button>
+              </div>
             </DialogActions>
           </DialogBody>
         </DialogSurface>

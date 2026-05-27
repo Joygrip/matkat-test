@@ -45,7 +45,6 @@ import {
   Delete24Regular,
   CheckmarkCircle24Regular,
   ClipboardTaskRegular,
-  ArrowUndo24Regular,
 } from '@fluentui/react-icons';
 import { actualsApi, ActualLine, ActualApprovalStatus, CreateActualLine } from '../api/actuals';
 import { lookupsApi, Resource } from '../api/lookups';
@@ -343,12 +342,12 @@ export const Actuals: React.FC = () => {
     loadInitialData();
   }, []);
 
-  // Employee: load own actuals when period or resource changes
+  // Employee and Manager (own resource): load own actuals when period or resource changes
   useEffect(() => {
-    if (isEmployee && selectedPeriodId) {
+    if ((isEmployee || isManager) && selectedPeriodId) {
       loadMyActuals();
     }
-  }, [selectedPeriodId, myResourceId, isEmployee]);
+  }, [selectedPeriodId, myResourceId, isEmployee, isManager]);
 
   // Non-employee: load finance actuals dashboard when period or filters change
   useEffect(() => {
@@ -498,16 +497,6 @@ export const Actuals: React.FC = () => {
     }
   };
 
-  const handleUnsign = async (actualId: string) => {
-    if (!window.confirm('Remove your signature? You will be able to edit and re-submit this actual for approval.')) return;
-    try {
-      await actualsApi.unsignActual(actualId);
-      showSuccess('Signature removed. You can now edit and re-submit.');
-      await reloadMyActuals();
-    } catch (err) {
-      showApiError(err as Error, 'Failed to unsign actual');
-    }
-  };
 
   const reloadMyActuals = async () => {
     try {
@@ -535,16 +524,22 @@ export const Actuals: React.FC = () => {
 
   const handleEditSave = async () => {
     if (!editActual) return;
+    if (editFte === undefined || editFte < 5) {
+      showError('Invalid FTE', 'FTE must be at least 5%');
+      return;
+    }
+    const wasRejected = approvalStatuses[editActual.id]?.status === 'rejected';
     try {
       await actualsApi.updateActualLine(editActual.id, {
         actual_fte_percent: editFte,
         planned_fte_percent: editPlannedFte,
         project_id: editProjectId,
       });
-      showSuccess('Actual line updated');
+      showSuccess(wasRejected ? 'Actual updated and resubmitted for approval' : 'Actual line updated');
       setIsEditDialogOpen(false);
       setEditActual(null);
-      await reloadMyActuals();
+      await Promise.all([reloadMyActuals(), loadFinanceActuals()]);
+      setEmpStatsVersion(v => v + 1);
     } catch (err) {
       showApiError(err as Error, 'Failed to update actual line');
     }
@@ -555,7 +550,7 @@ export const Actuals: React.FC = () => {
 
   const currentPeriod = ctxPeriod;
   const isLocked = currentPeriod?.status === 'locked';
-  const hasRejectedActuals = isEmployee && Object.values(approvalStatuses).some(s => s.status === 'rejected');
+  const hasRejectedActuals = (isEmployee || isManager) && actuals.some(a => approvalStatuses[a.id]?.status === 'rejected');
 
   if (loading || appDataLoading) {
     return (
@@ -731,7 +726,7 @@ export const Actuals: React.FC = () => {
       {hasRejectedActuals && !isLocked && (
         <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
           <MessageBarBody>
-            One or more of your actuals were rejected. Click <strong>Unsign</strong> on the rejected line to make corrections and re-submit for approval.
+            One or more of your actuals were rejected. Find your name in the table below to edit and resubmit.
           </MessageBarBody>
         </MessageBar>
       )}
@@ -942,15 +937,7 @@ export const Actuals: React.FC = () => {
                               onClick={() => openEditDialog(a)}
                             />
                           )}
-                          {a.employee_signed_at && approvalStatuses[a.id]?.status === 'rejected' && !isLocked && (
-                            <Button
-                              icon={<ArrowUndo24Regular />}
-                              appearance="subtle"
-                              title="Unsign — remove signature to edit and re-submit"
-                              style={{ color: tokens.colorPaletteRedForeground1 }}
-                              onClick={() => handleUnsign(a.id)}
-                            />
-                          )}
+
                           {!isLocked && approvalStatuses[a.id]?.status !== 'approved' && (
                             <Button
                               icon={<Delete24Regular />}
@@ -1023,7 +1010,7 @@ export const Actuals: React.FC = () => {
                   type="number"
                   value={editFte !== undefined ? String(editFte) : ''}
                   onChange={(_, data) => setEditFte(data.value ? Number(data.value) : undefined)}
-                  min={0}
+                  min={5}
                   max={100}
                   step={5}
                   required

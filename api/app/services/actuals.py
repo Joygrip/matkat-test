@@ -293,12 +293,12 @@ class ActualsService:
         period = self._check_period_open(year, month)
         
         # Validate FTE
-        if actual_fte_percent != 0 and (actual_fte_percent < 5 or actual_fte_percent > 100 or actual_fte_percent % 5 != 0):
+        if not (5 <= actual_fte_percent <= 100 and actual_fte_percent % 5 == 0):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "code": ErrorCode.FTE_INVALID,
-                    "message": "FTE must be 0 or between 5 and 100 in steps of 5",
+                    "message": "FTE must be between 5% and 100% in steps of 5%",
                 }
             )
         
@@ -493,12 +493,12 @@ class ActualsService:
         if data.get("actual_fte_percent") is not None:
             new_fte = data["actual_fte_percent"]
             # Validate FTE
-            if new_fte != 0 and (new_fte < 5 or new_fte > 100 or new_fte % 5 != 0):
+            if not (5 <= new_fte <= 100 and new_fte % 5 == 0):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
                         "code": ErrorCode.FTE_INVALID,
-                        "message": "FTE must be 0 or between 5 and 100 in steps of 5",
+                        "message": "FTE must be between 5% and 100% in steps of 5%",
                     }
                 )
             self._check_100_percent_limit(
@@ -533,6 +533,76 @@ class ActualsService:
             self.db.refresh(actual)
             self._ensure_approval_instance(actual)
             new_values["employee_signed_at"] = str(actual.employee_signed_at)
+
+        # Auto-resubmit when editing a signed-but-rejected actual.
+        # Fires for Employee (own resource) and Manager (own or CC-scoped team member).
+        # _check_manager_resource_access() already confirmed write access for Managers.
+        _did_resubmit = False
+        if actual.employee_signed_at:
+            is_own_resource = self.current_user.role == UserRole.EMPLOYEE
+            if not is_own_resource and self.current_user.role == UserRole.MANAGER:
+                own_id = self.get_my_resource_id()
+                is_own_resource = own_id is not None and actual.resource_id == own_id
+            if is_own_resource or self.current_user.role == UserRole.MANAGER:
+                rejected_instance = self.db.query(ApprovalInstance).filter(
+                    and_(
+                        ApprovalInstance.tenant_id == self.current_user.tenant_id,
+                        ApprovalInstance.subject_type == "actuals",
+                        ApprovalInstance.subject_id == actual.id,
+                    )
+                ).order_by(ApprovalInstance.created_at.desc()).first()
+                if rejected_instance and rejected_instance.status == ApprovalStatus.REJECTED:
+                    self.db.query(ApprovalAction).filter(
+                        ApprovalAction.instance_id == rejected_instance.id
+                    ).delete()
+                    self.db.query(ApprovalStep).filter(
+                        ApprovalStep.instance_id == rejected_instance.id
+                    ).delete()
+                    self.db.delete(rejected_instance)
+                    self.db.flush()
+                    actual.employee_signed_at = datetime.utcnow()
+                    actual.employee_signed_by = self.current_user.object_id
+                    actual.is_proxy_signed = not is_own_resource
+                    actual.proxy_sign_reason = "Edited and resubmitted by manager" if not is_own_resource else None
+                    self.db.commit()
+                    self.db.refresh(actual)
+                    self._ensure_approval_instance(actual)
+                    new_values["resubmitted"] = True
+                    _did_resubmit = True
+
+        # Reset approval chain when Manager edits a team member's PENDING actual.
+        # The updated FTE must go through approval from Step 1 again.
+        if (
+            not _did_resubmit
+            and actual.employee_signed_at
+            and self.current_user.role == UserRole.MANAGER
+        ):
+            own_id_pending = self.get_my_resource_id()
+            if own_id_pending is None or actual.resource_id != own_id_pending:
+                pending_instance = self.db.query(ApprovalInstance).filter(
+                    and_(
+                        ApprovalInstance.tenant_id == self.current_user.tenant_id,
+                        ApprovalInstance.subject_type == "actuals",
+                        ApprovalInstance.subject_id == actual.id,
+                    )
+                ).order_by(ApprovalInstance.created_at.desc()).first()
+                if pending_instance and pending_instance.status == ApprovalStatus.PENDING:
+                    self.db.query(ApprovalAction).filter(
+                        ApprovalAction.instance_id == pending_instance.id
+                    ).delete()
+                    self.db.query(ApprovalStep).filter(
+                        ApprovalStep.instance_id == pending_instance.id
+                    ).delete()
+                    self.db.delete(pending_instance)
+                    self.db.flush()
+                    actual.employee_signed_at = datetime.utcnow()
+                    actual.employee_signed_by = self.current_user.object_id
+                    actual.is_proxy_signed = True
+                    actual.proxy_sign_reason = "Edited by manager"
+                    self.db.commit()
+                    self.db.refresh(actual)
+                    self._ensure_approval_instance(actual)
+                    new_values["approval_chain_reset"] = True
 
         log_audit(
             self.db, self.current_user,
@@ -828,14 +898,12 @@ class ActualsService:
                 }
             )
 
-        if actual_fte_percent != 0 and (
-            actual_fte_percent < 5 or actual_fte_percent > 100 or actual_fte_percent % 5 != 0
-        ):
+        if not (5 <= actual_fte_percent <= 100 and actual_fte_percent % 5 == 0):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "code": ErrorCode.FTE_INVALID,
-                    "message": "FTE must be 0 or between 5 and 100 in steps of 5",
+                    "message": "FTE must be between 5% and 100% in steps of 5%",
                 }
             )
         self._check_100_percent_limit(

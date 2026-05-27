@@ -473,8 +473,12 @@ export function EmployeeView({ periods }: Props) {
   const saveActual = useCallback(async (projectId: string, period: Period, rawValue: string) => {
     const cellKey = `${projectId}:${period.id}`;
     const ftePct = parseFloat(rawValue);
-    if (rawValue === '' || isNaN(ftePct) || ftePct < 0) {
+    if (rawValue === '' || isNaN(ftePct)) {
       setActualsEdits(prev => { const n = { ...prev }; delete n[cellKey]; return n; });
+      return;
+    }
+    if (ftePct < 5) {
+      showError('Invalid FTE', 'FTE must be at least 5%');
       return;
     }
     if (!myResourceId) return;
@@ -860,7 +864,7 @@ export function EmployeeView({ periods }: Props) {
                                     <input
                                       className={styles.actualsInput}
                                       type="number"
-                                      min="0"
+                                      min="5"
                                       max="200"
                                       step="5"
                                       value={editVal}

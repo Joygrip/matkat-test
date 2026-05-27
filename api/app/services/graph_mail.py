@@ -521,7 +521,6 @@ def _build_approval_rejection_html(context: dict) -> str:
         f"</p>"
         f"{table}"
         f"{comment_html}"
-        f"{_cta_button('Review in MatKat →')}"
     )
 
     bg, border, title_color = _BANNER_CONFIGS["approval_rejection"]

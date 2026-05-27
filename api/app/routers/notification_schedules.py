@@ -261,6 +261,34 @@ async def preview_schedule(
 
     month_name = calendar.month_name[month]
 
+    # Event-driven notifications get a sample preview, not recipient lookup
+    if schedule.notification_type == "approval_rejection":
+        from api.app.services.graph_mail import build_approval_rejection_html
+        sample_html = build_approval_rejection_html({
+            "employee_name": "Anna Jensen",
+            "project_name": "Project Alpha",
+            "period": f"{year}-{month:02d}",
+            "fte_percent": 50,
+            "rejector_name": "Engineering Director",
+            "comment": "FTE allocation seems incorrect, please review and resubmit.",
+            "app_url": "https://matkat.ferrosanmd.com",
+        })
+        return SchedulePreviewResponse(
+            period={"year": year, "month": month, "label": f"{month_name} {year}"},
+            recipients=[PreviewRecipient(
+                email="(event-driven)",
+                display_name="Sent immediately to the employee on rejection",
+                role="Employee",
+                reason="Triggered when an approver rejects an actual",
+                email_subject="MatKat — Your actual was rejected",
+                email_body_html=sample_html,
+                already_notified=False,
+            )],
+            total_recipients=1,
+            skipped=0,
+            would_skip=False,
+        )
+
     service = NotificationsService(db, current_user)
     preview = service.preview_schedule(
         notification_type=schedule.notification_type,
@@ -300,7 +328,7 @@ async def run_schedule_now(
 
     excluded = schedule.excluded_emails or []
     ntype = schedule.notification_type
-    if ntype == NotificationScheduleType.CONFLICT_ALERTS:
+    if ntype == NotificationScheduleType.CONFLICT_ALERTS.value:
         result = service.run_conflict_alerts(
             year, month,
             notify_pm=schedule.notify_pm,
@@ -310,7 +338,7 @@ async def run_schedule_now(
             excluded_emails=excluded,
             force=force,
         )
-    elif ntype == NotificationScheduleType.MISSING_ACTUALS:
+    elif ntype == NotificationScheduleType.MISSING_ACTUALS.value:
         result = service.run_missing_actuals_alerts(
             year, month,
             notify_employee=schedule.notify_employee,
@@ -320,7 +348,7 @@ async def run_schedule_now(
             excluded_emails=excluded,
             force=force,
         )
-    elif ntype == NotificationScheduleType.PLANNING_REMINDER:
+    elif ntype == NotificationScheduleType.PLANNING_REMINDER.value:
         result = service.run_planning_reminder(
             year, month,
             notify_pm=schedule.notify_pm,
@@ -330,7 +358,7 @@ async def run_schedule_now(
             excluded_emails=excluded,
             force=force,
         )
-    elif ntype == NotificationScheduleType.APPROVAL_REMINDER:
+    elif ntype == NotificationScheduleType.APPROVAL_REMINDER.value:
         result = service.run_approval_reminder(
             year, month,
             notify_manager=schedule.notify_manager,

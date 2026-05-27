@@ -984,7 +984,7 @@ class NotificationsService:
 
     def preview_schedule(
         self,
-        notification_type: NotificationScheduleType,
+        notification_type: str,
         year: int,
         month: int,
         notify_pm: bool = True,
@@ -994,13 +994,13 @@ class NotificationsService:
         excluded_emails: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Return what a scheduled run would send — no emails sent, no logs written."""
-        if notification_type == NotificationScheduleType.CONFLICT_ALERTS:
+        if notification_type == NotificationScheduleType.CONFLICT_ALERTS.value:
             recipients, skipped = self._preview_conflict_alerts(year, month, notify_pm, notify_manager, notify_finance)
-        elif notification_type == NotificationScheduleType.MISSING_ACTUALS:
+        elif notification_type == NotificationScheduleType.MISSING_ACTUALS.value:
             recipients, skipped = self._preview_missing_actuals(year, month, notify_employee, notify_manager, notify_finance)
-        elif notification_type == NotificationScheduleType.PLANNING_REMINDER:
+        elif notification_type == NotificationScheduleType.PLANNING_REMINDER.value:
             recipients, skipped = self._preview_planning_reminder(year, month, notify_pm, notify_manager, notify_finance)
-        elif notification_type == NotificationScheduleType.APPROVAL_REMINDER:
+        elif notification_type == NotificationScheduleType.APPROVAL_REMINDER.value:
             recipients, skipped = self._preview_approval_reminder(year, month, notify_manager, notify_finance)
         else:
             recipients, skipped = [], 0

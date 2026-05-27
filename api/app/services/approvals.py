@@ -347,7 +347,7 @@ class ApprovalsService:
         if instance.subject_type == "actuals":
             try:
                 schedule = self.db.query(NotificationSchedule).filter(
-                    NotificationSchedule.notification_type == NotificationScheduleType.APPROVAL_REJECTION,
+                    NotificationSchedule.notification_type == NotificationScheduleType.APPROVAL_REJECTION.value,
                     NotificationSchedule.tenant_id == self.current_user.tenant_id,
                     NotificationSchedule.is_active == True,  # noqa: E712
                 ).first()

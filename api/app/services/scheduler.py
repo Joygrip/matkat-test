@@ -100,9 +100,9 @@ def _should_fire(schedule: NotificationSchedule, now_local: datetime, db) -> boo
 def _dispatch(service: NotificationsService, schedule: NotificationSchedule, year: int, month: int):
     excluded = schedule.excluded_emails or []
     ntype = schedule.notification_type
-    if ntype == NotificationScheduleType.APPROVAL_REJECTION:
+    if ntype == NotificationScheduleType.APPROVAL_REJECTION.value:
         return {}  # event-driven only — never fired by the scheduler
-    if ntype == NotificationScheduleType.CONFLICT_ALERTS:
+    if ntype == NotificationScheduleType.CONFLICT_ALERTS.value:
         return service.run_conflict_alerts(
             year, month,
             notify_pm=schedule.notify_pm,
@@ -110,7 +110,7 @@ def _dispatch(service: NotificationsService, schedule: NotificationSchedule, yea
             notify_finance=schedule.notify_finance,
             excluded_emails=excluded,
         )
-    if ntype == NotificationScheduleType.MISSING_ACTUALS:
+    if ntype == NotificationScheduleType.MISSING_ACTUALS.value:
         return service.run_missing_actuals_alerts(
             year, month,
             notify_employee=schedule.notify_employee,
@@ -118,7 +118,7 @@ def _dispatch(service: NotificationsService, schedule: NotificationSchedule, yea
             notify_finance=schedule.notify_finance,
             excluded_emails=excluded,
         )
-    if ntype == NotificationScheduleType.PLANNING_REMINDER:
+    if ntype == NotificationScheduleType.PLANNING_REMINDER.value:
         return service.run_planning_reminder(
             year, month,
             notify_pm=schedule.notify_pm,
@@ -126,7 +126,7 @@ def _dispatch(service: NotificationsService, schedule: NotificationSchedule, yea
             notify_finance=schedule.notify_finance,
             excluded_emails=excluded,
         )
-    if ntype == NotificationScheduleType.APPROVAL_REMINDER:
+    if ntype == NotificationScheduleType.APPROVAL_REMINDER.value:
         return service.run_approval_reminder(
             year, month,
             notify_manager=schedule.notify_manager,
@@ -152,7 +152,7 @@ def _run_tick() -> None:
 
         for schedule in schedules:
             try:
-                if schedule.notification_type == NotificationScheduleType.APPROVAL_REJECTION:
+                if schedule.notification_type == NotificationScheduleType.APPROVAL_REJECTION.value:
                     continue  # event-driven — never fired by the scheduler
 
                 if not _should_fire(schedule, now_local, db):

@@ -53,6 +53,9 @@ def upgrade() -> None:
             "'conflict_alerts','missing_actuals','planning_reminder',"
             "'approval_reminder','approval_rejection'))"
         ))
+        op.execute(sa.text(
+            "ALTER TABLE notification_schedules ALTER COLUMN notification_type NVARCHAR(50) NOT NULL"
+        ))
 
     # Insert the default approval_rejection schedule if not already present.
     # CURRENT_TIMESTAMP is supported by both SQLite and SQL Server.
@@ -107,4 +110,7 @@ def downgrade() -> None:
             "ADD CONSTRAINT ck_ns_notification_type "
             "CHECK (notification_type IN ("
             "'conflict_alerts','missing_actuals','planning_reminder','approval_reminder'))"
+        ))
+        op.execute(sa.text(
+            "ALTER TABLE notification_schedules ALTER COLUMN notification_type NVARCHAR(17) NOT NULL"
         ))

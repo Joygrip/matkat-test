@@ -16,6 +16,7 @@ import { Admin } from './pages/Admin';
 import { Finance } from './pages/Finance';
 import { AuditLogs } from './pages/AuditLogs';
 import { ProjectCosts } from './pages/ProjectCosts';
+import { FteInput } from './pages/FteInput';
 import { config } from './config';
 
 // Employees manage actuals via the Dashboard; redirect them if they navigate here directly
@@ -23,6 +24,13 @@ function ActualsRoute() {
   const { user } = useAuth();
   if (user?.role === 'Employee') return <Navigate to="/" replace />;
   return <Actuals />;
+}
+
+// FTE Input is only for PM and Manager; all other roles redirect to dashboard
+function FteInputRoute() {
+  const { user } = useAuth();
+  if (!user || (user.role !== 'PM' && user.role !== 'Manager')) return <Navigate to="/" replace />;
+  return <FteInput />;
 }
 
 const useStyles = makeStyles({
@@ -153,6 +161,7 @@ function App() {
           <Route path="/demand" element={<Navigate to="/resource-planning" replace />} />
           <Route path="/supply" element={<Navigate to="/resource-planning" replace />} />
           <Route path="/actuals" element={<ActualsRoute />} />
+          <Route path="/fte-input" element={<FteInputRoute />} />
           <Route path="/finance" element={<Finance />} />
           {/* Redirects for old routes */}
           <Route path="/finance-dashboard" element={<Navigate to="/finance" replace />} />

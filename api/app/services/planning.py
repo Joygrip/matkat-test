@@ -574,6 +574,198 @@ class DemandService:
         self.db.commit()
         return len(lines)
 
+    def move_group(
+        self,
+        project_id: str,
+        period_ids: list[str],
+        from_resource_id: Optional[str] = None,
+        from_placeholder_id: Optional[str] = None,
+        to_resource_id: Optional[str] = None,
+        to_placeholder_id: Optional[str] = None,
+    ) -> int:
+        """Move all demand lines for a source resource/placeholder + project to a target.
+
+        Validates all periods are open and checks for conflicts on the target before
+        updating any row (all-or-nothing). Returns the count of moved rows.
+        """
+        _MONTH_NAMES = [
+            'January', 'February', 'March', 'April', 'May', 'June',
+            'July', 'August', 'September', 'October', 'November', 'December',
+        ]
+
+        # Validate project exists within tenant
+        project = self.db.query(Project).filter(
+            and_(
+                Project.id == project_id,
+                Project.tenant_id == self.current_user.tenant_id,
+            )
+        ).first()
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "Project not found"},
+            )
+
+        # PM authorization
+        self._check_pm_authorized(project)
+
+        # Validate all period_ids belong to current tenant
+        periods = self.db.query(Period).filter(
+            and_(
+                Period.id.in_(period_ids),
+                Period.tenant_id == self.current_user.tenant_id,
+            )
+        ).all()
+        period_map = {p.id: p for p in periods}
+        for pid in period_ids:
+            if pid not in period_map:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "NOT_FOUND", "message": f"Period {pid} not found"},
+                )
+
+        # Check all periods are open (all-or-nothing)
+        for period in periods:
+            if period.status == PeriodStatus.LOCKED:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "code": ErrorCode.PERIOD_LOCKED,
+                        "message": f"Period {period.year}-{period.month:02d} is locked. No edits allowed.",
+                    },
+                )
+
+        # 4MFC check when moving to a placeholder
+        if to_placeholder_id:
+            for period in periods:
+                if is_within_4mfc(period.year, period.month):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "code": ErrorCode.PLACEHOLDER_BLOCKED_4MFC,
+                            "message": (
+                                f"Placeholders are not allowed within the 4-month forward commitment window. "
+                                f"Use named resources for {period.year}-{period.month:02d}."
+                            ),
+                        },
+                    )
+
+        # Validate target resource/placeholder exists and is active
+        target_name: str
+        if to_resource_id:
+            target_resource = self.db.query(Resource).filter(
+                and_(
+                    Resource.id == to_resource_id,
+                    Resource.tenant_id == self.current_user.tenant_id,
+                )
+            ).first()
+            if not target_resource:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "NOT_FOUND", "message": "Target resource not found"},
+                )
+            if not target_resource.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "RESOURCE_INACTIVE",
+                        "message": "Cannot move demand to an inactive resource. This person has left the organisation.",
+                    },
+                )
+            target_name = target_resource.display_name
+        else:
+            target_placeholder = self.db.query(Placeholder).filter(
+                and_(
+                    Placeholder.id == to_placeholder_id,
+                    Placeholder.tenant_id == self.current_user.tenant_id,
+                )
+            ).first()
+            if not target_placeholder:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "NOT_FOUND", "message": "Target placeholder not found"},
+                )
+            if not target_placeholder.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "RESOURCE_INACTIVE",
+                        "message": "Cannot move demand to an inactive placeholder.",
+                    },
+                )
+            target_name = target_placeholder.name
+
+        # Conflict detection: pre-check for any existing demand on the target for this
+        # project in the same (year, month) pairs. Must use year+month (not period_id)
+        # because that is how the unique index ix_demand_resource_unique is keyed.
+        year_month_pairs = [(p.year, p.month) for p in periods]
+        conflict_filter = or_(*[
+            and_(DemandLine.year == y, DemandLine.month == m)
+            for y, m in year_month_pairs
+        ])
+        conflict_query = self.db.query(DemandLine).filter(
+            and_(
+                DemandLine.tenant_id == self.current_user.tenant_id,
+                DemandLine.project_id == project_id,
+                conflict_filter,
+            )
+        )
+        if to_resource_id:
+            conflict_query = conflict_query.filter(DemandLine.resource_id == to_resource_id)
+        else:
+            conflict_query = conflict_query.filter(DemandLine.placeholder_id == to_placeholder_id)
+
+        conflicts = conflict_query.all()
+        if conflicts:
+            conflict_strs = [
+                f"{_MONTH_NAMES[c.month - 1]} {c.year}" for c in conflicts
+            ]
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "CONFLICT",
+                    "message": (
+                        f"{target_name} already has demand for {project.name} in: "
+                        f"{', '.join(conflict_strs)}. Cannot move the demand line."
+                    ),
+                },
+            )
+
+        # Fetch source demand lines
+        source_query = self.db.query(DemandLine).filter(
+            and_(
+                DemandLine.tenant_id == self.current_user.tenant_id,
+                DemandLine.project_id == project_id,
+                DemandLine.period_id.in_(period_ids),
+            )
+        )
+        if from_resource_id:
+            source_query = source_query.filter(DemandLine.resource_id == from_resource_id)
+        else:
+            source_query = source_query.filter(DemandLine.placeholder_id == from_placeholder_id)
+
+        lines = source_query.all()
+
+        # Update each line to point to the target (all-or-nothing within this transaction)
+        for line in lines:
+            old_values = {
+                "resource_id": line.resource_id,
+                "placeholder_id": line.placeholder_id,
+            }
+            line.resource_id = to_resource_id      # None when moving to placeholder
+            line.placeholder_id = to_placeholder_id  # None when moving to resource
+            log_audit(
+                self.db, self.current_user,
+                action="update",
+                entity_type="DemandLine",
+                entity_id=line.id,
+                old_values=old_values,
+                new_values={"resource_id": to_resource_id, "placeholder_id": to_placeholder_id},
+            )
+
+        self.db.commit()
+        return len(lines)
+
 
 class SupplyService:
     """Service for supply line operations."""

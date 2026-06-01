@@ -139,6 +139,42 @@ class DemandGroupDeleteRequest(BaseModel):
         return self
 
 
+class DemandGroupMoveRequest(BaseModel):
+    """Request body for moving all demand lines in a resource+project group to a different resource/placeholder."""
+    from_resource_id: Optional[str] = None
+    from_placeholder_id: Optional[str] = None
+    to_resource_id: Optional[str] = None
+    to_placeholder_id: Optional[str] = None
+    project_id: str
+    period_ids: List[str]
+
+    @field_validator('period_ids')
+    @classmethod
+    def validate_period_ids_not_empty(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError('period_ids must not be empty')
+        return v
+
+    @model_validator(mode='after')
+    def validate_identifiers(self) -> 'DemandGroupMoveRequest':
+        # Source XOR
+        if self.from_resource_id and self.from_placeholder_id:
+            raise ValueError(f'{ErrorCode.DEMAND_XOR}: Cannot specify both from_resource_id and from_placeholder_id')
+        if not self.from_resource_id and not self.from_placeholder_id:
+            raise ValueError(f'{ErrorCode.DEMAND_XOR}: Must specify either from_resource_id or from_placeholder_id')
+        # Target XOR
+        if self.to_resource_id and self.to_placeholder_id:
+            raise ValueError(f'{ErrorCode.DEMAND_XOR}: Cannot specify both to_resource_id and to_placeholder_id')
+        if not self.to_resource_id and not self.to_placeholder_id:
+            raise ValueError(f'{ErrorCode.DEMAND_XOR}: Must specify either to_resource_id or to_placeholder_id')
+        # Source != Target (same type)
+        if self.from_resource_id and self.from_resource_id == self.to_resource_id:
+            raise ValueError('Source and target resource cannot be the same')
+        if self.from_placeholder_id and self.from_placeholder_id == self.to_placeholder_id:
+            raise ValueError('Source and target placeholder cannot be the same')
+        return self
+
+
 # ============== BULK DEMAND ==============
 
 class BulkDemandLineCreate(DemandLineCreate):

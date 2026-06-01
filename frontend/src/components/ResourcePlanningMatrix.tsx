@@ -20,7 +20,7 @@ import {
   MenuItem,
 } from '@fluentui/react-components';
 import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular, MoreVertical16Regular } from '@fluentui/react-icons';
-import { planningApi, DemandLine, SupplyLine } from '../api/planning';
+import { planningApi, DemandLine, SupplyLine, MoveDemandGroupRequest } from '../api/planning';
 import { ApiError } from '../types';
 import { useToast } from '../hooks/useToast';
 import { lookupsApi, Project, CostCenter, Resource, Placeholder } from '../api/lookups';
@@ -520,6 +520,14 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [deletingGroup, setDeletingGroup] = useState(false);
   const [deleteGroupError, setDeleteGroupError] = useState<string | null>(null);
 
+  // Move group dialog state
+  const [moveGroupRow, setMoveGroupRow] = useState<MergedMatrixRow | null>(null);
+  const [movingGroup, setMovingGroup] = useState(false);
+  const [moveGroupError, setMoveGroupError] = useState<string | null>(null);
+  const [moveTargetId, setMoveTargetId] = useState('');
+  const [moveAllResources, setMoveAllResources] = useState<Resource[]>([]);
+  const [moveResourcesLoading, setMoveResourcesLoading] = useState(false);
+
   // Add Line dialog state
   const [addLineDialogOpen, setAddLineDialogOpen] = useState(false);
   const [dlgLineType, setDlgLineType] = useState<'demand' | 'supply'>('demand');
@@ -773,6 +781,60 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       setDeletingGroup(false);
     }
   }, [deleteGroupRow, periods, onReload, showSuccess]);
+
+  const openMoveDialog = useCallback(async (row: MergedMatrixRow) => {
+    setMoveGroupRow(row);
+    setMoveTargetId('');
+    setMoveGroupError(null);
+    setMoveResourcesLoading(true);
+    try {
+      const resources = await lookupsApi.listResources();
+      setMoveAllResources(resources);
+    } catch {
+      setMoveAllResources([]);
+    } finally {
+      setMoveResourcesLoading(false);
+    }
+  }, []);
+
+  const handleMoveGroup = useCallback(async () => {
+    if (!moveGroupRow || !moveTargetId) return;
+    setMovingGroup(true);
+    setMoveGroupError(null);
+    const body: MoveDemandGroupRequest = {
+      from_resource_id: moveGroupRow.resourceId ?? undefined,
+      from_placeholder_id: moveGroupRow.placeholderId ?? undefined,
+      to_resource_id: moveTargetId,
+      project_id: moveGroupRow.projectId || '',
+      period_ids: periods.map(p => p.id),
+    };
+    try {
+      await planningApi.moveDemandGroup(body);
+      const targetName = moveAllResources.find(r => r.id === moveTargetId)?.display_name || moveTargetId;
+      const { projectName } = moveGroupRow;
+      setMoveGroupRow(null);
+      onReload();
+      showSuccess('Demand line moved', `Moved demand for ${projectName} to ${targetName}.`);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.code === 'PERIOD_LOCKED') {
+          setMoveGroupError('One or more periods are locked and cannot be modified.');
+        } else if (err.code === 'PM_NOT_AUTHORIZED') {
+          setMoveGroupError('You are not authorized to manage demand for this project.');
+        } else if (err.code === 'CONFLICT') {
+          setMoveGroupError(err.detail || 'Target resource already has demand for this project in one or more periods.');
+        } else if (err.code === 'RESOURCE_EXCLUDED') {
+          setMoveGroupError(err.detail || 'This resource is excluded from planning.');
+        } else {
+          setMoveGroupError(err.detail || err.message || 'Failed to move demand line.');
+        }
+      } else {
+        setMoveGroupError((err as Error).message || 'Failed to move demand line.');
+      }
+    } finally {
+      setMovingGroup(false);
+    }
+  }, [moveGroupRow, moveTargetId, moveAllResources, periods, onReload, showSuccess]);
 
   const handleAddDemandLine = useCallback(async (ccId: string, allRows: MergedMatrixRow[]) => {
     const { resOrPh, projectId } = addDemandForm;
@@ -1580,6 +1642,11 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                               >
                                                 Delete demand line
                                               </MenuItem>
+                                              <MenuItem
+                                                onClick={() => openMoveDialog(row)}
+                                              >
+                                                Move to resource
+                                              </MenuItem>
                                             </MenuList>
                                           </MenuPopover>
                                         </Menu>
@@ -2288,6 +2355,82 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         </DialogBody>
       </DialogSurface>
     </Dialog>
+    {/* Move Demand Group Dialog */}
+    <Dialog
+      open={moveGroupRow !== null}
+      onOpenChange={(_, d) => { if (!d.open && !movingGroup) { setMoveGroupRow(null); setMoveGroupError(null); } }}
+    >
+      <DialogSurface style={{ maxWidth: 440 }}>
+        <DialogBody>
+          <DialogTitle>Move demand line</DialogTitle>
+          <DialogContent>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, paddingTop: tokens.spacingVerticalS }}>
+              <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                Moving demand for <strong>{moveGroupRow?.resourceName}</strong> on{' '}
+                <strong>{moveGroupRow?.projectName}</strong> across{' '}
+                <strong>{periods.length} open period{periods.length !== 1 ? 's' : ''}</strong>.
+              </div>
+
+              <div>
+                <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>
+                  New resource
+                </div>
+                {moveResourcesLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                    <Spinner size="extra-tiny" /> Loading resources…
+                  </div>
+                ) : (
+                  <select
+                    value={moveTargetId}
+                    onChange={e => { setMoveTargetId(e.target.value); setMoveGroupError(null); }}
+                    style={{
+                      padding: '5px 8px',
+                      border: `1px solid ${tokens.colorNeutralStroke1}`,
+                      borderRadius: tokens.borderRadiusMedium,
+                      fontSize: tokens.fontSizeBase300,
+                      width: '100%',
+                      backgroundColor: tokens.colorNeutralBackground1,
+                    }}
+                  >
+                    <option value="">Select a resource…</option>
+                    {moveAllResources
+                      .filter(r => r.id !== moveGroupRow?.resourceId)
+                      .map(r => (
+                        <option key={r.id} value={r.id}>{r.display_name}</option>
+                      ))
+                    }
+                  </select>
+                )}
+              </div>
+
+              {moveGroupError && (
+                <div style={{ color: tokens.colorPaletteRedForeground2, fontSize: tokens.fontSizeBase200 }}>
+                  {moveGroupError}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              appearance="secondary"
+              onClick={() => { setMoveGroupRow(null); setMoveGroupError(null); }}
+              disabled={movingGroup}
+            >
+              Cancel
+            </Button>
+            <Button
+              appearance="primary"
+              onClick={handleMoveGroup}
+              disabled={movingGroup || !moveTargetId || moveResourcesLoading}
+              icon={movingGroup ? <Spinner size="extra-tiny" /> : undefined}
+            >
+              Move demand
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+
     {/* Delete Demand Group Confirmation Dialog */}
     <Dialog
       open={deleteGroupRow !== null}

@@ -9,7 +9,7 @@ from api.app.models.core import UserRole, Resource, User
 from api.app.config import get_settings
 from api.app.schemas.planning import (
     DemandLineCreate, DemandLineUpdate, DemandLineResponse,
-    DemandGroupDeleteRequest,
+    DemandGroupDeleteRequest, DemandGroupMoveRequest,
     SupplyLineCreate, SupplyLineUpdate, SupplyLineResponse,
     BulkDemandLineRequest, BulkDemandLineResponse, BulkDemandLineAction,
     BulkDemandLineCreate, BulkDemandLineUpdate, BulkDemandLineDelete,
@@ -272,6 +272,40 @@ async def delete_demand_group(
         placeholder_id=data.placeholder_id,
     )
     return {"deleted": deleted}
+
+
+@router.post("/demand-lines/group/move")
+async def move_demand_group(
+    data: DemandGroupMoveRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.PM, UserRole.FINANCE)),
+):
+    """
+    Move all demand lines for a source resource/placeholder + project to a target
+    resource/placeholder across the specified periods.
+
+    Rules:
+    - Exactly one source identifier (from_resource_id XOR from_placeholder_id).
+    - Exactly one target identifier (to_resource_id XOR to_placeholder_id).
+    - Source and target cannot be identical.
+    - All periods must be open before any row is updated (all-or-nothing).
+    - Target resource must be active and not excluded by planning filters.
+    - If the target already has demand for the same project/month, returns 409 Conflict.
+    - Missing source rows are silently skipped.
+
+    Accessible to: Admin, PM, Finance
+    """
+    _check_resource_country(db, data.to_resource_id, current_user.tenant_id)
+    service = DemandService(db, current_user)
+    moved = service.move_group(
+        project_id=data.project_id,
+        period_ids=data.period_ids,
+        from_resource_id=data.from_resource_id,
+        from_placeholder_id=data.from_placeholder_id,
+        to_resource_id=data.to_resource_id,
+        to_placeholder_id=data.to_placeholder_id,
+    )
+    return {"moved": moved}
 
 
 @router.post("/demand-lines/bulk", response_model=BulkDemandLineResponse)

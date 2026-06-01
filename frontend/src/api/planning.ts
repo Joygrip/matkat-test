@@ -91,6 +91,15 @@ export interface DeleteDemandGroupRequest {
   period_ids: string[];
 }
 
+export interface MoveDemandGroupRequest {
+  from_resource_id?: string;
+  from_placeholder_id?: string;
+  to_resource_id?: string;
+  to_placeholder_id?: string;
+  project_id: string;
+  period_ids: string[];
+}
+
 export const planningApi = {
   // Demand Lines
   async getAllDemandLines(): Promise<DemandLine[]> {
@@ -132,6 +141,10 @@ export const planningApi = {
 
   async deleteDemandGroup(body: DeleteDemandGroupRequest): Promise<{ deleted: number }> {
     return apiClient.post<{ deleted: number }>('/demand-lines/group/delete', body);
+  },
+
+  async moveDemandGroup(body: MoveDemandGroupRequest): Promise<{ moved: number }> {
+    return apiClient.post<{ moved: number }>('/demand-lines/group/move', body);
   },
   
   // Supply Lines

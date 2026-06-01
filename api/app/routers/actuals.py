@@ -154,7 +154,7 @@ async def create_actual(
     data: ActualLineCreate,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.EMPLOYEE, UserRole.MANAGER
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.EMPLOYEE, UserRole.MANAGER, UserRole.PM
     )),
 ):
     """
@@ -186,7 +186,7 @@ async def update_actual(
     data: ActualLineUpdate,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.EMPLOYEE, UserRole.MANAGER
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.EMPLOYEE, UserRole.MANAGER, UserRole.PM
     )),
 ):
     """
@@ -204,7 +204,7 @@ async def delete_actual(
     actual_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.FINANCE, UserRole.EMPLOYEE, UserRole.MANAGER
+        UserRole.ADMIN, UserRole.FINANCE, UserRole.EMPLOYEE, UserRole.MANAGER, UserRole.PM
     )),
 ):
     """
@@ -224,7 +224,7 @@ async def sign_actual(
     actual_id: str,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.EMPLOYEE, UserRole.MANAGER
+        UserRole.ADMIN, UserRole.EMPLOYEE, UserRole.MANAGER, UserRole.PM
     )),
 ):
     """
@@ -263,7 +263,7 @@ async def resubmit_actual(
     data: ActualResubmitRequest,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
-        UserRole.ADMIN, UserRole.EMPLOYEE, UserRole.MANAGER
+        UserRole.ADMIN, UserRole.EMPLOYEE, UserRole.MANAGER, UserRole.PM
     )),
 ):
     """

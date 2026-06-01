@@ -108,6 +108,46 @@ class ActualsService:
                 }
             )
 
+    def _check_pm_owns_resource(self, resource_id: str) -> None:
+        """If the current user is a PM, verify they own the resource."""
+        if self.current_user.role != UserRole.PM:
+            return
+
+        user = self.db.query(User).filter(
+            and_(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            )
+        ).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "UNAUTHORIZED_RESOURCE",
+                    "message": "User record not found",
+                }
+            )
+
+        resource = self.db.query(Resource).filter(
+            and_(
+                Resource.id == resource_id,
+                Resource.tenant_id == self.current_user.tenant_id,
+            )
+        ).first()
+        if not resource:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "Resource not found"}
+            )
+        if resource.user_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "UNAUTHORIZED_RESOURCE",
+                    "message": "PMs can only manage their own actuals.",
+                }
+            )
+
     def _check_period_open(self, year: int, month: int) -> Period:
         """Check if the period exists and is open."""
         period = PeriodService(self.db, self.current_user).get_by_year_month(year, month)
@@ -319,6 +359,8 @@ class ActualsService:
         self._check_employee_owns_resource(resource_id)
         # Managers can only create actuals for resources in their cost center (or themselves)
         self._check_manager_resource_access(resource_id)
+        # PMs can only create actuals for their own resource
+        self._check_pm_owns_resource(resource_id)
 
         # For managers entering on behalf of another employee, reason is required
         is_manager_own = False
@@ -433,6 +475,14 @@ class ActualsService:
             self.db.commit()
             self.db.refresh(actual)
             self._ensure_approval_instance(actual)
+        elif self.current_user.role == UserRole.PM:
+            # PM entering their own actuals - sign as self (ownership already verified above)
+            actual.employee_signed_at = datetime.utcnow()
+            actual.employee_signed_by = self.current_user.object_id
+            actual.is_proxy_signed = False
+            self.db.commit()
+            self.db.refresh(actual)
+            self._ensure_approval_instance(actual)
 
         log_audit(
             self.db, self.current_user,
@@ -464,6 +514,8 @@ class ActualsService:
         self._check_employee_owns_resource(actual.resource_id)
         # Managers can only update actuals for resources in their cost center
         self._check_manager_resource_access(actual.resource_id)
+        # PMs can only update their own actuals
+        self._check_pm_owns_resource(actual.resource_id)
 
         # Block edit once approved; pending approval can still be edited
         if actual.employee_signed_at:
@@ -524,8 +576,8 @@ class ActualsService:
         self.db.commit()
         self.db.refresh(actual)
 
-        # Auto-sign for employees on edit (re-submit after rejection+unsign)
-        if self.current_user.role == UserRole.EMPLOYEE and not actual.employee_signed_at:
+        # Auto-sign for employees and PMs on edit (re-submit after rejection+unsign)
+        if self.current_user.role in (UserRole.EMPLOYEE, UserRole.PM) and not actual.employee_signed_at:
             actual.employee_signed_at = datetime.utcnow()
             actual.employee_signed_by = self.current_user.object_id
             actual.is_proxy_signed = False
@@ -535,11 +587,11 @@ class ActualsService:
             new_values["employee_signed_at"] = str(actual.employee_signed_at)
 
         # Auto-resubmit when editing a signed-but-rejected actual.
-        # Fires for Employee (own resource) and Manager (own or CC-scoped team member).
-        # _check_manager_resource_access() already confirmed write access for Managers.
+        # Fires for Employee/PM (own resource) and Manager (own or CC-scoped team member).
+        # Ownership guards above already confirmed write access for each role.
         _did_resubmit = False
         if actual.employee_signed_at:
-            is_own_resource = self.current_user.role == UserRole.EMPLOYEE
+            is_own_resource = self.current_user.role in (UserRole.EMPLOYEE, UserRole.PM)
             if not is_own_resource and self.current_user.role == UserRole.MANAGER:
                 own_id = self.get_my_resource_id()
                 is_own_resource = own_id is not None and actual.resource_id == own_id
@@ -628,6 +680,8 @@ class ActualsService:
         self._check_employee_owns_resource(actual.resource_id)
         # Managers can only delete actuals for resources in their cost center
         self._check_manager_resource_access(actual.resource_id)
+        # PMs can only delete their own actuals
+        self._check_pm_owns_resource(actual.resource_id)
 
         # Block delete once approved; pending approval can still be deleted
         if actual.employee_signed_at:
@@ -688,7 +742,18 @@ class ActualsService:
                         "message": "Managers can only sign their own actuals directly. Use proxy sign for team members.",
                     },
                 )
-        
+        # PMs can only sign their own actuals
+        if self.current_user.role == UserRole.PM:
+            own_id = self.get_my_resource_id()
+            if own_id is None or actual.resource_id != own_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "code": "UNAUTHORIZED_RESOURCE",
+                        "message": "PMs can only sign their own actuals.",
+                    },
+                )
+
         if actual.employee_signed_at:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -879,6 +944,7 @@ class ActualsService:
             )
 
         self._check_employee_owns_resource(actual.resource_id)
+        self._check_pm_owns_resource(actual.resource_id)
         self._check_period_open(actual.year, actual.month)
 
         instance = self.db.query(ApprovalInstance).filter(

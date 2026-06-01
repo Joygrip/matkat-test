@@ -130,6 +130,27 @@ class SupplyGroupDeleteRequest(BaseModel):
         return v
 
 
+class SupplyGroupMoveRequest(BaseModel):
+    """Request body for moving all supply lines from one resource to another."""
+    from_resource_id: str
+    to_resource_id: str
+    project_id: str
+    period_ids: List[str]
+
+    @field_validator('period_ids')
+    @classmethod
+    def validate_period_ids_not_empty(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError('period_ids must not be empty')
+        return v
+
+    @model_validator(mode='after')
+    def validate_different_resources(self) -> 'SupplyGroupMoveRequest':
+        if self.from_resource_id == self.to_resource_id:
+            raise ValueError('from_resource_id and to_resource_id cannot be the same')
+        return self
+
+
 # ============== GROUP DEMAND OPERATIONS ==============
 
 class DemandGroupDeleteRequest(BaseModel):

@@ -106,6 +106,13 @@ export interface DeleteSupplyGroupRequest {
   period_ids: string[];
 }
 
+export interface MoveSupplyGroupRequest {
+  from_resource_id: string;
+  to_resource_id: string;
+  project_id: string;
+  period_ids: string[];
+}
+
 export const planningApi = {
   // Demand Lines
   async getAllDemandLines(): Promise<DemandLine[]> {
@@ -181,6 +188,10 @@ export const planningApi = {
 
   async deleteSupplyGroup(body: DeleteSupplyGroupRequest): Promise<{ deleted: number }> {
     return apiClient.post<{ deleted: number }>('/supply-lines/group/delete', body);
+  },
+
+  async moveSupplyGroup(body: MoveSupplyGroupRequest): Promise<{ moved: number }> {
+    return apiClient.post<{ moved: number }>('/supply-lines/group/move', body);
   },
 
 };

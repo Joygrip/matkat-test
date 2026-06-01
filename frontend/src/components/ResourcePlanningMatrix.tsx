@@ -20,7 +20,7 @@ import {
   MenuItem,
 } from '@fluentui/react-components';
 import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular, MoreVertical16Regular } from '@fluentui/react-icons';
-import { planningApi, DemandLine, SupplyLine, MoveDemandGroupRequest, DeleteSupplyGroupRequest } from '../api/planning';
+import { planningApi, DemandLine, SupplyLine, MoveDemandGroupRequest, DeleteSupplyGroupRequest, MoveSupplyGroupRequest } from '../api/planning';
 import { ApiError } from '../types';
 import { useToast } from '../hooks/useToast';
 import { lookupsApi, Project, CostCenter, Resource, Placeholder } from '../api/lookups';
@@ -525,6 +525,14 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [deletingSupplyGroup, setDeletingSupplyGroup] = useState(false);
   const [deleteSupplyGroupError, setDeleteSupplyGroupError] = useState<string | null>(null);
 
+  // Move supply group dialog state
+  const [moveSupplyGroupRow, setMoveSupplyGroupRow] = useState<MergedMatrixRow | null>(null);
+  const [movingSupplyGroup, setMovingSupplyGroup] = useState(false);
+  const [moveSupplyGroupError, setMoveSupplyGroupError] = useState<string | null>(null);
+  const [moveSupplyTargetId, setMoveSupplyTargetId] = useState('');
+  const [moveSupplyAllResources, setMoveSupplyAllResources] = useState<Resource[]>([]);
+  const [moveSupplyResourcesLoading, setMoveSupplyResourcesLoading] = useState(false);
+
   // Move group dialog state
   const [moveGroupRow, setMoveGroupRow] = useState<MergedMatrixRow | null>(null);
   const [movingGroup, setMovingGroup] = useState(false);
@@ -817,6 +825,59 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       setDeletingSupplyGroup(false);
     }
   }, [deleteSupplyGroupRow, periods, onReload, showSuccess]);
+
+  const openMoveSupplyDialog = useCallback(async (row: MergedMatrixRow) => {
+    setMoveSupplyGroupRow(row);
+    setMoveSupplyTargetId('');
+    setMoveSupplyGroupError(null);
+    setMoveSupplyResourcesLoading(true);
+    try {
+      const resources = await lookupsApi.listResources();
+      setMoveSupplyAllResources(resources);
+    } catch {
+      setMoveSupplyAllResources([]);
+    } finally {
+      setMoveSupplyResourcesLoading(false);
+    }
+  }, []);
+
+  const handleMoveSupplyGroup = useCallback(async () => {
+    if (!moveSupplyGroupRow || !moveSupplyTargetId) return;
+    setMovingSupplyGroup(true);
+    setMoveSupplyGroupError(null);
+    const body: MoveSupplyGroupRequest = {
+      from_resource_id: moveSupplyGroupRow.resourceId || '',
+      to_resource_id: moveSupplyTargetId,
+      project_id: moveSupplyGroupRow.projectId || '',
+      period_ids: periods.map(p => p.id),
+    };
+    try {
+      await planningApi.moveSupplyGroup(body);
+      const targetName = moveSupplyAllResources.find(r => r.id === moveSupplyTargetId)?.display_name || moveSupplyTargetId;
+      const { projectName } = moveSupplyGroupRow;
+      setMoveSupplyGroupRow(null);
+      onReload();
+      showSuccess('Supply line moved', `Moved supply for ${projectName} to ${targetName}.`);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.code === 'PERIOD_LOCKED') {
+          setMoveSupplyGroupError('One or more periods are locked and cannot be modified.');
+        } else if (err.status === 403) {
+          setMoveSupplyGroupError('You are not authorized to manage supply for this resource.');
+        } else if (err.code === 'CONFLICT') {
+          setMoveSupplyGroupError(err.detail || 'Target resource already has supply for this project in one or more periods.');
+        } else if (err.code === 'RESOURCE_INACTIVE') {
+          setMoveSupplyGroupError(err.detail || 'Cannot move supply to an inactive resource.');
+        } else {
+          setMoveSupplyGroupError(err.detail || err.message || 'Failed to move supply line.');
+        }
+      } else {
+        setMoveSupplyGroupError((err as Error).message || 'Failed to move supply line.');
+      }
+    } finally {
+      setMovingSupplyGroup(false);
+    }
+  }, [moveSupplyGroupRow, moveSupplyTargetId, moveSupplyAllResources, periods, onReload, showSuccess]);
 
   const openMoveDialog = useCallback(async (row: MergedMatrixRow) => {
     setMoveGroupRow(row);
@@ -1792,6 +1853,11 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                           <MenuPopover>
                                             <MenuList>
                                               <MenuItem
+                                                onClick={() => openMoveSupplyDialog(row)}
+                                              >
+                                                Move supply line
+                                              </MenuItem>
+                                              <MenuItem
                                                 onClick={() => {
                                                   setDeleteSupplyGroupRow(row);
                                                   setDeleteSupplyGroupError(null);
@@ -2546,6 +2612,85 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         </DialogBody>
       </DialogSurface>
     </Dialog>
+    {/* Move Supply Group Dialog */}
+    <Dialog
+      open={moveSupplyGroupRow !== null}
+      onOpenChange={(_, d) => { if (!d.open && !movingSupplyGroup) { setMoveSupplyGroupRow(null); setMoveSupplyGroupError(null); } }}
+    >
+      <DialogSurface style={{ maxWidth: 440 }}>
+        <DialogBody>
+          <DialogTitle>Move supply line</DialogTitle>
+          <DialogContent>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, paddingTop: tokens.spacingVerticalS }}>
+              <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                Moving supply for <strong>{moveSupplyGroupRow?.resourceName}</strong> on{' '}
+                <strong>{moveSupplyGroupRow?.projectName}</strong> across{' '}
+                <strong>{periods.length} open period{periods.length !== 1 ? 's' : ''}</strong>.
+              </div>
+              <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                This will move supply values across the visible open periods. Demand and actuals will not be affected.
+              </div>
+
+              <div>
+                <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>
+                  New resource
+                </div>
+                {moveSupplyResourcesLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                    <Spinner size="extra-tiny" /> Loading resources…
+                  </div>
+                ) : (
+                  <select
+                    value={moveSupplyTargetId}
+                    onChange={e => { setMoveSupplyTargetId(e.target.value); setMoveSupplyGroupError(null); }}
+                    style={{
+                      padding: '5px 8px',
+                      border: `1px solid ${tokens.colorNeutralStroke1}`,
+                      borderRadius: tokens.borderRadiusMedium,
+                      fontSize: tokens.fontSizeBase300,
+                      width: '100%',
+                      backgroundColor: tokens.colorNeutralBackground1,
+                    }}
+                  >
+                    <option value="">Select a resource…</option>
+                    {moveSupplyAllResources
+                      .filter(r => r.id !== moveSupplyGroupRow?.resourceId)
+                      .map(r => (
+                        <option key={r.id} value={r.id}>{r.display_name}</option>
+                      ))
+                    }
+                  </select>
+                )}
+              </div>
+
+              {moveSupplyGroupError && (
+                <div style={{ color: tokens.colorPaletteRedForeground2, fontSize: tokens.fontSizeBase200 }}>
+                  {moveSupplyGroupError}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              appearance="secondary"
+              onClick={() => { setMoveSupplyGroupRow(null); setMoveSupplyGroupError(null); }}
+              disabled={movingSupplyGroup}
+            >
+              Cancel
+            </Button>
+            <Button
+              appearance="primary"
+              onClick={handleMoveSupplyGroup}
+              disabled={movingSupplyGroup || !moveSupplyTargetId || moveSupplyResourcesLoading}
+              icon={movingSupplyGroup ? <Spinner size="extra-tiny" /> : undefined}
+            >
+              Move supply
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+
     {/* Delete Supply Group Confirmation Dialog */}
     <Dialog
       open={deleteSupplyGroupRow !== null}

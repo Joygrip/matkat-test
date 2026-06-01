@@ -1237,3 +1237,148 @@ class SupplyService:
 
         self.db.commit()
         return len(lines)
+
+    def move_group(
+        self,
+        from_resource_id: str,
+        to_resource_id: str,
+        project_id: str,
+        period_ids: list[str],
+    ) -> int:
+        """Move all supply lines for a source resource + project to a target resource.
+
+        Validates all periods are open and checks for conflicts before updating any row
+        (all-or-nothing). Returns the count of moved rows.
+        """
+        _MONTH_NAMES = [
+            'January', 'February', 'March', 'April', 'May', 'June',
+            'July', 'August', 'September', 'October', 'November', 'December',
+        ]
+
+        # Validate project exists within tenant
+        project = self.db.query(Project).filter(
+            and_(
+                Project.id == project_id,
+                Project.tenant_id == self.current_user.tenant_id,
+            )
+        ).first()
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "Project not found"},
+            )
+
+        # Validate source resource exists within tenant
+        source_resource = self.db.query(Resource).filter(
+            and_(
+                Resource.id == from_resource_id,
+                Resource.tenant_id == self.current_user.tenant_id,
+            )
+        ).first()
+        if not source_resource:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "Source resource not found"},
+            )
+
+        # Validate target resource exists, belongs to tenant, and is active
+        target_resource = self.db.query(Resource).filter(
+            and_(
+                Resource.id == to_resource_id,
+                Resource.tenant_id == self.current_user.tenant_id,
+            )
+        ).first()
+        if not target_resource:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "Target resource not found"},
+            )
+        if not target_resource.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "RESOURCE_INACTIVE",
+                    "message": "Cannot move supply to an inactive resource. This person has left the organisation.",
+                },
+            )
+
+        # Manager: must be authorized to write supply for both source and target
+        self._check_ro_resource_authorized(from_resource_id)
+        self._check_ro_resource_authorized(to_resource_id)
+
+        # Validate all period_ids belong to current tenant
+        db_periods = self.db.query(Period).filter(
+            and_(
+                Period.id.in_(period_ids),
+                Period.tenant_id == self.current_user.tenant_id,
+            )
+        ).all()
+        period_map = {p.id: p for p in db_periods}
+        for pid in period_ids:
+            if pid not in period_map:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "NOT_FOUND", "message": f"Period {pid} not found"},
+                )
+
+        # Check all periods are open (all-or-nothing)
+        for period in db_periods:
+            if period.status == PeriodStatus.LOCKED:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "code": ErrorCode.PERIOD_LOCKED,
+                        "message": f"Period {period.year}-{period.month:02d} is locked. No edits allowed.",
+                    },
+                )
+
+        # Conflict detection: check whether target already has supply for this project/period
+        conflicts = self.db.query(SupplyLine).filter(
+            and_(
+                SupplyLine.tenant_id == self.current_user.tenant_id,
+                SupplyLine.resource_id == to_resource_id,
+                SupplyLine.project_id == project_id,
+                SupplyLine.period_id.in_(period_ids),
+            )
+        ).all()
+        if conflicts:
+            conflict_period_ids = {c.period_id for c in conflicts}
+            conflict_periods = [p for p in db_periods if p.id in conflict_period_ids]
+            conflict_strs = [
+                f"{_MONTH_NAMES[p.month - 1]} {p.year}"
+                for p in sorted(conflict_periods, key=lambda p: (p.year, p.month))
+            ]
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "CONFLICT",
+                    "message": (
+                        f"{target_resource.display_name} already has supply for {project.name} in: "
+                        f"{', '.join(conflict_strs)}. Cannot move the supply line."
+                    ),
+                },
+            )
+
+        # Fetch source supply lines
+        lines = self.db.query(SupplyLine).filter(
+            and_(
+                SupplyLine.tenant_id == self.current_user.tenant_id,
+                SupplyLine.resource_id == from_resource_id,
+                SupplyLine.project_id == project_id,
+                SupplyLine.period_id.in_(period_ids),
+            )
+        ).all()
+
+        for line in lines:
+            log_audit(
+                self.db, self.current_user,
+                action="update",
+                entity_type="SupplyLine",
+                entity_id=line.id,
+                old_values={"resource_id": line.resource_id},
+                new_values={"resource_id": to_resource_id},
+            )
+            line.resource_id = to_resource_id
+
+        self.db.commit()
+        return len(lines)

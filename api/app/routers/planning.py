@@ -11,7 +11,7 @@ from api.app.schemas.planning import (
     DemandLineCreate, DemandLineUpdate, DemandLineResponse,
     DemandGroupDeleteRequest, DemandGroupMoveRequest,
     SupplyLineCreate, SupplyLineUpdate, SupplyLineResponse,
-    SupplyGroupDeleteRequest,
+    SupplyGroupDeleteRequest, SupplyGroupMoveRequest,
     BulkDemandLineRequest, BulkDemandLineResponse, BulkDemandLineAction,
     BulkDemandLineCreate, BulkDemandLineUpdate, BulkDemandLineDelete,
     BulkDemandLineResult,
@@ -502,6 +502,36 @@ async def delete_supply_group(
         period_ids=data.period_ids,
     )
     return {"deleted": deleted}
+
+
+@router.post("/supply-lines/group/move")
+async def move_supply_group(
+    data: SupplyGroupMoveRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.FINANCE)),
+):
+    """
+    Move all supply lines for a source resource + project to a target resource across the
+    specified periods.
+
+    Rules:
+    - from_resource_id, to_resource_id, and project_id are required and must differ.
+    - All periods must be open before any mutation occurs (all-or-nothing).
+    - Manager must have supply write access for both source and target resources.
+    - Target must be active.
+    - If target already has supply for the same project in any period, returns 409.
+    - Missing source supply lines for some periods are silently skipped.
+
+    Accessible to: Admin, Manager, Finance
+    """
+    service = SupplyService(db, current_user)
+    moved = service.move_group(
+        from_resource_id=data.from_resource_id,
+        to_resource_id=data.to_resource_id,
+        project_id=data.project_id,
+        period_ids=data.period_ids,
+    )
+    return {"moved": moved}
 
 
 @router.post("/supply-lines/bulk", response_model=BulkSupplyLineResponse)

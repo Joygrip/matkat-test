@@ -84,6 +84,13 @@ export interface BulkResponse {
   results?: Array<{ status: string; error?: string | null }>;
 }
 
+export interface DeleteDemandGroupRequest {
+  resource_id?: string;
+  placeholder_id?: string;
+  project_id: string;
+  period_ids: string[];
+}
+
 export const planningApi = {
   // Demand Lines
   async getAllDemandLines(): Promise<DemandLine[]> {
@@ -121,6 +128,10 @@ export const planningApi = {
   
   async bulkDemandLines(body: BulkRequest<CreateDemandLine>): Promise<BulkResponse> {
     return apiClient.post<BulkResponse>('/demand-lines/bulk', body);
+  },
+
+  async deleteDemandGroup(body: DeleteDemandGroupRequest): Promise<{ deleted: number }> {
+    return apiClient.post<{ deleted: number }>('/demand-lines/group/delete', body);
   },
   
   // Supply Lines

@@ -9,6 +9,7 @@ from api.app.models.core import UserRole, Resource, User
 from api.app.config import get_settings
 from api.app.schemas.planning import (
     DemandLineCreate, DemandLineUpdate, DemandLineResponse,
+    DemandGroupDeleteRequest,
     SupplyLineCreate, SupplyLineUpdate, SupplyLineResponse,
     BulkDemandLineRequest, BulkDemandLineResponse, BulkDemandLineAction,
     BulkDemandLineCreate, BulkDemandLineUpdate, BulkDemandLineDelete,
@@ -242,6 +243,35 @@ async def delete_demand_line(
     service = DemandService(db, current_user)
     service.delete(demand_id)
     return {"message": "Demand line deleted"}
+
+
+@router.post("/demand-lines/group/delete")
+async def delete_demand_group(
+    data: DemandGroupDeleteRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.PM, UserRole.FINANCE)),
+):
+    """
+    Delete all demand lines for a resource/placeholder + project combination
+    across the specified periods.
+
+    Rules:
+    - Exactly one of resource_id or placeholder_id must be provided.
+    - All periods must be open before any deletion occurs (all-or-nothing).
+    - PM must be assigned to the project.
+    - Supply lines and actuals are not affected.
+    - Missing demand lines for some periods are silently skipped.
+
+    Accessible to: Admin, PM, Finance
+    """
+    service = DemandService(db, current_user)
+    deleted = service.delete_group(
+        project_id=data.project_id,
+        period_ids=data.period_ids,
+        resource_id=data.resource_id,
+        placeholder_id=data.placeholder_id,
+    )
+    return {"deleted": deleted}
 
 
 @router.post("/demand-lines/bulk", response_model=BulkDemandLineResponse)

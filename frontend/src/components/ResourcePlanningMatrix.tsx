@@ -13,9 +13,15 @@ import {
   DialogTitle,
   DialogActions,
   DialogContent,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItem,
 } from '@fluentui/react-components';
-import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular } from '@fluentui/react-icons';
+import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular, MoreVertical16Regular } from '@fluentui/react-icons';
 import { planningApi, DemandLine, SupplyLine } from '../api/planning';
+import { ApiError } from '../types';
 import { useToast } from '../hooks/useToast';
 import { lookupsApi, Project, CostCenter, Resource, Placeholder } from '../api/lookups';
 import { Period } from '../types/index';
@@ -460,7 +466,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   editableCcIds,
 }) => {
   const styles = useStyles();
-  const { showApiError } = useToast();
+  const { showApiError, showSuccess } = useToast();
 
   const [expandedCCs, setExpandedCCs] = useState<Set<string>>(new Set());
   const [editingCell, setEditingCell] = useState<string | null>(null);
@@ -508,6 +514,11 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [applyValue, setApplyValue] = useState<string>('');
   const [applying, setApplying] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+
+  // Delete group dialog state
+  const [deleteGroupRow, setDeleteGroupRow] = useState<MergedMatrixRow | null>(null);
+  const [deletingGroup, setDeletingGroup] = useState(false);
+  const [deleteGroupError, setDeleteGroupError] = useState<string | null>(null);
 
   // Add Line dialog state
   const [addLineDialogOpen, setAddLineDialogOpen] = useState(false);
@@ -730,6 +741,38 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       setEditingCell(null);
     }
   }, [onReload, showApiError]);
+
+  const handleDeleteGroup = useCallback(async () => {
+    if (!deleteGroupRow) return;
+    setDeletingGroup(true);
+    setDeleteGroupError(null);
+    const { resourceName, projectName } = deleteGroupRow;
+    try {
+      await planningApi.deleteDemandGroup({
+        resource_id: deleteGroupRow.resourceId ?? undefined,
+        placeholder_id: deleteGroupRow.placeholderId ?? undefined,
+        project_id: deleteGroupRow.projectId || '',
+        period_ids: periods.map(p => p.id),
+      });
+      setDeleteGroupRow(null);
+      onReload();
+      showSuccess('Demand line deleted', `Removed demand for ${resourceName} on ${projectName}.`);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.code === 'PERIOD_LOCKED') {
+          setDeleteGroupError('One or more periods are locked and cannot be modified.');
+        } else if (err.code === 'PM_NOT_AUTHORIZED') {
+          setDeleteGroupError('You are not authorized to manage demand for this project.');
+        } else {
+          setDeleteGroupError(err.detail || err.message || 'Failed to delete demand line.');
+        }
+      } else {
+        setDeleteGroupError((err as Error).message || 'Failed to delete demand line.');
+      }
+    } finally {
+      setDeletingGroup(false);
+    }
+  }, [deleteGroupRow, periods, onReload, showSuccess]);
 
   const handleAddDemandLine = useCallback(async (ccId: string, allRows: MergedMatrixRow[]) => {
     const { resOrPh, projectId } = addDemandForm;
@@ -1494,16 +1537,54 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                     style={{
                                       ...(row.isGeneral ? { fontStyle: 'italic' } : {}),
                                       paddingLeft: '12px',
+                                      paddingRight: '4px',
                                       color: tokens.colorNeutralForeground2,
                                       fontSize: '12.5px',
                                       fontWeight: 600,
                                       borderBottom: '1px solid #efeeea',
                                       borderTop: rowIdx > 0 ? '2px solid #c8c4be' : '1px solid #e5e4e0',
                                       background: hoveredProject === row.key ? 'rgba(30,58,95,0.08), #ffffff' : '#ffffff',
+                                      overflow: 'visible',
                                     }}
                                   >
-                                    {row.projectName}
-                                    {row.isGeneral && ' *'}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, overflow: 'hidden' }}>
+                                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
+                                        {row.projectName}
+                                        {row.isGeneral && ' *'}
+                                      </span>
+                                      {canEditDemand && !row.isGeneral && (
+                                        <Menu>
+                                          <MenuTrigger disableButtonEnhancement>
+                                            <Button
+                                              size="small"
+                                              appearance="subtle"
+                                              icon={<MoreVertical16Regular />}
+                                              style={{
+                                                visibility: hoveredProject === row.key ? 'visible' : 'hidden',
+                                                flexShrink: 0,
+                                                minWidth: '24px',
+                                                width: '24px',
+                                                height: '24px',
+                                                padding: 0,
+                                              }}
+                                              onClick={e => e.stopPropagation()}
+                                            />
+                                          </MenuTrigger>
+                                          <MenuPopover>
+                                            <MenuList>
+                                              <MenuItem
+                                                onClick={() => {
+                                                  setDeleteGroupRow(row);
+                                                  setDeleteGroupError(null);
+                                                }}
+                                              >
+                                                Delete demand line
+                                              </MenuItem>
+                                            </MenuList>
+                                          </MenuPopover>
+                                        </Menu>
+                                      )}
+                                    </div>
                                   </td>
                                   <td
                                     className={styles.typeCellDemand}
@@ -2202,6 +2283,51 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
               icon={dlgSaving ? <Spinner size="extra-tiny" /> : undefined}
             >
               Save
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+    {/* Delete Demand Group Confirmation Dialog */}
+    <Dialog
+      open={deleteGroupRow !== null}
+      onOpenChange={(_, d) => { if (!d.open && !deletingGroup) { setDeleteGroupRow(null); setDeleteGroupError(null); } }}
+    >
+      <DialogSurface style={{ maxWidth: 420 }}>
+        <DialogBody>
+          <DialogTitle>Delete demand line?</DialogTitle>
+          <DialogContent>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, paddingTop: tokens.spacingVerticalS }}>
+              <div style={{ fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 }}>
+                This will permanently remove all demand for{' '}
+                <strong>{deleteGroupRow?.resourceName}</strong> on{' '}
+                <strong>{deleteGroupRow?.projectName}</strong> across{' '}
+                <strong>{periods.length} open period{periods.length !== 1 ? 's' : ''}</strong>.
+                This cannot be undone.
+              </div>
+              {deleteGroupError && (
+                <div style={{ color: tokens.colorPaletteRedForeground2, fontSize: tokens.fontSizeBase200 }}>
+                  {deleteGroupError}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              appearance="secondary"
+              onClick={() => { setDeleteGroupRow(null); setDeleteGroupError(null); }}
+              disabled={deletingGroup}
+            >
+              Cancel
+            </Button>
+            <Button
+              appearance="primary"
+              style={{ backgroundColor: tokens.colorPaletteRedBackground3, borderColor: tokens.colorPaletteRedBorder2 }}
+              onClick={handleDeleteGroup}
+              disabled={deletingGroup}
+              icon={deletingGroup ? <Spinner size="extra-tiny" /> : undefined}
+            >
+              Delete demand line
             </Button>
           </DialogActions>
         </DialogBody>

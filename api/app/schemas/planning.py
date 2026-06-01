@@ -1,7 +1,7 @@
 """Planning schemas - Demand and Supply lines."""
 from datetime import datetime
 from typing import List, Literal, Optional, Union
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from api.app.schemas.common import ErrorCode
 
@@ -112,6 +112,31 @@ class SupplyLineResponse(SupplyLineBase):
     
     class Config:
         from_attributes = True
+
+
+# ============== GROUP DEMAND OPERATIONS ==============
+
+class DemandGroupDeleteRequest(BaseModel):
+    """Request body for deleting all demand lines in a resource+project group."""
+    resource_id: Optional[str] = None
+    placeholder_id: Optional[str] = None
+    project_id: str
+    period_ids: List[str]
+
+    @field_validator('period_ids')
+    @classmethod
+    def validate_period_ids_not_empty(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError('period_ids must not be empty')
+        return v
+
+    @model_validator(mode='after')
+    def validate_xor(self) -> 'DemandGroupDeleteRequest':
+        if self.resource_id and self.placeholder_id:
+            raise ValueError(f'{ErrorCode.DEMAND_XOR}: Cannot specify both resource_id and placeholder_id')
+        if not self.resource_id and not self.placeholder_id:
+            raise ValueError(f'{ErrorCode.DEMAND_XOR}: Must specify either resource_id or placeholder_id')
+        return self
 
 
 # ============== BULK DEMAND ==============

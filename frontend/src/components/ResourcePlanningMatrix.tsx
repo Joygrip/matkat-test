@@ -20,7 +20,7 @@ import {
   MenuItem,
 } from '@fluentui/react-components';
 import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular, MoreVertical16Regular } from '@fluentui/react-icons';
-import { planningApi, DemandLine, SupplyLine, MoveDemandGroupRequest } from '../api/planning';
+import { planningApi, DemandLine, SupplyLine, MoveDemandGroupRequest, DeleteSupplyGroupRequest } from '../api/planning';
 import { ApiError } from '../types';
 import { useToast } from '../hooks/useToast';
 import { lookupsApi, Project, CostCenter, Resource, Placeholder } from '../api/lookups';
@@ -520,6 +520,11 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [deletingGroup, setDeletingGroup] = useState(false);
   const [deleteGroupError, setDeleteGroupError] = useState<string | null>(null);
 
+  // Delete supply group dialog state
+  const [deleteSupplyGroupRow, setDeleteSupplyGroupRow] = useState<MergedMatrixRow | null>(null);
+  const [deletingSupplyGroup, setDeletingSupplyGroup] = useState(false);
+  const [deleteSupplyGroupError, setDeleteSupplyGroupError] = useState<string | null>(null);
+
   // Move group dialog state
   const [moveGroupRow, setMoveGroupRow] = useState<MergedMatrixRow | null>(null);
   const [movingGroup, setMovingGroup] = useState(false);
@@ -781,6 +786,37 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       setDeletingGroup(false);
     }
   }, [deleteGroupRow, periods, onReload, showSuccess]);
+
+  const handleDeleteSupplyGroup = useCallback(async () => {
+    if (!deleteSupplyGroupRow) return;
+    setDeletingSupplyGroup(true);
+    setDeleteSupplyGroupError(null);
+    const { resourceName, projectName } = deleteSupplyGroupRow;
+    try {
+      await planningApi.deleteSupplyGroup({
+        resource_id: deleteSupplyGroupRow.resourceId || '',
+        project_id: deleteSupplyGroupRow.projectId || '',
+        period_ids: periods.map(p => p.id),
+      } as DeleteSupplyGroupRequest);
+      setDeleteSupplyGroupRow(null);
+      onReload();
+      showSuccess('Supply line deleted', `Removed supply for ${resourceName} on ${projectName}.`);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.code === 'PERIOD_LOCKED') {
+          setDeleteSupplyGroupError('One or more periods are locked and cannot be modified.');
+        } else if (err.status === 403) {
+          setDeleteSupplyGroupError('You are not authorized to delete supply for this resource.');
+        } else {
+          setDeleteSupplyGroupError(err.detail || err.message || 'Failed to delete supply line.');
+        }
+      } else {
+        setDeleteSupplyGroupError((err as Error).message || 'Failed to delete supply line.');
+      }
+    } finally {
+      setDeletingSupplyGroup(false);
+    }
+  }, [deleteSupplyGroupRow, periods, onReload, showSuccess]);
 
   const openMoveDialog = useCallback(async (row: MergedMatrixRow) => {
     setMoveGroupRow(row);
@@ -1734,7 +1770,41 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                       boxShadow: isLastProject ? `inset 3px 0 0 ${SUPPLY_ACCENT}` : `inset 3px 0 0 ${SUPPLY_ACCENT}, inset 0 -3px 0 #c8c4be`,
                                       ...(hoveredProject === row.key ? { background: 'rgba(30,58,95,0.08), rgba(13,148,136,0.10), #ffffff' } : {}),
                                     }}
-                                  >Supply</td>
+                                  >
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                      <span>Supply</span>
+                                      {canEditSupply && !row.isPlaceholder && (!editableCcIds || editableCcIds.has(group.ccId)) && (
+                                        <Menu>
+                                          <MenuTrigger disableButtonEnhancement>
+                                            <Button
+                                              size="small"
+                                              appearance="subtle"
+                                              icon={<MoreVertical16Regular />}
+                                              style={{
+                                                visibility: hoveredProject === row.key ? 'visible' : 'hidden',
+                                                flexShrink: 0,
+                                                minWidth: '24px',
+                                                height: '20px',
+                                                padding: 0,
+                                              }}
+                                            />
+                                          </MenuTrigger>
+                                          <MenuPopover>
+                                            <MenuList>
+                                              <MenuItem
+                                                onClick={() => {
+                                                  setDeleteSupplyGroupRow(row);
+                                                  setDeleteSupplyGroupError(null);
+                                                }}
+                                              >
+                                                Delete supply line
+                                              </MenuItem>
+                                            </MenuList>
+                                          </MenuPopover>
+                                        </Menu>
+                                      )}
+                                    </span>
+                                  </td>
                                   {periods.map((period, colIndex) => {
                                     const sLine = row.supplyByPeriod.get(period.id);
                                     const sVal = sLine?.fte_percent ?? 0;
@@ -2471,6 +2541,52 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
               icon={deletingGroup ? <Spinner size="extra-tiny" /> : undefined}
             >
               Delete demand line
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+    {/* Delete Supply Group Confirmation Dialog */}
+    <Dialog
+      open={deleteSupplyGroupRow !== null}
+      onOpenChange={(_, d) => { if (!d.open && !deletingSupplyGroup) { setDeleteSupplyGroupRow(null); setDeleteSupplyGroupError(null); } }}
+    >
+      <DialogSurface style={{ maxWidth: 420 }}>
+        <DialogBody>
+          <DialogTitle>Delete supply line?</DialogTitle>
+          <DialogContent>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, paddingTop: tokens.spacingVerticalS }}>
+              <div style={{ fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 }}>
+                This will remove supply for{' '}
+                <strong>{deleteSupplyGroupRow?.resourceName}</strong> on{' '}
+                <strong>{deleteSupplyGroupRow?.projectName}</strong> across the visible open periods.
+              </div>
+              <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                This will not affect demand or actuals.
+              </div>
+              {deleteSupplyGroupError && (
+                <div style={{ color: tokens.colorPaletteRedForeground2, fontSize: tokens.fontSizeBase200 }}>
+                  {deleteSupplyGroupError}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              appearance="secondary"
+              onClick={() => { setDeleteSupplyGroupRow(null); setDeleteSupplyGroupError(null); }}
+              disabled={deletingSupplyGroup}
+            >
+              Cancel
+            </Button>
+            <Button
+              appearance="primary"
+              style={{ backgroundColor: tokens.colorPaletteRedBackground3, borderColor: tokens.colorPaletteRedBorder2 }}
+              onClick={handleDeleteSupplyGroup}
+              disabled={deletingSupplyGroup}
+              icon={deletingSupplyGroup ? <Spinner size="extra-tiny" /> : undefined}
+            >
+              Delete supply line
             </Button>
           </DialogActions>
         </DialogBody>

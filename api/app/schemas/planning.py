@@ -114,6 +114,22 @@ class SupplyLineResponse(SupplyLineBase):
         from_attributes = True
 
 
+# ============== GROUP SUPPLY OPERATIONS ==============
+
+class SupplyGroupDeleteRequest(BaseModel):
+    """Request body for deleting all supply lines in a resource+project group."""
+    resource_id: str
+    project_id: str
+    period_ids: List[str]
+
+    @field_validator('period_ids')
+    @classmethod
+    def validate_period_ids_not_empty(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError('period_ids must not be empty')
+        return v
+
+
 # ============== GROUP DEMAND OPERATIONS ==============
 
 class DemandGroupDeleteRequest(BaseModel):

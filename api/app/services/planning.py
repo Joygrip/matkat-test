@@ -1135,16 +1135,105 @@ class SupplyService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "NOT_FOUND", "message": "Supply line not found"}
             )
-        
+
         # Check period is open
         self._check_period_open(supply.year, supply.month)
-        
+
         self.db.delete(supply)
         self.db.commit()
-        
+
         log_audit(
             self.db, self.current_user,
             action="delete",
             entity_type="SupplyLine",
             entity_id=supply_id,
         )
+
+    def delete_group(
+        self,
+        resource_id: str,
+        project_id: str,
+        period_ids: list[str],
+    ) -> int:
+        """Delete all supply lines for a resource + project across the given periods.
+
+        Validates all periods are open before deleting any row (all-or-nothing).
+        Returns the count of deleted rows.
+        """
+        # Validate resource exists within tenant
+        resource = self.db.query(Resource).filter(
+            and_(
+                Resource.id == resource_id,
+                Resource.tenant_id == self.current_user.tenant_id,
+            )
+        ).first()
+        if not resource:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "Resource not found"},
+            )
+
+        # Validate project exists within tenant
+        project = self.db.query(Project).filter(
+            and_(
+                Project.id == project_id,
+                Project.tenant_id == self.current_user.tenant_id,
+            )
+        ).first()
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "Project not found"},
+            )
+
+        # Manager: only manage supply for resources in their cost center scope
+        self._check_ro_resource_authorized(resource_id)
+
+        # Validate all period_ids belong to current tenant
+        periods = self.db.query(Period).filter(
+            and_(
+                Period.id.in_(period_ids),
+                Period.tenant_id == self.current_user.tenant_id,
+            )
+        ).all()
+
+        period_map = {p.id: p for p in periods}
+        for pid in period_ids:
+            if pid not in period_map:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "NOT_FOUND", "message": f"Period {pid} not found"},
+                )
+
+        # Check ALL periods are open before touching any row (all-or-nothing)
+        for period in periods:
+            if period.status == PeriodStatus.LOCKED:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "code": ErrorCode.PERIOD_LOCKED,
+                        "message": f"Period {period.year}-{period.month:02d} is locked. No edits allowed.",
+                    },
+                )
+
+        # Fetch matching supply lines
+        lines = self.db.query(SupplyLine).filter(
+            and_(
+                SupplyLine.tenant_id == self.current_user.tenant_id,
+                SupplyLine.resource_id == resource_id,
+                SupplyLine.project_id == project_id,
+                SupplyLine.period_id.in_(period_ids),
+            )
+        ).all()
+
+        for line in lines:
+            log_audit(
+                self.db, self.current_user,
+                action="delete",
+                entity_type="SupplyLine",
+                entity_id=line.id,
+            )
+            self.db.delete(line)
+
+        self.db.commit()
+        return len(lines)

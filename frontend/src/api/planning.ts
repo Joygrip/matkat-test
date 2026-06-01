@@ -100,6 +100,12 @@ export interface MoveDemandGroupRequest {
   period_ids: string[];
 }
 
+export interface DeleteSupplyGroupRequest {
+  resource_id: string;
+  project_id: string;
+  period_ids: string[];
+}
+
 export const planningApi = {
   // Demand Lines
   async getAllDemandLines(): Promise<DemandLine[]> {
@@ -172,5 +178,9 @@ export const planningApi = {
   async bulkSupplyLines(body: BulkRequest<CreateSupplyLine>): Promise<BulkResponse> {
     return apiClient.post<BulkResponse>('/supply-lines/bulk', body);
   },
-  
+
+  async deleteSupplyGroup(body: DeleteSupplyGroupRequest): Promise<{ deleted: number }> {
+    return apiClient.post<{ deleted: number }>('/supply-lines/group/delete', body);
+  },
+
 };

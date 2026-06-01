@@ -11,6 +11,7 @@ from api.app.schemas.planning import (
     DemandLineCreate, DemandLineUpdate, DemandLineResponse,
     DemandGroupDeleteRequest, DemandGroupMoveRequest,
     SupplyLineCreate, SupplyLineUpdate, SupplyLineResponse,
+    SupplyGroupDeleteRequest,
     BulkDemandLineRequest, BulkDemandLineResponse, BulkDemandLineAction,
     BulkDemandLineCreate, BulkDemandLineUpdate, BulkDemandLineDelete,
     BulkDemandLineResult,
@@ -474,6 +475,33 @@ async def delete_supply_line(
     service = SupplyService(db, current_user)
     service.delete(supply_id)
     return {"message": "Supply line deleted"}
+
+
+@router.post("/supply-lines/group/delete")
+async def delete_supply_group(
+    data: SupplyGroupDeleteRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.FINANCE)),
+):
+    """
+    Delete all supply lines for a resource + project combination across the specified periods.
+
+    Rules:
+    - resource_id and project_id are required.
+    - All periods must be open before any deletion occurs (all-or-nothing).
+    - Manager must have supply write access for the resource's cost center.
+    - Demand lines and actuals are not affected.
+    - Missing supply lines for some periods are silently skipped.
+
+    Accessible to: Admin, Manager, Finance
+    """
+    service = SupplyService(db, current_user)
+    deleted = service.delete_group(
+        resource_id=data.resource_id,
+        project_id=data.project_id,
+        period_ids=data.period_ids,
+    )
+    return {"deleted": deleted}
 
 
 @router.post("/supply-lines/bulk", response_model=BulkSupplyLineResponse)

@@ -171,14 +171,6 @@ const useStyles = makeStyles({
       backgroundColor: '#fff',
     },
   },
-  submitRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalM,
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-    marginTop: tokens.spacingVerticalS,
-  },
   addProjectRow: {
     display: 'flex',
     alignItems: 'center',
@@ -220,7 +212,7 @@ function ApprovalDot({ status }: { status?: string }) {
 
 export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
   const styles = useStyles();
-  const { showSuccess, showError } = useToast();
+  const { showError } = useToast();
   const { myResource, appDataLoading, projects } = useAppData();
 
   const myResourceId = myResource?.resource_id ?? null;
@@ -235,8 +227,6 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
   const [savingCells, setSavingCells] = useState<Set<string>>(new Set());
   const [savedCells, setSavedCells] = useState<Set<string>>(new Set());
   const [resubmittedCells, setResubmittedCells] = useState<Set<string>>(new Set());
-  const [submitting, setSubmitting] = useState(false);
-
   const [additionalProjects, setAdditionalProjects] = useState<{ id: string; name: string }[]>([]);
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [addProjectSearch, setAddProjectSearch] = useState('');
@@ -280,11 +270,17 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
     myDemandLines.forEach(d => {
       if (!map.has(d.project_id)) map.set(d.project_id, d.project_name ?? d.project_id);
     });
+    myActuals.forEach(a => {
+      if (!map.has(a.project_id)) {
+        const project = projects.find(p => p.id === a.project_id);
+        map.set(a.project_id, a.project_name ?? project?.name ?? a.project_id);
+      }
+    });
     additionalProjects.forEach(p => {
       if (!map.has(p.id)) map.set(p.id, p.name);
     });
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [myDemandLines, additionalProjects]);
+  }, [myDemandLines, myActuals, additionalProjects, projects]);
 
   // NOTE: For PM users, `projects` from useAppData() is scoped to PM-assigned projects
   // (AppDataContext uses listProjectsScoped for PM/Finance/Admin roles). PM's Add Project
@@ -326,17 +322,6 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
   }, [myActuals]);
 
   const hasProjectSupply = useMemo(() => mySupplyLines.some(s => !!s.project_id), [mySupplyLines]);
-
-  const actualsStats = useMemo(() => {
-    const demandProjectIds = new Set(
-      myDemandLines.filter(d => d.period_id === earliestPeriod?.id).map(d => d.project_id),
-    );
-    const total = demandProjectIds.size;
-    const submitted = [...demandProjectIds].filter(pid =>
-      myActuals.some(a => a.project_id === pid && a.period_id === earliestPeriod?.id),
-    ).length;
-    return { total, submitted };
-  }, [myDemandLines, myActuals, earliestPeriod]);
 
   const saveActual = useCallback(async (projectId: string, period: Period, rawValue: string) => {
     const cellKey = `${projectId}:${period.id}`;
@@ -441,39 +426,6 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
       setSavingCells(prev => { const n = new Set(prev); n.delete(cellKey); return n; });
     }
   }, [myResourceId, actualsLookup, myApprovalStatuses, showError]);
-
-  const unsignedCurrentActuals = useMemo(() =>
-    earliestPeriod
-      ? myActuals.filter(a => a.period_id === earliestPeriod.id && !a.employee_signed_at)
-      : [],
-    [myActuals, earliestPeriod],
-  );
-
-  const hasRejectedActuals = useMemo(() =>
-    earliestPeriod
-      ? myActuals.some(a => a.period_id === earliestPeriod.id && myApprovalStatuses[a.id]?.status === 'rejected')
-      : false,
-    [myActuals, earliestPeriod, myApprovalStatuses],
-  );
-
-  const submitActuals = useCallback(async () => {
-    if (!earliestPeriod || unsignedCurrentActuals.length === 0) return;
-    setSubmitting(true);
-    try {
-      await Promise.all(unsignedCurrentActuals.map(a => actualsApi.signActuals(a.id)));
-      const [actuals, statuses] = await Promise.all([
-        actualsApi.getMyActuals(),
-        actualsApi.getMyApprovalStatuses(),
-      ]);
-      setMyActuals(actuals);
-      setMyApprovalStatuses(statuses);
-      showSuccess('Actuals submitted', `Your actuals for ${periodName} are pending approval.`);
-    } catch {
-      showError('Submit failed', 'Could not submit actuals. Please try again.');
-    } finally {
-      setSubmitting(false);
-    }
-  }, [earliestPeriod, unsignedCurrentActuals, periodName, showSuccess, showError]);
 
   if (loading) {
     return (
@@ -855,29 +807,6 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
             )}
           </div>
 
-          {/* Submit actuals button */}
-          {earliestPeriod && (
-            <div className={styles.submitRow}>
-              <Button
-                appearance="primary"
-                disabled={(unsignedCurrentActuals.length === 0 && !hasRejectedActuals) || submitting}
-                onClick={submitActuals}
-                icon={submitting ? <Spinner size="tiny" /> : undefined}
-                style={{ backgroundColor: ACTUALS_COLOR, border: 'none' }}
-              >
-                {hasRejectedActuals ? 'Resubmit Actuals' : 'Submit Actuals'} for {periodName}
-              </Button>
-              <span style={{ fontSize: 12, color: tokens.colorNeutralForeground3 }}>
-                {unsignedCurrentActuals.length === 0 && !hasRejectedActuals
-                  ? actualsStats.submitted === 0
-                    ? 'Enter actuals in the matrix above to submit'
-                    : 'All actuals submitted — awaiting approval'
-                  : hasRejectedActuals
-                    ? 'Some actuals were rejected — edit above and resubmit'
-                    : `${unsignedCurrentActuals.length} line${unsignedCurrentActuals.length !== 1 ? 's' : ''} ready to submit`}
-              </span>
-            </div>
-          )}
         </>
       )}
     </DashboardSection>

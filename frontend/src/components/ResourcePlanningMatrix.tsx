@@ -884,7 +884,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setMoveSupplyGroupError(null);
     setMoveSupplyResourcesLoading(true);
     try {
-      const resources = await lookupsApi.listResources();
+      const resources = await lookupsApi.listResourcesScoped();
       setMoveSupplyAllResources(resources);
     } catch {
       setMoveSupplyAllResources([]);

@@ -1,13 +1,20 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Button,
-  Spinner,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
   Input,
+  Label,
+  Spinner,
   tokens,
   makeStyles,
   mergeClasses,
 } from '@fluentui/react-components';
-import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular, DeleteRegular } from '@fluentui/react-icons';
+import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular, DeleteRegular, EditRegular } from '@fluentui/react-icons';
 import { projectCostsApi, ExternalLine, EquipmentLine } from '../../api/projectCosts';
 import { lookupsApi } from '../../api/lookups';
 import { periodsApi } from '../../api/periods';
@@ -28,6 +35,8 @@ const TYPE_COL_PX = `${TYPE_COL_WIDTH}px`;
 const PERIOD_COL_PX = `${PERIOD_COL_WIDTH}px`;
 const DESC_LEFT_PX = `${PROJECT_COL_WIDTH}px`;
 const TYPE_LEFT_PX = `${PROJECT_COL_WIDTH + DESC_COL_WIDTH}px`;
+const FIXED_AREA_WIDTH = PROJECT_COL_WIDTH + DESC_COL_WIDTH + TYPE_COL_WIDTH;
+const FIXED_AREA_PX = `${FIXED_AREA_WIDTH}px`;
 
 const C = {
   oopAccent:    '#9a5b00',
@@ -101,7 +110,7 @@ const useStyles = makeStyles({
   },
   wrapper: { overflowX: 'auto', width: '100%' },
   matrixSelecting: { userSelect: 'none' as const },
-  table: { borderCollapse: 'collapse', minWidth: '100%', fontSize: '13px' },
+  table: { borderCollapse: 'collapse', minWidth: '100%', fontSize: '13px', tableLayout: 'fixed' as const },
 
   th: {
     fontWeight: 500,
@@ -137,6 +146,23 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     fontSize: '13.5px',
     minWidth: PROJECT_COL_PX,
+    maxWidth: PROJECT_COL_PX,
+    overflow: 'hidden' as const,
+    textOverflow: 'ellipsis' as const,
+    whiteSpace: 'nowrap' as const,
+  },
+  summaryFixedSpanned: {
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
+    borderTop: `1px solid ${C.line}`,
+    borderBottom: `1px solid ${C.line}`,
+    position: 'sticky' as const,
+    left: 0,
+    backgroundColor: 'white',
+    zIndex: 1,
+    width: FIXED_AREA_PX,
+    minWidth: FIXED_AREA_PX,
+    maxWidth: FIXED_AREA_PX,
+    overflow: 'hidden' as const,
   },
   summaryDesc: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
@@ -147,6 +173,7 @@ const useStyles = makeStyles({
     backgroundColor: 'white',
     zIndex: 1,
     minWidth: DESC_COL_PX,
+    maxWidth: DESC_COL_PX,
   },
   summaryType: {
     padding: `2px ${tokens.spacingHorizontalXS}`,
@@ -157,12 +184,13 @@ const useStyles = makeStyles({
     backgroundColor: 'white',
     zIndex: 1,
     minWidth: TYPE_COL_PX,
+    maxWidth: TYPE_COL_PX,
   },
   summaryValueCell: {
     padding: `2px ${tokens.spacingHorizontalXS}`,
     borderTop: `1px solid ${C.line}`,
     borderBottom: `1px solid ${C.line}`,
-    textAlign: 'right' as const,
+    textAlign: 'center' as const,
     width: PERIOD_COL_PX,
     minWidth: PERIOD_COL_PX,
     verticalAlign: 'middle' as const,
@@ -291,8 +319,9 @@ const useStyles = makeStyles({
     fontFamily: MONO,
     fontVariantNumeric: 'tabular-nums' as const,
     fontSize: '12.5px',
-    textAlign: 'right' as const,
+    textAlign: 'center' as const,
     backgroundColor: tokens.colorNeutralBackground3,
+    margin: '0 auto',
     ':hover': { filter: 'brightness(0.92)' },
   },
   emptyCell: {
@@ -351,11 +380,13 @@ const useStyles = makeStyles({
   totalsCellValue: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalXS}`,
     borderTop: `2px solid ${C.line}`,
-    textAlign: 'right' as const,
+    textAlign: 'center' as const,
     fontFamily: MONO,
     fontVariantNumeric: 'tabular-nums' as const,
     fontSize: '12px',
     fontWeight: tokens.fontWeightSemibold,
+    width: PERIOD_COL_PX,
+    minWidth: PERIOD_COL_PX,
   },
   grandTotalCellLabel: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
@@ -373,12 +404,14 @@ const useStyles = makeStyles({
   grandTotalCellValue: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalXS}`,
     borderTop: `2px solid ${C.line}`,
-    textAlign: 'right' as const,
+    textAlign: 'center' as const,
     fontFamily: MONO,
     fontVariantNumeric: 'tabular-nums' as const,
     fontSize: '13px',
     fontWeight: 700,
     backgroundColor: C.grandTotalBg,
+    width: PERIOD_COL_PX,
+    minWidth: PERIOD_COL_PX,
   },
 
   // Floating popover (replaces top toolbar)
@@ -516,6 +549,12 @@ export const ProjectCostsMatrix: React.FC = () => {
   const isDraggingRef = useRef(false);
   const hasDraggedRef = useRef(false);
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  // ── Rename dialog ──
+  const [renamingLine, setRenamingLine] = useState<{ projectId: string; projectName: string; type: 'oop'|'equip'; description: string } | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameError, setRenameError] = useState('');
+  const [renameSaving, setRenameSaving] = useState(false);
 
   // ── Local (unsaved) lines ──
   const [localLines, setLocalLines] = useState<Array<{ projectId: string; type: 'oop'|'equip'; description: string }>>([]);
@@ -663,6 +702,50 @@ export const ProjectCostsMatrix: React.FC = () => {
     }
     return { oopByPeriod, equipByPeriod };
   }, [matrixGroups]);
+
+  // ── Rename dialog handlers ──
+  const openRenameDialog = useCallback((group: ProjectGroup, line: MatrixLine) => {
+    setRenamingLine({ projectId: group.projectId, projectName: group.projectName, type: line.type, description: line.description });
+    setRenameValue(line.description);
+    setRenameError('');
+  }, []);
+
+  const closeRenameDialog = useCallback(() => {
+    setRenamingLine(null);
+    setRenameValue('');
+    setRenameError('');
+  }, []);
+
+  const handleRenameSubmit = useCallback(async () => {
+    if (!renamingLine) return;
+    const trimmed = renameValue.trim();
+    if (!trimmed) { setRenameError('Name is required.'); return; }
+    setRenameSaving(true);
+    setRenameError('');
+    try {
+      const group = matrixGroups.find(g => g.projectId === renamingLine.projectId);
+      const line = group?.lines.find(l => l.type === renamingLine.type && l.description === renamingLine.description);
+      if (line && !line.isLocal) {
+        const promises: Promise<unknown>[] = [];
+        for (const [, cell] of line.costsByPeriod) {
+          if (!cell.isMulti) {
+            promises.push(
+              renamingLine.type === 'oop'
+                ? projectCostsApi.updateExternal(cell.id, { description: trimmed })
+                : projectCostsApi.updateEquipment(cell.id, { description: trimmed }),
+            );
+          }
+        }
+        await Promise.all(promises);
+        await load(false);
+      }
+      closeRenameDialog();
+    } catch (err) {
+      setRenameError(err instanceof Error ? err.message : 'Failed to rename line.');
+    } finally {
+      setRenameSaving(false);
+    }
+  }, [renamingLine, renameValue, matrixGroups, load, closeRenameDialog]);
 
   // ── Cell save ──
   const saveCostCell = useCallback(async (
@@ -907,6 +990,14 @@ export const ProjectCostsMatrix: React.FC = () => {
 
       <div className={mergeClasses(styles.wrapper, isDragging && styles.matrixSelecting)}>
         <table className={styles.table} onMouseLeave={() => setHoveredMonth(null)}>
+          <colgroup>
+            <col style={{ width: PROJECT_COL_WIDTH }} />
+            <col style={{ width: DESC_COL_WIDTH }} />
+            <col style={{ width: TYPE_COL_WIDTH }} />
+            {openPeriods.map(period => (
+              <col key={period.id} style={{ width: PERIOD_COL_WIDTH }} />
+            ))}
+          </colgroup>
           <thead>
             <tr>
               <th className={mergeClasses(styles.th, styles.thProject)} style={{ textAlign: 'left' }}>Project</th>
@@ -954,19 +1045,23 @@ export const ProjectCostsMatrix: React.FC = () => {
                       return s;
                     })}
                   >
-                    <td className={styles.summaryFixed} style={{ boxShadow: `inset 3px 0 0 ${C.equipAccent}`, paddingLeft: 14 }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <td
+                      className={styles.summaryFixedSpanned}
+                      colSpan={3}
+                      style={{ boxShadow: `inset 3px 0 0 ${C.equipAccent}`, paddingLeft: 14 }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         {isExpanded ? <ChevronDown20Regular /> : <ChevronRight20Regular />}
-                        <span style={{ fontSize: '13.5px', fontWeight: 600 }}>{group.projectName}</span>
+                        <span style={{ fontSize: '13.5px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                          {group.projectName}
+                        </span>
                         {lineCount > 0 && (
-                          <span style={{ fontSize: '11px', color: C.ink3, fontWeight: 400 }}>
+                          <span style={{ fontSize: '11px', color: C.ink3, fontWeight: 400, flexShrink: 0, whiteSpace: 'nowrap' }}>
                             · {lineCount} line{lineCount !== 1 ? 's' : ''}
                           </span>
                         )}
                       </span>
                     </td>
-                    <td className={styles.summaryDesc} />
-                    <td className={styles.summaryType} />
                     {openPeriods.map((p, colIdx) => {
                       const total = group.totalsByPeriod.get(p.id) ?? 0;
                       const isColHovered = hoveredMonth === colIdx;
@@ -1031,6 +1126,17 @@ export const ProjectCostsMatrix: React.FC = () => {
                             <span className={line.type === 'oop' ? styles.badgeOop : styles.badgeEquip}>
                               {line.type === 'oop' ? 'OoP' : 'Equip'}
                             </span>
+                            {canEditThisProject && !line.isLocal && (
+                              <Button
+                                size="small"
+                                appearance="subtle"
+                                icon={<EditRegular />}
+                                className={styles.deleteBtn}
+                                style={{ opacity: isHovered ? 1 : 0 }}
+                                title="Edit line name"
+                                onClick={() => openRenameDialog(group, line)}
+                              />
+                            )}
                             {canEditThisProject && (
                               <Button
                                 size="small"
@@ -1201,6 +1307,53 @@ export const ProjectCostsMatrix: React.FC = () => {
           </tbody>
         </table>
       </div>
+
+      {/* ── Rename dialog ── */}
+      <Dialog open={!!renamingLine} onOpenChange={(_, d) => { if (!d.open) closeRenameDialog(); }}>
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Edit line name</DialogTitle>
+            <DialogContent>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS }}>
+                  <Label>Project</Label>
+                  <span style={{ fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground2 }}>
+                    {renamingLine?.projectName}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS }}>
+                  <Label>Type</Label>
+                  <span style={{ fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground2 }}>
+                    {renamingLine?.type === 'oop' ? 'OoP' : 'Equipment'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS }}>
+                  <Label required htmlFor="rename-input">Name</Label>
+                  <Input
+                    id="rename-input"
+                    value={renameValue}
+                    onChange={(_, d) => { setRenameValue(d.value); setRenameError(''); }}
+                    onKeyDown={e => { if (e.key === 'Enter') handleRenameSubmit(); if (e.key === 'Escape') closeRenameDialog(); }}
+                    autoFocus
+                    disabled={renameSaving}
+                  />
+                  {renameError && (
+                    <span style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorStatusDangerForeground1 }}>
+                      {renameError}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="secondary" onClick={closeRenameDialog} disabled={renameSaving}>Cancel</Button>
+              <Button appearance="primary" onClick={handleRenameSubmit} disabled={renameSaving}>
+                {renameSaving ? <Spinner size="tiny" /> : 'Save'}
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
     </div>
   );
 };

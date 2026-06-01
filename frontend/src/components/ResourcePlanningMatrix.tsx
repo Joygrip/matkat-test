@@ -366,7 +366,33 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
     flexWrap: 'nowrap' as const,
   },
+  actionDialogContent: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '8px',
+    paddingTop: '2px',
+  },
+  actionDialogBodyText: {
+    fontSize: '13px',
+    lineHeight: '1.45',
+    color: tokens.colorNeutralForeground1,
+  },
+  actionDialogSecondary: {
+    fontSize: '12px',
+    lineHeight: '1.45',
+    color: tokens.colorNeutralForeground3,
+  },
+  actionDialogError: {
+    fontSize: '12px',
+    color: tokens.colorPaletteRedForeground2,
+  },
 });
+
+const dlgSurfaceDelete = { maxWidth: 420, borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06)', padding: '20px 24px' };
+const dlgSurfaceMove = { maxWidth: 480, borderRadius: 10, overflow: 'visible' as const, boxShadow: '0 4px 20px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06)', padding: '20px 24px' };
+const dlgTitleStyle = { fontSize: 18, fontWeight: 600, lineHeight: 1.3, marginBottom: 12 };
+const compactBtn = { height: 34, padding: '0 14px', borderRadius: 6, fontSize: 13, fontWeight: 500, minWidth: 0, whiteSpace: 'nowrap' as const, display: 'inline-flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const };
+const dangerBtn = { height: 34, padding: '0 14px', borderRadius: 6, fontSize: 13, fontWeight: 600, minWidth: 0, whiteSpace: 'nowrap' as const, display: 'inline-flex' as const, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: '#C92A2A', borderColor: '#C92A2A' };
 
 interface MergedMatrixRow {
   key: string;
@@ -2532,12 +2558,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       open={moveGroupRow !== null}
       onOpenChange={(_, d) => { if (!d.open && !movingGroup) { setMoveGroupRow(null); setMoveTargetId(''); setMoveDemandQuery(''); setMoveDemandDropdownOpen(false); setMoveGroupError(null); } }}
     >
-      <DialogSurface style={{ maxWidth: 440, overflow: 'visible' }}>
+      <DialogSurface style={dlgSurfaceMove}>
         <DialogBody>
-          <DialogTitle>Move demand line</DialogTitle>
+          <DialogTitle style={dlgTitleStyle}>Move demand line</DialogTitle>
           <DialogContent style={{ overflow: 'visible' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, paddingTop: tokens.spacingVerticalS }}>
-              <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+            <div className={styles.actionDialogContent}>
+              <div className={styles.actionDialogBodyText}>
                 Moving demand for <strong>{moveGroupRow?.resourceName}</strong> on{' '}
                 <strong>{moveGroupRow?.projectName}</strong> across{' '}
                 <strong>{periods.length} open period{periods.length !== 1 ? 's' : ''}</strong>.
@@ -2595,15 +2621,14 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
               </div>
 
               {moveGroupError && (
-                <div style={{ color: tokens.colorPaletteRedForeground2, fontSize: tokens.fontSizeBase200 }}>
-                  {moveGroupError}
-                </div>
+                <div className={styles.actionDialogError}>{moveGroupError}</div>
               )}
             </div>
           </DialogContent>
           <DialogActions>
             <Button
               appearance="secondary"
+              style={compactBtn}
               onClick={() => { setMoveGroupRow(null); setMoveTargetId(''); setMoveDemandQuery(''); setMoveDemandDropdownOpen(false); setMoveGroupError(null); }}
               disabled={movingGroup}
             >
@@ -2611,6 +2636,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
             </Button>
             <Button
               appearance="primary"
+              style={compactBtn}
               onClick={handleMoveGroup}
               disabled={movingGroup || !moveTargetId || moveResourcesLoading}
               icon={movingGroup ? <Spinner size="extra-tiny" /> : undefined}
@@ -2627,28 +2653,29 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       open={deleteGroupRow !== null}
       onOpenChange={(_, d) => { if (!d.open && !deletingGroup) { setDeleteGroupRow(null); setDeleteGroupError(null); } }}
     >
-      <DialogSurface style={{ maxWidth: 420 }}>
+      <DialogSurface style={dlgSurfaceDelete}>
         <DialogBody>
-          <DialogTitle>Delete demand line?</DialogTitle>
+          <DialogTitle style={dlgTitleStyle}>Delete demand line?</DialogTitle>
           <DialogContent>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, paddingTop: tokens.spacingVerticalS }}>
-              <div style={{ fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 }}>
-                This will permanently remove all demand for{' '}
+            <div className={styles.actionDialogContent}>
+              <div className={styles.actionDialogBodyText}>
+                This will remove all demand for{' '}
                 <strong>{deleteGroupRow?.resourceName}</strong> on{' '}
                 <strong>{deleteGroupRow?.projectName}</strong> across{' '}
                 <strong>{periods.length} open period{periods.length !== 1 ? 's' : ''}</strong>.
-                This cannot be undone.
+              </div>
+              <div className={styles.actionDialogSecondary}>
+                Supply and actuals will not be affected.
               </div>
               {deleteGroupError && (
-                <div style={{ color: tokens.colorPaletteRedForeground2, fontSize: tokens.fontSizeBase200 }}>
-                  {deleteGroupError}
-                </div>
+                <div className={styles.actionDialogError}>{deleteGroupError}</div>
               )}
             </div>
           </DialogContent>
           <DialogActions>
             <Button
               appearance="secondary"
+              style={compactBtn}
               onClick={() => { setDeleteGroupRow(null); setDeleteGroupError(null); }}
               disabled={deletingGroup}
             >
@@ -2656,12 +2683,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
             </Button>
             <Button
               appearance="primary"
-              style={{ backgroundColor: tokens.colorPaletteRedBackground3, borderColor: tokens.colorPaletteRedBorder2 }}
+              style={dangerBtn}
               onClick={handleDeleteGroup}
               disabled={deletingGroup}
               icon={deletingGroup ? <Spinner size="extra-tiny" /> : undefined}
             >
-              Delete demand line
+              Delete
             </Button>
           </DialogActions>
         </DialogBody>
@@ -2672,18 +2699,18 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       open={moveSupplyGroupRow !== null}
       onOpenChange={(_, d) => { if (!d.open && !movingSupplyGroup) { setMoveSupplyGroupRow(null); setMoveSupplyTargetId(''); setMoveSupplyQuery(''); setMoveSupplyDropdownOpen(false); setMoveSupplyGroupError(null); } }}
     >
-      <DialogSurface style={{ maxWidth: 440, overflow: 'visible' }}>
+      <DialogSurface style={dlgSurfaceMove}>
         <DialogBody>
-          <DialogTitle>Move supply line</DialogTitle>
+          <DialogTitle style={dlgTitleStyle}>Move supply line</DialogTitle>
           <DialogContent style={{ overflow: 'visible' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, paddingTop: tokens.spacingVerticalS }}>
-              <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+            <div className={styles.actionDialogContent}>
+              <div className={styles.actionDialogBodyText}>
                 Moving supply for <strong>{moveSupplyGroupRow?.resourceName}</strong> on{' '}
                 <strong>{moveSupplyGroupRow?.projectName}</strong> across{' '}
                 <strong>{periods.length} open period{periods.length !== 1 ? 's' : ''}</strong>.
               </div>
-              <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-                This will move supply values across the visible open periods. Demand and actuals will not be affected.
+              <div className={styles.actionDialogSecondary}>
+                This will move values across the visible open periods. Demand and actuals will not be affected.
               </div>
 
               <div>
@@ -2738,15 +2765,14 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
               </div>
 
               {moveSupplyGroupError && (
-                <div style={{ color: tokens.colorPaletteRedForeground2, fontSize: tokens.fontSizeBase200 }}>
-                  {moveSupplyGroupError}
-                </div>
+                <div className={styles.actionDialogError}>{moveSupplyGroupError}</div>
               )}
             </div>
           </DialogContent>
           <DialogActions>
             <Button
               appearance="secondary"
+              style={compactBtn}
               onClick={() => { setMoveSupplyGroupRow(null); setMoveSupplyTargetId(''); setMoveSupplyQuery(''); setMoveSupplyDropdownOpen(false); setMoveSupplyGroupError(null); }}
               disabled={movingSupplyGroup}
             >
@@ -2754,6 +2780,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
             </Button>
             <Button
               appearance="primary"
+              style={compactBtn}
               onClick={handleMoveSupplyGroup}
               disabled={movingSupplyGroup || !moveSupplyTargetId || moveSupplyResourcesLoading}
               icon={movingSupplyGroup ? <Spinner size="extra-tiny" /> : undefined}
@@ -2770,29 +2797,28 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       open={deleteSupplyGroupRow !== null}
       onOpenChange={(_, d) => { if (!d.open && !deletingSupplyGroup) { setDeleteSupplyGroupRow(null); setDeleteSupplyGroupError(null); } }}
     >
-      <DialogSurface style={{ maxWidth: 420 }}>
+      <DialogSurface style={dlgSurfaceDelete}>
         <DialogBody>
-          <DialogTitle>Delete supply line?</DialogTitle>
+          <DialogTitle style={dlgTitleStyle}>Delete supply line?</DialogTitle>
           <DialogContent>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, paddingTop: tokens.spacingVerticalS }}>
-              <div style={{ fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 }}>
+            <div className={styles.actionDialogContent}>
+              <div className={styles.actionDialogBodyText}>
                 This will remove supply for{' '}
                 <strong>{deleteSupplyGroupRow?.resourceName}</strong> on{' '}
                 <strong>{deleteSupplyGroupRow?.projectName}</strong> across the visible open periods.
               </div>
-              <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-                This will not affect demand or actuals.
+              <div className={styles.actionDialogSecondary}>
+                Demand and actuals will not be affected.
               </div>
               {deleteSupplyGroupError && (
-                <div style={{ color: tokens.colorPaletteRedForeground2, fontSize: tokens.fontSizeBase200 }}>
-                  {deleteSupplyGroupError}
-                </div>
+                <div className={styles.actionDialogError}>{deleteSupplyGroupError}</div>
               )}
             </div>
           </DialogContent>
           <DialogActions>
             <Button
               appearance="secondary"
+              style={compactBtn}
               onClick={() => { setDeleteSupplyGroupRow(null); setDeleteSupplyGroupError(null); }}
               disabled={deletingSupplyGroup}
             >
@@ -2800,12 +2826,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
             </Button>
             <Button
               appearance="primary"
-              style={{ backgroundColor: tokens.colorPaletteRedBackground3, borderColor: tokens.colorPaletteRedBorder2 }}
+              style={dangerBtn}
               onClick={handleDeleteSupplyGroup}
               disabled={deletingSupplyGroup}
               icon={deletingSupplyGroup ? <Spinner size="extra-tiny" /> : undefined}
             >
-              Delete supply line
+              Delete
             </Button>
           </DialogActions>
         </DialogBody>

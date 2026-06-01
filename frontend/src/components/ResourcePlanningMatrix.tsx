@@ -540,6 +540,10 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [moveTargetId, setMoveTargetId] = useState('');
   const [moveAllResources, setMoveAllResources] = useState<Resource[]>([]);
   const [moveResourcesLoading, setMoveResourcesLoading] = useState(false);
+  const [moveDemandQuery, setMoveDemandQuery] = useState('');
+  const [moveDemandDropdownOpen, setMoveDemandDropdownOpen] = useState(false);
+  const [moveSupplyQuery, setMoveSupplyQuery] = useState('');
+  const [moveSupplyDropdownOpen, setMoveSupplyDropdownOpen] = useState(false);
 
   // Add Line dialog state
   const [addLineDialogOpen, setAddLineDialogOpen] = useState(false);
@@ -672,6 +676,28 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       : [];
     return { resources, placeholders };
   }, [isRoleManager, dlgCcId, dlgResourceQuery, dlgLineType, ccResources, ccPlaceholders, dlgAllResources, dlgAllPlaceholders]);
+
+  const moveDemandFilteredResources = useMemo(() => {
+    const q = moveDemandQuery.trim().toLowerCase();
+    return moveAllResources
+      .filter(r => r.id !== moveGroupRow?.resourceId)
+      .filter(r => !q ||
+        r.display_name.toLowerCase().includes(q) ||
+        (r.initials ? r.initials.toLowerCase().includes(q) : false) ||
+        (r.email ? r.email.toLowerCase().includes(q) : false)
+      );
+  }, [moveAllResources, moveGroupRow, moveDemandQuery]);
+
+  const moveSupplyFilteredResources = useMemo(() => {
+    const q = moveSupplyQuery.trim().toLowerCase();
+    return moveSupplyAllResources
+      .filter(r => r.id !== moveSupplyGroupRow?.resourceId)
+      .filter(r => !q ||
+        r.display_name.toLowerCase().includes(q) ||
+        (r.initials ? r.initials.toLowerCase().includes(q) : false) ||
+        (r.email ? r.email.toLowerCase().includes(q) : false)
+      );
+  }, [moveSupplyAllResources, moveSupplyGroupRow, moveSupplyQuery]);
 
   const loadCcData = useCallback(async (ccId: string) => {
     const promises: Promise<void>[] = [];
@@ -856,6 +882,10 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       const targetName = moveSupplyAllResources.find(r => r.id === moveSupplyTargetId)?.display_name || moveSupplyTargetId;
       const { projectName } = moveSupplyGroupRow;
       setMoveSupplyGroupRow(null);
+      setMoveSupplyTargetId('');
+      setMoveSupplyQuery('');
+      setMoveSupplyDropdownOpen(false);
+      setMoveSupplyGroupError(null);
       onReload();
       showSuccess('Supply line moved', `Moved supply for ${projectName} to ${targetName}.`);
     } catch (err) {
@@ -910,6 +940,10 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       const targetName = moveAllResources.find(r => r.id === moveTargetId)?.display_name || moveTargetId;
       const { projectName } = moveGroupRow;
       setMoveGroupRow(null);
+      setMoveTargetId('');
+      setMoveDemandQuery('');
+      setMoveDemandDropdownOpen(false);
+      setMoveGroupError(null);
       onReload();
       showSuccess('Demand line moved', `Moved demand for ${projectName} to ${targetName}.`);
     } catch (err) {
@@ -1711,6 +1745,19 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                         {row.projectName}
                                         {row.isGeneral && ' *'}
                                       </span>
+                                    </div>
+                                  </td>
+                                  <td
+                                    className={styles.typeCellDemand}
+                                    onMouseEnter={() => setHoveredProject(row.key)}
+                                    onMouseLeave={() => setHoveredProject(null)}
+                                    style={{
+                                      borderTop: rowIdx > 0 ? '2px solid #c8c4be' : '1px solid #e5e4e0',
+                                      ...(hoveredProject === row.key ? { background: 'rgba(30,58,95,0.08), rgba(217,119,6,0.10), #ffffff' } : {}),
+                                    }}
+                                  >
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                      <span>Demand</span>
                                       {canEditDemand && !row.isGeneral && (
                                         <Menu>
                                           <MenuTrigger disableButtonEnhancement>
@@ -1722,15 +1769,18 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                                 visibility: hoveredProject === row.key ? 'visible' : 'hidden',
                                                 flexShrink: 0,
                                                 minWidth: '24px',
-                                                width: '24px',
-                                                height: '24px',
+                                                height: '20px',
                                                 padding: 0,
                                               }}
-                                              onClick={e => e.stopPropagation()}
                                             />
                                           </MenuTrigger>
                                           <MenuPopover>
                                             <MenuList>
+                                              <MenuItem
+                                                onClick={() => openMoveDialog(row)}
+                                              >
+                                                Move to resource
+                                              </MenuItem>
                                               <MenuItem
                                                 onClick={() => {
                                                   setDeleteGroupRow(row);
@@ -1739,26 +1789,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                               >
                                                 Delete demand line
                                               </MenuItem>
-                                              <MenuItem
-                                                onClick={() => openMoveDialog(row)}
-                                              >
-                                                Move to resource
-                                              </MenuItem>
                                             </MenuList>
                                           </MenuPopover>
                                         </Menu>
                                       )}
-                                    </div>
+                                    </span>
                                   </td>
-                                  <td
-                                    className={styles.typeCellDemand}
-                                    onMouseEnter={() => setHoveredProject(row.key)}
-                                    onMouseLeave={() => setHoveredProject(null)}
-                                    style={{
-                                      borderTop: rowIdx > 0 ? '2px solid #c8c4be' : '1px solid #e5e4e0',
-                                      ...(hoveredProject === row.key ? { background: 'rgba(30,58,95,0.08), rgba(217,119,6,0.10), #ffffff' } : {}),
-                                    }}
-                                  >Demand</td>
                                   {periods.map((period, colIndex) => {
                                     const dLine = row.demandByPeriod.get(period.id);
                                     const dVal = dLine?.fte_percent ?? 0;
@@ -2494,12 +2530,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     {/* Move Demand Group Dialog */}
     <Dialog
       open={moveGroupRow !== null}
-      onOpenChange={(_, d) => { if (!d.open && !movingGroup) { setMoveGroupRow(null); setMoveGroupError(null); } }}
+      onOpenChange={(_, d) => { if (!d.open && !movingGroup) { setMoveGroupRow(null); setMoveTargetId(''); setMoveDemandQuery(''); setMoveDemandDropdownOpen(false); setMoveGroupError(null); } }}
     >
-      <DialogSurface style={{ maxWidth: 440 }}>
+      <DialogSurface style={{ maxWidth: 440, overflow: 'visible' }}>
         <DialogBody>
           <DialogTitle>Move demand line</DialogTitle>
-          <DialogContent>
+          <DialogContent style={{ overflow: 'visible' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, paddingTop: tokens.spacingVerticalS }}>
               <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
                 Moving demand for <strong>{moveGroupRow?.resourceName}</strong> on{' '}
@@ -2516,26 +2552,45 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                     <Spinner size="extra-tiny" /> Loading resources…
                   </div>
                 ) : (
-                  <select
-                    value={moveTargetId}
-                    onChange={e => { setMoveTargetId(e.target.value); setMoveGroupError(null); }}
-                    style={{
-                      padding: '5px 8px',
-                      border: `1px solid ${tokens.colorNeutralStroke1}`,
-                      borderRadius: tokens.borderRadiusMedium,
-                      fontSize: tokens.fontSizeBase300,
-                      width: '100%',
-                      backgroundColor: tokens.colorNeutralBackground1,
-                    }}
-                  >
-                    <option value="">Select a resource…</option>
-                    {moveAllResources
-                      .filter(r => r.id !== moveGroupRow?.resourceId)
-                      .map(r => (
-                        <option key={r.id} value={r.id}>{r.display_name}</option>
-                      ))
-                    }
-                  </select>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="text"
+                      value={moveDemandQuery}
+                      onChange={e => { setMoveDemandQuery(e.target.value); setMoveTargetId(''); setMoveDemandDropdownOpen(true); setMoveGroupError(null); }}
+                      onFocus={() => setMoveDemandDropdownOpen(true)}
+                      onBlur={() => setTimeout(() => setMoveDemandDropdownOpen(false), 150)}
+                      placeholder="Search by name or initials..."
+                      style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', boxSizing: 'border-box' }}
+                    />
+                    {moveDemandDropdownOpen && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1000, background: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, boxShadow: tokens.shadow8, maxHeight: 300, overflowY: 'auto' }}>
+                        {moveDemandFilteredResources.length === 0 ? (
+                          <div style={{ padding: '6px 8px', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>No matching resources</div>
+                        ) : (
+                          moveDemandFilteredResources.map(r => (
+                            <div
+                              key={r.id}
+                              onMouseDown={e => {
+                                e.preventDefault();
+                                setMoveTargetId(r.id);
+                                setMoveDemandQuery(r.display_name);
+                                setMoveDemandDropdownOpen(false);
+                                setMoveGroupError(null);
+                              }}
+                              style={{ padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200 }}
+                              onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                            >
+                              <span style={{ background: tokens.colorBrandBackground2, color: tokens.colorBrandForeground1, borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
+                                {r.initials || r.display_name.slice(0, 2).toUpperCase()}
+                              </span>
+                              {r.display_name}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -2549,7 +2604,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
           <DialogActions>
             <Button
               appearance="secondary"
-              onClick={() => { setMoveGroupRow(null); setMoveGroupError(null); }}
+              onClick={() => { setMoveGroupRow(null); setMoveTargetId(''); setMoveDemandQuery(''); setMoveDemandDropdownOpen(false); setMoveGroupError(null); }}
               disabled={movingGroup}
             >
               Cancel
@@ -2615,12 +2670,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     {/* Move Supply Group Dialog */}
     <Dialog
       open={moveSupplyGroupRow !== null}
-      onOpenChange={(_, d) => { if (!d.open && !movingSupplyGroup) { setMoveSupplyGroupRow(null); setMoveSupplyGroupError(null); } }}
+      onOpenChange={(_, d) => { if (!d.open && !movingSupplyGroup) { setMoveSupplyGroupRow(null); setMoveSupplyTargetId(''); setMoveSupplyQuery(''); setMoveSupplyDropdownOpen(false); setMoveSupplyGroupError(null); } }}
     >
-      <DialogSurface style={{ maxWidth: 440 }}>
+      <DialogSurface style={{ maxWidth: 440, overflow: 'visible' }}>
         <DialogBody>
           <DialogTitle>Move supply line</DialogTitle>
-          <DialogContent>
+          <DialogContent style={{ overflow: 'visible' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, paddingTop: tokens.spacingVerticalS }}>
               <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
                 Moving supply for <strong>{moveSupplyGroupRow?.resourceName}</strong> on{' '}
@@ -2640,26 +2695,45 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                     <Spinner size="extra-tiny" /> Loading resources…
                   </div>
                 ) : (
-                  <select
-                    value={moveSupplyTargetId}
-                    onChange={e => { setMoveSupplyTargetId(e.target.value); setMoveSupplyGroupError(null); }}
-                    style={{
-                      padding: '5px 8px',
-                      border: `1px solid ${tokens.colorNeutralStroke1}`,
-                      borderRadius: tokens.borderRadiusMedium,
-                      fontSize: tokens.fontSizeBase300,
-                      width: '100%',
-                      backgroundColor: tokens.colorNeutralBackground1,
-                    }}
-                  >
-                    <option value="">Select a resource…</option>
-                    {moveSupplyAllResources
-                      .filter(r => r.id !== moveSupplyGroupRow?.resourceId)
-                      .map(r => (
-                        <option key={r.id} value={r.id}>{r.display_name}</option>
-                      ))
-                    }
-                  </select>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="text"
+                      value={moveSupplyQuery}
+                      onChange={e => { setMoveSupplyQuery(e.target.value); setMoveSupplyTargetId(''); setMoveSupplyDropdownOpen(true); setMoveSupplyGroupError(null); }}
+                      onFocus={() => setMoveSupplyDropdownOpen(true)}
+                      onBlur={() => setTimeout(() => setMoveSupplyDropdownOpen(false), 150)}
+                      placeholder="Search by name or initials..."
+                      style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', boxSizing: 'border-box' }}
+                    />
+                    {moveSupplyDropdownOpen && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1000, background: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, boxShadow: tokens.shadow8, maxHeight: 300, overflowY: 'auto' }}>
+                        {moveSupplyFilteredResources.length === 0 ? (
+                          <div style={{ padding: '6px 8px', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>No matching resources</div>
+                        ) : (
+                          moveSupplyFilteredResources.map(r => (
+                            <div
+                              key={r.id}
+                              onMouseDown={e => {
+                                e.preventDefault();
+                                setMoveSupplyTargetId(r.id);
+                                setMoveSupplyQuery(r.display_name);
+                                setMoveSupplyDropdownOpen(false);
+                                setMoveSupplyGroupError(null);
+                              }}
+                              style={{ padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200 }}
+                              onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                            >
+                              <span style={{ background: tokens.colorBrandBackground2, color: tokens.colorBrandForeground1, borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
+                                {r.initials || r.display_name.slice(0, 2).toUpperCase()}
+                              </span>
+                              {r.display_name}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -2673,7 +2747,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
           <DialogActions>
             <Button
               appearance="secondary"
-              onClick={() => { setMoveSupplyGroupRow(null); setMoveSupplyGroupError(null); }}
+              onClick={() => { setMoveSupplyGroupRow(null); setMoveSupplyTargetId(''); setMoveSupplyQuery(''); setMoveSupplyDropdownOpen(false); setMoveSupplyGroupError(null); }}
               disabled={movingSupplyGroup}
             >
               Cancel

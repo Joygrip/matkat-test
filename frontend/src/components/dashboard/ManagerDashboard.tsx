@@ -412,9 +412,9 @@ export function ManagerDashboard({ demandLines, supplyLines, costCenters, period
             </div>
             <button
               className={styles.rejectionAlertLink}
-              onClick={() => navigate('/actuals')}
+              onClick={() => navigate('/fte-input')}
             >
-              Go to FTE Approval →
+              Go to FTE Input →
             </button>
           </div>
         </div>

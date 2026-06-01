@@ -60,6 +60,7 @@ import { EmptyState } from '../components/EmptyState';
 import { useAuth, useHasRole } from '../auth/AuthProvider';
 import { apiClient } from '../api/client';
 import { ActualsTab, FinanceActualRow } from '../components/finance/ActualsTab';
+import { getInitials, avatarColor } from '../utils/avatar';
 
 const C_PAGE = {
   bg:      '#faf9f7',
@@ -190,6 +191,25 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
     marginBottom: tokens.spacingVerticalXXS,
+  },
+  resourceOptionRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  resourceAvatar: {
+    width: '26px',
+    height: '26px',
+    minWidth: '26px',
+    borderRadius: '50%',
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '10px',
+    fontWeight: '700',
+    flexShrink: 0,
+    userSelect: 'none',
   },
   loading: {
     display: 'flex',
@@ -635,11 +655,33 @@ export const Actuals: React.FC = () => {
                   placeholder="Search resource..."
                   freeform={false}
                 >
-                  {resources
-                    .filter(r => !resourceSearch || r.display_name.toLowerCase().includes(resourceSearch.toLowerCase()))
-                    .map(r => (
-                      <Option key={r.id} value={r.id}>{r.display_name}</Option>
-                    ))}
+                  {(() => {
+                    const q = resourceSearch.toLowerCase();
+                    const filtered = resources.filter(r => {
+                      if (!q) return true;
+                      const initials = getInitials(r.display_name, r.initials).toLowerCase();
+                      return (
+                        r.display_name.toLowerCase().includes(q) ||
+                        initials.includes(q) ||
+                        (r.email ?? '').toLowerCase().includes(q)
+                      );
+                    });
+                    if (filtered.length === 0) {
+                      return <Option key="__no_match" value="" disabled>No matching resources</Option>;
+                    }
+                    return filtered.map(r => {
+                      const initials = getInitials(r.display_name, r.initials);
+                      const bg = avatarColor(r.display_name);
+                      return (
+                        <Option key={r.id} value={r.id} text={r.display_name}>
+                          <span className={styles.resourceOptionRow}>
+                            <span className={styles.resourceAvatar} style={{ background: bg }}>{initials}</span>
+                            {r.display_name}
+                          </span>
+                        </Option>
+                      );
+                    });
+                  })()}
                 </Combobox>
               )}
             </div>

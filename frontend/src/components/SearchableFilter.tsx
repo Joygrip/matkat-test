@@ -1,6 +1,6 @@
 /**
  * Searchable filter: type to filter options by text (contains match).
- * Used for Project, Resource, Cost Center filters in Demand/Supply.
+ * Used for Project, Resource, Cost Center filters in Demand/Supply and Finance.
  */
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Input, makeStyles, tokens } from '@fluentui/react-components';
@@ -8,6 +8,8 @@ import { Input, makeStyles, tokens } from '@fluentui/react-components';
 export interface SearchableFilterOption {
   id: string;
   label: string;
+  /** Optional secondary text shown in the dropdown and included in search */
+  code?: string | null;
 }
 
 export interface SearchableFilterProps {
@@ -40,7 +42,8 @@ export function SearchableFilter({
     const q = query.trim().toLowerCase();
     if (!q) return options.slice(0, 80);
     return options.filter(o =>
-      o.label.toLowerCase().includes(q)
+      o.label.toLowerCase().includes(q) ||
+      (o.code ? o.code.toLowerCase().includes(q) : false)
     ).slice(0, 80);
   }, [options, query]);
 
@@ -88,7 +91,10 @@ export function SearchableFilter({
               className={styles.option}
               onMouseDown={(e) => { e.preventDefault(); onChange(o.id); setQuery(''); setOpen(false); }}
             >
-              {o.label}
+              <span>{o.label}</span>
+              {o.code && o.code.trim().toLowerCase() !== o.label.trim().toLowerCase() && (
+                <span className={styles.optionCode}>{o.code}</span>
+              )}
             </li>
           ))}
         </ul>
@@ -120,6 +126,14 @@ const useStyles = makeStyles({
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
     cursor: 'pointer',
     fontSize: tokens.fontSizeBase300,
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: tokens.spacingHorizontalS,
     ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
+  },
+  optionCode: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    flexShrink: 0,
   },
 });

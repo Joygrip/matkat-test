@@ -4,7 +4,8 @@
  * All demand_cost / actuals_cost are in DKK; externals_cost / equipment_cost are in cents.
  */
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Spinner, Select, Tab, TabList, Combobox, Option } from '@fluentui/react-components';
+import { Spinner, Tab, TabList } from '@fluentui/react-components';
+import { SearchableFilter } from '../SearchableFilter';
 import { ChevronRight20Regular, Dismiss20Regular, ArrowDownloadRegular } from '@fluentui/react-icons';
 import { PeriodPillSelector } from '../shared/PeriodPillSelector';
 import {
@@ -262,11 +263,14 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
 
   const costCenterOptions = useMemo(() => {
     const seen = new Set<string>();
-    const result: { id: string; name: string }[] = [];
+    const result: { id: string; name: string; code: string | null }[] = [];
     allRawData.forEach(r => {
-      if (r.cost_center_id && !seen.has(r.cost_center_id)) {
-        seen.add(r.cost_center_id);
-        result.push({ id: r.cost_center_id, name: r.cost_center_name ?? '' });
+      // In groupBy==='id' mode cost_center_id is populated; in groupBy==='code' mode
+      // the backend aggregates by code so cost_center_id is null — fall back to code.
+      const key = r.cost_center_id ?? r.cost_center_code;
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        result.push({ id: key, name: r.cost_center_name ?? r.cost_center_code ?? '', code: r.cost_center_code ?? null });
       }
     });
     return result.sort((a, b) => a.name.localeCompare(b.name));
@@ -276,7 +280,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
     let d = allRawData;
     if (selectedYearMonths) d = d.filter(r => selectedYearMonths.has(`${r.year}-${r.month}`));
     if (selectedProjectId) d = d.filter(r => r.project_id === selectedProjectId);
-    if (selectedCostCenterId) d = d.filter(r => r.cost_center_id === selectedCostCenterId);
+    if (selectedCostCenterId) d = d.filter(r => r.cost_center_id === selectedCostCenterId || r.cost_center_code === selectedCostCenterId);
     return d;
   }, [allRawData, selectedYearMonths, selectedProjectId, selectedCostCenterId]);
 
@@ -309,7 +313,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
     }
     let prev = allRawData.filter(r => prevIds.includes(`${r.year}-${r.month}`));
     if (selectedProjectId) prev = prev.filter(r => r.project_id === selectedProjectId);
-    if (selectedCostCenterId) prev = prev.filter(r => r.cost_center_id === selectedCostCenterId);
+    if (selectedCostCenterId) prev = prev.filter(r => r.cost_center_id === selectedCostCenterId || r.cost_center_code === selectedCostCenterId);
     if (prev.length === 0) return null;
     return {
       planned: prev.reduce((s, r) => s + r.demand_cost, 0),
@@ -478,17 +482,30 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
 
     if (baseParams) {
       setDrawerLoading(true);
-      const detailParams = targetYear !== undefined
-        ? { ...baseParams, year: targetYear, month: targetMonth! }
-        : { ...baseParams };
+      let fetchPromise: Promise<ConsolidatedCostDetail[]>;
 
-      getConsolidatedCostDetail(detailParams)
-        .then(details => {
-          if (details.length === 0) { setDrawerDetail(null); return; }
-          setDrawerDetail(details);
-        }).catch(() => setDrawerDetail(null)).finally(() => setDrawerLoading(false));
+      if (targetYear !== undefined) {
+        // Heatmap cell click: fetch that specific month only
+        fetchPromise = getConsolidatedCostDetail({ ...baseParams, year: targetYear, month: targetMonth! });
+      } else if (selectedPeriodIds.size > 0) {
+        // Period pills active: fetch each selected period (including locked/archive) and merge
+        const selPeriods = periods
+          .filter(p => selectedPeriodIds.has(p.id))
+          .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+        fetchPromise = Promise.all(
+          selPeriods.map(p => getConsolidatedCostDetail({ ...baseParams, year: p.year, month: p.month }))
+        ).then(arrays => arrays.flat());
+      } else {
+        // No period filter: fetch all open periods
+        fetchPromise = getConsolidatedCostDetail(baseParams);
+      }
+
+      fetchPromise
+        .then(details => { setDrawerDetail(details.length === 0 ? null : details); })
+        .catch(() => setDrawerDetail(null))
+        .finally(() => setDrawerLoading(false));
     }
-  }, [filteredData, buildMonthlyBuckets, ccNameToId, groupBy]);
+  }, [filteredData, buildMonthlyBuckets, ccNameToId, groupBy, selectedPeriodIds, periods]);
 
   // ── CSV export ────────────────────────────────────────────────────────────────
 
@@ -629,23 +646,27 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
         {/* Project */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={label11}>Project</span>
-          <Select value={selectedProjectId ?? ''} onChange={(_, d) => setSelectedProjectId(d.value || null)} style={{ minWidth: 160 }}>
-            <option value="">All projects</option>
-            {projectOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </Select>
+          <SearchableFilter
+            options={projectOptions.map(p => ({ id: p.id, label: p.name }))}
+            value={selectedProjectId ?? ''}
+            onChange={id => setSelectedProjectId(id || null)}
+            placeholder="All projects"
+            allLabel="All projects"
+            style={{ minWidth: 160 }}
+          />
         </div>
 
         {/* Cost Center */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={label11}>Cost Center</span>
-          <Combobox
-            value={selectedCostCenterId ? (costCenterOptions.find(c => c.id === selectedCostCenterId)?.name ?? '') : ''}
-            onOptionSelect={(_, d) => setSelectedCostCenterId(d.optionValue ? String(d.optionValue) : null)}
+          <SearchableFilter
+            options={costCenterOptions.map(c => ({ id: c.id, label: c.name, code: c.code }))}
+            value={selectedCostCenterId ?? ''}
+            onChange={id => setSelectedCostCenterId(id || null)}
+            placeholder="All cost centers"
+            allLabel="All cost centers"
             style={{ minWidth: 160 }}
-          >
-            <Option key="__all" value="" text="All cost centers">All cost centers</Option>
-            {costCenterOptions.map(c => <Option key={c.id} value={c.id} text={c.name}>{c.name}</Option>)}
-          </Combobox>
+          />
         </div>
 
 

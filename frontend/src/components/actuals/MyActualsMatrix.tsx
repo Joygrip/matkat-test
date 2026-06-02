@@ -336,6 +336,21 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
     }
     if (!myResourceId) return;
 
+    // Pre-validate: total actuals for this resource/period must not exceed 100%
+    let attemptedTotal = ftePct;
+    for (const a of myActuals) {
+      if (a.period_id === period.id && a.project_id !== projectId) {
+        attemptedTotal += a.actual_fte_percent;
+      }
+    }
+    if (attemptedTotal > 100.0001) {
+      const periodLabel = fmtPeriod(period);
+      const rounded = Math.round(attemptedTotal * 10) / 10;
+      showError('Save failed', `Total actuals for ${periodLabel} cannot exceed 100%. Current total would be ${rounded}%.`);
+      setActualsEdits(prev => { const n = { ...prev }; delete n[cellKey]; return n; });
+      return;
+    }
+
     const existing = actualsLookup.get(cellKey);
     const approvalStatus = existing ? myApprovalStatuses[existing.id]?.status : undefined;
 
@@ -419,13 +434,21 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
       setSavedCells(prev => new Set(prev).add(cellKey));
       setTimeout(() => setSavedCells(prev => { const n = new Set(prev); n.delete(cellKey); return n; }), 2000);
     } catch (err) {
-      const e = err as { response?: { data?: unknown; status?: number } };
+      type ErrDetail = string | { message?: string };
+      const e = err as { response?: { data?: { detail?: ErrDetail }; status?: number } };
       console.error('ACTUALS SAVE ERROR:', err, e?.response?.data, e?.response?.status);
-      showError('Save failed', 'Could not save actuals value. Please try again.');
+      setActualsEdits(prev => { const n = { ...prev }; delete n[cellKey]; return n; });
+      const detail = e?.response?.data?.detail;
+      const msg = typeof detail === 'string' && detail
+        ? detail
+        : (detail && typeof detail === 'object' && detail.message)
+          ? detail.message
+          : 'Could not save actuals value.';
+      showError('Save failed', msg);
     } finally {
       setSavingCells(prev => { const n = new Set(prev); n.delete(cellKey); return n; });
     }
-  }, [myResourceId, actualsLookup, myApprovalStatuses, showError]);
+  }, [myResourceId, myActuals, actualsLookup, myApprovalStatuses, showError]);
 
   if (loading) {
     return (

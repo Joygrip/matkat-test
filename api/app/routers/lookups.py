@@ -283,6 +283,15 @@ async def list_users(
     if cc_ids:
         for cc in db.query(CostCenter.id, CostCenter.name).filter(CostCenter.id.in_(cc_ids)).all():
             cc_name_map[cc.id] = cc.name
+    user_ids = [u.id for u in users]
+    initials_map: dict[str, str] = {}
+    if user_ids:
+        for r in db.query(Resource.user_id, Resource.initials).filter(
+            Resource.user_id.in_(user_ids),
+            Resource.is_active == True,
+        ).all():
+            if r.user_id and r.initials:
+                initials_map[r.user_id] = r.initials
     return [
         {
             "id": u.id,
@@ -290,6 +299,7 @@ async def list_users(
             "email": u.email,
             "role": u.role,
             "cost_center_name": cc_name_map.get(u.cost_center_id) if u.cost_center_id else None,
+            "initials": initials_map.get(u.id),
         }
         for u in users
     ]

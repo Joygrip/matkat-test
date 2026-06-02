@@ -104,6 +104,7 @@ export interface AdminUser {
   email: string;
   role: string;
   cost_center_name?: string | null;
+  initials?: string | null;
 }
 
 export interface AdminUserDetail {

@@ -26,6 +26,7 @@ import { useToast } from '../hooks/useToast';
 import { lookupsApi, Project, CostCenter, Resource, Placeholder } from '../api/lookups';
 import { Period } from '../types/index';
 import { MONTH_SHORT } from '../utils/format';
+import { avatarColor, getInitials } from '../utils/avatar';
 
 const RESOURCE_COL_WIDTH = 180;
 const PROJECT_COL_WIDTH = 150;
@@ -2354,8 +2355,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                         key={res.id}
                         style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 6px 2px 4px', border: `1px solid ${tokens.colorBrandStroke1}`, borderRadius: tokens.borderRadiusCircular, backgroundColor: tokens.colorBrandBackground2, fontSize: tokens.fontSizeBase100 }}
                       >
-                        <span style={{ background: tokens.colorBrandBackground, color: tokens.colorNeutralForegroundOnBrand, borderRadius: '50%', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
-                          {res.initials}
+                        <span style={{ background: avatarColor(res.name), color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
+                          {getInitials(res.name, res.initials)}
                         </span>
                         {res.name}
                         <button
@@ -2411,8 +2412,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                 onMouseEnter={e => { if (!alreadySelected) e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
                                 onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
                               >
-                                <span style={{ background: tokens.colorBrandBackground2, color: tokens.colorBrandForeground1, borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
-                                  {r.initials || r.display_name.slice(0, 2).toUpperCase()}
+                                <span style={{ background: avatarColor(r.display_name), color: '#fff', borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
+                                  {getInitials(r.display_name, r.initials)}
                                 </span>
                                 {r.display_name}
                                 {alreadySelected && <span style={{ marginLeft: 'auto', fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3 }}>✓</span>}
@@ -2607,8 +2608,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                               onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
                               onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
                             >
-                              <span style={{ background: tokens.colorBrandBackground2, color: tokens.colorBrandForeground1, borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
-                                {r.initials || r.display_name.slice(0, 2).toUpperCase()}
+                              <span style={{ background: avatarColor(r.display_name), color: '#fff', borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
+                                {getInitials(r.display_name, r.initials)}
                               </span>
                               {r.display_name}
                             </div>
@@ -2751,8 +2752,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                               onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
                               onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
                             >
-                              <span style={{ background: tokens.colorBrandBackground2, color: tokens.colorBrandForeground1, borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
-                                {r.initials || r.display_name.slice(0, 2).toUpperCase()}
+                              <span style={{ background: avatarColor(r.display_name), color: '#fff', borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
+                                {getInitials(r.display_name, r.initials)}
                               </span>
                               {r.display_name}
                             </div>

@@ -76,6 +76,7 @@ import { useToast } from '../hooks/useToast';
 import { useAuth } from '../auth/AuthProvider';
 import { apiClient } from '../api/client';
 import { config } from '../config';
+import { avatarColor, getInitials } from '../utils/avatar';
 import { AdminToolbar } from '../components/admin/AdminToolbar';
 import { StatusPill, projectStatus, resourceStatus } from '../components/admin/StatusPill';
 import { usePeriod } from '../contexts/PeriodContext';
@@ -1583,15 +1584,8 @@ export function Admin() {
   const [delegatorSearch, setDelegatorSearch] = useState('');
   const [delegateSearch, setDelegateSearch] = useState('');
 
-  const delegateUserInitials = (name: string) => {
-    const parts = name.trim().split(/\s+/);
-    return parts.length >= 2
-      ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-      : name.slice(0, 2).toUpperCase();
-  };
-
   const delegateOptionLabel = (u: AdminUser) => {
-    const ini = delegateUserInitials(u.display_name);
+    const ini = getInitials(u.display_name, u.initials);
     const cc = u.cost_center_name ? ` — ${u.cost_center_name}` : '';
     return `${ini} ${u.display_name} (${u.role})${cc}`;
   };
@@ -1599,10 +1593,16 @@ export function Admin() {
   const filterDelegateUsers = (users: AdminUser[], query: string) => {
     const q = query.trim().toLowerCase();
     if (!q) return users;
-    return users.filter(u =>
-      u.display_name.toLowerCase().includes(q) ||
-      delegateUserInitials(u.display_name).toLowerCase().includes(q)
-    );
+    return users.filter(u => {
+      const assigned = (u.initials ?? '').toLowerCase();
+      const generated = getInitials(u.display_name).toLowerCase();
+      return (
+        u.display_name.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        assigned.includes(q) ||
+        generated.includes(q)
+      );
+    });
   };
 
   // Dialog state
@@ -2745,7 +2745,13 @@ export function Admin() {
                         delegatorSearch
                       ).map(u => (
                         <Option key={u.id} value={u.id} text={delegateOptionLabel(u)}>
-                          {delegateOptionLabel(u)}
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ background: avatarColor(u.display_name), color: '#fff', borderRadius: '50%', width: 24, height: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, flexShrink: 0 }}>
+                              {getInitials(u.display_name, u.initials)}
+                            </span>
+                            {u.display_name}
+                            <span style={{ color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase100 }}>({u.role}{u.cost_center_name ? ` — ${u.cost_center_name}` : ''})</span>
+                          </span>
                         </Option>
                       ))}
                     </Combobox>
@@ -2779,7 +2785,13 @@ export function Admin() {
                       delegateSearch
                     ).map(u => (
                       <Option key={u.id} value={u.id} text={delegateOptionLabel(u)}>
-                        {delegateOptionLabel(u)}
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ background: avatarColor(u.display_name), color: '#fff', borderRadius: '50%', width: 24, height: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, flexShrink: 0 }}>
+                            {getInitials(u.display_name, u.initials)}
+                          </span>
+                          {u.display_name}
+                          <span style={{ color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase100 }}>({u.role}{u.cost_center_name ? ` — ${u.cost_center_name}` : ''})</span>
+                        </span>
                       </Option>
                     ))}
                   </Combobox>

@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { flushSync } from 'react-dom';
+import { flushSync, createPortal } from 'react-dom';
 import {
   Button,
   Spinner,
+  FluentProvider,
   tokens,
   makeStyles,
   mergeClasses,
-  Select,
   Dialog,
   DialogSurface,
   DialogBody,
@@ -27,6 +27,7 @@ import { lookupsApi, Project, CostCenter, Resource, Placeholder } from '../api/l
 import { Period } from '../types/index';
 import { MONTH_SHORT } from '../utils/format';
 import { avatarColor, getInitials } from '../utils/avatar';
+import { ferrosanTheme } from '../theme/ferrosanTheme';
 
 const RESOURCE_COL_WIDTH = 180;
 const PROJECT_COL_WIDTH = 150;
@@ -502,6 +503,14 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [addSupplyCC, setAddSupplyCC] = useState<string | null>(null);
   const [addDemandForm, setAddDemandForm] = useState({ resOrPh: '', projectId: '' });
   const [addSupplyForm, setAddSupplyForm] = useState({ resourceId: '', projectId: '' });
+  const [addDemandResQuery, setAddDemandResQuery] = useState('');
+  const [addDemandResDropdownOpen, setAddDemandResDropdownOpen] = useState(false);
+  const [addDemandProjectQuery, setAddDemandProjectQuery] = useState('');
+  const [addDemandProjectDropdownOpen, setAddDemandProjectDropdownOpen] = useState(false);
+  const [addSupplyResQuery, setAddSupplyResQuery] = useState('');
+  const [addSupplyResDropdownOpen, setAddSupplyResDropdownOpen] = useState(false);
+  const [addSupplyProjectQuery, setAddSupplyProjectQuery] = useState('');
+  const [addSupplyProjectDropdownOpen, setAddSupplyProjectDropdownOpen] = useState(false);
   const [ccResources, setCcResources] = useState<Record<string, Resource[]>>({});
   const [ccPlaceholders, setCcPlaceholders] = useState<Record<string, Placeholder[]>>({});
   const [localDemandRows, setLocalDemandRows] = useState<Record<string, LocalRow[]>>({});
@@ -523,6 +532,11 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const phantomRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const isSyncingScrollRef = useRef(false);
+  // Refs for portal-positioned inline add-row dropdowns
+  const addDemandResInputRef = useRef<HTMLInputElement>(null);
+  const addDemandProjectInputRef = useRef<HTMLInputElement>(null);
+  const addSupplyResInputRef = useRef<HTMLInputElement>(null);
+  const addSupplyProjectInputRef = useRef<HTMLInputElement>(null);
   const [dragStart, setDragStart] = useState<{
     cellKey: string;
     resourceId: string | null;
@@ -755,6 +769,40 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       !q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q)
     );
   }, [moveSupplyAllProjects, moveSupplyProjectQuery]);
+
+  const addDemandFilteredResAndPh = useMemo(() => {
+    if (!addDemandCC) return { resources: [] as Resource[], placeholders: [] as Placeholder[] };
+    const q = addDemandResQuery.trim().toLowerCase();
+    const resources = (ccResources[addDemandCC] ?? []).filter(r => !q ||
+      r.display_name.toLowerCase().includes(q) ||
+      (r.initials ? r.initials.toLowerCase().includes(q) : getInitials(r.display_name).toLowerCase().includes(q)) ||
+      (r.email ? r.email.toLowerCase().includes(q) : false)
+    );
+    const placeholders = (ccPlaceholders[addDemandCC] ?? []).filter(ph =>
+      !q || ph.name.toLowerCase().includes(q)
+    );
+    return { resources, placeholders };
+  }, [addDemandCC, addDemandResQuery, ccResources, ccPlaceholders]);
+
+  const addDemandFilteredProjects = useMemo(() => {
+    const q = addDemandProjectQuery.trim().toLowerCase();
+    return projects.filter(p => !q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q));
+  }, [addDemandProjectQuery, projects]);
+
+  const addSupplyFilteredResources = useMemo(() => {
+    if (!addSupplyCC) return [] as Resource[];
+    const q = addSupplyResQuery.trim().toLowerCase();
+    return (ccResources[addSupplyCC] ?? []).filter(r => !q ||
+      r.display_name.toLowerCase().includes(q) ||
+      (r.initials ? r.initials.toLowerCase().includes(q) : getInitials(r.display_name).toLowerCase().includes(q)) ||
+      (r.email ? r.email.toLowerCase().includes(q) : false)
+    );
+  }, [addSupplyCC, addSupplyResQuery, ccResources]);
+
+  const addSupplyFilteredProjects = useMemo(() => {
+    const q = addSupplyProjectQuery.trim().toLowerCase();
+    return projects.filter(p => !q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q));
+  }, [addSupplyProjectQuery, projects]);
 
   const loadCcData = useCallback(async (ccId: string) => {
     const promises: Promise<void>[] = [];
@@ -2226,37 +2274,99 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                         >
                           {addDemandCC === group.ccId ? (
                             <div className={styles.addLineForm}>
-                              <Select
-                                value={addDemandForm.resOrPh}
-                                onChange={(_, d) => setAddDemandForm(f => ({ ...f, resOrPh: d.value }))}
-                                style={{ minWidth: 200 }}
-                              >
-                                <option value="">Resource / Placeholder…</option>
-                                {(ccResources[group.ccId] ?? []).length > 0 && (
-                                  <optgroup label="Resources">
-                                    {(ccResources[group.ccId] ?? []).map(r => (
-                                      <option key={`r:${r.id}`} value={`r:${r.id}`}>{r.display_name}</option>
-                                    ))}
-                                  </optgroup>
+                              {/* Resource / Placeholder searchable picker */}
+                              <div style={{ minWidth: 200 }}>
+                                <input
+                                  ref={addDemandResInputRef}
+                                  type="text"
+                                  value={addDemandResQuery}
+                                  onChange={e => { setAddDemandResQuery(e.target.value); setAddDemandForm(f => ({ ...f, resOrPh: '' })); setAddDemandResDropdownOpen(true); }}
+                                  onFocus={() => setAddDemandResDropdownOpen(true)}
+                                  onBlur={() => setTimeout(() => setAddDemandResDropdownOpen(false), 150)}
+                                  placeholder="Resource..."
+                                  style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', boxSizing: 'border-box' }}
+                                />
+                                {addDemandResDropdownOpen && addDemandResInputRef.current && createPortal(
+                                  <FluentProvider theme={ferrosanTheme}>
+                                    <div style={{ position: 'fixed', top: addDemandResInputRef.current.getBoundingClientRect().bottom + 2, left: addDemandResInputRef.current.getBoundingClientRect().left, minWidth: addDemandResInputRef.current.getBoundingClientRect().width, zIndex: 9999, backgroundColor: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, boxShadow: tokens.shadow16, maxHeight: 200, overflowY: 'auto' }}>
+                                      {addDemandFilteredResAndPh.resources.length === 0 && addDemandFilteredResAndPh.placeholders.length === 0 ? (
+                                        <div style={{ padding: '6px 8px', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>No matching resources</div>
+                                      ) : (
+                                        <>
+                                          {addDemandFilteredResAndPh.resources.length > 0 && addDemandFilteredResAndPh.placeholders.length > 0 && (
+                                            <div style={{ padding: '2px 8px', fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3, fontWeight: tokens.fontWeightSemibold, backgroundColor: tokens.colorNeutralBackground2, borderBottom: `1px solid ${tokens.colorNeutralStroke1}` }}>Resources</div>
+                                          )}
+                                          {addDemandFilteredResAndPh.resources.map(r => (
+                                            <div
+                                              key={`r:${r.id}`}
+                                              onMouseDown={e => { e.preventDefault(); setAddDemandForm(f => ({ ...f, resOrPh: `r:${r.id}` })); setAddDemandResQuery(r.display_name); setAddDemandResDropdownOpen(false); }}
+                                              style={{ padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200, backgroundColor: addDemandForm.resOrPh === `r:${r.id}` ? tokens.colorNeutralBackground3 : tokens.colorNeutralBackground1 }}
+                                              onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = addDemandForm.resOrPh === `r:${r.id}` ? tokens.colorNeutralBackground3 : tokens.colorNeutralBackground1; }}
+                                            >
+                                              <span style={{ background: avatarColor(r.display_name), color: '#fff', borderRadius: '50%', width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
+                                                {getInitials(r.display_name, r.initials)}
+                                              </span>
+                                              {r.display_name}
+                                            </div>
+                                          ))}
+                                          {addDemandFilteredResAndPh.placeholders.length > 0 && addDemandFilteredResAndPh.resources.length > 0 && (
+                                            <div style={{ padding: '2px 8px', fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3, fontWeight: tokens.fontWeightSemibold, backgroundColor: tokens.colorNeutralBackground2, borderTop: `1px solid ${tokens.colorNeutralStroke1}`, borderBottom: `1px solid ${tokens.colorNeutralStroke1}` }}>Placeholders</div>
+                                          )}
+                                          {addDemandFilteredResAndPh.placeholders.map(ph => (
+                                            <div
+                                              key={`ph:${ph.id}`}
+                                              onMouseDown={e => { e.preventDefault(); setAddDemandForm(f => ({ ...f, resOrPh: `ph:${ph.id}` })); setAddDemandResQuery(ph.name); setAddDemandResDropdownOpen(false); }}
+                                              style={{ padding: '6px 8px', cursor: 'pointer', fontSize: tokens.fontSizeBase200, backgroundColor: addDemandForm.resOrPh === `ph:${ph.id}` ? tokens.colorNeutralBackground3 : tokens.colorNeutralBackground1 }}
+                                              onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = addDemandForm.resOrPh === `ph:${ph.id}` ? tokens.colorNeutralBackground3 : tokens.colorNeutralBackground1; }}
+                                            >
+                                              {ph.name}
+                                            </div>
+                                          ))}
+                                        </>
+                                      )}
+                                    </div>
+                                  </FluentProvider>,
+                                  document.body
                                 )}
-                                {(ccPlaceholders[group.ccId] ?? []).length > 0 && (
-                                  <optgroup label="Placeholders">
-                                    {(ccPlaceholders[group.ccId] ?? []).map(ph => (
-                                      <option key={`ph:${ph.id}`} value={`ph:${ph.id}`}>{ph.name}</option>
-                                    ))}
-                                  </optgroup>
+                              </div>
+                              {/* Project searchable picker */}
+                              <div style={{ minWidth: 180 }}>
+                                <input
+                                  ref={addDemandProjectInputRef}
+                                  type="text"
+                                  value={addDemandProjectQuery}
+                                  onChange={e => { setAddDemandProjectQuery(e.target.value); setAddDemandForm(f => ({ ...f, projectId: '' })); setAddDemandProjectDropdownOpen(true); }}
+                                  onFocus={() => setAddDemandProjectDropdownOpen(true)}
+                                  onBlur={() => setTimeout(() => setAddDemandProjectDropdownOpen(false), 150)}
+                                  placeholder="Project..."
+                                  style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', boxSizing: 'border-box' }}
+                                />
+                                {addDemandProjectDropdownOpen && addDemandProjectInputRef.current && createPortal(
+                                  <FluentProvider theme={ferrosanTheme}>
+                                    <div style={{ position: 'fixed', top: addDemandProjectInputRef.current.getBoundingClientRect().bottom + 2, left: addDemandProjectInputRef.current.getBoundingClientRect().left, minWidth: addDemandProjectInputRef.current.getBoundingClientRect().width, zIndex: 9999, backgroundColor: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, boxShadow: tokens.shadow16, maxHeight: 200, overflowY: 'auto' }}>
+                                      {addDemandFilteredProjects.length === 0 ? (
+                                        <div style={{ padding: '6px 8px', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>No matching projects</div>
+                                      ) : (
+                                        addDemandFilteredProjects.map(p => (
+                                          <div
+                                            key={p.id}
+                                            onMouseDown={e => { e.preventDefault(); setAddDemandForm(f => ({ ...f, projectId: p.id })); setAddDemandProjectQuery(p.name); setAddDemandProjectDropdownOpen(false); }}
+                                            style={{ padding: '6px 8px', cursor: 'pointer', fontSize: tokens.fontSizeBase200, backgroundColor: addDemandForm.projectId === p.id ? tokens.colorNeutralBackground3 : tokens.colorNeutralBackground1 }}
+                                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = addDemandForm.projectId === p.id ? tokens.colorNeutralBackground3 : tokens.colorNeutralBackground1; }}
+                                          >
+                                            <span style={{ fontWeight: tokens.fontWeightSemibold }}>{p.name}</span>
+                                            {p.code && <span style={{ marginLeft: 6, color: tokens.colorNeutralForeground3 }}>{p.code}</span>}
+                                          </div>
+                                        ))
+                                      )}
+                                    </div>
+                                  </FluentProvider>,
+                                  document.body
                                 )}
-                              </Select>
-                              <Select
-                                value={addDemandForm.projectId}
-                                onChange={(_, d) => setAddDemandForm(f => ({ ...f, projectId: d.value }))}
-                                style={{ minWidth: 160 }}
-                              >
-                                <option value="">Project…</option>
-                                {projects.map(p => (
-                                  <option key={p.id} value={p.id}>{p.name}</option>
-                                ))}
-                              </Select>
+                              </div>
                               <Button
                                 size="small"
                                 appearance="primary"
@@ -2268,7 +2378,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                               <Button
                                 size="small"
                                 appearance="subtle"
-                                onClick={() => { setAddDemandCC(null); setAddDemandForm({ resOrPh: '', projectId: '' }); }}
+                                onClick={() => { setAddDemandCC(null); setAddDemandForm({ resOrPh: '', projectId: '' }); setAddDemandResQuery(''); setAddDemandProjectQuery(''); setAddDemandResDropdownOpen(false); setAddDemandProjectDropdownOpen(false); }}
                               >
                                 Cancel
                               </Button>
@@ -2282,6 +2392,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                 e.stopPropagation();
                                 setAddDemandCC(group.ccId);
                                 setAddDemandForm({ resOrPh: '', projectId: '' });
+                                setAddDemandResQuery('');
+                                setAddDemandProjectQuery('');
                                 await loadCcData(group.ccId);
                               }}
                             >
@@ -2302,26 +2414,89 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                         >
                           {addSupplyCC === group.ccId ? (
                             <div className={styles.addLineForm}>
-                              <Select
-                                value={addSupplyForm.resourceId}
-                                onChange={(_, d) => setAddSupplyForm(f => ({ ...f, resourceId: d.value }))}
-                                style={{ minWidth: 200 }}
-                              >
-                                <option value="">Resource…</option>
-                                {(ccResources[group.ccId] ?? []).map(r => (
-                                  <option key={r.id} value={r.id}>{r.display_name}</option>
-                                ))}
-                              </Select>
-                              <Select
-                                value={addSupplyForm.projectId}
-                                onChange={(_, d) => setAddSupplyForm(f => ({ ...f, projectId: d.value }))}
-                                style={{ minWidth: 180 }}
-                              >
-                                <option value="">— General availability —</option>
-                                {projects.map(p => (
-                                  <option key={p.id} value={p.id}>{p.name}</option>
-                                ))}
-                              </Select>
+                              {/* Resource searchable picker */}
+                              <div style={{ minWidth: 200 }}>
+                                <input
+                                  ref={addSupplyResInputRef}
+                                  type="text"
+                                  value={addSupplyResQuery}
+                                  onChange={e => { setAddSupplyResQuery(e.target.value); setAddSupplyForm(f => ({ ...f, resourceId: '' })); setAddSupplyResDropdownOpen(true); }}
+                                  onFocus={() => setAddSupplyResDropdownOpen(true)}
+                                  onBlur={() => setTimeout(() => setAddSupplyResDropdownOpen(false), 150)}
+                                  placeholder="Resource..."
+                                  style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', boxSizing: 'border-box' }}
+                                />
+                                {addSupplyResDropdownOpen && addSupplyResInputRef.current && createPortal(
+                                  <FluentProvider theme={ferrosanTheme}>
+                                    <div style={{ position: 'fixed', top: addSupplyResInputRef.current.getBoundingClientRect().bottom + 2, left: addSupplyResInputRef.current.getBoundingClientRect().left, minWidth: addSupplyResInputRef.current.getBoundingClientRect().width, zIndex: 9999, backgroundColor: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, boxShadow: tokens.shadow16, maxHeight: 200, overflowY: 'auto' }}>
+                                      {addSupplyFilteredResources.length === 0 ? (
+                                        <div style={{ padding: '6px 8px', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>No matching resources</div>
+                                      ) : (
+                                        addSupplyFilteredResources.map(r => (
+                                          <div
+                                            key={r.id}
+                                            onMouseDown={e => { e.preventDefault(); setAddSupplyForm(f => ({ ...f, resourceId: r.id })); setAddSupplyResQuery(r.display_name); setAddSupplyResDropdownOpen(false); }}
+                                            style={{ padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200, backgroundColor: addSupplyForm.resourceId === r.id ? tokens.colorNeutralBackground3 : tokens.colorNeutralBackground1 }}
+                                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = addSupplyForm.resourceId === r.id ? tokens.colorNeutralBackground3 : tokens.colorNeutralBackground1; }}
+                                          >
+                                            <span style={{ background: avatarColor(r.display_name), color: '#fff', borderRadius: '50%', width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
+                                              {getInitials(r.display_name, r.initials)}
+                                            </span>
+                                            {r.display_name}
+                                          </div>
+                                        ))
+                                      )}
+                                    </div>
+                                  </FluentProvider>,
+                                  document.body
+                                )}
+                              </div>
+                              {/* Project searchable picker (optional — empty = General availability) */}
+                              <div style={{ minWidth: 180 }}>
+                                <input
+                                  ref={addSupplyProjectInputRef}
+                                  type="text"
+                                  value={addSupplyProjectQuery}
+                                  onChange={e => { setAddSupplyProjectQuery(e.target.value); setAddSupplyForm(f => ({ ...f, projectId: '' })); setAddSupplyProjectDropdownOpen(true); }}
+                                  onFocus={() => setAddSupplyProjectDropdownOpen(true)}
+                                  onBlur={() => setTimeout(() => setAddSupplyProjectDropdownOpen(false), 150)}
+                                  placeholder="Project..."
+                                  style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', boxSizing: 'border-box' }}
+                                />
+                                {addSupplyProjectDropdownOpen && addSupplyProjectInputRef.current && createPortal(
+                                  <FluentProvider theme={ferrosanTheme}>
+                                    <div style={{ position: 'fixed', top: addSupplyProjectInputRef.current.getBoundingClientRect().bottom + 2, left: addSupplyProjectInputRef.current.getBoundingClientRect().left, minWidth: addSupplyProjectInputRef.current.getBoundingClientRect().width, zIndex: 9999, backgroundColor: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, boxShadow: tokens.shadow16, maxHeight: 200, overflowY: 'auto' }}>
+                                      {(!addSupplyProjectQuery.trim() || 'general availability'.includes(addSupplyProjectQuery.trim().toLowerCase())) && (
+                                        <div
+                                          onMouseDown={e => { e.preventDefault(); setAddSupplyForm(f => ({ ...f, projectId: '' })); setAddSupplyProjectQuery(''); setAddSupplyProjectDropdownOpen(false); }}
+                                          style={{ padding: '6px 8px', cursor: 'pointer', fontSize: tokens.fontSizeBase200, fontStyle: 'italic', color: tokens.colorNeutralForeground2, backgroundColor: !addSupplyForm.projectId ? tokens.colorNeutralBackground3 : tokens.colorNeutralBackground1 }}
+                                          onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                                          onMouseLeave={e => { e.currentTarget.style.backgroundColor = !addSupplyForm.projectId ? tokens.colorNeutralBackground3 : tokens.colorNeutralBackground1; }}
+                                        >
+                                          — General availability —
+                                        </div>
+                                      )}
+                                      {addSupplyFilteredProjects.map(p => (
+                                        <div
+                                          key={p.id}
+                                          onMouseDown={e => { e.preventDefault(); setAddSupplyForm(f => ({ ...f, projectId: p.id })); setAddSupplyProjectQuery(p.name); setAddSupplyProjectDropdownOpen(false); }}
+                                          style={{ padding: '6px 8px', cursor: 'pointer', fontSize: tokens.fontSizeBase200, backgroundColor: addSupplyForm.projectId === p.id ? tokens.colorNeutralBackground3 : tokens.colorNeutralBackground1 }}
+                                          onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                                          onMouseLeave={e => { e.currentTarget.style.backgroundColor = addSupplyForm.projectId === p.id ? tokens.colorNeutralBackground3 : tokens.colorNeutralBackground1; }}
+                                        >
+                                          <span style={{ fontWeight: tokens.fontWeightSemibold }}>{p.name}</span>
+                                          {p.code && <span style={{ marginLeft: 6, color: tokens.colorNeutralForeground3 }}>{p.code}</span>}
+                                        </div>
+                                      ))}
+                                      {!(!addSupplyProjectQuery.trim() || 'general availability'.includes(addSupplyProjectQuery.trim().toLowerCase())) && addSupplyFilteredProjects.length === 0 && (
+                                        <div style={{ padding: '6px 8px', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>No matching projects</div>
+                                      )}
+                                    </div>
+                                  </FluentProvider>,
+                                  document.body
+                                )}
+                              </div>
                               <Button
                                 size="small"
                                 appearance="primary"
@@ -2333,7 +2508,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                               <Button
                                 size="small"
                                 appearance="subtle"
-                                onClick={() => { setAddSupplyCC(null); setAddSupplyForm({ resourceId: '', projectId: '' }); }}
+                                onClick={() => { setAddSupplyCC(null); setAddSupplyForm({ resourceId: '', projectId: '' }); setAddSupplyResQuery(''); setAddSupplyProjectQuery(''); setAddSupplyResDropdownOpen(false); setAddSupplyProjectDropdownOpen(false); }}
                               >
                                 Cancel
                               </Button>
@@ -2347,6 +2522,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                 e.stopPropagation();
                                 setAddSupplyCC(group.ccId);
                                 setAddSupplyForm({ resourceId: '', projectId: '' });
+                                setAddSupplyResQuery('');
+                                setAddSupplyProjectQuery('');
                                 await loadCcData(group.ccId);
                               }}
                             >

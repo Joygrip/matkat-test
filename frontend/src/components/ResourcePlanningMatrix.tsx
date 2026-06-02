@@ -1852,7 +1852,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                               <MenuItem
                                                 onClick={() => openMoveDialog(row)}
                                               >
-                                                Move to resource
+                                                Move demand line
                                               </MenuItem>
                                               <MenuItem
                                                 onClick={() => {

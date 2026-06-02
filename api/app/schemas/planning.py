@@ -134,7 +134,7 @@ class SupplyGroupMoveRequest(BaseModel):
     """Request body for moving all supply lines from one resource to another."""
     from_resource_id: str
     to_resource_id: str
-    project_id: str
+    project_id: Optional[str] = None
     to_project_id: str
     period_ids: List[str]
 

@@ -716,25 +716,21 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
   const moveDemandFilteredResources = useMemo(() => {
     const q = moveDemandQuery.trim().toLowerCase();
-    return moveAllResources
-      .filter(r => r.id !== moveGroupRow?.resourceId)
-      .filter(r => !q ||
-        r.display_name.toLowerCase().includes(q) ||
-        (r.initials ? r.initials.toLowerCase().includes(q) : false) ||
-        (r.email ? r.email.toLowerCase().includes(q) : false)
-      );
-  }, [moveAllResources, moveGroupRow, moveDemandQuery]);
+    return moveAllResources.filter(r => !q ||
+      r.display_name.toLowerCase().includes(q) ||
+      (r.initials ? r.initials.toLowerCase().includes(q) : false) ||
+      (r.email ? r.email.toLowerCase().includes(q) : false)
+    );
+  }, [moveAllResources, moveDemandQuery]);
 
   const moveSupplyFilteredResources = useMemo(() => {
     const q = moveSupplyQuery.trim().toLowerCase();
-    return moveSupplyAllResources
-      .filter(r => r.id !== moveSupplyGroupRow?.resourceId)
-      .filter(r => !q ||
-        r.display_name.toLowerCase().includes(q) ||
-        (r.initials ? r.initials.toLowerCase().includes(q) : false) ||
-        (r.email ? r.email.toLowerCase().includes(q) : false)
-      );
-  }, [moveSupplyAllResources, moveSupplyGroupRow, moveSupplyQuery]);
+    return moveSupplyAllResources.filter(r => !q ||
+      r.display_name.toLowerCase().includes(q) ||
+      (r.initials ? r.initials.toLowerCase().includes(q) : false) ||
+      (r.email ? r.email.toLowerCase().includes(q) : false)
+    );
+  }, [moveSupplyAllResources, moveSupplyQuery]);
 
   const moveDemandFilteredProjects = useMemo(() => {
     const q = moveDemandProjectQuery.trim().toLowerCase();
@@ -905,7 +901,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
   const openMoveSupplyDialog = useCallback(async (row: MergedMatrixRow) => {
     setMoveSupplyGroupRow(row);
-    setMoveSupplyTargetId('');
+    setMoveSupplyTargetId(row.resourceId || '');
     setMoveSupplyTargetProjectId(row.projectId || '');
     setMoveSupplyProjectQuery('');
     setMoveSupplyGroupError(null);
@@ -934,7 +930,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     const body: MoveSupplyGroupRequest = {
       from_resource_id: moveSupplyGroupRow.resourceId || '',
       to_resource_id: moveSupplyTargetId,
-      project_id: moveSupplyGroupRow.projectId || '',
+      project_id: moveSupplyGroupRow.projectId || undefined,
       to_project_id: moveSupplyTargetProjectId,
       period_ids: periods.map(p => p.id),
     };
@@ -975,7 +971,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
   const openMoveDialog = useCallback(async (row: MergedMatrixRow) => {
     setMoveGroupRow(row);
-    setMoveTargetId('');
+    setMoveTargetId(row.resourceId || '');
     setMoveTargetProjectId(row.projectId || '');
     setMoveDemandProjectQuery('');
     setMoveGroupError(null);
@@ -2651,13 +2647,13 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                               onMouseDown={e => {
                                 e.preventDefault();
                                 setMoveTargetId(r.id);
-                                setMoveDemandQuery(r.display_name);
+                                setMoveDemandQuery('');
                                 setMoveDemandDropdownOpen(false);
                                 setMoveGroupError(null);
                               }}
-                              style={{ padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200 }}
+                              style={{ padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200, backgroundColor: r.id === moveTargetId ? tokens.colorNeutralBackground3 : 'transparent' }}
                               onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
-                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = r.id === moveTargetId ? tokens.colorNeutralBackground3 : 'transparent'; }}
                             >
                               <span style={{ background: avatarColor(r.display_name), color: '#fff', borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
                                 {getInitials(r.display_name, r.initials)}
@@ -2668,6 +2664,11 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                         )}
                       </div>
                     )}
+                  </div>
+                )}
+                {moveTargetId && (
+                  <div style={{ marginTop: 4, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                    Selected: <strong>{moveAllResources.find(r => r.id === moveTargetId)?.display_name ?? moveTargetId}</strong>
                   </div>
                 )}
               </div>
@@ -2854,13 +2855,13 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                               onMouseDown={e => {
                                 e.preventDefault();
                                 setMoveSupplyTargetId(r.id);
-                                setMoveSupplyQuery(r.display_name);
+                                setMoveSupplyQuery('');
                                 setMoveSupplyDropdownOpen(false);
                                 setMoveSupplyGroupError(null);
                               }}
-                              style={{ padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200 }}
+                              style={{ padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200, backgroundColor: r.id === moveSupplyTargetId ? tokens.colorNeutralBackground3 : 'transparent' }}
                               onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
-                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = r.id === moveSupplyTargetId ? tokens.colorNeutralBackground3 : 'transparent'; }}
                             >
                               <span style={{ background: avatarColor(r.display_name), color: '#fff', borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
                                 {getInitials(r.display_name, r.initials)}
@@ -2871,6 +2872,11 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                         )}
                       </div>
                     )}
+                  </div>
+                )}
+                {moveSupplyTargetId && (
+                  <div style={{ marginTop: 4, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                    Selected: <strong>{moveSupplyAllResources.find(r => r.id === moveSupplyTargetId)?.display_name ?? moveSupplyTargetId}</strong>
                   </div>
                 )}
               </div>

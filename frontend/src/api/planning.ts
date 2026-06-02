@@ -110,7 +110,7 @@ export interface DeleteSupplyGroupRequest {
 export interface MoveSupplyGroupRequest {
   from_resource_id: string;
   to_resource_id: string;
-  project_id: string;
+  project_id?: string;
   to_project_id: string;
   period_ids: string[];
 }

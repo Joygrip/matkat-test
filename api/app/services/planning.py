@@ -1266,12 +1266,13 @@ class SupplyService:
         self,
         from_resource_id: str,
         to_resource_id: str,
-        project_id: str,
+        project_id: str | None,
         to_project_id: str,
         period_ids: list[str],
     ) -> int:
         """Move all supply lines for a source resource + project to a target resource/project.
 
+        project_id may be None for supply lines that were created without a project assignment.
         Validates all periods are open and checks for conflicts before updating any row
         (all-or-nothing). Returns the count of moved rows.
         """
@@ -1280,18 +1281,19 @@ class SupplyService:
             'July', 'August', 'September', 'October', 'November', 'December',
         ]
 
-        # Validate source project exists within tenant
-        project = self.db.query(Project).filter(
-            and_(
-                Project.id == project_id,
-                Project.tenant_id == self.current_user.tenant_id,
-            )
-        ).first()
-        if not project:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "NOT_FOUND", "message": "Project not found"},
-            )
+        # Validate source project exists within tenant (skip when source has no project)
+        if project_id:
+            project = self.db.query(Project).filter(
+                and_(
+                    Project.id == project_id,
+                    Project.tenant_id == self.current_user.tenant_id,
+                )
+            ).first()
+            if not project:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "NOT_FOUND", "message": "Project not found"},
+                )
 
         # Validate target project exists within tenant
         target_project = self.db.query(Project).filter(
@@ -1379,11 +1381,18 @@ class SupplyService:
                 SupplyLine.period_id.in_(period_ids),
             )
         )
-        # Exclude the source rows when resource and project are being kept the same
-        if from_resource_id == to_resource_id or project_id == to_project_id:
-            conflict_query = conflict_query.filter(
-                ~and_(SupplyLine.resource_id == from_resource_id, SupplyLine.project_id == project_id)
-            )
+        # Exclude source rows from conflict check when they would match the target filter
+        same_resource = from_resource_id == to_resource_id
+        same_project = project_id == to_project_id  # both None counts as same
+        if same_resource or same_project:
+            if project_id is None:
+                conflict_query = conflict_query.filter(
+                    ~and_(SupplyLine.resource_id == from_resource_id, SupplyLine.project_id.is_(None))
+                )
+            else:
+                conflict_query = conflict_query.filter(
+                    ~and_(SupplyLine.resource_id == from_resource_id, SupplyLine.project_id == project_id)
+                )
         conflicts = conflict_query.all()
         if conflicts:
             conflict_period_ids = {c.period_id for c in conflicts}
@@ -1403,12 +1412,16 @@ class SupplyService:
                 },
             )
 
-        # Fetch source supply lines
+        # Fetch source supply lines — filter by IS NULL when project_id is None
+        source_project_filter = (
+            SupplyLine.project_id.is_(None) if project_id is None
+            else SupplyLine.project_id == project_id
+        )
         lines = self.db.query(SupplyLine).filter(
             and_(
                 SupplyLine.tenant_id == self.current_user.tenant_id,
                 SupplyLine.resource_id == from_resource_id,
-                SupplyLine.project_id == project_id,
+                source_project_filter,
                 SupplyLine.period_id.in_(period_ids),
             )
         ).all()

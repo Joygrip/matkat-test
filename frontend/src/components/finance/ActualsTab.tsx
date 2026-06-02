@@ -1169,7 +1169,7 @@ export function ActualsTab({
                                             {sr.row.can_proxy_approve_step1 && sr.row.approval_instance_id && sr.row.step1_id && (
                                               <Button appearance="subtle" size="small" icon={<ArrowForward24Regular />} title="Proxy approve step 1" onClick={e => { e.stopPropagation(); setProxyStep1Row(sr.row!); setProxyStep1Comment(''); setProxyStep1Error(null); }} />
                                             )}
-                                            {sr.row.actual_id && (effectiveRowStatus?.toUpperCase() === 'PENDING' || effectiveRowStatus?.toUpperCase() === 'REJECTED') && (
+                                            {sr.row.actual_id && effectiveRowStatus?.toUpperCase() !== 'APPROVED' && (
                                               <Button
                                                 appearance="subtle"
                                                 size="small"

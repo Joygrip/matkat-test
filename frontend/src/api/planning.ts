@@ -99,6 +99,7 @@ export interface MoveDemandGroupRequest {
   project_id: string;
   to_project_id: string;
   period_ids: string[];
+  confirm_cap?: boolean;
 }
 
 export interface DeleteSupplyGroupRequest {
@@ -113,6 +114,16 @@ export interface MoveSupplyGroupRequest {
   project_id?: string;
   to_project_id: string;
   period_ids: string[];
+  confirm_cap?: boolean;
+}
+
+export interface MoveCapPeriodDetail {
+  period_id: string;
+  label: string;
+  existing_fte: number;
+  moved_fte: number;
+  raw_total: number;
+  capped_total: number;
 }
 
 export const planningApi = {

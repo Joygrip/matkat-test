@@ -137,6 +137,7 @@ class SupplyGroupMoveRequest(BaseModel):
     project_id: Optional[str] = None
     to_project_id: str
     period_ids: List[str]
+    confirm_cap: bool = False
 
     @field_validator('period_ids')
     @classmethod
@@ -186,6 +187,7 @@ class DemandGroupMoveRequest(BaseModel):
     project_id: str
     to_project_id: str
     period_ids: List[str]
+    confirm_cap: bool = False
 
     @field_validator('period_ids')
     @classmethod

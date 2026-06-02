@@ -583,6 +583,7 @@ class DemandService:
         from_placeholder_id: Optional[str] = None,
         to_resource_id: Optional[str] = None,
         to_placeholder_id: Optional[str] = None,
+        confirm_cap: bool = False,
     ) -> int:
         """Move all demand lines for a source resource/placeholder + project to a target.
 
@@ -710,48 +711,9 @@ class DemandService:
                 )
             target_name = target_placeholder.name
 
-        # Conflict detection: pre-check for any existing demand on the target resource/project
-        # in the same (year, month) pairs. Must use year+month (not period_id) because that
-        # is how the unique index ix_demand_resource_unique is keyed.
+        # Build year/month lookup structures for the requested periods
         year_month_pairs = [(p.year, p.month) for p in periods]
-        conflict_filter = or_(*[
-            and_(DemandLine.year == y, DemandLine.month == m)
-            for y, m in year_month_pairs
-        ])
-        conflict_query = self.db.query(DemandLine).filter(
-            and_(
-                DemandLine.tenant_id == self.current_user.tenant_id,
-                DemandLine.project_id == to_project_id,
-                conflict_filter,
-            )
-        )
-        if to_resource_id:
-            conflict_query = conflict_query.filter(DemandLine.resource_id == to_resource_id)
-        else:
-            conflict_query = conflict_query.filter(DemandLine.placeholder_id == to_placeholder_id)
-
-        # Exclude the source rows themselves when source and target project are the same
-        if project_id == to_project_id:
-            if from_resource_id:
-                conflict_query = conflict_query.filter(DemandLine.resource_id != from_resource_id)
-            elif from_placeholder_id:
-                conflict_query = conflict_query.filter(DemandLine.placeholder_id != from_placeholder_id)
-
-        conflicts = conflict_query.all()
-        if conflicts:
-            conflict_strs = [
-                f"{_MONTH_NAMES[c.month - 1]} {c.year}" for c in conflicts
-            ]
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "CONFLICT",
-                    "message": (
-                        f"{target_name} already has demand for {target_project.name} in: "
-                        f"{', '.join(conflict_strs)}. Cannot move the demand line."
-                    ),
-                },
-            )
+        period_ym_map = {(p.year, p.month): p for p in periods}
 
         # Fetch source demand lines
         source_query = self.db.query(DemandLine).filter(
@@ -765,30 +727,130 @@ class DemandService:
             source_query = source_query.filter(DemandLine.resource_id == from_resource_id)
         else:
             source_query = source_query.filter(DemandLine.placeholder_id == from_placeholder_id)
+        source_lines = source_query.all()
+        source_map = {(l.year, l.month): l for l in source_lines}
 
-        lines = source_query.all()
+        # Fetch matching target demand lines for the same year/month pairs
+        ym_filter = or_(*[
+            and_(DemandLine.year == y, DemandLine.month == m)
+            for y, m in year_month_pairs
+        ])
+        target_query = self.db.query(DemandLine).filter(
+            and_(
+                DemandLine.tenant_id == self.current_user.tenant_id,
+                DemandLine.project_id == to_project_id,
+                ym_filter,
+            )
+        )
+        if to_resource_id:
+            target_query = target_query.filter(DemandLine.resource_id == to_resource_id)
+        else:
+            target_query = target_query.filter(DemandLine.placeholder_id == to_placeholder_id)
+        target_lines = target_query.all()
+        target_map = {(l.year, l.month): l for l in target_lines}
 
-        # Update each line to point to the target (all-or-nothing within this transaction)
-        for line in lines:
-            old_values = {
-                "resource_id": line.resource_id,
-                "placeholder_id": line.placeholder_id,
-                "project_id": line.project_id,
-            }
-            line.resource_id = to_resource_id      # None when moving to placeholder
-            line.placeholder_id = to_placeholder_id  # None when moving to resource
-            line.project_id = to_project_id
-            log_audit(
-                self.db, self.current_user,
-                action="update",
-                entity_type="DemandLine",
-                entity_id=line.id,
-                old_values=old_values,
-                new_values={"resource_id": to_resource_id, "placeholder_id": to_placeholder_id, "project_id": to_project_id},
+        # Determine periods that would exceed 100% after merge
+        cap_details = []
+        for y, m in year_month_pairs:
+            source_line = source_map.get((y, m))
+            if not source_line:
+                continue
+            target_line = target_map.get((y, m))
+            target_fte = target_line.fte_percent if target_line else 0
+            raw_sum = source_line.fte_percent + target_fte
+            if raw_sum > 100:
+                period = period_ym_map[(y, m)]
+                cap_details.append({
+                    "period_id": period.id,
+                    "label": f"{_MONTH_NAMES[m - 1]} {y}",
+                    "existing_fte": target_fte,
+                    "moved_fte": source_line.fte_percent,
+                    "raw_total": raw_sum,
+                    "capped_total": 100,
+                })
+
+        if cap_details and not confirm_cap:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "MOVE_REQUIRES_CAP_CONFIRMATION",
+                    "message": "Some target periods would exceed 100% demand after this move.",
+                    "periods": cap_details,
+                }
             )
 
+        # Perform additive merge/move (all-or-nothing within this transaction)
+        moved_count = 0
+        for y, m in year_month_pairs:
+            source_line = source_map.get((y, m))
+            if not source_line:
+                continue
+            target_line = target_map.get((y, m))
+            source_fte = source_line.fte_percent
+            target_fte = target_line.fte_percent if target_line else 0
+            capped_value = min(source_fte + target_fte, 100)
+
+            if target_line:
+                # Merge: update target FTE and delete source line
+                log_audit(
+                    self.db, self.current_user,
+                    action="update",
+                    entity_type="DemandLine",
+                    entity_id=target_line.id,
+                    old_values={
+                        "resource_id": target_line.resource_id,
+                        "placeholder_id": target_line.placeholder_id,
+                        "project_id": target_line.project_id,
+                        "fte_percent": target_line.fte_percent,
+                    },
+                    new_values={
+                        "fte_percent": capped_value,
+                        "merged_from": source_line.id,
+                        "moved_fte": source_fte,
+                        "capped": capped_value < source_fte + target_fte,
+                    },
+                )
+                target_line.fte_percent = capped_value
+                log_audit(
+                    self.db, self.current_user,
+                    action="delete",
+                    entity_type="DemandLine",
+                    entity_id=source_line.id,
+                    old_values={
+                        "resource_id": source_line.resource_id,
+                        "placeholder_id": source_line.placeholder_id,
+                        "project_id": source_line.project_id,
+                        "fte_percent": source_fte,
+                        "reason": "merged into target demand line",
+                    },
+                )
+                self.db.delete(source_line)
+            else:
+                # Simple move: reassign source line to target resource/placeholder/project
+                old_values = {
+                    "resource_id": source_line.resource_id,
+                    "placeholder_id": source_line.placeholder_id,
+                    "project_id": source_line.project_id,
+                }
+                source_line.resource_id = to_resource_id
+                source_line.placeholder_id = to_placeholder_id
+                source_line.project_id = to_project_id
+                log_audit(
+                    self.db, self.current_user,
+                    action="update",
+                    entity_type="DemandLine",
+                    entity_id=source_line.id,
+                    old_values=old_values,
+                    new_values={
+                        "resource_id": to_resource_id,
+                        "placeholder_id": to_placeholder_id,
+                        "project_id": to_project_id,
+                    },
+                )
+            moved_count += 1
+
         self.db.commit()
-        return len(lines)
+        return moved_count
 
 
 class SupplyService:
@@ -1269,6 +1331,7 @@ class SupplyService:
         project_id: str | None,
         to_project_id: str,
         period_ids: list[str],
+        confirm_cap: bool = False,
     ) -> int:
         """Move all supply lines for a source resource + project to a target resource/project.
 
@@ -1372,52 +1435,16 @@ class SupplyService:
                     },
                 )
 
-        # Conflict detection: check whether target resource/project already has supply in these periods
-        conflict_query = self.db.query(SupplyLine).filter(
-            and_(
-                SupplyLine.tenant_id == self.current_user.tenant_id,
-                SupplyLine.resource_id == to_resource_id,
-                SupplyLine.project_id == to_project_id,
-                SupplyLine.period_id.in_(period_ids),
-            )
-        )
-        # Exclude source rows from conflict check when they would match the target filter
-        same_resource = from_resource_id == to_resource_id
-        same_project = project_id == to_project_id  # both None counts as same
-        if same_resource or same_project:
-            if project_id is None:
-                conflict_query = conflict_query.filter(
-                    ~and_(SupplyLine.resource_id == from_resource_id, SupplyLine.project_id.is_(None))
-                )
-            else:
-                conflict_query = conflict_query.filter(
-                    ~and_(SupplyLine.resource_id == from_resource_id, SupplyLine.project_id == project_id)
-                )
-        conflicts = conflict_query.all()
-        if conflicts:
-            conflict_period_ids = {c.period_id for c in conflicts}
-            conflict_periods = [p for p in db_periods if p.id in conflict_period_ids]
-            conflict_strs = [
-                f"{_MONTH_NAMES[p.month - 1]} {p.year}"
-                for p in sorted(conflict_periods, key=lambda p: (p.year, p.month))
-            ]
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "CONFLICT",
-                    "message": (
-                        f"{target_resource.display_name} already has supply for {target_project.name} in: "
-                        f"{', '.join(conflict_strs)}. Cannot move the supply line."
-                    ),
-                },
-            )
+        # Build year/month lookup structures for the requested periods
+        year_month_pairs = [(p.year, p.month) for p in db_periods]
+        period_ym_map = {(p.year, p.month): p for p in db_periods}
 
         # Fetch source supply lines — filter by IS NULL when project_id is None
         source_project_filter = (
             SupplyLine.project_id.is_(None) if project_id is None
             else SupplyLine.project_id == project_id
         )
-        lines = self.db.query(SupplyLine).filter(
+        source_lines = self.db.query(SupplyLine).filter(
             and_(
                 SupplyLine.tenant_id == self.current_user.tenant_id,
                 SupplyLine.resource_id == from_resource_id,
@@ -1425,18 +1452,110 @@ class SupplyService:
                 SupplyLine.period_id.in_(period_ids),
             )
         ).all()
+        source_map = {(l.year, l.month): l for l in source_lines}
 
-        for line in lines:
-            log_audit(
-                self.db, self.current_user,
-                action="update",
-                entity_type="SupplyLine",
-                entity_id=line.id,
-                old_values={"resource_id": line.resource_id, "project_id": line.project_id},
-                new_values={"resource_id": to_resource_id, "project_id": to_project_id},
+        # Fetch matching target supply lines for the same year/month pairs
+        ym_filter = or_(*[
+            and_(SupplyLine.year == y, SupplyLine.month == m)
+            for y, m in year_month_pairs
+        ])
+        target_lines = self.db.query(SupplyLine).filter(
+            and_(
+                SupplyLine.tenant_id == self.current_user.tenant_id,
+                SupplyLine.resource_id == to_resource_id,
+                SupplyLine.project_id == to_project_id,
+                ym_filter,
             )
-            line.resource_id = to_resource_id
-            line.project_id = to_project_id
+        ).all()
+        target_map = {(l.year, l.month): l for l in target_lines}
+
+        # Determine periods that would exceed 100% after merge
+        cap_details = []
+        for y, m in year_month_pairs:
+            source_line = source_map.get((y, m))
+            if not source_line:
+                continue
+            target_line = target_map.get((y, m))
+            target_fte = target_line.fte_percent if target_line else 0
+            raw_sum = source_line.fte_percent + target_fte
+            if raw_sum > 100:
+                period = period_ym_map[(y, m)]
+                cap_details.append({
+                    "period_id": period.id,
+                    "label": f"{_MONTH_NAMES[m - 1]} {y}",
+                    "existing_fte": target_fte,
+                    "moved_fte": source_line.fte_percent,
+                    "raw_total": raw_sum,
+                    "capped_total": 100,
+                })
+
+        if cap_details and not confirm_cap:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "MOVE_REQUIRES_CAP_CONFIRMATION",
+                    "message": "Some target periods would exceed 100% supply after this move.",
+                    "periods": cap_details,
+                }
+            )
+
+        # Perform additive merge/move (all-or-nothing within this transaction)
+        moved_count = 0
+        for y, m in year_month_pairs:
+            source_line = source_map.get((y, m))
+            if not source_line:
+                continue
+            target_line = target_map.get((y, m))
+            source_fte = source_line.fte_percent
+            target_fte = target_line.fte_percent if target_line else 0
+            capped_value = min(source_fte + target_fte, 100)
+
+            if target_line:
+                # Merge: update target FTE and delete source line
+                log_audit(
+                    self.db, self.current_user,
+                    action="update",
+                    entity_type="SupplyLine",
+                    entity_id=target_line.id,
+                    old_values={
+                        "resource_id": target_line.resource_id,
+                        "project_id": target_line.project_id,
+                        "fte_percent": target_line.fte_percent,
+                    },
+                    new_values={
+                        "fte_percent": capped_value,
+                        "merged_from": source_line.id,
+                        "moved_fte": source_fte,
+                        "capped": capped_value < source_fte + target_fte,
+                    },
+                )
+                target_line.fte_percent = capped_value
+                log_audit(
+                    self.db, self.current_user,
+                    action="delete",
+                    entity_type="SupplyLine",
+                    entity_id=source_line.id,
+                    old_values={
+                        "resource_id": source_line.resource_id,
+                        "project_id": source_line.project_id,
+                        "fte_percent": source_fte,
+                        "reason": "merged into target supply line",
+                    },
+                )
+                self.db.delete(source_line)
+            else:
+                # Simple move: reassign source line to target resource/project
+                log_audit(
+                    self.db, self.current_user,
+                    action="update",
+                    entity_type="SupplyLine",
+                    entity_id=source_line.id,
+                    old_values={"resource_id": source_line.resource_id, "project_id": source_line.project_id},
+                    new_values={"resource_id": to_resource_id, "project_id": to_project_id},
+                )
+                source_line.resource_id = to_resource_id
+                source_line.project_id = to_project_id
+            moved_count += 1
 
         self.db.commit()
-        return len(lines)
+        return moved_count

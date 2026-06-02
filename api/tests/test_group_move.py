@@ -185,11 +185,11 @@ def test_supply_move_same_resource_same_project_blocked(client, finance_headers,
     assert resp.json()["code"] == "VALIDATION_ERROR"
 
 
-def test_supply_move_conflict_returns_409(client, finance_headers, move_setup):
-    """If target resource+project already has supply in those periods, returns 409."""
+def test_supply_move_with_existing_target_merges(client, finance_headers, move_setup):
+    """If target already has supply and sum <= 100, merge automatically (200)."""
     d = move_setup
     _make_supply(client, finance_headers, d["resource_1_id"], d["project_a_id"],
-                 d["now_year"], d["now_month"])
+                 d["now_year"], d["now_month"], fte=50)
     _make_supply(client, finance_headers, d["resource_2_id"], d["project_b_id"],
                  d["now_year"], d["now_month"], fte=30)
 
@@ -197,8 +197,83 @@ def test_supply_move_conflict_returns_409(client, finance_headers, move_setup):
                         d["resource_1_id"], d["resource_2_id"],
                         d["project_a_id"], d["project_b_id"],
                         [d["period_now_id"]])
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["moved"] == 1
+
+
+def test_supply_move_cap_confirmation_required(client, finance_headers, move_setup):
+    """If sum > 100 and confirm_cap=False, returns 409 MOVE_REQUIRES_CAP_CONFIRMATION."""
+    d = move_setup
+    _make_supply(client, finance_headers, d["resource_1_id"], d["project_a_id"],
+                 d["now_year"], d["now_month"], fte=80)
+    _make_supply(client, finance_headers, d["resource_2_id"], d["project_b_id"],
+                 d["now_year"], d["now_month"], fte=50)
+
+    resp = client.post(
+        "/supply-lines/group/move",
+        json={"from_resource_id": d["resource_1_id"], "to_resource_id": d["resource_2_id"],
+              "project_id": d["project_a_id"], "to_project_id": d["project_b_id"],
+              "period_ids": [d["period_now_id"]], "confirm_cap": False},
+        headers=finance_headers,
+    )
     assert resp.status_code == 409, resp.text
-    assert resp.json()["code"] == "CONFLICT"
+    body = resp.json()
+    assert body["code"] == "MOVE_REQUIRES_CAP_CONFIRMATION"
+    assert "periods" in body
+    assert body["periods"][0]["raw_total"] == 130
+    assert body["periods"][0]["capped_total"] == 100
+
+
+def test_supply_move_cap_confirmed(client, finance_headers, move_setup):
+    """If sum > 100 and confirm_cap=True, target capped at 100 and source deleted."""
+    d = move_setup
+    _make_supply(client, finance_headers, d["resource_1_id"], d["project_a_id"],
+                 d["now_year"], d["now_month"], fte=80)
+    _make_supply(client, finance_headers, d["resource_2_id"], d["project_b_id"],
+                 d["now_year"], d["now_month"], fte=50)
+
+    resp = client.post(
+        "/supply-lines/group/move",
+        json={"from_resource_id": d["resource_1_id"], "to_resource_id": d["resource_2_id"],
+              "project_id": d["project_a_id"], "to_project_id": d["project_b_id"],
+              "period_ids": [d["period_now_id"]], "confirm_cap": True},
+        headers=finance_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["moved"] == 1
+
+    # Target supply should now be capped at 100
+    from api.app.models.planning import SupplyLine
+    target = (
+        finance_headers and
+        client.get(
+            f"/supply-lines?resource_id={d['resource_2_id']}",
+            headers=finance_headers,
+        ).json()
+    )
+    target_lines = [
+        l for l in target
+        if l["resource_id"] == d["resource_2_id"]
+        and l["project_id"] == d["project_b_id"]
+        and l["year"] == d["now_year"]
+        and l["month"] == d["now_month"]
+    ]
+    assert len(target_lines) == 1
+    assert target_lines[0]["fte_percent"] == 100
+
+    # Source supply should be gone
+    source_lines = client.get(
+        f"/supply-lines?resource_id={d['resource_1_id']}",
+        headers=finance_headers,
+    ).json()
+    source = [
+        l for l in source_lines
+        if l["resource_id"] == d["resource_1_id"]
+        and l["project_id"] == d["project_a_id"]
+        and l["year"] == d["now_year"]
+        and l["month"] == d["now_month"]
+    ]
+    assert len(source) == 0
 
 
 def test_supply_move_nonexistent_source_project_returns_404(client, finance_headers, move_setup):
@@ -384,11 +459,11 @@ def test_demand_move_same_resource_same_project_blocked(client, pm_headers, move
     assert resp.json()["code"] == "VALIDATION_ERROR"
 
 
-def test_demand_move_conflict_returns_409(client, pm_headers, move_setup):
-    """If target resource+project already has demand in those periods, returns 409."""
+def test_demand_move_with_existing_target_merges(client, pm_headers, move_setup):
+    """If target already has demand and sum <= 100, merge automatically (200)."""
     d = move_setup
     _make_demand(client, pm_headers, d["project_a_id"], d["resource_1_id"],
-                 d["nxt_year"], d["nxt_month"])
+                 d["nxt_year"], d["nxt_month"], fte=50)
     _make_demand(client, pm_headers, d["project_b_id"], d["resource_2_id"],
                  d["nxt_year"], d["nxt_month"], fte=30)
 
@@ -396,8 +471,72 @@ def test_demand_move_conflict_returns_409(client, pm_headers, move_setup):
                         d["resource_1_id"], d["resource_2_id"],
                         d["project_a_id"], d["project_b_id"],
                         [d["period_nxt_id"]])
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["moved"] == 1
+
+
+def test_demand_move_cap_confirmation_required(client, pm_headers, move_setup):
+    """If sum > 100 and confirm_cap=False, returns 409 MOVE_REQUIRES_CAP_CONFIRMATION."""
+    d = move_setup
+    _make_demand(client, pm_headers, d["project_a_id"], d["resource_1_id"],
+                 d["nxt_year"], d["nxt_month"], fte=75)
+    _make_demand(client, pm_headers, d["project_b_id"], d["resource_2_id"],
+                 d["nxt_year"], d["nxt_month"], fte=50)
+
+    resp = client.post(
+        "/demand-lines/group/move",
+        json={"from_resource_id": d["resource_1_id"], "to_resource_id": d["resource_2_id"],
+              "project_id": d["project_a_id"], "to_project_id": d["project_b_id"],
+              "period_ids": [d["period_nxt_id"]], "confirm_cap": False},
+        headers=pm_headers,
+    )
     assert resp.status_code == 409, resp.text
-    assert resp.json()["code"] == "CONFLICT"
+    body = resp.json()
+    assert body["code"] == "MOVE_REQUIRES_CAP_CONFIRMATION"
+    assert "periods" in body
+    assert body["periods"][0]["raw_total"] == 125
+    assert body["periods"][0]["capped_total"] == 100
+
+
+def test_demand_move_cap_confirmed(client, pm_headers, finance_headers, move_setup):
+    """If sum > 100 and confirm_cap=True, target capped at 100 and source deleted."""
+    d = move_setup
+    _make_demand(client, pm_headers, d["project_a_id"], d["resource_1_id"],
+                 d["nxt_year"], d["nxt_month"], fte=75)
+    _make_demand(client, pm_headers, d["project_b_id"], d["resource_2_id"],
+                 d["nxt_year"], d["nxt_month"], fte=50)
+
+    resp = client.post(
+        "/demand-lines/group/move",
+        json={"from_resource_id": d["resource_1_id"], "to_resource_id": d["resource_2_id"],
+              "project_id": d["project_a_id"], "to_project_id": d["project_b_id"],
+              "period_ids": [d["period_nxt_id"]], "confirm_cap": True},
+        headers=pm_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["moved"] == 1
+
+    # Use finance headers for verification (PM GET is project-scoped via ProjectPM table)
+    all_demand = client.get("/demand-lines/all", headers=finance_headers).json()
+
+    target = [
+        l for l in all_demand
+        if l["resource_id"] == d["resource_2_id"]
+        and l["project_id"] == d["project_b_id"]
+        and l["year"] == d["nxt_year"]
+        and l["month"] == d["nxt_month"]
+    ]
+    assert len(target) == 1, f"Expected 1 target line, got {len(target)}: {target}"
+    assert target[0]["fte_percent"] == 100
+
+    source = [
+        l for l in all_demand
+        if l["resource_id"] == d["resource_1_id"]
+        and l["project_id"] == d["project_a_id"]
+        and l["year"] == d["nxt_year"]
+        and l["month"] == d["nxt_month"]
+    ]
+    assert len(source) == 0, f"Source line should be deleted, got {len(source)}: {source}"
 
 
 def test_demand_move_nonexistent_source_project_returns_404(client, pm_headers, move_setup):

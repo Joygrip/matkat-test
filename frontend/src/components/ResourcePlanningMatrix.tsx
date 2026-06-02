@@ -20,7 +20,7 @@ import {
   MenuItem,
 } from '@fluentui/react-components';
 import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular, MoreVertical16Regular } from '@fluentui/react-icons';
-import { planningApi, DemandLine, SupplyLine, MoveDemandGroupRequest, DeleteSupplyGroupRequest, MoveSupplyGroupRequest } from '../api/planning';
+import { planningApi, DemandLine, SupplyLine, MoveDemandGroupRequest, DeleteSupplyGroupRequest, MoveSupplyGroupRequest, MoveCapPeriodDetail } from '../api/planning';
 import { ApiError } from '../types';
 import { useToast } from '../hooks/useToast';
 import { lookupsApi, Project, CostCenter, Resource, Placeholder } from '../api/lookups';
@@ -582,6 +582,16 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [moveDemandProjectQuery, setMoveDemandProjectQuery] = useState('');
   const [moveDemandProjectDropdownOpen, setMoveDemandProjectDropdownOpen] = useState(false);
 
+  // Demand cap confirmation state
+  const [demandCapPeriods, setDemandCapPeriods] = useState<MoveCapPeriodDetail[]>([]);
+  const [demandCapPendingBody, setDemandCapPendingBody] = useState<MoveDemandGroupRequest | null>(null);
+  const [confirmingDemandCap, setConfirmingDemandCap] = useState(false);
+
+  // Supply cap confirmation state
+  const [supplyCapPeriods, setSupplyCapPeriods] = useState<MoveCapPeriodDetail[]>([]);
+  const [supplyCapPendingBody, setSupplyCapPendingBody] = useState<MoveSupplyGroupRequest | null>(null);
+  const [confirmingSupplyCap, setConfirmingSupplyCap] = useState(false);
+
   // Add Line dialog state
   const [addLineDialogOpen, setAddLineDialogOpen] = useState(false);
   const [dlgLineType, setDlgLineType] = useState<'demand' | 'supply'>('demand');
@@ -954,8 +964,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
           setMoveSupplyGroupError('One or more periods are locked and cannot be modified.');
         } else if (err.status === 403) {
           setMoveSupplyGroupError('You are not authorized to manage supply for this resource.');
-        } else if (err.code === 'CONFLICT') {
-          setMoveSupplyGroupError(err.detail || 'Target resource already has supply for this project in one or more periods.');
+        } else if (err.code === 'MOVE_REQUIRES_CAP_CONFIRMATION') {
+          setSupplyCapPeriods(err.extras.periods as MoveCapPeriodDetail[]);
+          setSupplyCapPendingBody({ ...body, confirm_cap: true });
         } else if (err.code === 'RESOURCE_INACTIVE') {
           setMoveSupplyGroupError(err.detail || 'Cannot move supply to an inactive resource.');
         } else {
@@ -1025,8 +1036,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
           setMoveGroupError('One or more periods are locked and cannot be modified.');
         } else if (err.code === 'PM_NOT_AUTHORIZED') {
           setMoveGroupError('You are not authorized to manage demand for this project.');
-        } else if (err.code === 'CONFLICT') {
-          setMoveGroupError(err.detail || 'Target resource already has demand for this project in one or more periods.');
+        } else if (err.code === 'MOVE_REQUIRES_CAP_CONFIRMATION') {
+          setDemandCapPeriods(err.extras.periods as MoveCapPeriodDetail[]);
+          setDemandCapPendingBody({ ...body, confirm_cap: true });
         } else if (err.code === 'RESOURCE_EXCLUDED') {
           setMoveGroupError(err.detail || 'This resource is excluded from planning.');
         } else {
@@ -1039,6 +1051,70 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       setMovingGroup(false);
     }
   }, [moveGroupRow, moveTargetId, moveTargetProjectId, moveAllResources, moveDemandAllProjects, periods, onReload, showSuccess]);
+
+  const handleDemandCapConfirm = useCallback(async () => {
+    if (!demandCapPendingBody) return;
+    setConfirmingDemandCap(true);
+    try {
+      await planningApi.moveDemandGroup(demandCapPendingBody);
+      const targetName = moveAllResources.find(r => r.id === moveTargetId)?.display_name || moveTargetId;
+      const targetProjectName = moveDemandAllProjects.find(p => p.id === moveTargetProjectId)?.name || moveGroupRow?.projectName;
+      setDemandCapPeriods([]);
+      setDemandCapPendingBody(null);
+      setMoveGroupRow(null);
+      setMoveTargetId('');
+      setMoveTargetProjectId('');
+      setMoveDemandQuery('');
+      setMoveDemandProjectQuery('');
+      setMoveDemandDropdownOpen(false);
+      setMoveDemandProjectDropdownOpen(false);
+      setMoveGroupError(null);
+      onReload();
+      showSuccess('Demand line moved', `Moved demand to ${targetName} on ${targetProjectName}.`);
+    } catch (err) {
+      setDemandCapPeriods([]);
+      setDemandCapPendingBody(null);
+      if (err instanceof ApiError) {
+        setMoveGroupError(err.detail || err.message || 'Failed to move demand line.');
+      } else {
+        setMoveGroupError((err as Error).message || 'Failed to move demand line.');
+      }
+    } finally {
+      setConfirmingDemandCap(false);
+    }
+  }, [demandCapPendingBody, moveAllResources, moveTargetId, moveDemandAllProjects, moveTargetProjectId, moveGroupRow, onReload, showSuccess]);
+
+  const handleSupplyCapConfirm = useCallback(async () => {
+    if (!supplyCapPendingBody) return;
+    setConfirmingSupplyCap(true);
+    try {
+      await planningApi.moveSupplyGroup(supplyCapPendingBody);
+      const targetName = moveSupplyAllResources.find(r => r.id === moveSupplyTargetId)?.display_name || moveSupplyTargetId;
+      const targetProjectName = moveSupplyAllProjects.find(p => p.id === moveSupplyTargetProjectId)?.name || moveSupplyGroupRow?.projectName;
+      setSupplyCapPeriods([]);
+      setSupplyCapPendingBody(null);
+      setMoveSupplyGroupRow(null);
+      setMoveSupplyTargetId('');
+      setMoveSupplyTargetProjectId('');
+      setMoveSupplyQuery('');
+      setMoveSupplyProjectQuery('');
+      setMoveSupplyDropdownOpen(false);
+      setMoveSupplyProjectDropdownOpen(false);
+      setMoveSupplyGroupError(null);
+      onReload();
+      showSuccess('Supply line moved', `Moved supply to ${targetName} on ${targetProjectName}.`);
+    } catch (err) {
+      setSupplyCapPeriods([]);
+      setSupplyCapPendingBody(null);
+      if (err instanceof ApiError) {
+        setMoveSupplyGroupError(err.detail || err.message || 'Failed to move supply line.');
+      } else {
+        setMoveSupplyGroupError((err as Error).message || 'Failed to move supply line.');
+      }
+    } finally {
+      setConfirmingSupplyCap(false);
+    }
+  }, [supplyCapPendingBody, moveSupplyAllResources, moveSupplyTargetId, moveSupplyAllProjects, moveSupplyTargetProjectId, moveSupplyGroupRow, onReload, showSuccess]);
 
   const handleAddDemandLine = useCallback(async (ccId: string, allRows: MergedMatrixRow[]) => {
     const { resOrPh, projectId } = addDemandForm;
@@ -2964,6 +3040,98 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
               icon={movingSupplyGroup ? <Spinner size="extra-tiny" /> : undefined}
             >
               Move supply
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+
+    {/* Demand Move Would Exceed 100% — Cap Confirmation Dialog */}
+    <Dialog
+      open={demandCapPeriods.length > 0}
+      onOpenChange={(_, d) => { if (!d.open && !confirmingDemandCap) { setDemandCapPeriods([]); setDemandCapPendingBody(null); } }}
+    >
+      <DialogSurface style={{ maxWidth: 500, borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06)', padding: '20px 24px' }}>
+        <DialogBody>
+          <DialogTitle style={dlgTitleStyle}>Move would exceed 100%</DialogTitle>
+          <DialogContent>
+            <div className={styles.actionDialogContent}>
+              <div className={styles.actionDialogBodyText}>
+                Some target months already have demand on this resource and project. Moving this line would
+                exceed 100%. If you proceed, those months will be capped at 100%.
+              </div>
+              <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {demandCapPeriods.map(p => (
+                  <div key={p.period_id} style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                    <strong>{p.label}</strong>: existing {p.existing_fte}% + moved {p.moved_fte}% = {p.raw_total}%, capped to 100%
+                  </div>
+                ))}
+              </div>
+            </div>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              appearance="secondary"
+              style={compactBtn}
+              onClick={() => { setDemandCapPeriods([]); setDemandCapPendingBody(null); }}
+              disabled={confirmingDemandCap}
+            >
+              Cancel
+            </Button>
+            <Button
+              appearance="primary"
+              style={compactBtn}
+              onClick={handleDemandCapConfirm}
+              disabled={confirmingDemandCap}
+              icon={confirmingDemandCap ? <Spinner size="extra-tiny" /> : undefined}
+            >
+              Proceed and cap at 100
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+
+    {/* Supply Move Would Exceed 100% — Cap Confirmation Dialog */}
+    <Dialog
+      open={supplyCapPeriods.length > 0}
+      onOpenChange={(_, d) => { if (!d.open && !confirmingSupplyCap) { setSupplyCapPeriods([]); setSupplyCapPendingBody(null); } }}
+    >
+      <DialogSurface style={{ maxWidth: 500, borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06)', padding: '20px 24px' }}>
+        <DialogBody>
+          <DialogTitle style={dlgTitleStyle}>Move would exceed 100%</DialogTitle>
+          <DialogContent>
+            <div className={styles.actionDialogContent}>
+              <div className={styles.actionDialogBodyText}>
+                Some target months already have supply on this resource and project. Moving this line would
+                exceed 100%. If you proceed, those months will be capped at 100%.
+              </div>
+              <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {supplyCapPeriods.map(p => (
+                  <div key={p.period_id} style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                    <strong>{p.label}</strong>: existing {p.existing_fte}% + moved {p.moved_fte}% = {p.raw_total}%, capped to 100%
+                  </div>
+                ))}
+              </div>
+            </div>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              appearance="secondary"
+              style={compactBtn}
+              onClick={() => { setSupplyCapPeriods([]); setSupplyCapPendingBody(null); }}
+              disabled={confirmingSupplyCap}
+            >
+              Cancel
+            </Button>
+            <Button
+              appearance="primary"
+              style={compactBtn}
+              onClick={handleSupplyCapConfirm}
+              disabled={confirmingSupplyCap}
+              icon={confirmingSupplyCap ? <Spinner size="extra-tiny" /> : undefined}
+            >
+              Proceed and cap at 100
             </Button>
           </DialogActions>
         </DialogBody>

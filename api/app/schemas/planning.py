@@ -135,6 +135,7 @@ class SupplyGroupMoveRequest(BaseModel):
     from_resource_id: str
     to_resource_id: str
     project_id: str
+    to_project_id: str
     period_ids: List[str]
 
     @field_validator('period_ids')
@@ -145,9 +146,9 @@ class SupplyGroupMoveRequest(BaseModel):
         return v
 
     @model_validator(mode='after')
-    def validate_different_resources(self) -> 'SupplyGroupMoveRequest':
-        if self.from_resource_id == self.to_resource_id:
-            raise ValueError('from_resource_id and to_resource_id cannot be the same')
+    def validate_different_target(self) -> 'SupplyGroupMoveRequest':
+        if self.from_resource_id == self.to_resource_id and self.project_id == self.to_project_id:
+            raise ValueError('Target resource and project cannot be the same as source')
         return self
 
 
@@ -183,6 +184,7 @@ class DemandGroupMoveRequest(BaseModel):
     to_resource_id: Optional[str] = None
     to_placeholder_id: Optional[str] = None
     project_id: str
+    to_project_id: str
     period_ids: List[str]
 
     @field_validator('period_ids')
@@ -204,11 +206,11 @@ class DemandGroupMoveRequest(BaseModel):
             raise ValueError(f'{ErrorCode.DEMAND_XOR}: Cannot specify both to_resource_id and to_placeholder_id')
         if not self.to_resource_id and not self.to_placeholder_id:
             raise ValueError(f'{ErrorCode.DEMAND_XOR}: Must specify either to_resource_id or to_placeholder_id')
-        # Source != Target (same type)
-        if self.from_resource_id and self.from_resource_id == self.to_resource_id:
-            raise ValueError('Source and target resource cannot be the same')
-        if self.from_placeholder_id and self.from_placeholder_id == self.to_placeholder_id:
-            raise ValueError('Source and target placeholder cannot be the same')
+        # Source != Target: must differ in resource/placeholder OR project
+        if self.from_resource_id and self.from_resource_id == self.to_resource_id and self.project_id == self.to_project_id:
+            raise ValueError('Target resource and project cannot be the same as source')
+        if self.from_placeholder_id and self.from_placeholder_id == self.to_placeholder_id and self.project_id == self.to_project_id:
+            raise ValueError('Target placeholder and project cannot be the same as source')
         return self
 
 

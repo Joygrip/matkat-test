@@ -300,6 +300,7 @@ async def move_demand_group(
     service = DemandService(db, current_user)
     moved = service.move_group(
         project_id=data.project_id,
+        to_project_id=data.to_project_id,
         period_ids=data.period_ids,
         from_resource_id=data.from_resource_id,
         from_placeholder_id=data.from_placeholder_id,
@@ -529,6 +530,7 @@ async def move_supply_group(
         from_resource_id=data.from_resource_id,
         to_resource_id=data.to_resource_id,
         project_id=data.project_id,
+        to_project_id=data.to_project_id,
         period_ids=data.period_ids,
     )
     return {"moved": moved}

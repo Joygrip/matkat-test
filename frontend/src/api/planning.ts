@@ -97,6 +97,7 @@ export interface MoveDemandGroupRequest {
   to_resource_id?: string;
   to_placeholder_id?: string;
   project_id: string;
+  to_project_id: string;
   period_ids: string[];
 }
 
@@ -110,6 +111,7 @@ export interface MoveSupplyGroupRequest {
   from_resource_id: string;
   to_resource_id: string;
   project_id: string;
+  to_project_id: string;
   period_ids: string[];
 }
 

@@ -577,6 +577,7 @@ class DemandService:
     def move_group(
         self,
         project_id: str,
+        to_project_id: str,
         period_ids: list[str],
         from_resource_id: Optional[str] = None,
         from_placeholder_id: Optional[str] = None,
@@ -606,8 +607,22 @@ class DemandService:
                 detail={"code": "NOT_FOUND", "message": "Project not found"},
             )
 
-        # PM authorization
+        # PM authorization for source project
         self._check_pm_authorized(project)
+
+        # Validate target project exists and PM is authorized for it
+        target_project = self.db.query(Project).filter(
+            and_(
+                Project.id == to_project_id,
+                Project.tenant_id == self.current_user.tenant_id,
+            )
+        ).first()
+        if not target_project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "Target project not found"},
+            )
+        self._check_pm_authorized(target_project)
 
         # Validate all period_ids belong to current tenant
         periods = self.db.query(Period).filter(
@@ -695,9 +710,9 @@ class DemandService:
                 )
             target_name = target_placeholder.name
 
-        # Conflict detection: pre-check for any existing demand on the target for this
-        # project in the same (year, month) pairs. Must use year+month (not period_id)
-        # because that is how the unique index ix_demand_resource_unique is keyed.
+        # Conflict detection: pre-check for any existing demand on the target resource/project
+        # in the same (year, month) pairs. Must use year+month (not period_id) because that
+        # is how the unique index ix_demand_resource_unique is keyed.
         year_month_pairs = [(p.year, p.month) for p in periods]
         conflict_filter = or_(*[
             and_(DemandLine.year == y, DemandLine.month == m)
@@ -706,7 +721,7 @@ class DemandService:
         conflict_query = self.db.query(DemandLine).filter(
             and_(
                 DemandLine.tenant_id == self.current_user.tenant_id,
-                DemandLine.project_id == project_id,
+                DemandLine.project_id == to_project_id,
                 conflict_filter,
             )
         )
@@ -714,6 +729,13 @@ class DemandService:
             conflict_query = conflict_query.filter(DemandLine.resource_id == to_resource_id)
         else:
             conflict_query = conflict_query.filter(DemandLine.placeholder_id == to_placeholder_id)
+
+        # Exclude the source rows themselves when source and target project are the same
+        if project_id == to_project_id:
+            if from_resource_id:
+                conflict_query = conflict_query.filter(DemandLine.resource_id != from_resource_id)
+            elif from_placeholder_id:
+                conflict_query = conflict_query.filter(DemandLine.placeholder_id != from_placeholder_id)
 
         conflicts = conflict_query.all()
         if conflicts:
@@ -725,7 +747,7 @@ class DemandService:
                 detail={
                     "code": "CONFLICT",
                     "message": (
-                        f"{target_name} already has demand for {project.name} in: "
+                        f"{target_name} already has demand for {target_project.name} in: "
                         f"{', '.join(conflict_strs)}. Cannot move the demand line."
                     ),
                 },
@@ -751,16 +773,18 @@ class DemandService:
             old_values = {
                 "resource_id": line.resource_id,
                 "placeholder_id": line.placeholder_id,
+                "project_id": line.project_id,
             }
             line.resource_id = to_resource_id      # None when moving to placeholder
             line.placeholder_id = to_placeholder_id  # None when moving to resource
+            line.project_id = to_project_id
             log_audit(
                 self.db, self.current_user,
                 action="update",
                 entity_type="DemandLine",
                 entity_id=line.id,
                 old_values=old_values,
-                new_values={"resource_id": to_resource_id, "placeholder_id": to_placeholder_id},
+                new_values={"resource_id": to_resource_id, "placeholder_id": to_placeholder_id, "project_id": to_project_id},
             )
 
         self.db.commit()
@@ -1243,9 +1267,10 @@ class SupplyService:
         from_resource_id: str,
         to_resource_id: str,
         project_id: str,
+        to_project_id: str,
         period_ids: list[str],
     ) -> int:
-        """Move all supply lines for a source resource + project to a target resource.
+        """Move all supply lines for a source resource + project to a target resource/project.
 
         Validates all periods are open and checks for conflicts before updating any row
         (all-or-nothing). Returns the count of moved rows.
@@ -1255,7 +1280,7 @@ class SupplyService:
             'July', 'August', 'September', 'October', 'November', 'December',
         ]
 
-        # Validate project exists within tenant
+        # Validate source project exists within tenant
         project = self.db.query(Project).filter(
             and_(
                 Project.id == project_id,
@@ -1266,6 +1291,19 @@ class SupplyService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "NOT_FOUND", "message": "Project not found"},
+            )
+
+        # Validate target project exists within tenant
+        target_project = self.db.query(Project).filter(
+            and_(
+                Project.id == to_project_id,
+                Project.tenant_id == self.current_user.tenant_id,
+            )
+        ).first()
+        if not target_project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "Target project not found"},
             )
 
         # Validate source resource exists within tenant
@@ -1332,15 +1370,21 @@ class SupplyService:
                     },
                 )
 
-        # Conflict detection: check whether target already has supply for this project/period
-        conflicts = self.db.query(SupplyLine).filter(
+        # Conflict detection: check whether target resource/project already has supply in these periods
+        conflict_query = self.db.query(SupplyLine).filter(
             and_(
                 SupplyLine.tenant_id == self.current_user.tenant_id,
                 SupplyLine.resource_id == to_resource_id,
-                SupplyLine.project_id == project_id,
+                SupplyLine.project_id == to_project_id,
                 SupplyLine.period_id.in_(period_ids),
             )
-        ).all()
+        )
+        # Exclude the source rows when resource and project are being kept the same
+        if from_resource_id == to_resource_id or project_id == to_project_id:
+            conflict_query = conflict_query.filter(
+                ~and_(SupplyLine.resource_id == from_resource_id, SupplyLine.project_id == project_id)
+            )
+        conflicts = conflict_query.all()
         if conflicts:
             conflict_period_ids = {c.period_id for c in conflicts}
             conflict_periods = [p for p in db_periods if p.id in conflict_period_ids]
@@ -1353,7 +1397,7 @@ class SupplyService:
                 detail={
                     "code": "CONFLICT",
                     "message": (
-                        f"{target_resource.display_name} already has supply for {project.name} in: "
+                        f"{target_resource.display_name} already has supply for {target_project.name} in: "
                         f"{', '.join(conflict_strs)}. Cannot move the supply line."
                     ),
                 },
@@ -1375,10 +1419,11 @@ class SupplyService:
                 action="update",
                 entity_type="SupplyLine",
                 entity_id=line.id,
-                old_values={"resource_id": line.resource_id},
-                new_values={"resource_id": to_resource_id},
+                old_values={"resource_id": line.resource_id, "project_id": line.project_id},
+                new_values={"resource_id": to_resource_id, "project_id": to_project_id},
             )
             line.resource_id = to_resource_id
+            line.project_id = to_project_id
 
         self.db.commit()
         return len(lines)

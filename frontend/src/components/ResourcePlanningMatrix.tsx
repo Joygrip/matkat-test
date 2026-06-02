@@ -559,6 +559,11 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [moveSupplyTargetId, setMoveSupplyTargetId] = useState('');
   const [moveSupplyAllResources, setMoveSupplyAllResources] = useState<Resource[]>([]);
   const [moveSupplyResourcesLoading, setMoveSupplyResourcesLoading] = useState(false);
+  const [moveSupplyTargetProjectId, setMoveSupplyTargetProjectId] = useState('');
+  const [moveSupplyAllProjects, setMoveSupplyAllProjects] = useState<Project[]>([]);
+  const [moveSupplyProjectsLoading, setMoveSupplyProjectsLoading] = useState(false);
+  const [moveSupplyProjectQuery, setMoveSupplyProjectQuery] = useState('');
+  const [moveSupplyProjectDropdownOpen, setMoveSupplyProjectDropdownOpen] = useState(false);
 
   // Move group dialog state
   const [moveGroupRow, setMoveGroupRow] = useState<MergedMatrixRow | null>(null);
@@ -571,6 +576,11 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [moveDemandDropdownOpen, setMoveDemandDropdownOpen] = useState(false);
   const [moveSupplyQuery, setMoveSupplyQuery] = useState('');
   const [moveSupplyDropdownOpen, setMoveSupplyDropdownOpen] = useState(false);
+  const [moveTargetProjectId, setMoveTargetProjectId] = useState('');
+  const [moveDemandAllProjects, setMoveDemandAllProjects] = useState<Project[]>([]);
+  const [moveDemandProjectsLoading, setMoveDemandProjectsLoading] = useState(false);
+  const [moveDemandProjectQuery, setMoveDemandProjectQuery] = useState('');
+  const [moveDemandProjectDropdownOpen, setMoveDemandProjectDropdownOpen] = useState(false);
 
   // Add Line dialog state
   const [addLineDialogOpen, setAddLineDialogOpen] = useState(false);
@@ -725,6 +735,20 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         (r.email ? r.email.toLowerCase().includes(q) : false)
       );
   }, [moveSupplyAllResources, moveSupplyGroupRow, moveSupplyQuery]);
+
+  const moveDemandFilteredProjects = useMemo(() => {
+    const q = moveDemandProjectQuery.trim().toLowerCase();
+    return moveDemandAllProjects.filter(p =>
+      !q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q)
+    );
+  }, [moveDemandAllProjects, moveDemandProjectQuery]);
+
+  const moveSupplyFilteredProjects = useMemo(() => {
+    const q = moveSupplyProjectQuery.trim().toLowerCase();
+    return moveSupplyAllProjects.filter(p =>
+      !q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q)
+    );
+  }, [moveSupplyAllProjects, moveSupplyProjectQuery]);
 
   const loadCcData = useCallback(async (ccId: string) => {
     const promises: Promise<void>[] = [];
@@ -882,39 +906,52 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const openMoveSupplyDialog = useCallback(async (row: MergedMatrixRow) => {
     setMoveSupplyGroupRow(row);
     setMoveSupplyTargetId('');
+    setMoveSupplyTargetProjectId(row.projectId || '');
+    setMoveSupplyProjectQuery('');
     setMoveSupplyGroupError(null);
     setMoveSupplyResourcesLoading(true);
+    setMoveSupplyProjectsLoading(true);
     try {
-      const resources = await lookupsApi.listResourcesScoped();
+      const [resources, projects] = await Promise.all([
+        lookupsApi.listResourcesScoped(),
+        lookupsApi.listProjects(),
+      ]);
       setMoveSupplyAllResources(resources);
+      setMoveSupplyAllProjects(projects.filter(p => p.is_active));
     } catch {
       setMoveSupplyAllResources([]);
+      setMoveSupplyAllProjects([]);
     } finally {
       setMoveSupplyResourcesLoading(false);
+      setMoveSupplyProjectsLoading(false);
     }
   }, []);
 
   const handleMoveSupplyGroup = useCallback(async () => {
-    if (!moveSupplyGroupRow || !moveSupplyTargetId) return;
+    if (!moveSupplyGroupRow || !moveSupplyTargetId || !moveSupplyTargetProjectId) return;
     setMovingSupplyGroup(true);
     setMoveSupplyGroupError(null);
     const body: MoveSupplyGroupRequest = {
       from_resource_id: moveSupplyGroupRow.resourceId || '',
       to_resource_id: moveSupplyTargetId,
       project_id: moveSupplyGroupRow.projectId || '',
+      to_project_id: moveSupplyTargetProjectId,
       period_ids: periods.map(p => p.id),
     };
     try {
       await planningApi.moveSupplyGroup(body);
       const targetName = moveSupplyAllResources.find(r => r.id === moveSupplyTargetId)?.display_name || moveSupplyTargetId;
-      const { projectName } = moveSupplyGroupRow;
+      const targetProjectName = moveSupplyAllProjects.find(p => p.id === moveSupplyTargetProjectId)?.name || moveSupplyGroupRow.projectName;
       setMoveSupplyGroupRow(null);
       setMoveSupplyTargetId('');
+      setMoveSupplyTargetProjectId('');
       setMoveSupplyQuery('');
+      setMoveSupplyProjectQuery('');
       setMoveSupplyDropdownOpen(false);
+      setMoveSupplyProjectDropdownOpen(false);
       setMoveSupplyGroupError(null);
       onReload();
-      showSuccess('Supply line moved', `Moved supply for ${projectName} to ${targetName}.`);
+      showSuccess('Supply line moved', `Moved supply to ${targetName} on ${targetProjectName}.`);
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.code === 'PERIOD_LOCKED') {
@@ -934,25 +971,34 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     } finally {
       setMovingSupplyGroup(false);
     }
-  }, [moveSupplyGroupRow, moveSupplyTargetId, moveSupplyAllResources, periods, onReload, showSuccess]);
+  }, [moveSupplyGroupRow, moveSupplyTargetId, moveSupplyTargetProjectId, moveSupplyAllResources, moveSupplyAllProjects, periods, onReload, showSuccess]);
 
   const openMoveDialog = useCallback(async (row: MergedMatrixRow) => {
     setMoveGroupRow(row);
     setMoveTargetId('');
+    setMoveTargetProjectId(row.projectId || '');
+    setMoveDemandProjectQuery('');
     setMoveGroupError(null);
     setMoveResourcesLoading(true);
+    setMoveDemandProjectsLoading(true);
     try {
-      const resources = await lookupsApi.listResources();
+      const [resources, projects] = await Promise.all([
+        lookupsApi.listResources(),
+        lookupsApi.listProjectsScoped(),
+      ]);
       setMoveAllResources(resources);
+      setMoveDemandAllProjects(projects);
     } catch {
       setMoveAllResources([]);
+      setMoveDemandAllProjects([]);
     } finally {
       setMoveResourcesLoading(false);
+      setMoveDemandProjectsLoading(false);
     }
   }, []);
 
   const handleMoveGroup = useCallback(async () => {
-    if (!moveGroupRow || !moveTargetId) return;
+    if (!moveGroupRow || !moveTargetId || !moveTargetProjectId) return;
     setMovingGroup(true);
     setMoveGroupError(null);
     const body: MoveDemandGroupRequest = {
@@ -960,19 +1006,23 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       from_placeholder_id: moveGroupRow.placeholderId ?? undefined,
       to_resource_id: moveTargetId,
       project_id: moveGroupRow.projectId || '',
+      to_project_id: moveTargetProjectId,
       period_ids: periods.map(p => p.id),
     };
     try {
       await planningApi.moveDemandGroup(body);
       const targetName = moveAllResources.find(r => r.id === moveTargetId)?.display_name || moveTargetId;
-      const { projectName } = moveGroupRow;
+      const targetProjectName = moveDemandAllProjects.find(p => p.id === moveTargetProjectId)?.name || moveGroupRow.projectName;
       setMoveGroupRow(null);
       setMoveTargetId('');
+      setMoveTargetProjectId('');
       setMoveDemandQuery('');
+      setMoveDemandProjectQuery('');
       setMoveDemandDropdownOpen(false);
+      setMoveDemandProjectDropdownOpen(false);
       setMoveGroupError(null);
       onReload();
-      showSuccess('Demand line moved', `Moved demand for ${projectName} to ${targetName}.`);
+      showSuccess('Demand line moved', `Moved demand to ${targetName} on ${targetProjectName}.`);
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.code === 'PERIOD_LOCKED') {
@@ -992,7 +1042,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     } finally {
       setMovingGroup(false);
     }
-  }, [moveGroupRow, moveTargetId, moveAllResources, periods, onReload, showSuccess]);
+  }, [moveGroupRow, moveTargetId, moveTargetProjectId, moveAllResources, moveDemandAllProjects, periods, onReload, showSuccess]);
 
   const handleAddDemandLine = useCallback(async (ccId: string, allRows: MergedMatrixRow[]) => {
     const { resOrPh, projectId } = addDemandForm;
@@ -2557,7 +2607,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     {/* Move Demand Group Dialog */}
     <Dialog
       open={moveGroupRow !== null}
-      onOpenChange={(_, d) => { if (!d.open && !movingGroup) { setMoveGroupRow(null); setMoveTargetId(''); setMoveDemandQuery(''); setMoveDemandDropdownOpen(false); setMoveGroupError(null); } }}
+      onOpenChange={(_, d) => { if (!d.open && !movingGroup) { setMoveGroupRow(null); setMoveTargetId(''); setMoveTargetProjectId(''); setMoveDemandQuery(''); setMoveDemandProjectQuery(''); setMoveDemandDropdownOpen(false); setMoveDemandProjectDropdownOpen(false); setMoveGroupError(null); } }}
     >
       <DialogSurface style={dlgSurfaceMove}>
         <DialogBody>
@@ -2568,6 +2618,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                 Moving demand for <strong>{moveGroupRow?.resourceName}</strong> on{' '}
                 <strong>{moveGroupRow?.projectName}</strong> across{' '}
                 <strong>{periods.length} open period{periods.length !== 1 ? 's' : ''}</strong>.
+                Choose the target resource and project.
               </div>
 
               <div>
@@ -2621,6 +2672,60 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                 )}
               </div>
 
+              <div>
+                <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>
+                  New project
+                </div>
+                {moveDemandProjectsLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                    <Spinner size="extra-tiny" /> Loading projects…
+                  </div>
+                ) : (
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="text"
+                      value={moveDemandProjectQuery}
+                      onChange={e => { setMoveDemandProjectQuery(e.target.value); setMoveTargetProjectId(''); setMoveDemandProjectDropdownOpen(true); setMoveGroupError(null); }}
+                      onFocus={() => setMoveDemandProjectDropdownOpen(true)}
+                      onBlur={() => setTimeout(() => setMoveDemandProjectDropdownOpen(false), 150)}
+                      placeholder="Search by project name or code..."
+                      style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', boxSizing: 'border-box' }}
+                    />
+                    {moveDemandProjectDropdownOpen && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 999, background: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, boxShadow: tokens.shadow8, maxHeight: 300, overflowY: 'auto' }}>
+                        {moveDemandFilteredProjects.length === 0 ? (
+                          <div style={{ padding: '6px 8px', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>No matching projects</div>
+                        ) : (
+                          moveDemandFilteredProjects.map(p => (
+                            <div
+                              key={p.id}
+                              onMouseDown={e => {
+                                e.preventDefault();
+                                setMoveTargetProjectId(p.id);
+                                setMoveDemandProjectQuery('');
+                                setMoveDemandProjectDropdownOpen(false);
+                                setMoveGroupError(null);
+                              }}
+                              style={{ padding: '6px 8px', cursor: 'pointer', fontSize: tokens.fontSizeBase200, backgroundColor: p.id === moveTargetProjectId ? tokens.colorNeutralBackground3 : 'transparent' }}
+                              onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = p.id === moveTargetProjectId ? tokens.colorNeutralBackground3 : 'transparent'; }}
+                            >
+                              <span style={{ fontWeight: tokens.fontWeightSemibold }}>{p.name}</span>
+                              {p.code && <span style={{ marginLeft: 6, color: tokens.colorNeutralForeground3 }}>{p.code}</span>}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {moveTargetProjectId && (
+                  <div style={{ marginTop: 4, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                    Selected: <strong>{moveDemandAllProjects.find(p => p.id === moveTargetProjectId)?.name ?? moveTargetProjectId}</strong>
+                  </div>
+                )}
+              </div>
+
               {moveGroupError && (
                 <div className={styles.actionDialogError}>{moveGroupError}</div>
               )}
@@ -2630,7 +2735,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
             <Button
               appearance="secondary"
               style={compactBtn}
-              onClick={() => { setMoveGroupRow(null); setMoveTargetId(''); setMoveDemandQuery(''); setMoveDemandDropdownOpen(false); setMoveGroupError(null); }}
+              onClick={() => { setMoveGroupRow(null); setMoveTargetId(''); setMoveTargetProjectId(''); setMoveDemandQuery(''); setMoveDemandProjectQuery(''); setMoveDemandDropdownOpen(false); setMoveDemandProjectDropdownOpen(false); setMoveGroupError(null); }}
               disabled={movingGroup}
             >
               Cancel
@@ -2639,7 +2744,14 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
               appearance="primary"
               style={compactBtn}
               onClick={handleMoveGroup}
-              disabled={movingGroup || !moveTargetId || moveResourcesLoading}
+              disabled={
+                movingGroup ||
+                !moveTargetId ||
+                !moveTargetProjectId ||
+                moveResourcesLoading ||
+                moveDemandProjectsLoading ||
+                (moveTargetId === moveGroupRow?.resourceId && moveTargetProjectId === moveGroupRow?.projectId)
+              }
               icon={movingGroup ? <Spinner size="extra-tiny" /> : undefined}
             >
               Move demand
@@ -2698,7 +2810,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     {/* Move Supply Group Dialog */}
     <Dialog
       open={moveSupplyGroupRow !== null}
-      onOpenChange={(_, d) => { if (!d.open && !movingSupplyGroup) { setMoveSupplyGroupRow(null); setMoveSupplyTargetId(''); setMoveSupplyQuery(''); setMoveSupplyDropdownOpen(false); setMoveSupplyGroupError(null); } }}
+      onOpenChange={(_, d) => { if (!d.open && !movingSupplyGroup) { setMoveSupplyGroupRow(null); setMoveSupplyTargetId(''); setMoveSupplyTargetProjectId(''); setMoveSupplyQuery(''); setMoveSupplyProjectQuery(''); setMoveSupplyDropdownOpen(false); setMoveSupplyProjectDropdownOpen(false); setMoveSupplyGroupError(null); } }}
     >
       <DialogSurface style={dlgSurfaceMove}>
         <DialogBody>
@@ -2709,9 +2821,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                 Moving supply for <strong>{moveSupplyGroupRow?.resourceName}</strong> on{' '}
                 <strong>{moveSupplyGroupRow?.projectName}</strong> across{' '}
                 <strong>{periods.length} open period{periods.length !== 1 ? 's' : ''}</strong>.
-              </div>
-              <div className={styles.actionDialogSecondary}>
-                This will move values across the visible open periods. Demand and actuals will not be affected.
+                Choose the target resource and project. Demand and actuals will not be affected.
               </div>
 
               <div>
@@ -2765,6 +2875,60 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                 )}
               </div>
 
+              <div>
+                <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>
+                  New project
+                </div>
+                {moveSupplyProjectsLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                    <Spinner size="extra-tiny" /> Loading projects…
+                  </div>
+                ) : (
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="text"
+                      value={moveSupplyProjectQuery}
+                      onChange={e => { setMoveSupplyProjectQuery(e.target.value); setMoveSupplyTargetProjectId(''); setMoveSupplyProjectDropdownOpen(true); setMoveSupplyGroupError(null); }}
+                      onFocus={() => setMoveSupplyProjectDropdownOpen(true)}
+                      onBlur={() => setTimeout(() => setMoveSupplyProjectDropdownOpen(false), 150)}
+                      placeholder="Search by project name or code..."
+                      style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', boxSizing: 'border-box' }}
+                    />
+                    {moveSupplyProjectDropdownOpen && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 999, background: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, boxShadow: tokens.shadow8, maxHeight: 300, overflowY: 'auto' }}>
+                        {moveSupplyFilteredProjects.length === 0 ? (
+                          <div style={{ padding: '6px 8px', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>No matching projects</div>
+                        ) : (
+                          moveSupplyFilteredProjects.map(p => (
+                            <div
+                              key={p.id}
+                              onMouseDown={e => {
+                                e.preventDefault();
+                                setMoveSupplyTargetProjectId(p.id);
+                                setMoveSupplyProjectQuery('');
+                                setMoveSupplyProjectDropdownOpen(false);
+                                setMoveSupplyGroupError(null);
+                              }}
+                              style={{ padding: '6px 8px', cursor: 'pointer', fontSize: tokens.fontSizeBase200, backgroundColor: p.id === moveSupplyTargetProjectId ? tokens.colorNeutralBackground3 : 'transparent' }}
+                              onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = p.id === moveSupplyTargetProjectId ? tokens.colorNeutralBackground3 : 'transparent'; }}
+                            >
+                              <span style={{ fontWeight: tokens.fontWeightSemibold }}>{p.name}</span>
+                              {p.code && <span style={{ marginLeft: 6, color: tokens.colorNeutralForeground3 }}>{p.code}</span>}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {moveSupplyTargetProjectId && (
+                  <div style={{ marginTop: 4, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                    Selected: <strong>{moveSupplyAllProjects.find(p => p.id === moveSupplyTargetProjectId)?.name ?? moveSupplyTargetProjectId}</strong>
+                  </div>
+                )}
+              </div>
+
               {moveSupplyGroupError && (
                 <div className={styles.actionDialogError}>{moveSupplyGroupError}</div>
               )}
@@ -2774,7 +2938,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
             <Button
               appearance="secondary"
               style={compactBtn}
-              onClick={() => { setMoveSupplyGroupRow(null); setMoveSupplyTargetId(''); setMoveSupplyQuery(''); setMoveSupplyDropdownOpen(false); setMoveSupplyGroupError(null); }}
+              onClick={() => { setMoveSupplyGroupRow(null); setMoveSupplyTargetId(''); setMoveSupplyTargetProjectId(''); setMoveSupplyQuery(''); setMoveSupplyProjectQuery(''); setMoveSupplyDropdownOpen(false); setMoveSupplyProjectDropdownOpen(false); setMoveSupplyGroupError(null); }}
               disabled={movingSupplyGroup}
             >
               Cancel
@@ -2783,7 +2947,14 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
               appearance="primary"
               style={compactBtn}
               onClick={handleMoveSupplyGroup}
-              disabled={movingSupplyGroup || !moveSupplyTargetId || moveSupplyResourcesLoading}
+              disabled={
+                movingSupplyGroup ||
+                !moveSupplyTargetId ||
+                !moveSupplyTargetProjectId ||
+                moveSupplyResourcesLoading ||
+                moveSupplyProjectsLoading ||
+                (moveSupplyTargetId === moveSupplyGroupRow?.resourceId && moveSupplyTargetProjectId === moveSupplyGroupRow?.projectId)
+              }
               icon={movingSupplyGroup ? <Spinner size="extra-tiny" /> : undefined}
             >
               Move supply

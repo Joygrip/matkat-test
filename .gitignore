@@ -72,3 +72,5 @@ logs/
 *.temp
 .cache/
 frontend/.env.production
+infra/prod.parameters.json
+infra/dev.parameters.json

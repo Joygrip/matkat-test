@@ -483,6 +483,22 @@ class ActualsService:
             self.db.commit()
             self.db.refresh(actual)
             self._ensure_approval_instance(actual)
+        elif self.current_user.role in (UserRole.FINANCE, UserRole.ADMIN):
+            # Finance/Admin entering on behalf of an employee — always a proxy sign.
+            # Routing is determined by actual.resource_id -> resource.user_id ->
+            # manager_object_id, independent of current_user, so the correct manager
+            # is set as approver regardless of who created the actual.
+            actual.employee_signed_at = datetime.utcnow()
+            actual.employee_signed_by = self.current_user.object_id
+            actual.is_proxy_signed = True
+            actual.proxy_sign_reason = (
+                proxy_sign_reason.strip()
+                if proxy_sign_reason and proxy_sign_reason.strip()
+                else f"Entered by {self.current_user.role.value}"
+            )
+            self.db.commit()
+            self.db.refresh(actual)
+            self._ensure_approval_instance(actual)
 
         log_audit(
             self.db, self.current_user,

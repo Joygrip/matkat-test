@@ -18,12 +18,14 @@ import {
   MessageBarBody,
   Body1,
   Body2,
+  Badge,
 } from '@fluentui/react-components';
 import { CalendarMonthRegular, CameraRegular, MoneyRegular } from '@fluentui/react-icons';
 import { useAuth } from '../../auth/AuthProvider';
 import { useToast } from '../../hooks/useToast';
 import { usePeriod } from '../../contexts/PeriodContext';
 import { consolidationApi, Snapshot } from '../../api/consolidation';
+import { MONTH_NAMES } from '../../utils/format';
 import { PeriodPanel } from '../PeriodPanel';
 import { PeriodSelector } from '../PeriodSelector';
 import { SnapshotsTab } from './SnapshotsTab';
@@ -40,6 +42,29 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
     margin: `0 0 ${tokens.spacingVerticalM} 0`,
+  },
+  periodSummary: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    marginBottom: tokens.spacingVerticalL,
+    flexWrap: 'wrap',
+  },
+  periodSummaryLabel: {
+    fontSize: tokens.fontSizeBase100,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  periodSummaryName: {
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
   },
   subnavWrapper: {
     overflowX: 'auto',
@@ -124,6 +149,10 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
     setSubTab(data.value as FinanceSubTab);
   };
 
+  const periodLabel = currentPeriod
+    ? `${MONTH_NAMES[currentPeriod.month - 1]} ${currentPeriod.year}`
+    : '—';
+
   const renderContent = () => {
     if (subTab === 'period-control') {
       return <PeriodPanel variant="embedded" />;
@@ -176,9 +205,27 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
 
   return (
     <>
+      {/* Subtitle */}
       <p className={styles.subtitle}>
         Manage monthly period status, publish snapshots, and maintain cost reporting settings.
       </p>
+
+      {/* Current period summary */}
+      <div className={styles.periodSummary}>
+        <span className={styles.periodSummaryLabel}>Current period</span>
+        <span className={styles.periodSummaryName}>{periodLabel}</span>
+        {currentPeriod && (
+          <Badge
+            appearance="filled"
+            color={currentPeriod.status === 'open' ? 'success' : 'danger'}
+            shape="rounded"
+          >
+            {currentPeriod.status === 'open' ? 'Open' : 'Locked'}
+          </Badge>
+        )}
+      </div>
+
+      {/* Internal section subnav */}
       <div className={styles.subnavWrapper}>
         <TabList selectedValue={subTab} onTabSelect={handleSubTabSelect} appearance="subtle">
           <Tab value="period-control" icon={<CalendarMonthRegular />}>Period Control</Tab>
@@ -186,6 +233,7 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
           <Tab value="cost-settings-export" icon={<MoneyRegular />}>Cost Settings &amp; Export</Tab>
         </TabList>
       </div>
+
       {renderContent()}
 
       {/* Publish Snapshot dialog */}

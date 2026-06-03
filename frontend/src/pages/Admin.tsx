@@ -1521,21 +1521,52 @@ export function Admin() {
   const { showSuccess, showApiError } = useToast();
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
-  const rawTab = searchParams.get('tab') ?? 'cost-centers';
+  const rawTab = searchParams.get('tab');
+  const canManageMasterData = user?.role === 'Admin' || user?.role === 'Finance';
+  const canManageSettings = user?.role === 'Admin';
+  const canManageDelegates = user?.role === 'Admin' || user?.role === 'Finance' || user?.role === 'Manager';
+  const canManageFinanceData = user?.role === 'Admin' || user?.role === 'Finance';
+
+  const allTabs: TabValue[] = [
+    'finance-operations',
+    'cost-centers',
+    'projects',
+    'resources',
+    'placeholders',
+    'manager-overrides',
+    'delegates',
+    'users',
+    'sync',
+    'notifications',
+  ];
+
+  const visibleTabs: TabValue[] = [
+    ...(canManageFinanceData ? ['finance-operations' as TabValue] : []),
+    ...(canManageMasterData ? ['cost-centers' as TabValue, 'projects' as TabValue, 'resources' as TabValue, 'placeholders' as TabValue, 'notifications' as TabValue] : []),
+    ...(canManageSettings ? ['manager-overrides' as TabValue, 'users' as TabValue, 'sync' as TabValue] : []),
+    ...(canManageDelegates ? ['delegates' as TabValue] : []),
+  ];
+
+  const isTabValue = (value: string): value is TabValue => allTabs.includes(value as TabValue);
+
   const legacyFinanceTabs: Record<string, FinanceSubTab> = {
     'periods': 'period-control',
     'snapshots': 'snapshot-publishing',
     'cost-report': 'cost-settings-export',
   };
-  const initialTab = rawTab in legacyFinanceTabs ? 'finance-operations' : rawTab;
-  const initialFinanceSubTab: FinanceSubTab = legacyFinanceTabs[rawTab] ?? 'period-control';
-  const [selectedTab, setSelectedTab] = useState<TabValue>(initialTab as TabValue);
-  const [loading, setLoading] = useState(true);
 
-  const canManageMasterData = user?.role === 'Admin' || user?.role === 'Finance';
-  const canManageSettings = user?.role === 'Admin';
-  const canManageDelegates = user?.role === 'Admin' || user?.role === 'Finance' || user?.role === 'Manager';
-  const canManageFinanceData = user?.role === 'Admin' || user?.role === 'Finance';
+  const requestedTab = rawTab == null
+    ? 'finance-operations'
+    : (rawTab in legacyFinanceTabs ? 'finance-operations' : rawTab);
+
+  const initialTab: TabValue =
+    (isTabValue(requestedTab) && visibleTabs.includes(requestedTab))
+      ? requestedTab
+      : (visibleTabs[0] ?? 'cost-centers');
+
+  const initialFinanceSubTab: FinanceSubTab = rawTab ? (legacyFinanceTabs[rawTab] ?? 'period-control') : 'period-control';
+  const [selectedTab, setSelectedTab] = useState<TabValue>(initialTab);
+  const [loading, setLoading] = useState(true);
 
   // Data
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
@@ -2865,11 +2896,11 @@ export function Admin() {
       <Card className={styles.card}>
         <div className={styles.tabBarWrapper}>
         <TabList selectedValue={selectedTab} onTabSelect={handleTabSelect}>
+          {canManageFinanceData && <Tab value="finance-operations" icon={<MoneyRegular />}>Finance Operations</Tab>}
           {canManageMasterData && <Tab value="cost-centers" icon={<OrganizationRegular />}>Cost Centers</Tab>}
           {canManageMasterData && <Tab value="projects" icon={<FolderRegular />}>Projects</Tab>}
           {canManageMasterData && <Tab value="resources" icon={<PersonRegular />}>Resources</Tab>}
           {canManageMasterData && <Tab value="placeholders" icon={<PersonQuestionMarkRegular />}>Placeholders</Tab>}
-          {canManageFinanceData && <Tab value="finance-operations" icon={<MoneyRegular />}>Finance Operations</Tab>}
           {canManageSettings && (
             <Tab value="manager-overrides" icon={<PeopleTeamRegular />}>Manager Overrides</Tab>
           )}

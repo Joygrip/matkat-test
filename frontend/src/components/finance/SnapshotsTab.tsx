@@ -65,11 +65,13 @@ const useStyles = makeStyles({
   tableWrap: {
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
-    overflow: 'hidden',
+    overflowX: 'auto',
+    overflowY: 'hidden',
   },
   table: { width: '100%' },
   sortableTable: {
     width: '100%',
+    minWidth: '760px',
     '& thead': {
       backgroundColor: tokens.colorNeutralBackground2,
     },

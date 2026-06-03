@@ -8,10 +8,8 @@ import {
   Input,
   Spinner,
 } from '@fluentui/react-components';
-import { CheckmarkCircleRegular, ArrowDownloadRegular } from '@fluentui/react-icons';
+import { CheckmarkCircleRegular } from '@fluentui/react-icons';
 import { getFinanceSetting, updateFinanceSetting } from '../../api/finance';
-import { apiClient } from '../../api/client';
-import type { FinanceActualRow } from './ActualsTab';
 import { formatDKK } from '../../utils/format';
 import type { Period } from '../../types';
 import { PeriodSelector } from '../PeriodSelector';
@@ -23,7 +21,6 @@ export interface CostReportTabProps {
   periods: Period[];
   selectedPeriodId: string;
   onSelectPeriod: (id: string) => void;
-  currentPeriod: { year: number; month: number } | null;
   showSuccess: (title: string) => void;
   showError: (title: string) => void;
   showApiError: (err: Error, ctx?: string) => void;
@@ -69,10 +66,6 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
-  divider: {
-    height: '1px',
-    backgroundColor: tokens.colorNeutralStroke2,
-  },
   row: {
     display: 'flex',
     alignItems: 'center',
@@ -88,29 +81,10 @@ const useStyles = makeStyles({
   },
 });
 
-
-function toCsv(rows: FinanceActualRow[], monthlyFteCost: number): string {
-  const header = ['Employee', 'Project', 'Month', 'Actual %', 'Monthly FTE Cost', 'Cost (DKK)'];
-  const lines = [header.join(',')];
-  rows.forEach(r => {
-    const cost = Math.round((r.fte_percent / 100) * monthlyFteCost);
-    lines.push([
-      r.employee_name,
-      r.project_name,
-      `${r.year}-${String(r.month).padStart(2, '0')}`,
-      r.fte_percent,
-      monthlyFteCost,
-      cost,
-    ].join(','));
-  });
-  return lines.join('\r\n');
-}
-
 export function CostReportTab({
   periods,
   selectedPeriodId,
   onSelectPeriod,
-  currentPeriod,
   showSuccess,
   showError,
   showApiError,
@@ -121,7 +95,6 @@ export function CostReportTab({
   const [costInput, setCostInput] = useState<string>(String(DEFAULT_MONTHLY_FTE_COST));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [csvLoading, setCsvLoading] = useState(false);
 
   useEffect(() => {
     setSaved(false);
@@ -152,32 +125,6 @@ export function CostReportTab({
       setSaving(false);
     }
   }, [costInput, showError, showSuccess, showApiError]);
-
-  const handleDownloadCsv = useCallback(async () => {
-    if (!currentPeriod) return;
-    setCsvLoading(true);
-    try {
-      const params = new URLSearchParams({
-        year: String(currentPeriod.year),
-        month: String(currentPeriod.month),
-      });
-      const rows = await apiClient.get<FinanceActualRow[]>(`/finance/actuals-dashboard?${params.toString()}`);
-      const csv = toCsv(rows, monthlyFteCost);
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `cost-report-${selectedPeriodId}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      showApiError(err as Error, 'Failed to download CSV');
-    } finally {
-      setCsvLoading(false);
-    }
-  }, [currentPeriod, monthlyFteCost, selectedPeriodId, showApiError]);
 
   return (
     <div className={styles.card}>
@@ -216,25 +163,6 @@ export function CostReportTab({
               : <>Current: {formatDKK(monthlyFteCost)}</>
             }
           </div>
-        </div>
-      </div>
-
-      <div className={styles.divider} />
-
-      <div className={styles.section}>
-        <div>
-          <Body1 className={styles.sectionTitle}>Export</Body1>
-          <Body2 className={styles.sectionDescription}>Download reporting data for the selected period.</Body2>
-        </div>
-        <div className={styles.row}>
-          <Button
-            appearance="secondary"
-            icon={csvLoading ? <Spinner size="tiny" /> : <ArrowDownloadRegular />}
-            onClick={handleDownloadCsv}
-            disabled={csvLoading || !currentPeriod}
-          >
-            Download CSV
-          </Button>
         </div>
       </div>
     </div>

@@ -3,7 +3,6 @@ import {
   makeStyles,
   tokens,
   Title3,
-  Badge,
   Body1,
   Body2,
   Dialog,
@@ -25,7 +24,6 @@ import { consolidationApi, Snapshot } from '../../api/consolidation';
 import { PeriodPanel } from '../PeriodPanel';
 import { SnapshotsTab } from './SnapshotsTab';
 import { CostReportTab } from './CostReportTab';
-import { MONTH_NAMES } from '../../utils/format';
 
 export type FinanceSubTab = 'period-control' | 'snapshot-publishing' | 'cost-settings-export';
 
@@ -35,6 +33,11 @@ export interface FinanceOperationsPanelProps {
 
 const useStyles = makeStyles({
   root: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
+  },
+  contentStack: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalL,
@@ -56,25 +59,16 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground1,
+    minWidth: 0,
   },
-  currentPeriodRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    flexWrap: 'wrap',
-  },
-  currentPeriodLabel: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  currentPeriodName: {
-    fontSize: tokens.fontSizeBase500,
-    color: tokens.colorNeutralForeground1,
-    fontWeight: tokens.fontWeightSemibold,
+  mainGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(520px, 0.95fr) minmax(520px, 1.05fr)',
+    gap: tokens.spacingHorizontalL,
+    alignItems: 'start',
+    '@media (max-width: 1240px)': {
+      gridTemplateColumns: '1fr',
+    },
   },
   sectionHeader: {
     display: 'flex',
@@ -87,10 +81,6 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
   sectionSubtitle: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-  },
-  helperText: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
   },
@@ -147,10 +137,6 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPeriodId]);
 
-  const formattedCurrentPeriod = currentPeriod
-    ? `${MONTH_NAMES[currentPeriod.month - 1]} ${currentPeriod.year}`
-    : 'No period selected';
-
   return (
     <>
       <div className={styles.root}>
@@ -159,60 +145,48 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
           <span className={styles.pageSubtitle}>Monthly finance close and reporting controls.</span>
         </div>
 
-        <section className={styles.sectionCard}>
-          <div className={styles.currentPeriodLabel}>Current period</div>
-          <div className={styles.currentPeriodRow}>
-            <Body1 className={styles.currentPeriodName}>{formattedCurrentPeriod}</Body1>
-            {currentPeriod && (
-              <Badge appearance="filled" color={currentPeriod.status === 'locked' ? 'danger' : 'success'}>
-                {currentPeriod.status === 'locked' ? 'Locked' : 'Open'}
-              </Badge>
-            )}
-          </div>
-          <Body2 className={styles.helperText}>
-            Period close, snapshot publishing, and reporting controls are available below.
-          </Body2>
-        </section>
+        <div className={styles.contentStack}>
+          <section className={styles.sectionCard}>
+            <div className={styles.sectionHeader}>
+              <Body1 className={styles.sectionTitle}>Cost Settings</Body1>
+              <Body2 className={styles.sectionSubtitle}>Maintain monthly FTE cost settings.</Body2>
+            </div>
+            <CostReportTab
+              periods={periods}
+              selectedPeriodId={selectedPeriodId}
+              onSelectPeriod={setSelectedPeriodId}
+              showSuccess={showSuccess}
+              showError={showError}
+              showApiError={showApiError}
+            />
+          </section>
 
-        <section className={styles.sectionCard}>
-          <div className={styles.sectionHeader}>
-            <Body1 className={styles.sectionTitle}>Periods</Body1>
-            <Body2 className={styles.sectionSubtitle}>Create, lock, and unlock monthly periods.</Body2>
-          </div>
-          <PeriodPanel variant="compact" />
-        </section>
+          <div className={styles.mainGrid}>
+          <section className={styles.sectionCard}>
+            <div className={styles.sectionHeader}>
+              <Body1 className={styles.sectionTitle}>Periods</Body1>
+              <Body2 className={styles.sectionSubtitle}>Create, lock, and unlock monthly periods.</Body2>
+            </div>
+            <PeriodPanel variant="compact" />
+          </section>
 
-        <section className={styles.sectionCard}>
-          <div className={styles.sectionHeader}>
-            <Body1 className={styles.sectionTitle}>Snapshot Publishing</Body1>
-            <Body2 className={styles.sectionSubtitle}>Publish immutable snapshots and review snapshot history.</Body2>
+          <section className={styles.sectionCard}>
+            <div className={styles.sectionHeader}>
+              <Body1 className={styles.sectionTitle}>Snapshot Publishing</Body1>
+              <Body2 className={styles.sectionSubtitle}>Publish immutable snapshots and review snapshot history.</Body2>
+            </div>
+            <SnapshotsTab
+              snapshots={snapshots}
+              canDownloadCsv={canManageFinanceData}
+              showApiError={showApiError}
+              periods={periods}
+              selectedPeriodId={selectedPeriodId}
+              onSelectPeriod={setSelectedPeriodId}
+              onPublishClick={() => setIsPublishDialogOpen(true)}
+            />
+          </section>
           </div>
-          <SnapshotsTab
-            snapshots={snapshots}
-            canDownloadCsv={canManageFinanceData}
-            showApiError={showApiError}
-            periods={periods}
-            selectedPeriodId={selectedPeriodId}
-            onSelectPeriod={setSelectedPeriodId}
-            onPublishClick={() => setIsPublishDialogOpen(true)}
-          />
-        </section>
-
-        <section className={styles.sectionCard}>
-          <div className={styles.sectionHeader}>
-            <Body1 className={styles.sectionTitle}>Cost Settings & Export</Body1>
-            <Body2 className={styles.sectionSubtitle}>Maintain monthly FTE cost settings and download period reporting.</Body2>
-          </div>
-          <CostReportTab
-            periods={periods}
-            selectedPeriodId={selectedPeriodId}
-            onSelectPeriod={setSelectedPeriodId}
-            currentPeriod={currentPeriod ?? null}
-            showSuccess={showSuccess}
-            showError={showError}
-            showApiError={showApiError}
-          />
-        </section>
+        </div>
       </div>
 
       {/* Publish Snapshot dialog */}

@@ -62,6 +62,7 @@ const useStyles = makeStyles({
   },
   table: {
     width: '100%',
+    tableLayout: 'fixed',
     '& thead': {
       backgroundColor: tokens.colorNeutralBackground2,
     },
@@ -81,6 +82,12 @@ const useStyles = makeStyles({
     },
     '& tbody tr:last-child td': {
       borderBottom: 'none',
+    },
+    '& th:nth-child(2), & td:nth-child(2)': {
+      width: '112px',
+    },
+    '& th:nth-child(3), & td:nth-child(3)': {
+      width: '108px',
     },
   },
   monthName: {

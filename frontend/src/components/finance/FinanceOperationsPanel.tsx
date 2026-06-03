@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   makeStyles,
   tokens,
@@ -100,15 +100,6 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
   const [publishName, setPublishName] = useState('');
   const [publishDescription, setPublishDescription] = useState('');
 
-  const latestSnapshot = useMemo(() =>
-    snapshots.length > 0
-      ? [...snapshots].sort((a, b) =>
-          new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
-        )[0]
-      : null,
-    [snapshots]
-  );
-
   const loadSnapshots = useCallback(async () => {
     if (!canManageFinanceData) return;
     try {
@@ -160,23 +151,15 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
 
     if (subTab === 'snapshot-publishing') {
       return (
-        <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalL, marginBottom: tokens.spacingVerticalL, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS }}>
-              <span style={{ fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground2, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Period</span>
-              <PeriodSelector periods={periods} selectedId={selectedPeriodId} onSelect={setSelectedPeriodId} />
-            </div>
-            <Button appearance="primary" style={{ marginTop: 'auto' }} onClick={() => setIsPublishDialogOpen(true)}>
-              Publish Snapshot
-            </Button>
-            <span style={{ marginLeft: 'auto', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-              {latestSnapshot
-                ? `Last snapshot: ${new Date(latestSnapshot.published_at).toLocaleDateString()}`
-                : 'No snapshots yet'}
-            </span>
-          </div>
-          <SnapshotsTab snapshots={snapshots} canDownloadCsv={canManageFinanceData} showApiError={showApiError} />
-        </>
+        <SnapshotsTab
+          snapshots={snapshots}
+          canDownloadCsv={canManageFinanceData}
+          showApiError={showApiError}
+          periods={periods}
+          selectedPeriodId={selectedPeriodId}
+          onSelectPeriod={setSelectedPeriodId}
+          onPublishClick={() => setIsPublishDialogOpen(true)}
+        />
       );
     }
 

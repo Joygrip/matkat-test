@@ -377,17 +377,10 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
 
           let cellStyle: React.CSSProperties;
           if (period) {
-            if (isOpen) {
-              cellStyle = {
-                backgroundColor: tokens.colorStatusSuccessBackground1,
-                border: `1px solid ${tokens.colorStatusSuccessBorderActive}`,
-              };
-            } else {
-              cellStyle = {
-                backgroundColor: tokens.colorStatusDangerBackground1,
-                border: `1px solid ${tokens.colorStatusDangerBorderActive}`,
-              };
-            }
+            cellStyle = {
+              backgroundColor: isHovered ? tokens.colorNeutralBackground1Hover : tokens.colorNeutralBackground1,
+              border: `1px solid ${tokens.colorNeutralStroke2}`,
+            };
           } else {
             cellStyle = {
               backgroundColor: isHovered ? tokens.colorNeutralBackground4 : tokens.colorNeutralBackground3,
@@ -401,7 +394,7 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
               key={month}
               className={styles.monthCell}
               style={cellStyle}
-              onMouseEnter={() => !period && setHoveredCell(cellKey)}
+              onMouseEnter={() => setHoveredCell(cellKey)}
               onMouseLeave={() => setHoveredCell(null)}
               onClick={() => {
                 if (!period && isFinanceOrAdmin) {

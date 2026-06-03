@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   makeStyles,
   tokens,
@@ -21,18 +21,67 @@ import {
   TableCell,
 } from '@fluentui/react-components';
 import { consolidationApi, Snapshot, SnapshotDetail } from '../../api/consolidation';
+import type { Period } from '../../types';
+import { PeriodSelector } from '../PeriodSelector';
 
 export interface SnapshotsTabProps {
   snapshots: Snapshot[];
   canDownloadCsv: boolean;
   showApiError: (err: Error, ctx?: string) => void;
+  periods: Period[];
+  selectedPeriodId: string;
+  onSelectPeriod: (id: string) => void;
+  onPublishClick: () => void;
 }
 
 const useStyles = makeStyles({
+  wrapper: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
+  },
   card: {
     borderRadius: tokens.borderRadiusLarge,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     boxShadow: tokens.shadow4,
+  },
+  cardHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM} 0`,
+  },
+  cardTitle: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  cardDescription: {
+    color: tokens.colorNeutralForeground3,
+  },
+  publishControls: {
+    display: 'flex',
+    alignItems: 'flex-end',
+    gap: tokens.spacingHorizontalL,
+    flexWrap: 'wrap',
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM} ${tokens.spacingVerticalM}`,
+  },
+  periodField: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+  },
+  periodLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  lastSnapshot: {
+    marginLeft: 'auto',
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    alignSelf: 'center',
   },
   table: { width: '100%' },
   sortableTable: {
@@ -56,7 +105,11 @@ const useStyles = makeStyles({
     '& tbody tr:hover': { backgroundColor: tokens.colorNeutralBackground2 },
   },
   emptyState: {
-    padding: `${tokens.spacingVerticalXL} ${tokens.spacingHorizontalL}`,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    padding: `${tokens.spacingVerticalXXL} ${tokens.spacingHorizontalL}`,
+    gap: tokens.spacingVerticalS,
     textAlign: 'center' as const,
     color: tokens.colorNeutralForeground3,
   },
@@ -67,10 +120,27 @@ const useStyles = makeStyles({
   },
 });
 
-export function SnapshotsTab({ snapshots, canDownloadCsv, showApiError }: SnapshotsTabProps) {
+export function SnapshotsTab({
+  snapshots,
+  canDownloadCsv,
+  showApiError,
+  periods,
+  selectedPeriodId,
+  onSelectPeriod,
+  onPublishClick,
+}: SnapshotsTabProps) {
   const styles = useStyles();
   const [viewedSnapshot, setViewedSnapshot] = useState<SnapshotDetail | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const latestSnapshot = useMemo(() =>
+    snapshots.length > 0
+      ? [...snapshots].sort((a, b) =>
+          new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
+        )[0]
+      : null,
+    [snapshots]
+  );
 
   const handleView = async (id: string) => {
     try {
@@ -93,7 +163,31 @@ export function SnapshotsTab({ snapshots, canDownloadCsv, showApiError }: Snapsh
   };
 
   return (
-    <>
+    <div className={styles.wrapper}>
+
+      {/* Card 1: Publish Snapshot */}
+      <Card className={styles.card}>
+        <div className={styles.cardHeader}>
+          <Body2 className={styles.cardTitle}>Publish Snapshot</Body2>
+          <Body2 className={styles.cardDescription}>Freeze reporting data for the selected period.</Body2>
+        </div>
+        <div className={styles.publishControls}>
+          <div className={styles.periodField}>
+            <span className={styles.periodLabel}>Period</span>
+            <PeriodSelector periods={periods} selectedId={selectedPeriodId} onSelect={onSelectPeriod} />
+          </div>
+          <Button appearance="primary" onClick={onPublishClick}>
+            Publish Snapshot
+          </Button>
+          <span className={styles.lastSnapshot}>
+            {latestSnapshot
+              ? `Last snapshot: ${new Date(latestSnapshot.published_at).toLocaleDateString()}`
+              : 'No snapshots yet'}
+          </span>
+        </div>
+      </Card>
+
+      {/* Card 2: Published Snapshots */}
       <Card className={styles.card}>
         <CardHeader header={<Body1><strong>Published Snapshots</strong></Body1>} />
         {snapshots.length > 0 ? (
@@ -140,11 +234,14 @@ export function SnapshotsTab({ snapshots, canDownloadCsv, showApiError }: Snapsh
         ) : (
           <div className={styles.emptyState}>
             <Body1>No snapshots published for this period yet.</Body1>
+            <Body2>
+              Publish a snapshot to freeze reporting values for this period.
+            </Body2>
           </div>
         )}
       </Card>
 
-      {/* Detail dialog */}
+      {/* Detail dialog — unchanged */}
       <Dialog open={!!viewedSnapshot} onOpenChange={(_, d) => !d.open && setViewedSnapshot(null)}>
         <DialogSurface style={{ maxWidth: 720 }}>
           <DialogBody>
@@ -193,6 +290,7 @@ export function SnapshotsTab({ snapshots, canDownloadCsv, showApiError }: Snapsh
           </DialogBody>
         </DialogSurface>
       </Dialog>
-    </>
+
+    </div>
   );
 }

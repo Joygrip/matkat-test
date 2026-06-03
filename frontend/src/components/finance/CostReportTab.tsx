@@ -2,7 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   makeStyles,
   tokens,
+  Card,
   Button,
+  Body2,
   Input,
   Spinner,
 } from '@fluentui/react-components';
@@ -24,23 +26,35 @@ export interface CostReportTabProps {
 }
 
 const useStyles = makeStyles({
-  section: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: '10px',
-    padding: `${tokens.spacingVerticalXL} ${tokens.spacingHorizontalXL}`,
-    maxWidth: '560px',
+  wrapper: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    gap: tokens.spacingHorizontalL,
+    alignItems: 'start',
   },
-  sectionTitle: {
-    fontSize: tokens.fontSizeBase400,
+  card: {
+    borderRadius: tokens.borderRadiusLarge,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    boxShadow: tokens.shadow4,
+  },
+  cardHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM} 0`,
+  },
+  cardTitle: {
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalXS,
   },
-  description: {
-    fontSize: tokens.fontSizeBase200,
+  cardDescription: {
     color: tokens.colorNeutralForeground3,
-    marginBottom: tokens.spacingVerticalL,
+  },
+  cardBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM} ${tokens.spacingVerticalL}`,
   },
   row: {
     display: 'flex',
@@ -52,7 +66,6 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
-    marginTop: tokens.spacingVerticalS,
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
   },
@@ -148,41 +161,64 @@ export function CostReportTab({
   }, [currentPeriod, monthlyFteCost, selectedPeriodId, showApiError]);
 
   return (
-    <div className={styles.section}>
-      <div className={styles.sectionTitle}>Monthly FTE Cost (DKK)</div>
-      <div className={styles.description}>
-        Set the monthly FTE cost rate used for cost calculations across Cost Overview, Dashboards, and reports.
-      </div>
-      <div className={styles.row}>
-        <Input
-          type="number"
-          value={costInput}
-          onChange={(_, d) => { setCostInput(d.value); setSaved(false); }}
-          style={{ width: 160 }}
-          disabled={saving}
-        />
-        <Button
-          appearance="primary"
-          onClick={handleApply}
-          disabled={saving}
-        >
-          {saving ? <><Spinner size="tiny" style={{ marginRight: 6 }} />Saving…</> : 'Apply'}
-        </Button>
-        <Button
-          appearance="secondary"
-          icon={csvLoading ? <Spinner size="tiny" /> : <ArrowDownloadRegular />}
-          onClick={handleDownloadCsv}
-          disabled={csvLoading || !currentPeriod}
-        >
-          Download CSV
-        </Button>
-      </div>
-      <div className={styles.savedRow}>
-        {saved
-          ? <><CheckmarkCircleRegular style={{ color: tokens.colorPaletteGreenForeground1 }} /> Current: {formatDKK(monthlyFteCost)} ✓</>
-          : <>Current: {formatDKK(monthlyFteCost)}</>
-        }
-      </div>
+    <div className={styles.wrapper}>
+
+      {/* Card 1 — Monthly FTE Cost */}
+      <Card className={styles.card}>
+        <div className={styles.cardHeader}>
+          <Body2 className={styles.cardTitle}>Monthly FTE Cost</Body2>
+          <Body2 className={styles.cardDescription}>
+            Set the monthly FTE cost rate used for cost calculations across cost overview, dashboards, and reports.
+          </Body2>
+        </div>
+        <div className={styles.cardBody}>
+          <div className={styles.row}>
+            <Input
+              type="number"
+              value={costInput}
+              onChange={(_, d) => { setCostInput(d.value); setSaved(false); }}
+              style={{ width: 160 }}
+              disabled={saving}
+            />
+            <Button
+              appearance="primary"
+              onClick={handleApply}
+              disabled={saving}
+            >
+              {saving ? <><Spinner size="tiny" style={{ marginRight: 6 }} />Saving…</> : 'Apply'}
+            </Button>
+          </div>
+          <div className={styles.savedRow}>
+            {saved
+              ? <><CheckmarkCircleRegular style={{ color: tokens.colorPaletteGreenForeground1 }} />&nbsp;Current: {formatDKK(monthlyFteCost)} ✓</>
+              : <>Current: {formatDKK(monthlyFteCost)}</>
+            }
+          </div>
+        </div>
+      </Card>
+
+      {/* Card 2 — Export Cost Report */}
+      <Card className={styles.card}>
+        <div className={styles.cardHeader}>
+          <Body2 className={styles.cardTitle}>Export Cost Report</Body2>
+          <Body2 className={styles.cardDescription}>
+            Download reporting data for the selected period.
+          </Body2>
+        </div>
+        <div className={styles.cardBody}>
+          <div className={styles.row}>
+            <Button
+              appearance="secondary"
+              icon={csvLoading ? <Spinner size="tiny" /> : <ArrowDownloadRegular />}
+              onClick={handleDownloadCsv}
+              disabled={csvLoading || !currentPeriod}
+            >
+              Download CSV
+            </Button>
+          </div>
+        </div>
+      </Card>
+
     </div>
   );
 }

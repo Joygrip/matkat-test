@@ -4,6 +4,7 @@ import {
   tokens,
   Body1,
   Body2,
+  Badge,
   Button,
   Dialog,
   DialogSurface,
@@ -19,16 +20,12 @@ import {
   TableCell,
 } from '@fluentui/react-components';
 import { consolidationApi, Snapshot, SnapshotDetail } from '../../api/consolidation';
-import type { Period } from '../../types';
-import { PeriodSelector } from '../PeriodSelector';
 
 export interface SnapshotsTabProps {
   snapshots: Snapshot[];
   canDownloadCsv: boolean;
   showApiError: (err: Error, ctx?: string) => void;
-  periods: Period[];
-  selectedPeriodId: string;
-  onSelectPeriod: (id: string) => void;
+  selectedPeriodLabel: string;
   onPublishClick: () => void;
 }
 
@@ -44,7 +41,7 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
   },
-  periodField: {
+  periodInfo: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
@@ -55,6 +52,13 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
+  },
+  periodValue: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightSemibold,
   },
   lastSnapshot: {
     marginLeft: 'auto',
@@ -113,9 +117,7 @@ export function SnapshotsTab({
   snapshots,
   canDownloadCsv,
   showApiError,
-  periods,
-  selectedPeriodId,
-  onSelectPeriod,
+  selectedPeriodLabel,
   onPublishClick,
 }: SnapshotsTabProps) {
   const styles = useStyles();
@@ -155,9 +157,12 @@ export function SnapshotsTab({
     <div className={styles.wrapper}>
 
       <div className={styles.toolbar}>
-        <div className={styles.periodField}>
+        <div className={styles.periodInfo}>
           <span className={styles.periodLabel}>Period</span>
-          <PeriodSelector periods={periods} selectedId={selectedPeriodId} onSelect={onSelectPeriod} />
+          <span className={styles.periodValue}>
+            <Badge appearance="filled" color="informative" size="small">Snapshots</Badge>
+            {selectedPeriodLabel}
+          </span>
         </div>
         <Button appearance="primary" onClick={onPublishClick}>
           Publish Snapshot
@@ -213,7 +218,7 @@ export function SnapshotsTab({
           </Table>
         ) : (
           <div className={styles.emptyState}>
-            <Body1>No snapshots published for this period yet.</Body1>
+            <Body1>No snapshots published for {selectedPeriodLabel}.</Body1>
             <Body2>
               Publish a snapshot to freeze reporting values for this period.
             </Body2>

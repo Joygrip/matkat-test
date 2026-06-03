@@ -24,6 +24,7 @@ import { consolidationApi, Snapshot } from '../../api/consolidation';
 import { PeriodPanel } from '../PeriodPanel';
 import { SnapshotsTab } from './SnapshotsTab';
 import { CostReportTab } from './CostReportTab';
+import { MONTH_SHORT } from '../../utils/format';
 
 export type FinanceSubTab = 'period-control' | 'snapshot-publishing' | 'cost-settings-export';
 
@@ -137,6 +138,10 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPeriodId]);
 
+  const selectedPeriodLabel = currentPeriod
+    ? `${MONTH_SHORT[currentPeriod.month - 1]} ${currentPeriod.year}`
+    : 'Selected period';
+
   return (
     <>
       <div className={styles.root}>
@@ -179,9 +184,7 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
               snapshots={snapshots}
               canDownloadCsv={canManageFinanceData}
               showApiError={showApiError}
-              periods={periods}
-              selectedPeriodId={selectedPeriodId}
-              onSelectPeriod={setSelectedPeriodId}
+              selectedPeriodLabel={selectedPeriodLabel}
               onPublishClick={() => setIsPublishDialogOpen(true)}
             />
           </section>

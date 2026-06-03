@@ -45,19 +45,6 @@ const useStyles = makeStyles({
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     boxShadow: tokens.shadow4,
   },
-  cardHeader: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM} 0`,
-  },
-  cardTitle: {
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
-  cardDescription: {
-    color: tokens.colorNeutralForeground3,
-  },
   publishControls: {
     display: 'flex',
     alignItems: 'flex-end',
@@ -167,10 +154,6 @@ export function SnapshotsTab({
 
       {/* Card 1: Publish Snapshot */}
       <Card className={styles.card}>
-        <div className={styles.cardHeader}>
-          <Body2 className={styles.cardTitle}>Publish Snapshot</Body2>
-          <Body2 className={styles.cardDescription}>Freeze reporting data for the selected period.</Body2>
-        </div>
         <div className={styles.publishControls}>
           <div className={styles.periodField}>
             <span className={styles.periodLabel}>Period</span>

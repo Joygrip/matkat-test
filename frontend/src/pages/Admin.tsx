@@ -2889,30 +2889,31 @@ export function Admin() {
         </div>
 
         <div className={styles.tabContent}>
-          <div className={styles.header}>
-            <div>
-              <Title3>{tabLabels[selectedTab]}</Title3>
-              {selectedTab === 'cost-centers' && (
-                <p style={{ fontSize: '12px', color: tokens.colorNeutralForeground3, margin: '4px 0 0 0' }}>
-                  A placeholder is created automatically for each cost center. Click a row to see assigned resources.
-                </p>
-              )}
-              {selectedTab === 'placeholders' && (
-                <p style={{ fontSize: '12px', color: tokens.colorNeutralForeground3, margin: '4px 0 0 0' }}>
-                  One placeholder per cost center. Edit name and details here; create cost centers to add placeholders.
-                </p>
+          {selectedTab !== 'finance-operations' && (
+            <div className={styles.header}>
+              <div>
+                <Title3>{tabLabels[selectedTab]}</Title3>
+                {selectedTab === 'cost-centers' && (
+                  <p style={{ fontSize: '12px', color: tokens.colorNeutralForeground3, margin: '4px 0 0 0' }}>
+                    A placeholder is created automatically for each cost center. Click a row to see assigned resources.
+                  </p>
+                )}
+                {selectedTab === 'placeholders' && (
+                  <p style={{ fontSize: '12px', color: tokens.colorNeutralForeground3, margin: '4px 0 0 0' }}>
+                    One placeholder per cost center. Edit name and details here; create cost centers to add placeholders.
+                  </p>
+                )}
+              </div>
+              {selectedTab !== 'users' && selectedTab !== 'sync' && selectedTab !== 'notifications' &&
+               (canManageMasterData ||
+                (selectedTab === 'manager-overrides' && canManageSettings) ||
+                (selectedTab === 'delegates' && canManageDelegates)) && (
+                <Button appearance="primary" icon={<AddRegular />} onClick={openCreateDialog}>
+                  Add {tabLabels[selectedTab].replace(/s$/, '')}
+                </Button>
               )}
             </div>
-            {selectedTab !== 'users' && selectedTab !== 'sync' && selectedTab !== 'notifications' &&
-             selectedTab !== 'finance-operations' &&
-             (canManageMasterData ||
-              (selectedTab === 'manager-overrides' && canManageSettings) ||
-              (selectedTab === 'delegates' && canManageDelegates)) && (
-              <Button appearance="primary" icon={<AddRegular />} onClick={openCreateDialog}>
-                Add {tabLabels[selectedTab].replace(/s$/, '')}
-              </Button>
-            )}
-          </div>
+          )}
 
           {renderTable()}
         </div>

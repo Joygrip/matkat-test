@@ -614,7 +614,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [dlgSelectedResources, setDlgSelectedResources] = useState<SelectedResource[]>([]);
   const [dlgProjectId, setDlgProjectId] = useState('');
   const [dlgSelectedPeriods, setDlgSelectedPeriods] = useState<Set<string>>(new Set());
-  const [dlgFte, setDlgFte] = useState('');
+  const [dlgFte, setDlgFte] = useState('5');
   const [dlgSaving, setDlgSaving] = useState(false);
   const [dlgError, setDlgError] = useState<string | null>(null);
   const [dlgShowResourceDropdown, setDlgShowResourceDropdown] = useState(false);
@@ -1528,7 +1528,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDlgSelectedResources([]);
     setDlgProjectId('');
     setDlgSelectedPeriods(new Set());
-    setDlgFte('');
+    setDlgFte('5');
     setDlgSaving(false);
     setDlgError(null);
     setDlgShowResourceDropdown(false);
@@ -2822,8 +2822,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                   type="number"
                   value={dlgFte}
                   onChange={e => setDlgFte(e.target.value)}
-                  min={1}
-                  max={200}
+                  min={5}
+                  max={100}
                   step={5}
                   placeholder="e.g. 100"
                   style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: 100 }}

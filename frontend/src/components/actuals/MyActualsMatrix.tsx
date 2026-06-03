@@ -558,15 +558,10 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
                       {fmtPeriod(p)}{p.id === earliestPeriod?.id ? ' ●' : ''}
                     </th>
                   ))}
-                  <th className={styles.matrixTh}>Total</th>
                 </tr>
               </thead>
               <tbody>
                 {matrixProjects.map((proj, projIdx) => {
-                  const demandTotal = matrixPeriods.reduce(
-                    (sum, p) => sum + (demandLookup.get(proj.id)?.get(p.id) ?? 0), 0,
-                  );
-
                   return (
                     <>
                       {/* ── DEMAND row ── */}
@@ -594,9 +589,6 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
                             </td>
                           );
                         })}
-                        <td className={styles.matrixTd}>
-                          <span className={styles.demandVal}>{Math.round(demandTotal)}%</span>
-                        </td>
                       </tr>
 
                       {/* ── SUPPLY row ── */}
@@ -617,14 +609,6 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
                             </td>
                           );
                         })}
-                        <td className={styles.matrixTd}>
-                          {hasProjectSupply && (() => {
-                            const supplyTotal = matrixPeriods.reduce(
-                              (sum, p) => sum + (supplyLookup.get(proj.id)?.get(p.id) ?? 0), 0,
-                            );
-                            return <span className={styles.supplyVal}>{Math.round(supplyTotal)}%</span>;
-                          })()}
-                        </td>
                       </tr>
 
                       {/* ── ACTUALS row ── */}
@@ -739,17 +723,6 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
                             );
                           }
                         })}
-                        <td className={styles.matrixTd} style={{ backgroundColor: 'rgba(30, 58, 95, 0.03)' }}>
-                          {(() => {
-                            const aTotal = matrixPeriods.reduce((sum, p) => {
-                              const a = actualsLookup.get(`${proj.id}:${p.id}`);
-                              return sum + (a?.actual_fte_percent ?? 0);
-                            }, 0);
-                            return aTotal > 0
-                              ? <span className={styles.actualsVal}>{Math.round(aTotal * 10) / 10}%</span>
-                              : <span className={styles.emptyCell}>—</span>;
-                          })()}
-                        </td>
                       </tr>
                     </>
                   );
@@ -783,27 +756,6 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
                       </td>
                     );
                   })}
-                  <td className={styles.matrixTotalTd}>
-                    {(() => {
-                      const grandD = matrixProjects.reduce(
-                        (sum, proj) => sum + matrixPeriods.reduce(
-                          (s, p) => s + (demandLookup.get(proj.id)?.get(p.id) ?? 0), 0,
-                        ), 0,
-                      );
-                      const grandA = matrixProjects.reduce(
-                        (sum, proj) => sum + matrixPeriods.reduce((s, p) => {
-                          const a = actualsLookup.get(`${proj.id}:${p.id}`);
-                          return s + (a?.actual_fte_percent ?? 0);
-                        }, 0), 0,
-                      );
-                      return (
-                        <>
-                          <div style={{ color: DEMAND_COLOR, fontSize: 11 }}>D: {Math.round(grandD)}%</div>
-                          {grandA > 0 && <div style={{ color: ACTUALS_COLOR, fontSize: 11 }}>A: {Math.round(grandA)}%</div>}
-                        </>
-                      );
-                    })()}
-                  </td>
                 </tr>
               </tfoot>
             </table>

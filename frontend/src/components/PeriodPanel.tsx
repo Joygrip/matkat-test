@@ -42,7 +42,7 @@ const useStyles = makeStyles({
   root: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
+    gap: tokens.spacingVerticalS,
   },
   toolbar: {
     display: 'flex',
@@ -64,7 +64,7 @@ const useStyles = makeStyles({
     flexWrap: 'wrap',
   },
   yearPill: {
-    padding: '4px 14px',
+    padding: '3px 12px',
     borderRadius: '999px',
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     cursor: 'pointer',
@@ -95,22 +95,24 @@ const useStyles = makeStyles({
       fontWeight: tokens.fontWeightSemibold,
       textTransform: 'uppercase',
       letterSpacing: '0.4px',
-      padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+      padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
       borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+      height: '34px',
     },
     '& td': {
-      padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+      padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
       borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
       verticalAlign: 'middle',
+      height: '36px',
     },
     '& tbody tr:last-child td': {
       borderBottom: 'none',
     },
     '& th:nth-child(2), & td:nth-child(2)': {
-      width: '108px',
+      width: '96px',
     },
     '& th:nth-child(3), & td:nth-child(3)': {
-      width: '96px',
+      width: '88px',
     },
   },
   rowClickable: {
@@ -420,10 +422,10 @@ export function PeriodPanel({
               {year}
             </button>
           ))}
+          <Button appearance="secondary" size="small" onClick={handleAddYear}>Add Year</Button>
         </div>
 
         <div className={styles.actionsRow}>
-          <Button appearance="subtle" size="small" onClick={handleAddYear}>Add Year</Button>
           {isFinanceOrAdmin && (
             <Button appearance="secondary" size="small" icon={<AddRegular />} onClick={() => openBulkDialog()}>
               Create Periods

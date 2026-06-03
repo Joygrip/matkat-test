@@ -33,11 +33,16 @@ const useStyles = makeStyles({
   wrapper: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
+    gap: tokens.spacingVerticalS,
   },
-  toolbar: {
+  actionsRow: {
     display: 'flex',
-    alignItems: 'flex-end',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  contextRow: {
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
   },
@@ -80,11 +85,12 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium,
     overflowX: 'auto',
     overflowY: 'hidden',
+    width: '100%',
   },
   table: { width: '100%' },
   sortableTable: {
     width: '100%',
-    minWidth: '760px',
+    minWidth: '680px',
     '& thead': {
       backgroundColor: tokens.colorNeutralBackground2,
     },
@@ -92,13 +98,13 @@ const useStyles = makeStyles({
       fontWeight: tokens.fontWeightSemibold,
       fontSize: tokens.fontSizeBase200,
       color: tokens.colorNeutralForeground2,
-      padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+      padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
       textTransform: 'uppercase',
       letterSpacing: '0.5px',
       borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     },
     '& td': {
-      padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+      padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
       borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     },
     '& tbody tr:last-child td': {
@@ -119,6 +125,7 @@ const useStyles = makeStyles({
     display: 'flex',
     gap: tokens.spacingHorizontalXS,
     alignItems: 'center',
+    whiteSpace: 'nowrap',
   },
 });
 
@@ -166,7 +173,13 @@ export function SnapshotsTab({
   return (
     <div className={styles.wrapper}>
 
-      <div className={styles.toolbar}>
+      <div className={styles.actionsRow}>
+        <Button appearance="primary" size="small" onClick={onPublishClick}>
+          Publish Snapshot
+        </Button>
+      </div>
+
+      <div className={styles.contextRow}>
         <div className={styles.periodContext}>
           <span className={styles.periodLabel}>Snapshots for</span>
           <span className={styles.periodValue}>
@@ -176,9 +189,6 @@ export function SnapshotsTab({
             </span>
           </span>
         </div>
-        <Button appearance="primary" size="small" onClick={onPublishClick}>
-          Publish Snapshot
-        </Button>
         <span className={styles.lastSnapshot}>
           {latestSnapshot
             ? `Last snapshot: ${new Date(latestSnapshot.published_at).toLocaleDateString()}`

@@ -38,7 +38,7 @@ const useStyles = makeStyles({
   root: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
+    gap: tokens.spacingVerticalM,
   },
   contentStack: {
     display: 'flex',
@@ -46,14 +46,15 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalM,
   },
   contextStrip: {
-    minHeight: '52px',
+    minHeight: '54px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: tokens.spacingHorizontalL,
-    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderLeft: `3px solid ${tokens.colorBrandStroke1}`,
+    borderRadius: tokens.borderRadiusSmall,
     backgroundColor: tokens.colorNeutralBackground1,
     flexWrap: 'wrap',
   },
@@ -70,6 +71,11 @@ const useStyles = makeStyles({
     textTransform: 'uppercase',
     letterSpacing: '0.4px',
     fontWeight: tokens.fontWeightSemibold,
+  },
+  stripTitle: {
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
   },
   stripValue: {
     display: 'inline-flex',
@@ -101,7 +107,7 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
-    padding: tokens.spacingHorizontalL,
+    padding: tokens.spacingHorizontalM,
     borderRadius: tokens.borderRadiusSmall,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground1,
@@ -109,11 +115,11 @@ const useStyles = makeStyles({
   },
   mainGrid: {
     display: 'grid',
-    gridTemplateColumns: '3fr 2fr',
-    gap: tokens.spacingHorizontalXXL,
+    gridTemplateColumns: 'minmax(360px, 0.75fr) minmax(680px, 1.25fr)',
+    gap: tokens.spacingHorizontalL,
     alignItems: 'start',
-    marginTop: tokens.spacingVerticalM,
-    '@media (max-width: 1100px)': {
+    marginTop: tokens.spacingVerticalXS,
+    '@media (max-width: 1180px)': {
       gridTemplateColumns: '1fr',
     },
   },

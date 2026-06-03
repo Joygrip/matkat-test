@@ -4,7 +4,6 @@ import {
   tokens,
   Body1,
   Body2,
-  Badge,
   Button,
   Dialog,
   DialogSurface,
@@ -26,6 +25,7 @@ export interface SnapshotsTabProps {
   canDownloadCsv: boolean;
   showApiError: (err: Error, ctx?: string) => void;
   selectedPeriodLabel: string;
+  selectedPeriodStatus: 'open' | 'locked' | 'unknown';
   onPublishClick: () => void;
 }
 
@@ -41,10 +41,11 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
   },
-  periodInfo: {
+  periodContext: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
+    minWidth: '220px',
   },
   periodLabel: {
     fontSize: tokens.fontSizeBase200,
@@ -54,10 +55,18 @@ const useStyles = makeStyles({
     letterSpacing: '0.5px',
   },
   periodValue: {
-    display: 'inline-flex',
+    display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
-    color: tokens.colorNeutralForeground1,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase200,
+  },
+  periodStatusOpen: {
+    color: tokens.colorBrandForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  periodStatusLocked: {
+    color: tokens.colorNeutralForeground3,
     fontWeight: tokens.fontWeightSemibold,
   },
   lastSnapshot: {
@@ -118,6 +127,7 @@ export function SnapshotsTab({
   canDownloadCsv,
   showApiError,
   selectedPeriodLabel,
+  selectedPeriodStatus,
   onPublishClick,
 }: SnapshotsTabProps) {
   const styles = useStyles();
@@ -157,14 +167,16 @@ export function SnapshotsTab({
     <div className={styles.wrapper}>
 
       <div className={styles.toolbar}>
-        <div className={styles.periodInfo}>
-          <span className={styles.periodLabel}>Period</span>
+        <div className={styles.periodContext}>
+          <span className={styles.periodLabel}>Snapshots for</span>
           <span className={styles.periodValue}>
-            <Badge appearance="filled" color="informative" size="small">Snapshots</Badge>
-            {selectedPeriodLabel}
+            <span>{selectedPeriodLabel}</span>
+            <span className={selectedPeriodStatus === 'open' ? styles.periodStatusOpen : styles.periodStatusLocked}>
+              {selectedPeriodStatus === 'open' ? 'Open' : selectedPeriodStatus === 'locked' ? 'Locked' : ''}
+            </span>
           </span>
         </div>
-        <Button appearance="primary" onClick={onPublishClick}>
+        <Button appearance="primary" size="small" onClick={onPublishClick}>
           Publish Snapshot
         </Button>
         <span className={styles.lastSnapshot}>
@@ -179,22 +191,20 @@ export function SnapshotsTab({
           <Table className={styles.sortableTable}>
             <TableHeader>
               <TableRow>
-                <TableHeaderCell>Name</TableHeaderCell>
-                <TableHeaderCell>Description</TableHeaderCell>
-                <TableHeaderCell>Lines</TableHeaderCell>
                 <TableHeaderCell>Published At</TableHeaderCell>
                 <TableHeaderCell>Published By</TableHeaderCell>
+                <TableHeaderCell>Name</TableHeaderCell>
+                <TableHeaderCell>Lines</TableHeaderCell>
                 <TableHeaderCell>Actions</TableHeaderCell>
               </TableRow>
             </TableHeader>
             <TableBody>
               {snapshots.map(snapshot => (
                 <TableRow key={snapshot.id}>
-                  <TableCell><strong>{snapshot.name}</strong></TableCell>
-                  <TableCell>{snapshot.description || '—'}</TableCell>
-                  <TableCell>{snapshot.lines_count}</TableCell>
                   <TableCell>{new Date(snapshot.published_at).toLocaleString()}</TableCell>
                   <TableCell>{snapshot.published_by}</TableCell>
+                  <TableCell><strong>{snapshot.name}</strong></TableCell>
+                  <TableCell>{snapshot.lines_count}</TableCell>
                   <TableCell>
                     <div className={styles.actionCell}>
                       <Button size="small" appearance="subtle" onClick={() => handleView(snapshot.id)}>

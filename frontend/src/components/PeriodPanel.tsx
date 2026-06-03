@@ -3,6 +3,7 @@
  */
 import { useState, useEffect, useMemo } from 'react';
 import {
+  mergeClasses,
   Body1,
   Button,
   Badge,
@@ -43,17 +44,39 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
-  topBar: {
+  toolbar: {
     display: 'flex',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    flexWrap: 'wrap',
   },
   yearTabsRow: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     flexWrap: 'wrap',
-    paddingBottom: tokens.spacingVerticalS,
+  },
+  actionsRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    flexWrap: 'wrap',
+  },
+  yearPill: {
+    padding: '4px 14px',
+    borderRadius: '999px',
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    cursor: 'pointer',
+    fontSize: tokens.fontSizeBase200,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground2,
+  },
+  yearPillActive: {
+    border: `1px solid ${tokens.colorBrandStroke1}`,
+    color: tokens.colorBrandForeground1,
+    backgroundColor: tokens.colorBrandBackground2,
+    fontWeight: tokens.fontWeightSemibold,
   },
   tableWrap: {
     border: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -84,10 +107,22 @@ const useStyles = makeStyles({
       borderBottom: 'none',
     },
     '& th:nth-child(2), & td:nth-child(2)': {
-      width: '112px',
+      width: '108px',
     },
     '& th:nth-child(3), & td:nth-child(3)': {
-      width: '108px',
+      width: '96px',
+    },
+  },
+  rowClickable: {
+    cursor: 'pointer',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+  },
+  rowSelected: {
+    backgroundColor: tokens.colorBrandBackground2,
+    '& td:first-child': {
+      boxShadow: `inset 2px 0 0 ${tokens.colorBrandStroke1}`,
     },
   },
   monthName: {
@@ -145,9 +180,15 @@ const useStyles = makeStyles({
 
 interface PeriodPanelProps {
   variant?: 'card' | 'embedded' | 'compact';
+  selectedWorkingPeriodId?: string;
+  onSelectWorkingPeriod?: (periodId: string) => void;
 }
 
-export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
+export function PeriodPanel({
+  variant: _variant = 'card',
+  selectedWorkingPeriodId,
+  onSelectWorkingPeriod,
+}: PeriodPanelProps) {
   const styles = useStyles();
   const { showSuccess, showApiError } = useToast();
   const { user } = useAuth();
@@ -220,6 +261,11 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
     return map;
   }, [periods]);
 
+  const periodsInActiveYear = useMemo(
+    () => periods.filter(p => p.year === activeYear).sort((a, b) => a.month - b.month),
+    [periods, activeYear],
+  );
+
   // Bulk preview — only within selected year, month range
   const bulkPreviewItems = useMemo(() => {
     if (bulkFromMonth > bulkToMonth) return [];
@@ -242,7 +288,23 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
   const handleAddYear = () => {
     const nextYear = maxAvailableYear + 1;
     setManualYears(prev => new Set([...prev, nextYear]));
-    setActiveYear(nextYear);
+    handleChangeYear(nextYear);
+  };
+
+  const selectFallbackForYear = (year: number, yearPeriods: Period[] = periods.filter(p => p.year === year)) => {
+    if (!onSelectWorkingPeriod || yearPeriods.length === 0) return;
+    const open = yearPeriods.find(p => p.status === 'open');
+    const fallback = open ?? yearPeriods[0];
+    onSelectWorkingPeriod(fallback.id);
+  };
+
+  const handleChangeYear = (year: number) => {
+    setActiveYear(year);
+    const selectedInYear = periods.some(p => p.id === selectedWorkingPeriodId && p.year === year);
+    if (!selectedInYear) {
+      const yearPeriods = periods.filter(p => p.year === year).sort((a, b) => a.month - b.month);
+      selectFallbackForYear(year, yearPeriods);
+    }
   };
 
   const openBulkDialog = (year?: number, fromMonth?: number, toMonth?: number) => {
@@ -317,6 +379,26 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
     }
   };
 
+  useEffect(() => {
+    if (!selectedWorkingPeriodId) return;
+    const selected = periods.find(p => p.id === selectedWorkingPeriodId);
+    if (selected) {
+      setActiveYear(selected.year);
+    }
+  }, [selectedWorkingPeriodId, periods]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!selectedWorkingPeriodId) {
+      selectFallbackForYear(activeYear, periodsInActiveYear);
+      return;
+    }
+    const selectedExists = periods.some(p => p.id === selectedWorkingPeriodId);
+    if (!selectedExists) {
+      selectFallbackForYear(activeYear, periodsInActiveYear);
+    }
+  }, [loading, periods, periodsInActiveYear, activeYear, selectedWorkingPeriodId]);
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -326,64 +408,28 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
   return (
     <div className={styles.root}>
 
-      {/* "+ Create Periods" button */}
-      {isFinanceOrAdmin && (
-        <div className={styles.topBar}>
-          <Button
-            appearance="primary"
-            icon={<AddRegular />}
-            onClick={() => openBulkDialog()}
-          >
-            Create Periods
-          </Button>
+      <div className={styles.toolbar}>
+        <div className={styles.yearTabsRow}>
+          {availableYears.map(year => (
+            <button
+              key={year}
+              type="button"
+              className={mergeClasses(styles.yearPill, activeYear === year && styles.yearPillActive)}
+              onClick={() => handleChangeYear(year)}
+            >
+              {year}
+            </button>
+          ))}
         </div>
-      )}
 
-      {/* Year tabs */}
-      <div className={styles.yearTabsRow}>
-        {availableYears.map(year => (
-          <button
-            key={year}
-            onClick={() => setActiveYear(year)}
-            style={{
-              padding: '6px 18px',
-              borderRadius: '20px',
-              border: activeYear === year
-                ? `2px solid ${tokens.colorBrandBackground}`
-                : `1px solid ${tokens.colorNeutralStroke1}`,
-              cursor: 'pointer',
-              fontSize: tokens.fontSizeBase300,
-              fontWeight: activeYear === year
-                ? tokens.fontWeightSemibold
-                : tokens.fontWeightRegular,
-              backgroundColor: activeYear === year
-                ? tokens.colorBrandBackground
-                : tokens.colorNeutralBackground1,
-              color: activeYear === year
-                ? tokens.colorNeutralForegroundOnBrand
-                : tokens.colorNeutralForeground1,
-              lineHeight: 1.4,
-            }}
-          >
-            {year}
-          </button>
-        ))}
-        <button
-          onClick={handleAddYear}
-          style={{
-            padding: '5px 12px',
-            borderRadius: '20px',
-            border: `1px dashed ${tokens.colorNeutralStroke1}`,
-            cursor: 'pointer',
-            fontSize: tokens.fontSizeBase200,
-            fontWeight: tokens.fontWeightRegular,
-            backgroundColor: 'transparent',
-            color: tokens.colorNeutralForeground3,
-            lineHeight: 1.4,
-          }}
-        >
-          + Add Year
-        </button>
+        <div className={styles.actionsRow}>
+          <Button appearance="subtle" size="small" onClick={handleAddYear}>Add Year</Button>
+          {isFinanceOrAdmin && (
+            <Button appearance="secondary" size="small" icon={<AddRegular />} onClick={() => openBulkDialog()}>
+              Create Periods
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Compact month table for the active year */}
@@ -401,17 +447,24 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
               const period = periodMap.get(`${activeYear}-${month}`);
               const isOpen = period?.status === 'open';
               const isLocked = period?.status === 'locked';
+              const isSelected = !!period && period.id === selectedWorkingPeriodId;
 
               return (
-                <TableRow key={month}>
+                <TableRow
+                  key={month}
+                  className={mergeClasses(period && styles.rowClickable, isSelected && styles.rowSelected)}
+                  onClick={() => {
+                    if (period && onSelectWorkingPeriod) onSelectWorkingPeriod(period.id);
+                  }}
+                >
                   <TableCell>
                     <Text className={styles.monthName}>{MONTH_NAMES[month - 1]}</Text>
                   </TableCell>
                   <TableCell>
                     {period ? (
                       <Badge
-                        appearance="filled"
-                        color={isLocked ? 'danger' : 'success'}
+                        appearance={isLocked ? 'tint' : 'filled'}
+                        color={isLocked ? 'informative' : 'brand'}
                         size="small"
                         className={styles.statusBadge}
                       >
@@ -429,9 +482,12 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
                         isOpen ? (
                           <Button
                             size="small"
-                            appearance="subtle"
+                            appearance="primary"
                             icon={<LockClosedRegular />}
-                            onClick={() => handleLockClick(period)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleLockClick(period);
+                            }}
                             disabled={actionLoading === period.id}
                           >
                             Lock
@@ -441,7 +497,10 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
                             size="small"
                             appearance="subtle"
                             icon={<LockOpenRegular />}
-                            onClick={() => handleUnlockClick(period)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleUnlockClick(period);
+                            }}
                             disabled={actionLoading === period.id}
                           >
                             Unlock
@@ -452,7 +511,10 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
                           size="small"
                           appearance="subtle"
                           icon={<AddRegular />}
-                          onClick={() => openBulkDialog(activeYear, month, month)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openBulkDialog(activeYear, month, month);
+                          }}
                         >
                           Create
                         </Button>

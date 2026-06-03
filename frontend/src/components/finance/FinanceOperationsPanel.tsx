@@ -3,6 +3,8 @@ import {
   makeStyles,
   tokens,
   Title3,
+  Badge,
+  Divider,
   Body1,
   Body2,
   Dialog,
@@ -24,7 +26,7 @@ import { consolidationApi, Snapshot } from '../../api/consolidation';
 import { PeriodPanel } from '../PeriodPanel';
 import { SnapshotsTab } from './SnapshotsTab';
 import { CostReportTab } from './CostReportTab';
-import { MONTH_SHORT } from '../../utils/format';
+import { MONTH_NAMES } from '../../utils/format';
 
 export type FinanceSubTab = 'period-control' | 'snapshot-publishing' | 'cost-settings-export';
 
@@ -41,7 +43,50 @@ const useStyles = makeStyles({
   contentStack: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
+    gap: tokens.spacingVerticalM,
+  },
+  contextStrip: {
+    minHeight: '52px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalL,
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    flexWrap: 'wrap',
+  },
+  stripGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    flexWrap: 'wrap',
+    minWidth: 0,
+  },
+  stripLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.4px',
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  stripValue: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  stripStatusOpen: {
+    color: tokens.colorBrandForeground1,
+  },
+  stripStatusLocked: {
+    color: tokens.colorNeutralForeground3,
+  },
+  stripDivider: {
+    height: '24px',
   },
   pageHeader: {
     display: 'flex',
@@ -57,17 +102,18 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingHorizontalL,
-    borderRadius: tokens.borderRadiusMedium,
+    borderRadius: tokens.borderRadiusSmall,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground1,
     minWidth: 0,
   },
   mainGrid: {
     display: 'grid',
-    gridTemplateColumns: 'minmax(520px, 0.95fr) minmax(520px, 1.05fr)',
-    gap: tokens.spacingHorizontalL,
+    gridTemplateColumns: '3fr 2fr',
+    gap: tokens.spacingHorizontalXXL,
     alignItems: 'start',
-    '@media (max-width: 1240px)': {
+    marginTop: tokens.spacingVerticalM,
+    '@media (max-width: 1100px)': {
       gridTemplateColumns: '1fr',
     },
   },
@@ -92,7 +138,6 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
   const { user } = useAuth();
   const { showSuccess, showError, showApiError } = useToast();
   const {
-    periods,
     selectedPeriodId,
     setSelectedPeriodId,
     selectedPeriod: currentPeriod,
@@ -139,56 +184,77 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
   }, [selectedPeriodId]);
 
   const selectedPeriodLabel = currentPeriod
-    ? `${MONTH_SHORT[currentPeriod.month - 1]} ${currentPeriod.year}`
-    : 'Selected period';
+    ? `${MONTH_NAMES[currentPeriod.month - 1]} ${currentPeriod.year}`
+    : 'No period selected';
+
+  const selectedPeriodStatus = currentPeriod?.status ?? 'unknown';
 
   return (
     <>
       <div className={styles.root}>
         <div className={styles.pageHeader}>
           <Title3>Finance Operations</Title3>
-          <span className={styles.pageSubtitle}>Monthly finance close and reporting controls.</span>
+          <span className={styles.pageSubtitle}>Manage monthly periods, FTE cost rates, and reporting snapshots.</span>
         </div>
 
         <div className={styles.contentStack}>
-          <section className={styles.sectionCard}>
-            <div className={styles.sectionHeader}>
-              <Body1 className={styles.sectionTitle}>Cost Settings</Body1>
-              <Body2 className={styles.sectionSubtitle}>Maintain monthly FTE cost settings.</Body2>
+          <div className={styles.contextStrip}>
+            <div className={styles.stripGroup}>
+              <span className={styles.stripLabel}>Working period</span>
+              <span className={styles.stripValue}>
+                {selectedPeriodLabel}
+                {selectedPeriodStatus !== 'unknown' && (
+                  <Badge appearance={selectedPeriodStatus === 'open' ? 'filled' : 'tint'} color="informative" size="small">
+                    <span className={selectedPeriodStatus === 'open' ? styles.stripStatusOpen : styles.stripStatusLocked}>
+                      {selectedPeriodStatus === 'open' ? 'Open' : 'Locked'}
+                    </span>
+                  </Badge>
+                )}
+              </span>
             </div>
-            <CostReportTab
-              periods={periods}
-              selectedPeriodId={selectedPeriodId}
-              onSelectPeriod={setSelectedPeriodId}
-              showSuccess={showSuccess}
-              showError={showError}
-              showApiError={showApiError}
-            />
-          </section>
+
+            <Divider vertical className={styles.stripDivider} />
+
+            <div className={styles.stripGroup}>
+              <span className={styles.stripLabel}>Cost settings</span>
+              <CostReportTab
+                selectedPeriodId={selectedPeriodId}
+                showSuccess={showSuccess}
+                showError={showError}
+                showApiError={showApiError}
+              />
+            </div>
+          </div>
 
           <div className={styles.mainGrid}>
-          <section className={styles.sectionCard}>
-            <div className={styles.sectionHeader}>
-              <Body1 className={styles.sectionTitle}>Periods</Body1>
-              <Body2 className={styles.sectionSubtitle}>Create, lock, and unlock monthly periods.</Body2>
-            </div>
-            <PeriodPanel variant="compact" />
-          </section>
+            <section className={styles.sectionCard}>
+              <div className={styles.sectionHeader}>
+                <Body2 className={styles.sectionTitle}>Periods</Body2>
+                <Body2 className={styles.sectionSubtitle}>Select a month row to set the working period.</Body2>
+              </div>
+              <PeriodPanel
+                variant="compact"
+                selectedWorkingPeriodId={selectedPeriodId}
+                onSelectWorkingPeriod={setSelectedPeriodId}
+              />
+            </section>
 
-          <section className={styles.sectionCard}>
-            <div className={styles.sectionHeader}>
-              <Body1 className={styles.sectionTitle}>Snapshot Publishing</Body1>
-              <Body2 className={styles.sectionSubtitle}>Publish immutable snapshots and review snapshot history.</Body2>
-            </div>
-            <SnapshotsTab
-              snapshots={snapshots}
-              canDownloadCsv={canManageFinanceData}
-              showApiError={showApiError}
-              selectedPeriodLabel={selectedPeriodLabel}
-              onPublishClick={() => setIsPublishDialogOpen(true)}
-            />
-          </section>
+            <section className={styles.sectionCard}>
+              <div className={styles.sectionHeader}>
+                <Body2 className={styles.sectionTitle}>Snapshots</Body2>
+                <Body2 className={styles.sectionSubtitle}>Publish immutable snapshots and review history.</Body2>
+              </div>
+              <SnapshotsTab
+                snapshots={snapshots}
+                canDownloadCsv={canManageFinanceData}
+                showApiError={showApiError}
+                selectedPeriodLabel={selectedPeriodLabel}
+                selectedPeriodStatus={selectedPeriodStatus}
+                onPublishClick={() => setIsPublishDialogOpen(true)}
+              />
+            </section>
           </div>
+
         </div>
       </div>
 

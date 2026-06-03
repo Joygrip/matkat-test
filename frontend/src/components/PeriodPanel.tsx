@@ -1,11 +1,17 @@
 /**
- * Period management panel — renders inside the Finance page modal.
+ * Period management panel — renders inside the Finance Operations page.
  */
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Body1,
   Button,
   Badge,
+  Table,
+  TableHeader,
+  TableRow,
+  TableHeaderCell,
+  TableBody,
+  TableCell,
   Spinner,
   Dialog,
   DialogSurface,
@@ -35,7 +41,7 @@ const useStyles = makeStyles({
   root: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
+    gap: tokens.spacingVerticalM,
   },
   topBar: {
     display: 'flex',
@@ -47,34 +53,42 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     flexWrap: 'wrap',
-    paddingBottom: tokens.spacingVerticalM,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    paddingBottom: tokens.spacingVerticalS,
   },
-  monthGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
-    gap: tokens.spacingHorizontalM,
-  },
-  monthCell: {
+  tableWrap: {
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
-    padding: tokens.spacingVerticalM,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    minHeight: '120px',
+    overflow: 'hidden',
+  },
+  table: {
+    width: '100%',
+    '& thead': {
+      backgroundColor: tokens.colorNeutralBackground2,
+    },
+    '& th': {
+      fontSize: tokens.fontSizeBase200,
+      color: tokens.colorNeutralForeground2,
+      fontWeight: tokens.fontWeightSemibold,
+      textTransform: 'uppercase',
+      letterSpacing: '0.4px',
+      padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+      borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    },
+    '& td': {
+      padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+      borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+      verticalAlign: 'middle',
+    },
+    '& tbody tr:last-child td': {
+      borderBottom: 'none',
+    },
   },
   monthName: {
     fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase400,
   },
-  createHint: {
-    marginTop: 'auto',
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    textAlign: 'center' as const,
-    paddingTop: tokens.spacingVerticalS,
+  statusBadge: {
+    minWidth: '72px',
+    justifyContent: 'center',
   },
   dialogField: {
     display: 'flex',
@@ -123,7 +137,7 @@ const useStyles = makeStyles({
 });
 
 interface PeriodPanelProps {
-  variant?: 'card' | 'embedded';
+  variant?: 'card' | 'embedded' | 'compact';
 }
 
 export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
@@ -141,7 +155,6 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
   // Year tab state
   const [manualYears, setManualYears] = useState<Set<number>>(new Set());
   const [activeYear, setActiveYear] = useState<number>(currentYear);
-  const [hoveredCell, setHoveredCell] = useState<string | null>(null);
 
   // Lock dialog state
   const [lockConfirmOpen, setLockConfirmOpen] = useState(false);
@@ -314,7 +327,7 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
             icon={<AddRegular />}
             onClick={() => openBulkDialog()}
           >
-            + Create Periods
+            Create Periods
           </Button>
         </div>
       )}
@@ -366,88 +379,86 @@ export function PeriodPanel({ variant: _variant = 'card' }: PeriodPanelProps) {
         </button>
       </div>
 
-      {/* 3-column × 4-row month grid for the active year */}
-      <div className={styles.monthGrid}>
-        {Array.from({ length: 12 }, (_, i) => i + 1).map(month => {
-          const period = periodMap.get(`${activeYear}-${month}`);
-          const isOpen = period?.status === 'open';
-          const isLocked = period?.status === 'locked';
-          const cellKey = `${activeYear}-${month}`;
-          const isHovered = hoveredCell === cellKey;
+      {/* Compact month table for the active year */}
+      <div className={styles.tableWrap}>
+        <Table className={styles.table}>
+          <TableHeader>
+            <TableRow>
+              <TableHeaderCell>Month</TableHeaderCell>
+              <TableHeaderCell>Status</TableHeaderCell>
+              <TableHeaderCell>Action</TableHeaderCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {Array.from({ length: 12 }, (_, i) => i + 1).map(month => {
+              const period = periodMap.get(`${activeYear}-${month}`);
+              const isOpen = period?.status === 'open';
+              const isLocked = period?.status === 'locked';
 
-          let cellStyle: React.CSSProperties;
-          if (period) {
-            cellStyle = {
-              backgroundColor: isHovered ? tokens.colorNeutralBackground1Hover : tokens.colorNeutralBackground1,
-              border: `1px solid ${tokens.colorNeutralStroke2}`,
-            };
-          } else {
-            cellStyle = {
-              backgroundColor: isHovered ? tokens.colorNeutralBackground4 : tokens.colorNeutralBackground3,
-              border: `1px solid ${tokens.colorNeutralStroke2}`,
-              cursor: isFinanceOrAdmin ? 'pointer' : 'default',
-            };
-          }
-
-          return (
-            <div
-              key={month}
-              className={styles.monthCell}
-              style={cellStyle}
-              onMouseEnter={() => setHoveredCell(cellKey)}
-              onMouseLeave={() => setHoveredCell(null)}
-              onClick={() => {
-                if (!period && isFinanceOrAdmin) {
-                  openBulkDialog(activeYear, month, month);
-                }
-              }}
-            >
-              <Text className={styles.monthName}>{MONTH_NAMES[month - 1]}</Text>
-
-              {period ? (
-                <>
-                  <Badge
-                    appearance="filled"
-                    color={isLocked ? 'danger' : 'success'}
-                    size="small"
-                    style={{ alignSelf: 'flex-start' }}
-                  >
-                    {isLocked ? 'Locked' : 'Open'}
-                  </Badge>
-                  {isFinanceOrAdmin && (
-                    <div style={{ marginTop: 'auto' }}>
-                      {isOpen ? (
-                        <Button
-                          size="small"
-                          appearance="subtle"
-                          icon={<LockClosedRegular />}
-                          onClick={e => { e.stopPropagation(); handleLockClick(period); }}
-                          disabled={actionLoading === period.id}
-                        >
-                          Lock
-                        </Button>
+              return (
+                <TableRow key={month}>
+                  <TableCell>
+                    <Text className={styles.monthName}>{MONTH_NAMES[month - 1]}</Text>
+                  </TableCell>
+                  <TableCell>
+                    {period ? (
+                      <Badge
+                        appearance="filled"
+                        color={isLocked ? 'danger' : 'success'}
+                        size="small"
+                        className={styles.statusBadge}
+                      >
+                        {isLocked ? 'Locked' : 'Open'}
+                      </Badge>
+                    ) : (
+                      <Badge appearance="tint" color="informative" size="small" className={styles.statusBadge}>
+                        Not Created
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {isFinanceOrAdmin ? (
+                      period ? (
+                        isOpen ? (
+                          <Button
+                            size="small"
+                            appearance="subtle"
+                            icon={<LockClosedRegular />}
+                            onClick={() => handleLockClick(period)}
+                            disabled={actionLoading === period.id}
+                          >
+                            Lock
+                          </Button>
+                        ) : (
+                          <Button
+                            size="small"
+                            appearance="subtle"
+                            icon={<LockOpenRegular />}
+                            onClick={() => handleUnlockClick(period)}
+                            disabled={actionLoading === period.id}
+                          >
+                            Unlock
+                          </Button>
+                        )
                       ) : (
                         <Button
                           size="small"
                           appearance="subtle"
-                          icon={<LockOpenRegular />}
-                          onClick={e => { e.stopPropagation(); handleUnlockClick(period); }}
-                          disabled={actionLoading === period.id}
+                          icon={<AddRegular />}
+                          onClick={() => openBulkDialog(activeYear, month, month)}
                         >
-                          Unlock
+                          Create
                         </Button>
-                      )}
-                    </div>
-                  )}
-                </>
-              ) : (
-                isHovered && isFinanceOrAdmin && (
-                  <span className={styles.createHint}>+ Create</span>
-                )
-              )}
-            </div>
-          );
-        })}
+                      )
+                    ) : (
+                      '—'
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
       </div>
 
       {/* Lock Confirmation Dialog */}

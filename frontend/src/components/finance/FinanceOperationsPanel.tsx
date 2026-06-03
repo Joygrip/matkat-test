@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   makeStyles,
-  mergeClasses,
   tokens,
   Title3,
+  Badge,
+  Body1,
+  Body2,
   Dialog,
   DialogSurface,
   DialogBody,
@@ -15,10 +17,7 @@ import {
   Textarea,
   MessageBar,
   MessageBarBody,
-  Body1,
-  Body2,
 } from '@fluentui/react-components';
-import { CalendarMonthRegular, CameraRegular, MoneyRegular } from '@fluentui/react-icons';
 import { useAuth } from '../../auth/AuthProvider';
 import { useToast } from '../../hooks/useToast';
 import { usePeriod } from '../../contexts/PeriodContext';
@@ -26,6 +25,7 @@ import { consolidationApi, Snapshot } from '../../api/consolidation';
 import { PeriodPanel } from '../PeriodPanel';
 import { SnapshotsTab } from './SnapshotsTab';
 import { CostReportTab } from './CostReportTab';
+import { MONTH_NAMES } from '../../utils/format';
 
 export type FinanceSubTab = 'period-control' | 'snapshot-publishing' | 'cost-settings-export';
 
@@ -34,84 +34,65 @@ export interface FinanceOperationsPanelProps {
 }
 
 const useStyles = makeStyles({
-  // Page header — title + subtitle only
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
+  },
   pageHeader: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
-    marginBottom: tokens.spacingVerticalL,
   },
   pageSubtitle: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
   },
-  // Operation selection cards
-  opCardsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: tokens.spacingHorizontalM,
-    marginBottom: tokens.spacingVerticalM,
-  },
-  opCard: {
-    width: '100%',
+  sectionCard: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
-    minHeight: '110px',
+    gap: tokens.spacingVerticalM,
+    padding: tokens.spacingHorizontalL,
     borderRadius: tokens.borderRadiusMedium,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground1,
-    cursor: 'pointer',
-    textAlign: 'left',
-    fontFamily: 'inherit',
-    fontSize: 'inherit',
-    color: 'inherit',
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground1Hover,
-    },
-    ':focus-visible': {
-      outlineOffset: '2px',
-      outlineStyle: 'solid',
-      outlineWidth: '2px',
-      outlineColor: tokens.colorBrandBackground,
-    },
   },
-  opCardActive: {
-    boxShadow: `0 0 0 2px ${tokens.colorBrandBackground}`,
-  },
-  opCardIcon: {
-    fontSize: '22px',
-    lineHeight: '1',
+  currentPeriodRow: {
     display: 'flex',
-    color: tokens.colorNeutralForeground2,
-    marginBottom: tokens.spacingVerticalXXS,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    flexWrap: 'wrap',
   },
-  opCardIconActive: {
-    color: tokens.colorBrandBackground,
+  currentPeriodLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    fontWeight: tokens.fontWeightSemibold,
   },
-  opCardTitle: {
-    fontSize: tokens.fontSizeBase300,
+  currentPeriodName: {
+    fontSize: tokens.fontSizeBase500,
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  sectionHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+  },
+  sectionTitle: {
+    fontSize: tokens.fontSizeBase400,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
-  opCardDescription: {
-    fontSize: tokens.fontSizeBase200,
+  sectionSubtitle: {
     color: tokens.colorNeutralForeground3,
-  },
-  opCardMeta: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
     fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
-    paddingTop: tokens.spacingVerticalXS,
   },
-  divider: {
-    height: '1px',
-    backgroundColor: tokens.colorNeutralStroke2,
-    marginTop: tokens.spacingVerticalXS,
-    marginBottom: tokens.spacingVerticalL,
+  helperText: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
   },
 });
 
@@ -128,22 +109,13 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
 
   const canManageFinanceData = user?.role === 'Admin' || user?.role === 'Finance';
 
-  const [subTab, setSubTab] = useState<FinanceSubTab>(initialSubTab);
+  void initialSubTab;
 
   // Snapshots state (previously owned by Admin.tsx)
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
   const [publishName, setPublishName] = useState('');
   const [publishDescription, setPublishDescription] = useState('');
-
-  const latestSnapshot = useMemo(() =>
-    snapshots.length > 0
-      ? [...snapshots].sort((a, b) =>
-          new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
-        )[0]
-      : null,
-    [snapshots]
-  );
 
   const loadSnapshots = useCallback(async () => {
     if (!canManageFinanceData) return;
@@ -169,111 +141,79 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
     }
   };
 
-  // Reload snapshots when period changes while on snapshot-publishing subtab
+  // Reload snapshots when period changes
   useEffect(() => {
-    if (selectedPeriodId && subTab === 'snapshot-publishing') loadSnapshots();
+    if (selectedPeriodId) loadSnapshots();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPeriodId]);
 
-  // Load snapshots when switching to snapshot-publishing subtab
-  useEffect(() => {
-    if (subTab === 'snapshot-publishing' && selectedPeriodId) loadSnapshots();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subTab]);
-
-  // Operation card definitions — meta only where it adds unique information
-  const operationCards = [
-    {
-      key: 'period-control' as FinanceSubTab,
-      icon: <CalendarMonthRegular />,
-      title: 'Period Control',
-      description: 'Lock, unlock, and create finance periods.',
-      meta: null,
-    },
-    {
-      key: 'snapshot-publishing' as FinanceSubTab,
-      icon: <CameraRegular />,
-      title: 'Snapshot Publishing',
-      description: 'Freeze reporting data for the selected period.',
-      meta: latestSnapshot
-        ? `Last: ${new Date(latestSnapshot.published_at).toLocaleDateString()}`
-        : null,
-    },
-    {
-      key: 'cost-settings-export' as FinanceSubTab,
-      icon: <MoneyRegular />,
-      title: 'Cost Settings & Export',
-      description: 'Maintain FTE cost and export reporting data.',
-      meta: null,
-    },
-  ];
-
-  const renderContent = () => {
-    if (subTab === 'period-control') {
-      return <PeriodPanel variant="embedded" />;
-    }
-    if (subTab === 'snapshot-publishing') {
-      return (
-        <SnapshotsTab
-          snapshots={snapshots}
-          canDownloadCsv={canManageFinanceData}
-          showApiError={showApiError}
-          periods={periods}
-          selectedPeriodId={selectedPeriodId}
-          onSelectPeriod={setSelectedPeriodId}
-          onPublishClick={() => setIsPublishDialogOpen(true)}
-        />
-      );
-    }
-    if (subTab === 'cost-settings-export') {
-      return (
-        <CostReportTab
-          selectedPeriodId={selectedPeriodId}
-          currentPeriod={currentPeriod ?? null}
-          showSuccess={showSuccess}
-          showError={showError}
-          showApiError={showApiError}
-        />
-      );
-    }
-    return null;
-  };
+  const formattedCurrentPeriod = currentPeriod
+    ? `${MONTH_NAMES[currentPeriod.month - 1]} ${currentPeriod.year}`
+    : 'No period selected';
 
   return (
     <>
-      {/* Page header — title and subtitle only; global header shows current period */}
-      <div className={styles.pageHeader}>
-        <Title3>Finance Operations</Title3>
-        <span className={styles.pageSubtitle}>
-          Manage monthly period status, publish snapshots, and maintain cost reporting settings.
-        </span>
-      </div>
+      <div className={styles.root}>
+        <div className={styles.pageHeader}>
+          <Title3>Finance Operations</Title3>
+          <span className={styles.pageSubtitle}>Monthly finance close and reporting controls.</span>
+        </div>
 
-      {/* Operation selection cards */}
-      <div className={styles.opCardsGrid}>
-        {operationCards.map(card => (
-          <button
-            key={card.key}
-            type="button"
-            className={mergeClasses(styles.opCard, subTab === card.key && styles.opCardActive)}
-            onClick={() => setSubTab(card.key)}
-          >
-            <div className={mergeClasses(styles.opCardIcon, subTab === card.key && styles.opCardIconActive)}>
-              {card.icon}
-            </div>
-            <div className={styles.opCardTitle}>{card.title}</div>
-            <div className={styles.opCardDescription}>{card.description}</div>
-            {card.meta != null && (
-              <div className={styles.opCardMeta}>{card.meta}</div>
+        <section className={styles.sectionCard}>
+          <div className={styles.currentPeriodLabel}>Current period</div>
+          <div className={styles.currentPeriodRow}>
+            <Body1 className={styles.currentPeriodName}>{formattedCurrentPeriod}</Body1>
+            {currentPeriod && (
+              <Badge appearance="filled" color={currentPeriod.status === 'locked' ? 'danger' : 'success'}>
+                {currentPeriod.status === 'locked' ? 'Locked' : 'Open'}
+              </Badge>
             )}
-          </button>
-        ))}
+          </div>
+          <Body2 className={styles.helperText}>
+            Period close, snapshot publishing, and reporting controls are available below.
+          </Body2>
+        </section>
+
+        <section className={styles.sectionCard}>
+          <div className={styles.sectionHeader}>
+            <Body1 className={styles.sectionTitle}>Periods</Body1>
+            <Body2 className={styles.sectionSubtitle}>Create, lock, and unlock monthly periods.</Body2>
+          </div>
+          <PeriodPanel variant="compact" />
+        </section>
+
+        <section className={styles.sectionCard}>
+          <div className={styles.sectionHeader}>
+            <Body1 className={styles.sectionTitle}>Snapshot Publishing</Body1>
+            <Body2 className={styles.sectionSubtitle}>Publish immutable snapshots and review snapshot history.</Body2>
+          </div>
+          <SnapshotsTab
+            snapshots={snapshots}
+            canDownloadCsv={canManageFinanceData}
+            showApiError={showApiError}
+            periods={periods}
+            selectedPeriodId={selectedPeriodId}
+            onSelectPeriod={setSelectedPeriodId}
+            onPublishClick={() => setIsPublishDialogOpen(true)}
+          />
+        </section>
+
+        <section className={styles.sectionCard}>
+          <div className={styles.sectionHeader}>
+            <Body1 className={styles.sectionTitle}>Cost Settings & Export</Body1>
+            <Body2 className={styles.sectionSubtitle}>Maintain monthly FTE cost settings and download period reporting.</Body2>
+          </div>
+          <CostReportTab
+            periods={periods}
+            selectedPeriodId={selectedPeriodId}
+            onSelectPeriod={setSelectedPeriodId}
+            currentPeriod={currentPeriod ?? null}
+            showSuccess={showSuccess}
+            showError={showError}
+            showApiError={showApiError}
+          />
+        </section>
       </div>
-
-      <div className={styles.divider} />
-
-      {/* Selected section content */}
-      {renderContent()}
 
       {/* Publish Snapshot dialog */}
       {canManageFinanceData && (

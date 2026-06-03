@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   makeStyles,
   tokens,
-  Card,
-  Button,
+  Body1,
   Body2,
+  Button,
   Input,
   Spinner,
 } from '@fluentui/react-components';
@@ -13,12 +13,16 @@ import { getFinanceSetting, updateFinanceSetting } from '../../api/finance';
 import { apiClient } from '../../api/client';
 import type { FinanceActualRow } from './ActualsTab';
 import { formatDKK } from '../../utils/format';
+import type { Period } from '../../types';
+import { PeriodSelector } from '../PeriodSelector';
 
 const COST_SETTING_KEY = 'monthly_fte_cost';
 const DEFAULT_MONTHLY_FTE_COST = 99000;
 
 export interface CostReportTabProps {
+  periods: Period[];
   selectedPeriodId: string;
+  onSelectPeriod: (id: string) => void;
   currentPeriod: { year: number; month: number } | null;
   showSuccess: (title: string) => void;
   showError: (title: string) => void;
@@ -26,35 +30,48 @@ export interface CostReportTabProps {
 }
 
 const useStyles = makeStyles({
-  wrapper: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-    gap: tokens.spacingHorizontalL,
-    alignItems: 'start',
-  },
   card: {
-    borderRadius: tokens.borderRadiusLarge,
+    borderRadius: tokens.borderRadiusMedium,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
-    boxShadow: tokens.shadow4,
+    padding: tokens.spacingHorizontalL,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
   },
-  cardHeader: {
+  periodRow: {
+    display: 'flex',
+    flexWrap: 'wrap' as const,
+    gap: tokens.spacingHorizontalM,
+    alignItems: 'flex-end',
+  },
+  periodField: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM} 0`,
   },
-  cardTitle: {
+  periodLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  sectionTitle: {
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
-  cardDescription: {
+  sectionDescription: {
     color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
   },
-  cardBody: {
+  section: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM} ${tokens.spacingVerticalL}`,
+  },
+  divider: {
+    height: '1px',
+    backgroundColor: tokens.colorNeutralStroke2,
   },
   row: {
     display: 'flex',
@@ -90,7 +107,9 @@ function toCsv(rows: FinanceActualRow[], monthlyFteCost: number): string {
 }
 
 export function CostReportTab({
+  periods,
   selectedPeriodId,
+  onSelectPeriod,
   currentPeriod,
   showSuccess,
   showError,
@@ -161,17 +180,20 @@ export function CostReportTab({
   }, [currentPeriod, monthlyFteCost, selectedPeriodId, showApiError]);
 
   return (
-    <div className={styles.wrapper}>
-
-      {/* Card 1 — Monthly FTE Cost */}
-      <Card className={styles.card}>
-        <div className={styles.cardHeader}>
-          <Body2 className={styles.cardTitle}>Monthly FTE Cost</Body2>
-          <Body2 className={styles.cardDescription}>
-            Set the monthly FTE cost rate used for cost calculations across cost overview, dashboards, and reports.
-          </Body2>
+    <div className={styles.card}>
+      <div className={styles.periodRow}>
+        <div className={styles.periodField}>
+          <span className={styles.periodLabel}>Period</span>
+          <PeriodSelector periods={periods} selectedId={selectedPeriodId} onSelect={onSelectPeriod} />
         </div>
-        <div className={styles.cardBody}>
+      </div>
+
+      <div className={styles.section}>
+        <div>
+          <Body1 className={styles.sectionTitle}>Monthly FTE Cost</Body1>
+          <Body2 className={styles.sectionDescription}>Set the monthly FTE cost rate used for cost calculations.</Body2>
+        </div>
+        <div>
           <div className={styles.row}>
             <Input
               type="number"
@@ -195,30 +217,26 @@ export function CostReportTab({
             }
           </div>
         </div>
-      </Card>
+      </div>
 
-      {/* Card 2 — Export Cost Report */}
-      <Card className={styles.card}>
-        <div className={styles.cardHeader}>
-          <Body2 className={styles.cardTitle}>Export Cost Report</Body2>
-          <Body2 className={styles.cardDescription}>
-            Download reporting data for the selected period.
-          </Body2>
-        </div>
-        <div className={styles.cardBody}>
-          <div className={styles.row}>
-            <Button
-              appearance="secondary"
-              icon={csvLoading ? <Spinner size="tiny" /> : <ArrowDownloadRegular />}
-              onClick={handleDownloadCsv}
-              disabled={csvLoading || !currentPeriod}
-            >
-              Download CSV
-            </Button>
-          </div>
-        </div>
-      </Card>
+      <div className={styles.divider} />
 
+      <div className={styles.section}>
+        <div>
+          <Body1 className={styles.sectionTitle}>Export</Body1>
+          <Body2 className={styles.sectionDescription}>Download reporting data for the selected period.</Body2>
+        </div>
+        <div className={styles.row}>
+          <Button
+            appearance="secondary"
+            icon={csvLoading ? <Spinner size="tiny" /> : <ArrowDownloadRegular />}
+            onClick={handleDownloadCsv}
+            disabled={csvLoading || !currentPeriod}
+          >
+            Download CSV
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

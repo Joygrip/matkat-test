@@ -4,8 +4,6 @@ import {
   tokens,
   Body1,
   Body2,
-  Card,
-  CardHeader,
   Button,
   Dialog,
   DialogSurface,
@@ -38,19 +36,13 @@ const useStyles = makeStyles({
   wrapper: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
+    gap: tokens.spacingVerticalM,
   },
-  card: {
-    borderRadius: tokens.borderRadiusLarge,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    boxShadow: tokens.shadow4,
-  },
-  publishControls: {
+  toolbar: {
     display: 'flex',
     alignItems: 'flex-end',
-    gap: tokens.spacingHorizontalL,
+    gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM} ${tokens.spacingVerticalM}`,
   },
   periodField: {
     display: 'flex',
@@ -70,6 +62,11 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     alignSelf: 'center',
   },
+  tableWrap: {
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    overflow: 'hidden',
+  },
   table: { width: '100%' },
   sortableTable: {
     width: '100%',
@@ -78,16 +75,19 @@ const useStyles = makeStyles({
     },
     '& th': {
       fontWeight: tokens.fontWeightSemibold,
-      fontSize: tokens.fontSizeBase300,
+      fontSize: tokens.fontSizeBase200,
       color: tokens.colorNeutralForeground2,
-      padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
+      padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
       textTransform: 'uppercase',
       letterSpacing: '0.5px',
-      borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+      borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     },
     '& td': {
-      padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
-      borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+      padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+      borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    },
+    '& tbody tr:last-child td': {
+      borderBottom: 'none',
     },
     '& tbody tr:hover': { backgroundColor: tokens.colorNeutralBackground2 },
   },
@@ -152,27 +152,22 @@ export function SnapshotsTab({
   return (
     <div className={styles.wrapper}>
 
-      {/* Card 1: Publish Snapshot */}
-      <Card className={styles.card}>
-        <div className={styles.publishControls}>
-          <div className={styles.periodField}>
-            <span className={styles.periodLabel}>Period</span>
-            <PeriodSelector periods={periods} selectedId={selectedPeriodId} onSelect={onSelectPeriod} />
-          </div>
-          <Button appearance="primary" onClick={onPublishClick}>
-            Publish Snapshot
-          </Button>
-          <span className={styles.lastSnapshot}>
-            {latestSnapshot
-              ? `Last snapshot: ${new Date(latestSnapshot.published_at).toLocaleDateString()}`
-              : 'No snapshots yet'}
-          </span>
+      <div className={styles.toolbar}>
+        <div className={styles.periodField}>
+          <span className={styles.periodLabel}>Period</span>
+          <PeriodSelector periods={periods} selectedId={selectedPeriodId} onSelect={onSelectPeriod} />
         </div>
-      </Card>
+        <Button appearance="primary" onClick={onPublishClick}>
+          Publish Snapshot
+        </Button>
+        <span className={styles.lastSnapshot}>
+          {latestSnapshot
+            ? `Last snapshot: ${new Date(latestSnapshot.published_at).toLocaleDateString()}`
+            : 'No snapshots for selected period'}
+        </span>
+      </div>
 
-      {/* Card 2: Published Snapshots */}
-      <Card className={styles.card}>
-        <CardHeader header={<Body1><strong>Published Snapshots</strong></Body1>} />
+      <div className={styles.tableWrap}>
         {snapshots.length > 0 ? (
           <Table className={styles.sortableTable}>
             <TableHeader>
@@ -222,7 +217,7 @@ export function SnapshotsTab({
             </Body2>
           </div>
         )}
-      </Card>
+      </div>
 
       {/* Detail dialog — unchanged */}
       <Dialog open={!!viewedSnapshot} onOpenChange={(_, d) => !d.open && setViewedSnapshot(null)}>

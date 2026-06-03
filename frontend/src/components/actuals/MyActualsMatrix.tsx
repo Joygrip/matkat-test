@@ -265,22 +265,44 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
   const earliestPeriod = matrixPeriods[0] ?? null;
   const periodName = earliestPeriod ? fmtPeriod(earliestPeriod) : '—';
 
+  const visiblePeriodIdSet = useMemo(
+    () => new Set(matrixPeriods.map(p => p.id)),
+    [matrixPeriods],
+  );
+
   const matrixProjects = useMemo(() => {
     const map = new Map<string, string>();
-    myDemandLines.forEach(d => {
-      if (!map.has(d.project_id)) map.set(d.project_id, d.project_name ?? d.project_id);
-    });
-    myActuals.forEach(a => {
-      if (!map.has(a.project_id)) {
-        const project = projects.find(p => p.id === a.project_id);
-        map.set(a.project_id, a.project_name ?? project?.name ?? a.project_id);
-      }
-    });
+    // Only include projects that have demand in the currently visible (open) periods
+    myDemandLines
+      .filter(d => visiblePeriodIdSet.has(d.period_id))
+      .forEach(d => {
+        if (!map.has(d.project_id)) map.set(d.project_id, d.project_name ?? d.project_id);
+      });
+    // Only include projects that have supply in the currently visible (open) periods
+    // Skip supply lines with no project_id (general-availability / unallocated supply)
+    mySupplyLines
+      .filter(s => s.project_id && visiblePeriodIdSet.has(s.period_id))
+      .forEach(s => {
+        if (!map.has(s.project_id!)) {
+          const project = projects.find(p => p.id === s.project_id);
+          map.set(s.project_id!, s.project_name ?? project?.name ?? s.project_id!);
+        }
+      });
+    // Only include projects that have actuals in the currently visible (open) periods
+    myActuals
+      .filter(a => visiblePeriodIdSet.has(a.period_id))
+      .forEach(a => {
+        if (!map.has(a.project_id)) {
+          const project = projects.find(p => p.id === a.project_id);
+          map.set(a.project_id, a.project_name ?? project?.name ?? a.project_id);
+        }
+      });
+    // Always include manually added projects for the current session
     additionalProjects.forEach(p => {
       if (!map.has(p.id)) map.set(p.id, p.name);
     });
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [myDemandLines, myActuals, additionalProjects, projects]);
+  }, [myDemandLines, mySupplyLines, myActuals, additionalProjects, projects, visiblePeriodIdSet]);
 
   // NOTE: For PM users, `projects` from useAppData() is scoped to PM-assigned projects
   // (AppDataContext uses listProjectsScoped for PM/Finance/Admin roles). PM's Add Project

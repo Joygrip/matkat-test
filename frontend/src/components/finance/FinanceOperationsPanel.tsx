@@ -17,14 +17,12 @@ import {
   MessageBarBody,
   Body1,
   Body2,
-  Badge,
 } from '@fluentui/react-components';
 import { CalendarMonthRegular, CameraRegular, MoneyRegular } from '@fluentui/react-icons';
 import { useAuth } from '../../auth/AuthProvider';
 import { useToast } from '../../hooks/useToast';
 import { usePeriod } from '../../contexts/PeriodContext';
 import { consolidationApi, Snapshot } from '../../api/consolidation';
-import { MONTH_NAMES } from '../../utils/format';
 import { PeriodPanel } from '../PeriodPanel';
 import { SnapshotsTab } from './SnapshotsTab';
 import { CostReportTab } from './CostReportTab';
@@ -36,34 +34,16 @@ export interface FinanceOperationsPanelProps {
 }
 
 const useStyles = makeStyles({
-  // Cockpit page header
+  // Page header — title + subtitle only
   pageHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: tokens.spacingHorizontalL,
-    marginBottom: tokens.spacingVerticalL,
-    flexWrap: 'wrap',
-  },
-  pageHeaderLeft: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
+    marginBottom: tokens.spacingVerticalL,
   },
   pageSubtitle: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
-  },
-  pageHeaderRight: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalXS,
-  },
-  periodName: {
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground2,
   },
   // Operation selection cards
   opCardsGrid: {
@@ -125,7 +105,6 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXS,
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
-    marginTop: 'auto',
     paddingTop: tokens.spacingVerticalXS,
   },
   divider: {
@@ -202,30 +181,14 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subTab]);
 
-  const periodLabel = currentPeriod
-    ? `${MONTH_NAMES[currentPeriod.month - 1]} ${currentPeriod.year}`
-    : '—';
-
-  // Operation card definitions — icons, titles, descriptions, live meta
+  // Operation card definitions — meta only where it adds unique information
   const operationCards = [
     {
       key: 'period-control' as FinanceSubTab,
       icon: <CalendarMonthRegular />,
       title: 'Period Control',
       description: 'Lock, unlock, and create finance periods.',
-      meta: currentPeriod ? (
-        <>
-          <span>{periodLabel}</span>
-          <Badge
-            appearance="filled"
-            color={currentPeriod.status === 'open' ? 'success' : 'danger'}
-            shape="rounded"
-            size="small"
-          >
-            {currentPeriod.status === 'open' ? 'Open' : 'Locked'}
-          </Badge>
-        </>
-      ) : <span>No active period</span>,
+      meta: null,
     },
     {
       key: 'snapshot-publishing' as FinanceSubTab,
@@ -234,14 +197,14 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
       description: 'Freeze reporting data for the selected period.',
       meta: latestSnapshot
         ? `Last: ${new Date(latestSnapshot.published_at).toLocaleDateString()}`
-        : 'No snapshots yet',
+        : null,
     },
     {
       key: 'cost-settings-export' as FinanceSubTab,
       icon: <MoneyRegular />,
       title: 'Cost Settings & Export',
       description: 'Maintain FTE cost and export reporting data.',
-      meta: 'Reporting settings',
+      meta: null,
     },
   ];
 
@@ -278,29 +241,15 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
 
   return (
     <>
-      {/* Cockpit page header — title/subtitle left, current period right */}
+      {/* Page header — title and subtitle only; global header shows current period */}
       <div className={styles.pageHeader}>
-        <div className={styles.pageHeaderLeft}>
-          <Title3>Finance Operations</Title3>
-          <span className={styles.pageSubtitle}>
-            Manage monthly period status, publish snapshots, and maintain cost reporting settings.
-          </span>
-        </div>
-        <div className={styles.pageHeaderRight}>
-          <span className={styles.periodName}>{periodLabel}</span>
-          {currentPeriod && (
-            <Badge
-              appearance="filled"
-              color={currentPeriod.status === 'open' ? 'success' : 'danger'}
-              shape="rounded"
-            >
-              {currentPeriod.status === 'open' ? 'Open' : 'Locked'}
-            </Badge>
-          )}
-        </div>
+        <Title3>Finance Operations</Title3>
+        <span className={styles.pageSubtitle}>
+          Manage monthly period status, publish snapshots, and maintain cost reporting settings.
+        </span>
       </div>
 
-      {/* Operation selection cards — replace the old internal TabList */}
+      {/* Operation selection cards */}
       <div className={styles.opCardsGrid}>
         {operationCards.map(card => (
           <button
@@ -314,7 +263,9 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
             </div>
             <div className={styles.opCardTitle}>{card.title}</div>
             <div className={styles.opCardDescription}>{card.description}</div>
-            <div className={styles.opCardMeta}>{card.meta}</div>
+            {card.meta != null && (
+              <div className={styles.opCardMeta}>{card.meta}</div>
+            )}
           </button>
         ))}
       </div>

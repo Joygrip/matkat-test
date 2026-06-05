@@ -33,6 +33,7 @@ export interface Period {
   tenant_id: string;
   year: number;
   month: number;
+  monthly_fte_cost?: number;
   status: PeriodStatus;
   locked_at: string | null;
   locked_by: string | null;

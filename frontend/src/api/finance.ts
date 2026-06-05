@@ -55,12 +55,21 @@ export interface FinanceSetting {
   updated_at?: string;
 }
 
-export async function getFinanceSetting(key: string): Promise<FinanceSetting> {
-  return apiClient.get<FinanceSetting>(`/finance/settings/${key}`);
+export async function getFinanceSetting(key: string, periodId?: string): Promise<FinanceSetting> {
+  const query = new URLSearchParams();
+  if (periodId) query.append('period_id', periodId);
+  const qs = query.toString();
+  return apiClient.get<FinanceSetting>(`/finance/settings/${key}${qs ? `?${qs}` : ''}`);
 }
 
-export async function updateFinanceSetting(key: string, value: string): Promise<FinanceSetting> {
-  return apiClient.put<FinanceSetting>(`/finance/settings/${key}`, { setting_value: value });
+export async function updateFinanceSetting(key: string, value: string, periodId?: string): Promise<FinanceSetting> {
+  const query = new URLSearchParams();
+  if (periodId) query.append('period_id', periodId);
+  const qs = query.toString();
+  return apiClient.put<FinanceSetting>(
+    `/finance/settings/${key}${qs ? `?${qs}` : ''}`,
+    { setting_value: value, period_id: periodId },
+  );
 }
 
 export interface ConsolidatedCostRow {

@@ -1,6 +1,8 @@
 """Tests for period endpoints."""
 from datetime import datetime
 
+from api.app.models.finance import FinanceSetting
+
 
 def test_create_period_as_finance(client, finance_headers, db):
     """Finance can create a period."""
@@ -141,3 +143,50 @@ def test_tenant_isolation(client, finance_headers, db):
     periods = response.json()
     tenant_ids = [p["tenant_id"] for p in periods]
     assert "test-tenant-001" not in tenant_ids
+
+
+def test_create_period_uses_global_monthly_fte_cost_when_no_prior_period(client, finance_headers, db):
+    """When no prior period exists, creation falls back to tenant global monthly_fte_cost."""
+    db.add(
+        FinanceSetting(
+            tenant_id="test-tenant-001",
+            setting_key="monthly_fte_cost",
+            setting_value="123456",
+            updated_by="finance-001",
+        )
+    )
+    db.commit()
+
+    response = client.post(
+        "/periods",
+        json={"year": 2027, "month": 1},
+        headers=finance_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["monthly_fte_cost"] == 123456
+
+
+def test_create_period_copies_latest_prior_period_monthly_fte_cost(client, finance_headers, db):
+    """New period should inherit monthly_fte_cost from latest prior period."""
+    jan = client.post(
+        "/periods",
+        json={"year": 2027, "month": 1},
+        headers=finance_headers,
+    )
+    assert jan.status_code == 200
+    jan_id = jan.json()["id"]
+
+    upd = client.put(
+        "/finance/settings/monthly_fte_cost?period_id=" + jan_id,
+        json={"setting_value": "111111"},
+        headers=finance_headers,
+    )
+    assert upd.status_code == 200
+
+    feb = client.post(
+        "/periods",
+        json={"year": 2027, "month": 2},
+        headers=finance_headers,
+    )
+    assert feb.status_code == 200
+    assert feb.json()["monthly_fte_cost"] == 111111

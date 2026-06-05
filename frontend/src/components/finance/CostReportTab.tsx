@@ -16,6 +16,7 @@ const DEFAULT_MONTHLY_FTE_COST = 99000;
 
 export interface CostReportTabProps {
   selectedPeriodId: string;
+  selectedPeriodStatus: 'open' | 'locked' | 'unknown';
   showSuccess: (title: string) => void;
   showError: (title: string) => void;
   showApiError: (err: Error, ctx?: string) => void;
@@ -50,6 +51,7 @@ const useStyles = makeStyles({
 
 export function CostReportTab({
   selectedPeriodId,
+  selectedPeriodStatus,
   showSuccess,
   showError,
   showApiError,
@@ -63,7 +65,7 @@ export function CostReportTab({
 
   useEffect(() => {
     setSaved(false);
-    getFinanceSetting(COST_SETTING_KEY).then(s => {
+    getFinanceSetting(COST_SETTING_KEY, selectedPeriodId).then(s => {
       const v = parseInt(s.setting_value, 10);
       if (!isNaN(v)) {
         setMonthlyFteCost(v);
@@ -73,6 +75,10 @@ export function CostReportTab({
   }, [selectedPeriodId]);
 
   const handleApply = useCallback(async () => {
+    if (selectedPeriodStatus !== 'open') {
+      showError('Locked period. Monthly FTE cost is frozen.');
+      return;
+    }
     const v = parseInt(costInput, 10);
     if (isNaN(v) || v <= 0) {
       showError('Monthly FTE cost must be a positive number');
@@ -80,7 +86,7 @@ export function CostReportTab({
     }
     setSaving(true);
     try {
-      await updateFinanceSetting(COST_SETTING_KEY, String(v));
+      await updateFinanceSetting(COST_SETTING_KEY, String(v), selectedPeriodId);
       setMonthlyFteCost(v);
       setSaved(true);
       showSuccess('Monthly FTE cost updated');
@@ -89,7 +95,9 @@ export function CostReportTab({
     } finally {
       setSaving(false);
     }
-  }, [costInput, showError, showSuccess, showApiError]);
+  }, [costInput, selectedPeriodId, selectedPeriodStatus, showError, showSuccess, showApiError]);
+
+  const isLocked = selectedPeriodStatus !== 'open';
 
   return (
     <div className={styles.root}>
@@ -100,13 +108,13 @@ export function CostReportTab({
           value={costInput}
           onChange={(_, d) => { setCostInput(d.value); setSaved(false); }}
           style={{ width: 120 }}
-          disabled={saving}
+          disabled={saving || isLocked}
         />
         <Button
           appearance="primary"
           size="small"
           onClick={handleApply}
-          disabled={saving}
+          disabled={saving || isLocked}
         >
           {saving ? <><Spinner size="tiny" style={{ marginRight: 6 }} />Saving…</> : 'Apply'}
         </Button>
@@ -115,6 +123,11 @@ export function CostReportTab({
             ? <><CheckmarkCircleRegular style={{ color: tokens.colorPaletteGreenForeground1 }} />&nbsp;Current: {formatDKK(monthlyFteCost)} ✓</>
             : <>Current: {formatDKK(monthlyFteCost)}</>
           }
+        </Body2>
+        <Body2 className={styles.savedRow}>
+          {isLocked
+            ? 'Locked period. Monthly FTE cost is frozen.'
+            : 'Applies to the selected working period only.'}
         </Body2>
       </div>
     </div>

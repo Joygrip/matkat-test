@@ -225,6 +225,7 @@ export function FinanceOperationsPanel({ initialSubTab = 'period-control' }: Fin
               <span className={styles.stripLabel}>Cost settings</span>
               <CostReportTab
                 selectedPeriodId={selectedPeriodId}
+                selectedPeriodStatus={selectedPeriodStatus}
                 showSuccess={showSuccess}
                 showError={showError}
                 showApiError={showApiError}

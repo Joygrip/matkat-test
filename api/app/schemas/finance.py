@@ -63,6 +63,7 @@ class FinanceSettingResponse(BaseModel):
 
 class FinanceSettingUpdate(BaseModel):
     setting_value: str
+    period_id: Optional[str] = None
 
 
 class ConsolidatedCostByProject(BaseModel):

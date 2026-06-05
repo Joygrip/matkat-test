@@ -5,7 +5,8 @@ from sqlalchemy import and_, or_, func
 from api.app.auth.dependencies import CurrentUser
 from api.app.models.actuals import ActualLine
 from sqlalchemy import exists as sa_exists
-from api.app.models.core import User, Project, ProjectPM, Resource, CostCenter
+from fastapi import HTTPException
+from api.app.models.core import User, Project, ProjectPM, Resource, CostCenter, Period, PeriodStatus
 from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalStatus, StepStatus
 from api.app.models.finance import FinanceSetting
 from api.app.services.period import PeriodService
@@ -30,6 +31,61 @@ class FinanceService:
     def __init__(self, db: Session, current_user: CurrentUser):
         self.db = db
         self.current_user = current_user
+
+    def _get_global_monthly_fte_cost_value(self) -> int:
+        """Read tenant-level fallback rate from finance_settings or default."""
+        row = (
+            self.db.query(FinanceSetting)
+            .filter(
+                FinanceSetting.tenant_id == self.current_user.tenant_id,
+                FinanceSetting.setting_key == "monthly_fte_cost",
+            )
+            .first()
+        )
+        if row is None:
+            return int(DEFAULT_MONTHLY_FTE_COST)
+        try:
+            parsed = int(row.setting_value)
+            return parsed if parsed > 0 else int(DEFAULT_MONTHLY_FTE_COST)
+        except (TypeError, ValueError):
+            return int(DEFAULT_MONTHLY_FTE_COST)
+
+    def _get_monthly_fte_cost_for_period(self, period_id: str) -> int:
+        """Resolve monthly FTE cost for one period with transition fallback."""
+        period = (
+            self.db.query(Period)
+            .filter(
+                Period.tenant_id == self.current_user.tenant_id,
+                Period.id == period_id,
+            )
+            .first()
+        )
+        if period is None:
+            raise HTTPException(status_code=404, detail="Period not found.")
+
+        if period.monthly_fte_cost is not None:
+            return int(period.monthly_fte_cost)
+        return self._get_global_monthly_fte_cost_value()
+
+    def _get_monthly_fte_costs_by_period(self, period_ids: set[str]) -> dict[str, int]:
+        """Resolve monthly FTE cost per period for multi-period cost calculations."""
+        if not period_ids:
+            return {}
+
+        rows = (
+            self.db.query(Period.id, Period.monthly_fte_cost)
+            .filter(
+                Period.tenant_id == self.current_user.tenant_id,
+                Period.id.in_(list(period_ids)),
+            )
+            .all()
+        )
+
+        fallback = self._get_global_monthly_fte_cost_value()
+        rate_by_period: dict[str, int] = {}
+        for pid, rate in rows:
+            rate_by_period[pid] = int(rate) if rate is not None else fallback
+        return rate_by_period
 
     def _approved_actual_ids_subq(self):
         """
@@ -614,8 +670,7 @@ class FinanceService:
         if period is None:
             raise HTTPException(status_code=404, detail="Period not found.")
 
-        setting = self.get_setting("monthly_fte_cost")
-        monthly_fte_cost = int(setting.setting_value)
+        monthly_fte_cost = self._get_monthly_fte_cost_for_period(period.id)
 
         if cost_center_id or cost_center_code:
             # CC mode — filter lines by Resource.cost_center_id.
@@ -976,8 +1031,24 @@ class FinanceService:
                 pass
         return results
 
-    def get_setting(self, key: str) -> FinanceSettingResponse:
-        """Return a finance setting by key, or a default if not yet configured."""
+    def get_setting(self, key: str, period_id: Optional[str] = None) -> FinanceSettingResponse:
+        """Return a finance setting by key, optionally scoped to a period."""
+        if key == "monthly_fte_cost" and period_id:
+            period = PeriodService(self.db, self.current_user).get_by_id(period_id)
+            if period is None:
+                raise HTTPException(status_code=404, detail="Period not found.")
+
+            value = (
+                str(period.monthly_fte_cost)
+                if period.monthly_fte_cost is not None
+                else str(self._get_global_monthly_fte_cost_value())
+            )
+            return FinanceSettingResponse(
+                setting_key=key,
+                setting_value=value,
+                updated_at=period.updated_at.isoformat() if period.updated_at else None,
+            )
+
         row = (
             self.db.query(FinanceSetting)
             .filter(
@@ -1012,9 +1083,7 @@ class FinanceService:
         from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
         from api.app.models.core import Project
 
-        # 1. Resolve monthly FTE cost setting
-        setting = self.get_setting("monthly_fte_cost")
-        monthly_fte_cost = int(setting.setting_value)
+        fallback_monthly_fte_cost = self._get_global_monthly_fte_cost_value()
 
         # 2. Load periods — specific month when year+month provided (allows locked periods),
         #    otherwise only open periods for the default aggregated view.
@@ -1028,7 +1097,9 @@ class FinanceService:
         period_map = {p.id: (p.year, p.month) for p in all_periods}
 
         if not period_ids:
-            return ConsolidatedCostResponse(data=[], monthly_fte_cost=monthly_fte_cost)
+            return ConsolidatedCostResponse(data=[], monthly_fte_cost=fallback_monthly_fte_cost)
+
+        monthly_fte_costs_by_period = self._get_monthly_fte_costs_by_period(set(period_ids))
 
         # 3a. Manager role restriction — scope to accessible resources via reporting hierarchy.
         # Manager+Reader bypasses this and sees all data (same view as Finance).
@@ -1046,7 +1117,7 @@ class FinanceService:
                     if rid not in ids:
                         ids.append(rid)
             if not ids:
-                return ConsolidatedCostResponse(data=[], monthly_fte_cost=monthly_fte_cost)
+                return ConsolidatedCostResponse(data=[], monthly_fte_cost=fallback_monthly_fte_cost)
             scoped_resource_ids = set(ids)
 
         # 3b. PM role restriction — only their own projects
@@ -1121,7 +1192,8 @@ class FinanceService:
             if not _pm_allowed(line.project_id):
                 continue
             yr, mo = period_map[line.period_id]
-            agg[(line.project_id, _cc_key(cc_id), yr, mo)]["demand_cost"] += int(line.fte_percent * monthly_fte_cost // 100)
+            rate = monthly_fte_costs_by_period.get(line.period_id, fallback_monthly_fte_cost)
+            agg[(line.project_id, _cc_key(cc_id), yr, mo)]["demand_cost"] += int(line.fte_percent * rate // 100)
 
         # 7. Actual lines → actual labor cost (approved only), keyed by Resource.cost_center_id
         approved_subq_cons = self._approved_actual_ids_subq()
@@ -1144,7 +1216,8 @@ class FinanceService:
             if not _pm_allowed(line.project_id):
                 continue
             yr, mo = period_map[line.period_id]
-            agg[(line.project_id, _cc_key(cc_id), yr, mo)]["actuals_cost"] += int(line.actual_fte_percent * monthly_fte_cost // 100)
+            rate = monthly_fte_costs_by_period.get(line.period_id, fallback_monthly_fte_cost)
+            agg[(line.project_id, _cc_key(cc_id), yr, mo)]["actuals_cost"] += int(line.actual_fte_percent * rate // 100)
 
         # 8. External lines → contractor cost, keyed by Resource.cost_center_id when available
         ext_q = (
@@ -1213,10 +1286,44 @@ class FinanceService:
                     externals_cost=costs["externals_cost"],
                     equipment_cost=costs["equipment_cost"],
                 ))
-        return ConsolidatedCostResponse(data=data, monthly_fte_cost=monthly_fte_cost)
+        monthly_fte_cost_for_response = (
+            monthly_fte_costs_by_period.get(period_ids[0], fallback_monthly_fte_cost)
+            if period_ids
+            else fallback_monthly_fte_cost
+        )
+        return ConsolidatedCostResponse(data=data, monthly_fte_cost=monthly_fte_cost_for_response)
 
-    def upsert_setting(self, key: str, value: str) -> FinanceSettingResponse:
+    def upsert_setting(self, key: str, value: str, period_id: Optional[str] = None) -> FinanceSettingResponse:
         """Create or update a finance setting."""
+        if key == "monthly_fte_cost" and period_id:
+            period = PeriodService(self.db, self.current_user).get_by_id(period_id)
+            if period is None:
+                raise HTTPException(status_code=404, detail="Period not found.")
+            if period.status == PeriodStatus.LOCKED:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "PERIOD_LOCKED",
+                        "message": "Monthly FTE cost is frozen for locked periods.",
+                    },
+                )
+
+            try:
+                parsed = int(value)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="monthly_fte_cost must be a positive integer.")
+            if parsed <= 0:
+                raise HTTPException(status_code=400, detail="monthly_fte_cost must be a positive integer.")
+
+            period.monthly_fte_cost = parsed
+            self.db.commit()
+            self.db.refresh(period)
+            return FinanceSettingResponse(
+                setting_key=key,
+                setting_value=str(period.monthly_fte_cost),
+                updated_at=period.updated_at.isoformat() if period.updated_at else None,
+            )
+
         row = (
             self.db.query(FinanceSetting)
             .filter(

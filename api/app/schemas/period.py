@@ -21,6 +21,7 @@ class PeriodResponse(PeriodBase):
     """Period response."""
     id: str
     tenant_id: str
+    monthly_fte_cost: int
     status: PeriodStatus
     locked_at: Optional[datetime] = None
     locked_by: Optional[str] = None

@@ -3,11 +3,15 @@ from datetime import datetime
 from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 
 from api.app.models.core import Period, PeriodStatus
+from api.app.models.finance import FinanceSetting
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
+
+
+DEFAULT_MONTHLY_FTE_COST = 99000
 
 
 class PeriodService:
@@ -69,10 +73,13 @@ class PeriodService:
                 }
             )
         
+        monthly_fte_cost = self._resolve_default_monthly_fte_cost(year, month)
+
         period = Period(
             tenant_id=self.current_user.tenant_id,
             year=year,
             month=month,
+            monthly_fte_cost=monthly_fte_cost,
             status=PeriodStatus.OPEN,
         )
         self.db.add(period)
@@ -84,10 +91,63 @@ class PeriodService:
             action="create",
             entity_type="Period",
             entity_id=period.id,
-            new_values={"year": year, "month": month, "status": "open"},
+            new_values={
+                "year": year,
+                "month": month,
+                "status": "open",
+                "monthly_fte_cost": monthly_fte_cost,
+            },
         )
         
         return period
+
+    def _resolve_default_monthly_fte_cost(self, year: int, month: int) -> int:
+        """Resolve default rate for a newly created period.
+
+        Priority:
+        1) latest existing period for tenant ordered by year/month descending
+        2) global finance_settings.monthly_fte_cost
+        3) static default 99000
+        """
+        latest_period = (
+            self.db.query(Period)
+            .filter(
+                Period.tenant_id == self.current_user.tenant_id,
+                or_(
+                    Period.year < year,
+                    and_(Period.year == year, Period.month < month),
+                ),
+            )
+            .order_by(Period.year.desc(), Period.month.desc())
+            .first()
+        )
+        if latest_period is None:
+            latest_period = (
+                self.db.query(Period)
+                .filter(Period.tenant_id == self.current_user.tenant_id)
+                .order_by(Period.year.desc(), Period.month.desc())
+                .first()
+            )
+        if latest_period and latest_period.monthly_fte_cost:
+            return int(latest_period.monthly_fte_cost)
+
+        global_setting = (
+            self.db.query(FinanceSetting)
+            .filter(
+                FinanceSetting.tenant_id == self.current_user.tenant_id,
+                FinanceSetting.setting_key == "monthly_fte_cost",
+            )
+            .first()
+        )
+        if global_setting:
+            try:
+                parsed = int(global_setting.setting_value)
+                if parsed > 0:
+                    return parsed
+            except (TypeError, ValueError):
+                pass
+
+        return DEFAULT_MONTHLY_FTE_COST
     
     def lock(self, period_id: str) -> Period:
         """Lock a period (Finance only)."""

@@ -143,6 +143,7 @@ async def consolidated_costs(
 @router.get("/settings/{key}", response_model=FinanceSettingResponse)
 async def get_finance_setting(
     key: str,
+    period_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.ADMIN)),
 ):
@@ -151,13 +152,14 @@ async def get_finance_setting(
     Accessible to: Finance, Admin
     """
     service = FinanceService(db, current_user)
-    return service.get_setting(key)
+    return service.get_setting(key, period_id=period_id)
 
 
 @router.put("/settings/{key}", response_model=FinanceSettingResponse)
 async def update_finance_setting(
     key: str,
     body: FinanceSettingUpdate,
+    period_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.FINANCE, UserRole.ADMIN)),
 ):
@@ -166,4 +168,5 @@ async def update_finance_setting(
     Accessible to: Finance, Admin only
     """
     service = FinanceService(db, current_user)
-    return service.upsert_setting(key, body.setting_value)
+    effective_period_id = body.period_id or period_id
+    return service.upsert_setting(key, body.setting_value, period_id=effective_period_id)

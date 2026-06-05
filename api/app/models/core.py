@@ -204,6 +204,7 @@ class Period(Base):
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     month: Mapped[int] = mapped_column(Integer, nullable=False)
+    monthly_fte_cost: Mapped[int] = mapped_column(Integer, nullable=False, default=99000)
     status: Mapped[PeriodStatus] = mapped_column(SQLEnum(PeriodStatus), nullable=False, default=PeriodStatus.OPEN)
     locked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     locked_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)

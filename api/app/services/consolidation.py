@@ -307,25 +307,33 @@ class ConsolidationService:
     def publish_snapshot(self, period_id: str, name: str, description: Optional[str] = None) -> PublishSnapshot:
         """
         Create an immutable snapshot of planning data for a period.
+
+        Freezes: demand, supply, approved actuals, OoP, and equipment lines
+        along with the period's monthly_fte_cost_used so costs are reproducible
+        without relying on future rate changes.
         """
-        # Verify period exists
+        from api.app.models.core import CostCenter
+
         period = PeriodService(self.db, self.current_user).get_by_id(period_id)
-        
         if not period:
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Period not found"})
-        
-        # Create snapshot
+
+        # Resolve the FTE cost rate for this period (always set since migration 000037).
+        rate: int = int(period.monthly_fte_cost)
+
         snapshot = PublishSnapshot(
             tenant_id=self.current_user.tenant_id,
             period_id=period_id,
             name=name,
             description=description,
             published_by=self.current_user.object_id,
+            monthly_fte_cost_used=rate,
+            period_status_at_publish=period.status.value if period.status else None,
         )
         self.db.add(snapshot)
         self.db.flush()
-        
-        # Copy demand lines
+
+        # ── Fetch source lines ──────────────────────────────────────────────
         demands = self.db.query(DemandLine).filter(
             and_(
                 DemandLine.tenant_id == self.current_user.tenant_id,
@@ -333,7 +341,6 @@ class ConsolidationService:
             )
         ).all()
 
-        # Copy supply lines
         supplies = self.db.query(SupplyLine).filter(
             and_(
                 SupplyLine.tenant_id == self.current_user.tenant_id,
@@ -341,7 +348,7 @@ class ConsolidationService:
             )
         ).all()
 
-        # Copy actual lines — approved only
+        # Approved actuals only
         from api.app.models.approvals import ApprovalInstance, ApprovalStatus
         latest_actual_subq = (
             self.db.query(
@@ -373,7 +380,6 @@ class ConsolidationService:
             )
         ).all()
 
-        # Copy OoP lines
         oops = self.db.query(ProjectExternalLine).filter(
             and_(
                 ProjectExternalLine.tenant_id == self.current_user.tenant_id,
@@ -381,7 +387,6 @@ class ConsolidationService:
             )
         ).all()
 
-        # Copy equipment lines
         equips = self.db.query(ProjectEquipmentLine).filter(
             and_(
                 ProjectEquipmentLine.tenant_id == self.current_user.tenant_id,
@@ -389,10 +394,10 @@ class ConsolidationService:
             )
         ).all()
 
-        # Batch-load all referenced entities in 3 queries instead of one-per-line.
-        # Avoids N+1 queries when iterating demand/supply/actual/oop lines below.
+        # ── Batch-load referenced entities (avoids N+1) ────────────────────
         _project_ids = (
             {d.project_id for d in demands if d.project_id}
+            | {s.project_id for s in supplies if s.project_id}
             | {a.project_id for a in actuals if a.project_id}
             | {o.project_id for o in oops if o.project_id}
             | {e.project_id for e in equips if e.project_id}
@@ -401,11 +406,11 @@ class ConsolidationService:
             {d.resource_id for d in demands if d.resource_id}
             | {s.resource_id for s in supplies if s.resource_id}
             | {a.resource_id for a in actuals if a.resource_id}
-            | {o.resource_id for o in oops if o.resource_id}  # resource_id optional on ProjectExternalLine
+            | {o.resource_id for o in oops if o.resource_id}
         )
         _placeholder_ids = {d.placeholder_id for d in demands if d.placeholder_id}
 
-        snap_project_map: Dict[str, Project] = {}
+        snap_project_map: Dict[str, "Project"] = {}
         if _project_ids:
             snap_project_map = {
                 p.id: p for p in self.db.query(Project).filter(
@@ -413,7 +418,8 @@ class ConsolidationService:
                     Project.tenant_id == self.current_user.tenant_id,
                 ).all()
             }
-        snap_resource_map: Dict[str, Resource] = {}
+
+        snap_resource_map: Dict[str, "Resource"] = {}
         if _resource_ids:
             snap_resource_map = {
                 r.id: r for r in self.db.query(Resource).filter(
@@ -421,7 +427,8 @@ class ConsolidationService:
                     Resource.tenant_id == self.current_user.tenant_id,
                 ).all()
             }
-        snap_placeholder_map: Dict[str, Placeholder] = {}
+
+        snap_placeholder_map: Dict[str, "Placeholder"] = {}
         if _placeholder_ids:
             snap_placeholder_map = {
                 p.id: p for p in self.db.query(Placeholder).filter(
@@ -430,115 +437,184 @@ class ConsolidationService:
                 ).all()
             }
 
+        # Batch-load cost centers to get their code (avoids lazy-load per resource).
+        _cc_ids = {r.cost_center_id for r in snap_resource_map.values() if r.cost_center_id}
+        _cc_ids |= {p.cost_center_id for p in snap_placeholder_map.values() if p.cost_center_id}
+        snap_cc_map: Dict[str, "CostCenter"] = {}
+        if _cc_ids:
+            snap_cc_map = {
+                cc.id: cc for cc in self.db.query(CostCenter).filter(
+                    CostCenter.id.in_(_cc_ids),
+                    CostCenter.tenant_id == self.current_user.tenant_id,
+                ).all()
+            }
+
+        # ── Helpers ────────────────────────────────────────────────────────
+        def _cc_fields(resource=None, placeholder=None):
+            """Return (cc_id, cc_name, cc_code) from resource or placeholder."""
+            if resource and resource.cost_center_id:
+                cc = snap_cc_map.get(resource.cost_center_id)
+                if cc:
+                    return cc.id, cc.name, cc.code
+            if placeholder and placeholder.cost_center_id:
+                cc = snap_cc_map.get(placeholder.cost_center_id)
+                if cc:
+                    return cc.id, cc.name, cc.code
+            return None, "Unassigned", None
+
+        def _labor_cost_cents(fte: int) -> int:
+            """Cost in cents for a given FTE percentage at the period rate.
+            monthly_fte_cost_used is in DKK, so cost_cents = fte * rate (no /100 cancels out).
+            cost_dkk = fte * rate / 100 (matching existing finance.py formula).
+            """
+            return fte * rate
+
+        # ── Build demand lines ─────────────────────────────────────────────
         for d in demands:
             project = snap_project_map.get(d.project_id)
             resource = snap_resource_map.get(d.resource_id) if d.resource_id else None
             placeholder = snap_placeholder_map.get(d.placeholder_id) if d.placeholder_id else None
-            cc_id, cc_name = self._resolve_cc(resource=resource, placeholder=placeholder)
+            cc_id, cc_name, cc_code = _cc_fields(resource=resource, placeholder=placeholder)
 
-            line = PublishSnapshotLine(
+            planned_cents = _labor_cost_cents(d.fte_percent)
+
+            self.db.add(PublishSnapshotLine(
                 snapshot_id=snapshot.id,
                 line_type="demand",
+                source_id=d.id,
                 project_id=d.project_id,
                 project_name=project.name if project else None,
+                project_code=project.code if project else None,
                 resource_id=d.resource_id,
                 resource_name=resource.display_name if resource else None,
+                resource_initials=resource.initials if resource else None,
                 placeholder_id=d.placeholder_id,
                 placeholder_name=placeholder.name if placeholder else None,
                 cost_center_id=cc_id,
                 cost_center_name=cc_name,
+                cost_center_code=cc_code,
                 year=d.year,
                 month=d.month,
                 fte_percent=d.fte_percent,
-            )
-            self.db.add(line)
+                planned_fte_percent=d.fte_percent,
+                actual_fte_percent=None,
+                monthly_fte_cost_used=rate,
+                planned_cost_cents=planned_cents,
+                actual_cost_cents=None,
+                cost=planned_cents,  # populate cost for backward-compat cost_cents column
+            ))
 
+        # ── Build supply lines ─────────────────────────────────────────────
         for s in supplies:
+            project = snap_project_map.get(s.project_id) if s.project_id else None
             resource = snap_resource_map.get(s.resource_id) if s.resource_id else None
-            cc_id, cc_name = self._resolve_cc(resource=resource)
+            cc_id, cc_name, cc_code = _cc_fields(resource=resource)
 
-            line = PublishSnapshotLine(
+            self.db.add(PublishSnapshotLine(
                 snapshot_id=snapshot.id,
                 line_type="supply",
+                source_id=s.id,
+                project_id=s.project_id,
+                project_name=project.name if project else None,
+                project_code=project.code if project else None,
                 resource_id=s.resource_id,
                 resource_name=resource.display_name if resource else None,
+                resource_initials=resource.initials if resource else None,
                 cost_center_id=cc_id,
                 cost_center_name=cc_name,
+                cost_center_code=cc_code,
                 year=s.year,
                 month=s.month,
                 fte_percent=s.fte_percent,
-            )
-            self.db.add(line)
+                planned_fte_percent=None,
+                actual_fte_percent=None,
+                monthly_fte_cost_used=None,
+                planned_cost_cents=None,
+                actual_cost_cents=None,
+                cost=None,
+            ))
 
+        # ── Build actual lines (approved only) ─────────────────────────────
         for a in actuals:
             project = snap_project_map.get(a.project_id)
             resource = snap_resource_map.get(a.resource_id) if a.resource_id else None
-            cc_id, cc_name = self._resolve_cc(resource=resource)
+            cc_id, cc_name, cc_code = _cc_fields(resource=resource)
 
-            line = PublishSnapshotLine(
+            actual_cents = _labor_cost_cents(a.actual_fte_percent)
+            planned_cents = (
+                _labor_cost_cents(a.planned_fte_percent)
+                if a.planned_fte_percent is not None
+                else None
+            )
+
+            self.db.add(PublishSnapshotLine(
                 snapshot_id=snapshot.id,
                 line_type="actual",
+                source_id=a.id,
                 project_id=a.project_id,
                 project_name=project.name if project else None,
+                project_code=project.code if project else None,
                 resource_id=a.resource_id,
                 resource_name=resource.display_name if resource else None,
+                resource_initials=resource.initials if resource else None,
                 cost_center_id=cc_id,
                 cost_center_name=cc_name,
+                cost_center_code=cc_code,
                 year=a.year,
                 month=a.month,
                 fte_percent=a.actual_fte_percent,
-            )
-            self.db.add(line)
+                planned_fte_percent=a.planned_fte_percent,
+                actual_fte_percent=a.actual_fte_percent,
+                monthly_fte_cost_used=rate,
+                planned_cost_cents=planned_cents,
+                actual_cost_cents=actual_cents,
+                cost=actual_cents,  # backward compat: cost_cents = actual cost for actual lines
+                approval_status="approved",
+            ))
 
+        # ── Build OoP lines ────────────────────────────────────────────────
         for o in oops:
             project = snap_project_map.get(o.project_id)
             resource = snap_resource_map.get(o.resource_id) if o.resource_id else None
-            cc_id, cc_name = self._resolve_cc(resource=resource)
+            cc_id, cc_name, cc_code = _cc_fields(resource=resource)
 
-            line = PublishSnapshotLine(
+            self.db.add(PublishSnapshotLine(
                 snapshot_id=snapshot.id,
                 line_type="oop",
+                source_id=o.id,
                 project_id=o.project_id,
                 project_name=project.name if project else None,
+                project_code=project.code if project else None,
                 resource_id=o.resource_id,
                 resource_name=resource.display_name if resource else o.description,
-                placeholder_id=None,
-                placeholder_name=None,
                 cost_center_id=cc_id,
                 cost_center_name=cc_name,
+                cost_center_code=cc_code,
                 year=period.year,
                 month=period.month,
-                fte_percent=None,
-                hours=None,
                 cost=o.cost,
-            )
-            self.db.add(line)
+            ))
 
+        # ── Build equipment lines ──────────────────────────────────────────
         for e in equips:
             project = snap_project_map.get(e.project_id)
 
-            line = PublishSnapshotLine(
+            self.db.add(PublishSnapshotLine(
                 snapshot_id=snapshot.id,
                 line_type="equipment",
+                source_id=e.id,
                 project_id=e.project_id,
                 project_name=project.name if project else None,
-                resource_id=None,
+                project_code=project.code if project else None,
                 resource_name=e.description,
-                placeholder_id=None,
-                placeholder_name=None,
-                cost_center_id=None,
-                cost_center_name=None,
                 year=period.year,
                 month=period.month,
-                fte_percent=None,
-                hours=None,
                 cost=e.cost,
-            )
-            self.db.add(line)
+            ))
 
         self.db.commit()
         self.db.refresh(snapshot)
-        
+
         log_audit(
             self.db, self.current_user,
             action="publish",
@@ -548,9 +624,10 @@ class ConsolidationService:
                 "period_id": period_id,
                 "name": name,
                 "lines_count": len(snapshot.lines),
+                "monthly_fte_cost_used": rate,
             }
         )
-        
+
         return snapshot
     
     def get_snapshots(self, period_id: Optional[str] = None) -> List[PublishSnapshot]:

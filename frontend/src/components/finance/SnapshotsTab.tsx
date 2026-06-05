@@ -256,6 +256,9 @@ export function SnapshotsTab({
                 <>
                   <Body2 style={{ marginBottom: tokens.spacingVerticalM, color: tokens.colorNeutralForeground3 }}>
                     {viewedSnapshot.description || 'No description'} · {viewedSnapshot.lines_count} lines · {new Date(viewedSnapshot.published_at).toLocaleString()}
+                    {viewedSnapshot.monthly_fte_cost_used != null && (
+                      <> · Rate: {viewedSnapshot.monthly_fte_cost_used.toLocaleString()} DKK</>
+                    )}
                   </Body2>
                   <div style={{ maxHeight: 360, overflowY: 'auto' }}>
                     <Table className={styles.table}>
@@ -264,20 +267,37 @@ export function SnapshotsTab({
                           <TableHeaderCell>Type</TableHeaderCell>
                           <TableHeaderCell>Project</TableHeaderCell>
                           <TableHeaderCell>Resource</TableHeaderCell>
+                          <TableHeaderCell>Cost Center</TableHeaderCell>
                           <TableHeaderCell>Period</TableHeaderCell>
                           <TableHeaderCell>FTE %</TableHeaderCell>
+                          <TableHeaderCell>Cost (DKK)</TableHeaderCell>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {viewedSnapshot.lines.slice(0, 100).map((line, i) => (
-                          <TableRow key={i}>
-                            <TableCell>{line.line_type}</TableCell>
-                            <TableCell>{line.project_name || '—'}</TableCell>
-                            <TableCell>{line.resource_name || line.placeholder_name || '—'}</TableCell>
-                            <TableCell>{line.year}-{String(line.month).padStart(2, '0')}</TableCell>
-                            <TableCell>{line.fte_percent ?? '—'}%</TableCell>
-                          </TableRow>
-                        ))}
+                        {viewedSnapshot.lines.slice(0, 100).map((line, i) => {
+                          const costCents = line.actual_cost_cents ?? line.planned_cost_cents ?? line.cost;
+                          const costDkk = costCents != null ? Math.floor(costCents / 100).toLocaleString() : null;
+                          return (
+                            <TableRow key={i}>
+                              <TableCell>{line.line_type}</TableCell>
+                              <TableCell>
+                                {line.project_code ? <><strong>{line.project_code}</strong> </> : null}
+                                {line.project_name || '—'}
+                              </TableCell>
+                              <TableCell>
+                                {line.resource_initials ? <strong>{line.resource_initials} </strong> : null}
+                                {line.resource_name || line.placeholder_name || '—'}
+                              </TableCell>
+                              <TableCell>
+                                {line.cost_center_code ? <><strong>{line.cost_center_code}</strong> </> : null}
+                                {line.cost_center_name || '—'}
+                              </TableCell>
+                              <TableCell>{line.year}-{String(line.month).padStart(2, '0')}</TableCell>
+                              <TableCell>{line.fte_percent != null ? `${line.fte_percent}%` : '—'}</TableCell>
+                              <TableCell>{costDkk ?? '—'}</TableCell>
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                     {viewedSnapshot.lines.length > 100 && (

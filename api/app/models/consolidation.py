@@ -52,21 +52,25 @@ class OopLine(Base):
 class PublishSnapshot(Base):
     """Published snapshot of planning data at a point in time."""
     __tablename__ = "publish_snapshots"
-    
+
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     period_id: Mapped[str] = mapped_column(String(36), ForeignKey("periods.id"), nullable=False)
-    
+
     name: Mapped[str] = mapped_column(String(255), nullable=False)  # e.g., "February 2026 Final"
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
+
     # Metadata
     published_by: Mapped[str] = mapped_column(String(36), nullable=False)
     published_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    
+
+    # Finance context frozen at publish time (added migration 000038)
+    monthly_fte_cost_used: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    period_status_at_publish: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+
     # Relationships
     lines: Mapped[list["PublishSnapshotLine"]] = relationship(back_populates="snapshot")
-    
+
     __table_args__ = (
         Index('ix_snapshot_tenant_period', 'tenant_id', 'period_id'),
     )
@@ -75,30 +79,52 @@ class PublishSnapshot(Base):
 class PublishSnapshotLine(Base):
     """Individual line in a published snapshot - immutable copy of planning data."""
     __tablename__ = "publish_snapshot_lines"
-    
+
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     snapshot_id: Mapped[str] = mapped_column(String(36), ForeignKey("publish_snapshots.id"), nullable=False)
-    
-    # Snapshot data (denormalized copy of original data)
-    line_type: Mapped[str] = mapped_column(String(20), nullable=False)  # "demand", "supply", "actual", "oop"
+
+    # Denormalized copy of source data
+    line_type: Mapped[str] = mapped_column(String(20), nullable=False)  # demand/supply/actual/oop/equipment
+    source_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)  # original row id
+
     project_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     project_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    project_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
     resource_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     resource_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    resource_initials: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
     placeholder_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     placeholder_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     cost_center_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     cost_center_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    cost_center_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     month: Mapped[int] = mapped_column(Integer, nullable=False)
+
     fte_percent: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    planned_fte_percent: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_fte_percent: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # monthly_fte_cost_used is in DKK (e.g. 99000 = 99,000 kr); NULL for OoP/equipment lines
+    monthly_fte_cost_used: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Labor costs in cents (planned/actual); NULL for supply and OoP/equipment
+    planned_cost_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_cost_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Generic cost in cents — OoP/equipment flat cost; also equals actual_cost_cents for actual lines
     cost: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    
+
+    approval_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
     # Relationships
     snapshot: Mapped["PublishSnapshot"] = relationship(back_populates="lines")
-    
+
     __table_args__ = (
         Index('ix_snapshotline_snapshot', 'snapshot_id'),
     )

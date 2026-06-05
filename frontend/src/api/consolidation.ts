@@ -86,17 +86,29 @@ export interface ResourceDetail {
 export interface SnapshotLine {
   id: string;
   line_type: string;
+  source_id?: string;
   project_id?: string;
+  project_code?: string;
   project_name?: string;
   resource_id?: string;
+  resource_initials?: string;
   resource_name?: string;
   placeholder_id?: string;
   placeholder_name?: string;
+  cost_center_id?: string;
+  cost_center_code?: string;
+  cost_center_name?: string;
   year: number;
   month: number;
   fte_percent?: number;
+  planned_fte_percent?: number;
+  actual_fte_percent?: number;
   hours?: number;
+  monthly_fte_cost_used?: number;
+  planned_cost_cents?: number;
+  actual_cost_cents?: number;
   cost?: number;
+  approval_status?: string;
 }
 
 export interface Snapshot {
@@ -108,6 +120,8 @@ export interface Snapshot {
   published_by: string;
   published_at: string;
   lines_count: number;
+  monthly_fte_cost_used?: number;
+  period_status_at_publish?: string;
 }
 
 export interface SnapshotDetail extends Snapshot {

@@ -1029,7 +1029,7 @@ export function ActualsTab({
                               <div style={{ fontSize:12, color:C.ink2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{approverRow.current_approver_name || '—'}</div>
                               {approverRow.current_approval_step && (
                                 <span style={{ background:C.pendingSoft, color:C.pending, fontSize:10, fontWeight:600, padding:'1px 6px', borderRadius:10, marginTop:2, display:'inline-block' }}>
-                                  {approverRow.current_approval_step}
+                                  {approverRow.current_approval_step === 'Manager' ? 'Step 1' : approverRow.current_approval_step === 'Senior Manager' ? 'Step 2' : approverRow.current_approval_step}
                                 </span>
                               )}
                             </div>

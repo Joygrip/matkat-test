@@ -303,12 +303,33 @@ class ApiClient {
     return this.get(`/dev/users-by-role${params}`);
   }
 
-  async getAuditLogs(limit: number = 100, offset: number = 0): Promise<AuditLogEntry[]> {
-    return this.get<AuditLogEntry[]>(`/audit-logs/?limit=${limit}&offset=${offset}`);
+  async getAuditLogs(params: AuditLogParams = {}): Promise<AuditLogResponse> {
+    const q = new URLSearchParams();
+    if (params.limit !== undefined) q.set('limit', String(params.limit));
+    if (params.offset !== undefined) q.set('offset', String(params.offset));
+    if (params.action) q.set('action', params.action);
+    if (params.entity_type) q.set('entity_type', params.entity_type);
+    if (params.actor) q.set('actor', params.actor);
+    if (params.q) q.set('q', params.q);
+    if (params.from_date) q.set('from_date', params.from_date);
+    if (params.to_date) q.set('to_date', params.to_date);
+    return this.get<AuditLogResponse>(`/audit-logs/?${q.toString()}`);
   }
 }
 
+export interface AuditLogParams {
+  limit?: number;
+  offset?: number;
+  action?: string;
+  entity_type?: string;
+  actor?: string;
+  q?: string;
+  from_date?: string;
+  to_date?: string;
+}
+
 export interface AuditLogEntry {
+  id: string;
   timestamp: string;
   user_email: string;
   action: string;
@@ -318,6 +339,11 @@ export interface AuditLogEntry {
   new_values: string | null;
   reason: string | null;
   ip_address: string | null;
+}
+
+export interface AuditLogResponse {
+  items: AuditLogEntry[];
+  has_more: boolean;
 }
 
 export const apiClient = new ApiClient();

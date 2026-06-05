@@ -1135,6 +1135,9 @@ class SupplyService:
                 detail={"code": "NOT_FOUND", "message": "Supply line not found"}
             )
 
+        # Enforce manager scope on existing resource before any mutation (covers FTE-only updates)
+        self._check_ro_resource_authorized(supply.resource_id)
+
         # Check period is open
         self._check_period_open(supply.year, supply.month)
 

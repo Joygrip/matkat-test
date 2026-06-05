@@ -890,9 +890,16 @@ export function OverviewTab({ dashboard, loading, projectId, scopeProjectIds, on
   const [sortBy, setSortBy] = useState<CcSortKey>('gap');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
-  // When reader scope: supply editing is allowed only for the reader's own CC.
-  // Demand editing is already blocked by role (reader is not Finance/PM).
-  const effectiveCanEditSupply = canEditSupply && (!readerOwnCcId || selectedCcId === readerOwnCcId);
+  // Supply editing is gated on three independent conditions (all must hold):
+  // 1. Role allows supply writes (Finance or Manager — canEditSupply).
+  // 2. Reader-scope constraint: if readerOwnCcId is set, only that CC is editable.
+  // 3. Manager-scope constraint: if managedCcIds is set (manager scope), the selected CC must be
+  //    in the writable set (own + director + delegated). When managedCcIds is undefined (Finance/Admin
+  //    scope, or no CC selected yet) this condition is satisfied unconditionally.
+  const effectiveCanEditSupply =
+    canEditSupply &&
+    (!readerOwnCcId || selectedCcId === readerOwnCcId) &&
+    (!managedCcIds || !selectedCcId || managedCcIds.has(selectedCcId) || (delegatedCcIds?.has(selectedCcId) ?? false));
 
   const handleSortClick = (key: CcSortKey) => {
     if (sortBy === key) {

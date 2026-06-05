@@ -284,6 +284,93 @@ class TestSupplyWriteScope:
         del_resp = client.delete(f"/supply-lines/{supply_id}", headers=finance_headers)
         assert del_resp.status_code == 200, del_resp.text
 
+    def test_manager_reader_cannot_update_fte_of_out_of_scope_supply(
+        self, client, manager_reader_headers, finance_headers, mr_scope_setup
+    ):
+        """Manager+Reader cannot PATCH fte_percent of an unrelated supply line.
+
+        This tests the write gate added to SupplyService.update() that fires
+        for FTE-only updates (resource_id unchanged). Without the fix, get_by_id()
+        uses read-scope and returns any supply line, so Manager+Reader could
+        mutate FTE without being blocked.
+        """
+        data = mr_scope_setup
+        # Finance creates supply for the out-of-scope resource
+        create_resp = client.post(
+            "/supply-lines",
+            json={
+                "resource_id": data["r2_id"],
+                "year": data["year"],
+                "month": data["month"],
+                "fte_percent": 50,
+            },
+            headers=finance_headers,
+        )
+        assert create_resp.status_code == 200, create_resp.text
+        supply_id = create_resp.json()["id"]
+
+        # Manager+Reader tries to update FTE only (no resource_id change)
+        patch_resp = client.patch(
+            f"/supply-lines/{supply_id}",
+            json={"fte_percent": 75},
+            headers=manager_reader_headers,
+        )
+        assert patch_resp.status_code == 403, (
+            f"Expected 403, got {patch_resp.status_code}: {patch_resp.text}"
+        )
+        assert patch_resp.json()["code"] == "MANAGER_NOT_AUTHORIZED"
+
+    def test_manager_reader_can_update_fte_of_in_scope_supply(
+        self, client, manager_reader_headers, finance_headers, mr_scope_setup
+    ):
+        """Manager+Reader can PATCH fte_percent of a supply line for their own CC resource."""
+        data = mr_scope_setup
+        create_resp = client.post(
+            "/supply-lines",
+            json={
+                "resource_id": data["r1_id"],
+                "year": data["year"],
+                "month": data["month"],
+                "fte_percent": 50,
+            },
+            headers=finance_headers,
+        )
+        assert create_resp.status_code == 200, create_resp.text
+        supply_id = create_resp.json()["id"]
+
+        patch_resp = client.patch(
+            f"/supply-lines/{supply_id}",
+            json={"fte_percent": 75},
+            headers=manager_reader_headers,
+        )
+        assert patch_resp.status_code == 200, patch_resp.text
+        assert patch_resp.json()["fte_percent"] == 75
+
+    def test_finance_supply_update_unchanged(
+        self, client, finance_headers, mr_scope_setup
+    ):
+        """Finance can update any supply line FTE (behavior unchanged after the fix)."""
+        data = mr_scope_setup
+        create_resp = client.post(
+            "/supply-lines",
+            json={
+                "resource_id": data["r2_id"],
+                "year": data["year"],
+                "month": data["month"],
+                "fte_percent": 50,
+            },
+            headers=finance_headers,
+        )
+        assert create_resp.status_code == 200, create_resp.text
+        supply_id = create_resp.json()["id"]
+
+        patch_resp = client.patch(
+            f"/supply-lines/{supply_id}",
+            json={"fte_percent": 75},
+            headers=finance_headers,
+        )
+        assert patch_resp.status_code == 200, patch_resp.text
+
 
 # ---------------------------------------------------------------------------
 # Actuals resubmit scope test

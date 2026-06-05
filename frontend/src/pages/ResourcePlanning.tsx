@@ -233,7 +233,9 @@ export const ResourcePlanning: React.FC = () => {
     if (!user?.object_id || !isAnyManager || !myResource) return;
     const rid: string | null = myResource.resource_id;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const fetches: Promise<any>[] = [lookupsApi.listResourcesScoped()];
+    // forWrite:true ensures Manager+Reader gets write-scoped resources (own+director+delegated)
+    // rather than read-expanded company-wide resources. For plain Manager the result is identical.
+    const fetches: Promise<any>[] = [lookupsApi.listResourcesScoped({ forWrite: true })];
     if (user?.role === 'Manager') {
       fetches.push(adminApi.listDelegatesAsDelegate());
     }
@@ -333,32 +335,32 @@ export const ResourcePlanning: React.FC = () => {
   }, []);
 
   // CCs the user may write supply lines for.
-  // Backend scoping is authoritative — every CC present in the loaded supply/demand data is manageable.
-  // We also include own CC (always) and delegated CCs (ManagerReader) so the dropdown is correct even
-  // when no lines exist yet for those CCs.
+  // Source of truth is scopedCcIds (from listResourcesScoped({ forWrite: true })), which the backend
+  // scopes to own CC + director CCs + delegated resources. Supply/demand line CCs are NOT unioned here
+  // because for Manager+Reader the read-expanded backend returns company-wide lines, which would pollute
+  // the writable set. Backend remains final authority; this only controls UI picker options.
   const editableCcIds = useMemo((): Set<string> | null => {
     if (!isAnyManager) return null;
     const ids = new Set<string>();
     if (managerCcId) ids.add(managerCcId);
-    // ManagerReader: also add explicitly delegated CCs (may have no lines yet)
+    // Delegated CCs from explicit delegation grants
     if (user?.role === 'Manager') delegatedCcIds.forEach(id => ids.add(id));
-    // All managers: include every CC present in backend-scoped data
-    supplyLines.forEach(s => { if (s.cost_center_id) ids.add(s.cost_center_id); });
-    demandLines.forEach(d => { if (d.cost_center_id) ids.add(d.cost_center_id); });
-    // Also include all CCs from scoped resources (managed CCs that may have no lines yet)
+    // Write-scoped CCs from the forWrite=true lookup (own CC + director CCs + delegated)
     scopedCcIds.forEach(id => ids.add(id));
     // Return null only while still loading (nothing resolved yet)
     return ids.size > 0 ? ids : null;
-  }, [isAnyManager, isManagerReader, managerCcId, delegatedCcIds, supplyLines, demandLines, scopedCcIds]);
+  }, [isAnyManager, isManagerReader, managerCcId, delegatedCcIds, scopedCcIds]);
 
+  // CCs labelled "My CC": direct-RO and director CCs for this user.
+  // Use isAnyManager (not isManager) so Manager+Reader also gets labels for their own CCs.
   const managedCcIds = useMemo(() => {
-    if (!isManager || !user?.id) return new Set<string>();
+    if (!isAnyManager || !user?.id) return new Set<string>();
     return new Set(
       costCenters
         .filter(cc => cc.ro_user_id === user.id || cc.director_user_id === user.id)
         .map(cc => cc.id)
     );
-  }, [costCenters, user?.id, isManager]);
+  }, [costCenters, user?.id, isAnyManager]);
 
   const filteredDemandLines = useMemo(() => {
     return demandLines.filter(d => {

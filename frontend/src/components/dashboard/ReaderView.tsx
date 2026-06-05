@@ -1065,7 +1065,12 @@ export function ReaderView({
           </div>
         }
       >
-        <FinanceOverview scope="reader" costCenterId={myCcId ?? undefined} />
+        {/* Use scope="manager" so the write-scope machinery computes managedCcIds/delegatedCcIds.
+            This lets director/delegated CCs show labels and edit controls, while reader-only
+            company CCs stay read-only (effectiveCanEditSupply gates on managedCcIds).
+            Dashboard data visibility is identical — both "reader" and "manager" return the
+            full unfiltered dashboard, preserving Manager+Reader's broad read access. */}
+        <FinanceOverview scope="manager" costCenterId={myCcId ?? undefined} />
       </DashboardSection>
 
     </div>

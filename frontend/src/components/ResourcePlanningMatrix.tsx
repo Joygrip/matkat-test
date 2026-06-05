@@ -807,8 +807,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const loadCcData = useCallback(async (ccId: string) => {
     const promises: Promise<void>[] = [];
     if (!ccResources[ccId]) {
+      // Use write-scoped endpoint so the resource picker never shows resources outside the user's
+      // writable reporting line. For Finance/Admin the scoped endpoint returns all CC resources
+      // (no scope applied), so their Add Line experience is unchanged.
       promises.push(
-        lookupsApi.listResources(ccId).then(r => setCcResources(prev => ({ ...prev, [ccId]: r })))
+        lookupsApi.listResourcesScoped({ costCenterId: ccId, forWrite: true })
+          .then(r => setCcResources(prev => ({ ...prev, [ccId]: r })))
       );
     }
     if (!ccPlaceholders[ccId]) {

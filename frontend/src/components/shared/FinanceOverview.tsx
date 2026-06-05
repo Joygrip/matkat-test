@@ -187,7 +187,9 @@ export function FinanceOverview({
     }
     Promise.all([
       adminApi.listDelegatesAsDelegate(),
-      lookupsApi.listResourcesScoped(),
+      // forWrite:true ensures Manager+Reader gets write-scoped resources (own+director+delegated)
+      // rather than read-expanded company-wide resources, so managedCcIds reflects only writable CCs.
+      lookupsApi.listResourcesScoped({ forWrite: true }),
     ]).then(([delegates, resources]) => {
       const activeDelegatorIds = new Set(
         delegates.filter(d => d.is_active).map(d => d.delegator_id)

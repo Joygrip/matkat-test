@@ -2,9 +2,10 @@ import { useState, useEffect, useMemo } from 'react';
 import type { ConsolidationDashboard, DashboardResource, OverAllocation } from '../../api/consolidation';
 import { consolidationApi } from '../../api/consolidation';
 import { adminApi } from '../../api/admin';
-import { lookupsApi } from '../../api/lookups';
 import { usePeriod } from '../../contexts/PeriodContext';
 import { useToast } from '../../hooks/useToast';
+import { useAuth } from '../../auth/AuthProvider';
+import { useAppData } from '../../contexts/AppDataContext';
 import { OverviewTab } from '../finance/OverviewTab';
 import type { Period } from '../../types';
 import { MONTH_SHORT } from '../../utils/format';
@@ -34,6 +35,8 @@ export function FinanceOverview({
 }: FinanceOverviewProps) {
   const { periods } = usePeriod();
   const { showApiError } = useToast();
+  const { user } = useAuth();
+  const { costCenters } = useAppData();
   const [dashboard, setDashboard] = useState<ConsolidationDashboard | null>(null);
   const [loading, setLoading] = useState(false);
   const [localPeriodId, setLocalPeriodId] = useState<string>('');
@@ -178,39 +181,46 @@ export function FinanceOverview({
   }, [dashboard, scope, projectIds, costCenterId]);
 
   // For manager scope: resolve which CCs are truly delegated (via ApprovalDelegate records)
-  // vs directly managed (RO/Director). Only CCs from actual delegation records get the label.
+  // vs directly managed (RO/Director). Uses costCenters ro_user_id/director_user_id — same
+  // approach as ResourcePlanning.tsx — to avoid the resource.user_id mismatch that caused
+  // swapped labels when a delegator also had employee resources in the current user's own CC.
   useEffect(() => {
     if (scope !== 'manager') {
       setDelegatedCcIds(undefined);
       setManagedCcIds(undefined);
       return;
     }
-    Promise.all([
-      adminApi.listDelegatesAsDelegate(),
-      // forWrite:true ensures Manager+Reader gets write-scoped resources (own+director+delegated)
-      // rather than read-expanded company-wide resources, so managedCcIds reflects only writable CCs.
-      lookupsApi.listResourcesScoped({ forWrite: true }),
-    ]).then(([delegates, resources]) => {
+    adminApi.listDelegatesAsDelegate().then((delegates) => {
       const activeDelegatorIds = new Set(
         delegates.filter(d => d.is_active).map(d => d.delegator_id)
       );
+      // Delegated CCs: the CC's manager (ro_user_id or director_user_id) is an active delegator
       const delegated = new Set<string>(
-        resources
-          .filter(r => r.user_id && activeDelegatorIds.has(r.user_id))
-          .map(r => r.cost_center_id)
+        costCenters
+          .filter(cc =>
+            (cc.ro_user_id && activeDelegatorIds.has(cc.ro_user_id)) ||
+            (cc.director_user_id && activeDelegatorIds.has(cc.director_user_id))
+          )
+          .map(cc => cc.id)
       );
       setDelegatedCcIds(delegated.size > 0 ? delegated : undefined);
-      // All scoped CCs that are not from delegation = directly managed (RO/Director) CCs
-      const allScopedCcIds = new Set<string>(
-        resources.map(r => r.cost_center_id).filter(Boolean)
-      );
-      const managed = new Set<string>([...allScopedCcIds].filter(id => !delegated.has(id)));
-      setManagedCcIds(managed.size > 0 ? managed : undefined);
+      // Directly owned/director CCs — "My CC" label takes priority over "Delegated"
+      if (user?.id) {
+        const managed = new Set<string>(
+          costCenters
+            .filter(cc =>
+              (cc.ro_user_id === user.id || cc.director_user_id === user.id) &&
+              !delegated.has(cc.id)
+            )
+            .map(cc => cc.id)
+        );
+        setManagedCcIds(managed.size > 0 ? managed : undefined);
+      }
     }).catch(() => {
       setDelegatedCcIds(undefined);
       setManagedCcIds(undefined);
     });
-  }, [scope]);
+  }, [scope, costCenters, user?.id]);
 
   // Silent background refresh after a line edit/add/delete — does NOT set loading=true
   // so OverviewTab stays rendered and the modal stays open without a flash.

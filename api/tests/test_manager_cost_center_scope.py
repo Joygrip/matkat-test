@@ -222,6 +222,7 @@ def test_manager_can_create_actual_for_own_cost_center_resource(client, finance_
             "year": d["year"],
             "month": d["month"],
             "actual_fte_percent": 50,
+            "proxy_sign_reason": "Manager entering on behalf of team member",
         },
         headers=d["manager_a_headers"],
     )

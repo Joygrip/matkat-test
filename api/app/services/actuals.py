@@ -512,7 +512,8 @@ class ActualsService:
                 "month": month,
                 "actual_fte_percent": actual_fte_percent,
                 **({"employee_signed_at": str(actual.employee_signed_at)} if actual.employee_signed_at else {}),
-            }
+            },
+            details=self._build_actual_line_context(actual, resource=resource, project=project),
         )
 
         return actual
@@ -797,10 +798,11 @@ class ActualsService:
             entity_type="ActualLine",
             entity_id=actual.id,
             new_values={"employee_signed_at": str(actual.employee_signed_at)},
+            details=self._build_actual_line_context(actual),
         )
-        
+
         return actual
-    
+
     def proxy_sign(self, actual_id: str, reason: str) -> ActualLine:
         """RO signs on behalf of absent employee."""
         actual = self.get_by_id(actual_id)
@@ -862,8 +864,9 @@ class ActualsService:
                 "is_proxy_signed": True,
             },
             reason=reason.strip(),
+            details=self._build_actual_line_context(actual),
         )
-        
+
         return actual
 
     def _ensure_approval_instance(self, actual: ActualLine) -> None:
@@ -1021,6 +1024,7 @@ class ActualsService:
                 "actual_fte_percent": actual_fte_percent,
                 "employee_signed_at": str(actual.employee_signed_at),
             },
+            details=self._build_actual_line_context(actual),
         )
 
         return actual
@@ -1119,3 +1123,31 @@ class ActualsService:
         ).scalar()
         
         return result or 0
+
+    def _build_actual_line_context(
+        self,
+        actual: ActualLine,
+        resource: Optional[Resource] = None,
+        project: Optional[Project] = None,
+    ) -> dict:
+        """Build enriched audit context for an ActualLine action (write-time denormalization)."""
+        ctx: dict = {
+            "actual_line_id": actual.id,
+            "year": actual.year,
+            "month": actual.month,
+            "actual_fte_percent": actual.actual_fte_percent,
+            "planned_fte_percent": actual.planned_fte_percent,
+        }
+        res = resource or actual.resource
+        if res:
+            ctx["employee_name"] = res.display_name
+            ctx["employee_email"] = res.email
+            ctx["resource_id"] = res.id
+            if res.cost_center:
+                ctx["cost_center_name"] = res.cost_center.name
+                ctx["cost_center_id"] = res.cost_center_id
+        prj = project or actual.project
+        if prj:
+            ctx["project_name"] = prj.name
+            ctx["project_id"] = prj.id
+        return ctx

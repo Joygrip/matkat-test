@@ -339,6 +339,7 @@ export interface AuditLogEntry {
   new_values: string | null;
   reason: string | null;
   ip_address: string | null;
+  details: string | null;
 }
 
 export interface AuditLogResponse {

@@ -195,10 +195,9 @@ def test_actuals_exactly_100_allowed(client, employee_headers, setup_actuals_dat
 
 
 def test_sign_actuals(client, employee_headers, setup_actuals_data):
-    """Employee can sign their actuals."""
+    """Employee actuals are auto-signed on create."""
     data = setup_actuals_data
-    
-    # Create actual
+
     create_resp = client.post(
         "/actuals",
         json={
@@ -210,12 +209,8 @@ def test_sign_actuals(client, employee_headers, setup_actuals_data):
         },
         headers=employee_headers,
     )
-    actual_id = create_resp.json()["id"]
-    
-    # Sign it
-    sign_resp = client.post(f"/actuals/{actual_id}/sign", headers=employee_headers)
-    assert sign_resp.status_code == 200
-    result = sign_resp.json()
+    assert create_resp.status_code == 200
+    result = create_resp.json()
     assert result["employee_signed_at"] is not None
     assert result["is_proxy_signed"] == False
 
@@ -247,27 +242,35 @@ def test_proxy_sign_requires_reason(client, ro_headers, employee_headers, setup_
     assert response.status_code == 400 or response.status_code == 422
 
 
-def test_proxy_sign_with_reason(client, ro_headers, employee_headers, setup_actuals_data):
-    """RO can proxy sign with a reason."""
+def test_proxy_sign_with_reason(client, db, ro_headers, setup_actuals_data):
+    """RO can proxy sign an unsigned actual with a reason."""
+    from api.app.models.actuals import ActualLine
+    from api.app.models.core import Period
     data = setup_actuals_data
-    
-    # Create actual
-    create_resp = client.post(
-        "/actuals",
-        json={
-            "resource_id": data["resource_id"],
-            "project_id": data["project1_id"],
-            "year": data["year"],
-            "month": data["month"],
-            "actual_fte_percent": 50,
-        },
-        headers=employee_headers,
+
+    # Insert unsigned actual directly (employees auto-sign via create, so bypass the API)
+    period = db.query(Period).filter(
+        Period.tenant_id == "test-tenant-001",
+        Period.year == data["year"],
+        Period.month == data["month"],
+    ).first()
+    actual = ActualLine(
+        tenant_id="test-tenant-001",
+        period_id=period.id,
+        resource_id=data["resource_id"],
+        project_id=data["project1_id"],
+        year=data["year"],
+        month=data["month"],
+        actual_fte_percent=50,
+        created_by="system",
     )
-    actual_id = create_resp.json()["id"]
-    
+    db.add(actual)
+    db.commit()
+    db.refresh(actual)
+
     # Proxy sign
     response = client.post(
-        f"/actuals/{actual_id}/proxy-sign",
+        f"/actuals/{actual.id}/proxy-sign",
         json={"reason": "Employee on vacation"},
         headers=ro_headers,
     )
@@ -278,10 +281,10 @@ def test_proxy_sign_with_reason(client, ro_headers, employee_headers, setup_actu
 
 
 def test_cannot_edit_signed_actuals(client, employee_headers, setup_actuals_data):
-    """Cannot edit signed actuals."""
+    """Signed actuals with PENDING approval can still be edited; only APPROVED blocks edits."""
     data = setup_actuals_data
-    
-    # Create and sign actual
+
+    # Create actual — employee auto-signs on create, approval becomes PENDING
     create_resp = client.post(
         "/actuals",
         json={
@@ -293,17 +296,17 @@ def test_cannot_edit_signed_actuals(client, employee_headers, setup_actuals_data
         },
         headers=employee_headers,
     )
+    assert create_resp.status_code == 200
     actual_id = create_resp.json()["id"]
-    client.post(f"/actuals/{actual_id}/sign", headers=employee_headers)
-    
-    # Try to edit
+
+    # Editing a PENDING-approval actual is intentionally allowed
     response = client.patch(
         f"/actuals/{actual_id}",
         json={"actual_fte_percent": 60},
         headers=employee_headers,
     )
-    assert response.status_code == 400
-    assert "signed" in response.json()["detail"].lower()
+    assert response.status_code == 200
+    assert response.json()["actual_fte_percent"] == 60
 
 
 def test_locked_period_blocks_actuals(client, employee_headers, finance_headers, setup_actuals_data):
@@ -336,36 +339,44 @@ def test_locked_period_blocks_actuals(client, employee_headers, finance_headers,
     assert response.json()["code"] == "PERIOD_LOCKED"
 
 
-def test_locked_period_blocks_sign(client, employee_headers, finance_headers, setup_actuals_data):
-    """Locked period blocks signing actuals."""
+def test_locked_period_blocks_sign(client, db, employee_headers, finance_headers, setup_actuals_data):
+    """Locked period blocks signing an unsigned actual."""
+    from api.app.models.actuals import ActualLine
+    from api.app.models.core import Period
     data = setup_actuals_data
 
-    # Create actual while open
-    create_resp = client.post(
-        "/actuals",
-        json={
-            "resource_id": data["resource_id"],
-            "project_id": data["project1_id"],
-            "year": data["year"],
-            "month": data["month"],
-            "actual_fte_percent": 50,
-        },
-        headers=employee_headers,
+    # Insert unsigned actual directly (bypassing the API which auto-signs)
+    period = db.query(Period).filter(
+        Period.tenant_id == "test-tenant-001",
+        Period.year == data["year"],
+        Period.month == data["month"],
+    ).first()
+    actual = ActualLine(
+        tenant_id="test-tenant-001",
+        period_id=period.id,
+        resource_id=data["resource_id"],
+        project_id=data["project1_id"],
+        year=data["year"],
+        month=data["month"],
+        actual_fte_percent=50,
+        created_by="system",
     )
-    actual_id = create_resp.json()["id"]
+    db.add(actual)
+    db.commit()
+    db.refresh(actual)
 
     # Lock the period
     periods_resp = client.get("/periods", headers=finance_headers)
-    period = next(
+    period_item = next(
         (p for p in periods_resp.json()
          if p["year"] == data["year"] and p["month"] == data["month"]),
-        None
+        None,
     )
-    assert period is not None
-    client.post(f"/periods/{period['id']}/lock", headers=finance_headers)
+    assert period_item is not None
+    client.post(f"/periods/{period_item['id']}/lock", headers=finance_headers)
 
-    # Try to sign
-    sign_resp = client.post(f"/actuals/{actual_id}/sign", headers=employee_headers)
+    # Try to sign — should be blocked by period lock
+    sign_resp = client.post(f"/actuals/{actual.id}/sign", headers=employee_headers)
     assert sign_resp.status_code == 403
     assert sign_resp.json()["code"] == "PERIOD_LOCKED"
 

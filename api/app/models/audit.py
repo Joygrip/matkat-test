@@ -22,4 +22,5 @@ class AuditLog(Base):
     new_values: Mapped[str] = mapped_column(Text, nullable=True)  # JSON string
     reason: Mapped[str] = mapped_column(Text, nullable=True)
     ip_address: Mapped[str] = mapped_column(String(64), nullable=True)
+    details: Mapped[str] = mapped_column(Text, nullable=True)  # JSON: enriched business context
 

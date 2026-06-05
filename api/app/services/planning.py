@@ -29,12 +29,39 @@ def get_4mfc_boundary() -> tuple[int, int]:
 def is_within_4mfc(year: int, month: int) -> bool:
     """Check if a given year/month is within the 4MFC window."""
     boundary_year, boundary_month = get_4mfc_boundary()
-    
+
     # Convert to comparable values (year * 12 + month)
     target = year * 12 + month
     boundary = boundary_year * 12 + boundary_month
-    
+
     return target < boundary
+
+
+def _build_demand_line_ctx(demand: "DemandLine", project=None, resource=None, placeholder=None) -> dict:
+    """Build enriched audit context for a DemandLine action (write-time denormalization)."""
+    ctx: dict = {
+        "demand_line_id": demand.id,
+        "year": demand.year,
+        "month": demand.month,
+        "fte_percent": demand.fte_percent,
+    }
+    prj = project or demand.project
+    if prj:
+        ctx["project_name"] = prj.name
+        ctx["project_id"] = prj.id
+    res = resource or demand.resource
+    if res:
+        ctx["resource_name"] = res.display_name
+        ctx["resource_email"] = res.email
+        ctx["resource_id"] = res.id
+        if res.cost_center:
+            ctx["cost_center_name"] = res.cost_center.name
+            ctx["cost_center_id"] = res.cost_center_id
+    ph = placeholder or demand.placeholder
+    if ph:
+        ctx["placeholder_name"] = ph.name
+        ctx["placeholder_id"] = ph.id
+    return ctx
 
 
 class DemandService:
@@ -348,9 +375,10 @@ class DemandService:
                 "year": year,
                 "month": month,
                 "fte_percent": fte_percent,
-            }
+            },
+            details=_build_demand_line_ctx(demand, project=project, resource=resource, placeholder=placeholder),
         )
-        
+
         return demand
     
     def update(self, demand_id: str, fte_percent: int, resource_id: str | None = None, placeholder_id: str | None = None) -> DemandLine:
@@ -461,6 +489,7 @@ class DemandService:
             entity_id=demand.id,
             old_values=old_values,
             new_values={"fte_percent": fte_percent, "resource_id": demand.resource_id, "placeholder_id": demand.placeholder_id},
+            details=_build_demand_line_ctx(demand),
         )
 
         return demand

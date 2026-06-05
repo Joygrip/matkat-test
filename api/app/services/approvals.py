@@ -12,7 +12,7 @@ from api.app.models.approvals import (
     ApprovalStatus, StepStatus,
 )
 from api.app.models.actuals import ActualLine
-from api.app.models.core import User, Resource, ManagerOverride, ApprovalDelegate
+from api.app.models.core import User, Resource, Project, ManagerOverride, ApprovalDelegate
 from api.app.models.notification_schedule import NotificationSchedule, NotificationScheduleType
 from api.app.auth.dependencies import CurrentUser
 from api.app.services.audit import log_audit
@@ -227,10 +227,18 @@ class ApprovalsService:
             action="approve",
             entity_type="ApprovalStep",
             entity_id=step_id,
+            details=self._build_step_audit_details(
+                step=step,
+                instance=instance,
+                user=user,
+                is_delegated=is_delegated,
+                delegated_for_name=delegated_for_name,
+                approval_status="approved",
+            ),
         )
-        
+
         return instance
-    
+
     def proxy_approve_step1_by_step2(self, instance_id: str, step1_id: str, comment: str) -> ApprovalInstance:
         """Step 2 approver proxy-approves Step 1 on behalf of the direct manager."""
         instance = self.get_by_id(instance_id)
@@ -269,7 +277,21 @@ class ApprovalsService:
         self.db.commit()
         self.db.refresh(instance)
 
-        log_audit(self.db, self.current_user, action="proxy_approve_step1", entity_type="ApprovalStep", entity_id=step1_id)
+        log_audit(
+            self.db, self.current_user,
+            action="proxy_approve_step1",
+            entity_type="ApprovalStep",
+            entity_id=step1_id,
+            details=self._build_step_audit_details(
+                step=step1,
+                instance=instance,
+                user=user,
+                is_delegated=False,
+                delegated_for_name=None,
+                approval_status="proxy_approved",
+                proxy_approver_name=user.display_name,
+            ),
+        )
         return instance
 
     def reject_step(self, instance_id: str, step_id: str, comment: Optional[str] = None) -> ApprovalInstance:
@@ -342,6 +364,14 @@ class ApprovalsService:
             entity_type="ApprovalStep",
             entity_id=step_id,
             reason=comment,
+            details=self._build_step_audit_details(
+                step=step,
+                instance=instance,
+                user=user,
+                is_delegated=is_delegated,
+                delegated_for_name=delegated_for_name,
+                approval_status="rejected",
+            ),
         )
 
         # Fire-and-forget rejection email — runs in background so the user gets an
@@ -537,4 +567,62 @@ class ApprovalsService:
             delegator = self.db.query(User).filter(User.id == step.approver_id).first()
             return True, (delegator.display_name if delegator else None)
         return False, None
+
+    def _build_step_audit_details(
+        self,
+        step: ApprovalStep,
+        instance: ApprovalInstance,
+        user: User,
+        is_delegated: bool,
+        delegated_for_name: Optional[str],
+        approval_status: str,
+        proxy_approver_name: Optional[str] = None,
+    ) -> dict:
+        """Build enriched audit context for an approval step action (write-time denormalization)."""
+        ctx: dict = {
+            "approval_instance_id": instance.id,
+            "approval_step_id": step.id,
+            "approval_step_order": step.step_order,
+            "approval_step_label": f"Step {step.step_order}",
+            "approval_step_name": step.step_name,
+            "approval_status": approval_status,
+            "actor_name": user.display_name,
+            "actor_email": user.email,
+            "acted_as_delegate": is_delegated,
+        }
+        if is_delegated and delegated_for_name:
+            ctx["delegating_manager_name"] = delegated_for_name
+        if proxy_approver_name:
+            ctx["proxy_approver_name"] = proxy_approver_name
+
+        if instance.subject_type == "actuals":
+            actual = self.db.query(ActualLine).filter(
+                ActualLine.id == instance.subject_id
+            ).first()
+            if actual:
+                ctx["actual_line_id"] = actual.id
+                ctx["year"] = actual.year
+                ctx["month"] = actual.month
+                ctx["actual_fte_percent"] = actual.actual_fte_percent
+                ctx["planned_fte_percent"] = actual.planned_fte_percent
+
+                resource = self.db.query(Resource).filter(
+                    Resource.id == actual.resource_id
+                ).first()
+                if resource:
+                    ctx["employee_name"] = resource.display_name
+                    ctx["employee_email"] = resource.email
+                    ctx["resource_id"] = resource.id
+                    if resource.cost_center:
+                        ctx["cost_center_name"] = resource.cost_center.name
+                        ctx["cost_center_id"] = resource.cost_center_id
+
+                project = self.db.query(Project).filter(
+                    Project.id == actual.project_id
+                ).first()
+                if project:
+                    ctx["project_name"] = project.name
+                    ctx["project_id"] = project.id
+
+        return ctx
 

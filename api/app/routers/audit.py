@@ -101,6 +101,7 @@ def list_audit_logs(
                 "new_values": log.new_values,
                 "reason": log.reason,
                 "ip_address": log.ip_address,
+                "details": log.details,
             }
             for log in rows
         ],

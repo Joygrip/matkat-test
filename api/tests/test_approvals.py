@@ -106,7 +106,7 @@ def test_full_approval_workflow(client, db):
     db.add(project)
     db.commit()
     
-    # Create and sign actuals as employee (triggers approval instance)
+    # Create actuals as employee — auto-signed on create, approval instance is created
     employee_headers = {"X-Dev-Role": "Employee", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": "employee-oid"}
     create_resp = client.post(
         "/actuals",
@@ -119,9 +119,7 @@ def test_full_approval_workflow(client, db):
         },
         headers=employee_headers,
     )
-    actual_id = create_resp.json()["id"]
-    sign_resp = client.post(f"/actuals/{actual_id}/sign", headers=employee_headers)
-    assert sign_resp.status_code == 200
+    assert create_resp.status_code == 200
 
     # Manager (step 1) should see approval in inbox
     manager_headers = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": "ro-oid"}
@@ -227,7 +225,7 @@ def test_skip_director_when_ro_equals_director(client, db):
     
     db.commit()
     
-    # Create and sign actuals as employee (triggers approval instance)
+    # Create actuals as employee — auto-signed on create, approval instance is created
     employee_headers = {"X-Dev-Role": "Employee", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": "employee-oid"}
     create_resp = client.post(
         "/actuals",
@@ -240,9 +238,7 @@ def test_skip_director_when_ro_equals_director(client, db):
         },
         headers=employee_headers,
     )
-    actual_id = create_resp.json()["id"]
-    sign_resp = client.post(f"/actuals/{actual_id}/sign", headers=employee_headers)
-    assert sign_resp.status_code == 200
+    assert create_resp.status_code == 200
 
     # When manager approves, the whole instance should be approved (Senior Manager skipped)
     headers = {"X-Dev-Role": "Manager", "X-Dev-Tenant": tenant_id, "X-Dev-User-Id": "ro-director-oid"}

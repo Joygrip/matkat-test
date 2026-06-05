@@ -26,10 +26,11 @@ def log_audit(
     new_values: Optional[dict[str, Any]] = None,
     reason: Optional[str] = None,
     ip_address: Optional[str] = None,
+    details: Optional[dict[str, Any]] = None,
 ) -> AuditLog:
     """
     Create an audit log entry.
-    
+
     Args:
         db: Database session
         current_user: Current authenticated user
@@ -40,6 +41,7 @@ def log_audit(
         new_values: New values (for creates/updates)
         reason: Reason for the action (required for some actions)
         ip_address: Client IP address
+        details: Enriched business context (denormalized at write time)
     """
     audit = AuditLog(
         tenant_id=current_user.tenant_id,
@@ -52,6 +54,7 @@ def log_audit(
         new_values=json.dumps(new_values, cls=_AuditEncoder) if new_values else None,
         reason=reason,
         ip_address=ip_address,
+        details=json.dumps(details, cls=_AuditEncoder) if details else None,
     )
     db.add(audit)
     db.commit()

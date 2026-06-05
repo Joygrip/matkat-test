@@ -89,16 +89,14 @@ class DemandService:
                 },
             )
 
-    def _get_scoped_resource_ids(self) -> Optional[list[str]]:
-        """
-        Return the list of resource IDs the current user may access, or None
-        if the user has unscoped (full-tenant) access.
+    def _get_scoped_resource_ids(self, for_write: bool = False) -> Optional[list[str]]:
+        """Return the list of resource IDs the current user may access, or None for full access.
         Includes resources accessible via active delegation grants.
-        Manager+Reader bypasses CC scoping for reads.
+        Manager+Reader bypasses CC scoping for reads; for_write=True preserves write guards.
         """
         if self.current_user.role not in _SCOPED_ROLES:
             return None
-        if self.current_user.is_manager_reader:
+        if not for_write and self.current_user.is_manager_reader:
             return None
         from api.app.services.reporting import ReportingService
         svc = ReportingService(self.db, self.current_user)
@@ -1221,6 +1219,11 @@ class SupplyService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "NOT_FOUND", "message": "Supply line not found"}
             )
+
+        # Enforce write-scope regardless of read-expanded role (e.g. Manager+Reader).
+        # get_by_id uses read-scope (for_write=False) and can surface out-of-scope rows
+        # for Manager+Reader; this explicit check closes that gap for single-delete.
+        self._check_ro_resource_authorized(supply.resource_id)
 
         # Check period is open
         self._check_period_open(supply.year, supply.month)

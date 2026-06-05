@@ -135,3 +135,20 @@ def director_headers():
         "X-Dev-Email": "director@test.com",
         "X-Dev-Name": "Senior Manager User",
     }
+
+
+@pytest.fixture
+def manager_reader_headers():
+    """Headers for Manager+Reader user (Manager with secondary_role=Reader).
+
+    Uses X-Dev-Secondary-Role so the dev bypass sets secondary_role on the DB user,
+    making is_manager_reader=True for all requests with these headers.
+    """
+    return {
+        "X-Dev-Role": "Manager",
+        "X-Dev-Secondary-Role": "Reader",
+        "X-Dev-Tenant": "test-tenant-001",
+        "X-Dev-User-Id": "manager-reader-001",
+        "X-Dev-Email": "manager.reader@test.com",
+        "X-Dev-Name": "Manager Reader User",
+    }

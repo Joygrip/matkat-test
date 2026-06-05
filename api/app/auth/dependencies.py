@@ -96,6 +96,9 @@ async def get_current_user(
         dev_user_id = request.headers.get("X-Dev-User-Id", "dev-user-001")
         dev_email = request.headers.get("X-Dev-Email", "dev@example.com")
         dev_name = request.headers.get("X-Dev-Name", "Dev User")
+        # Optional header for test fixtures: set secondary_role directly without DB admin call.
+        # Empty string clears secondary_role; omitting the header leaves the existing DB value.
+        dev_secondary_role_header = request.headers.get("X-Dev-Secondary-Role", None)
 
         try:
             role = UserRole(dev_role)
@@ -114,6 +117,8 @@ async def get_current_user(
             db_user.display_name = dev_name
             db_user.role = role
             db_user.is_active = True
+            if dev_secondary_role_header is not None:
+                db_user.secondary_role = dev_secondary_role_header or None
             db.commit()
         else:
             db_user = User(
@@ -122,6 +127,7 @@ async def get_current_user(
                 email=dev_email,
                 display_name=dev_name,
                 role=role,
+                secondary_role=dev_secondary_role_header or None,
                 is_active=True,
             )
             db.add(db_user)
@@ -134,7 +140,7 @@ async def get_current_user(
             email=dev_email,
             display_name=dev_name,
             role=role,
-            secondary_role=db_user.secondary_role if db_user else None,
+            secondary_role=db_user.secondary_role,
         )
 
     # ------------------------------------------------------------------

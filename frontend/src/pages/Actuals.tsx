@@ -385,7 +385,7 @@ export const Actuals: React.FC = () => {
     try {
       setLoading(true);
       const resourcesData = await (isManager
-        ? lookupsApi.listResourcesScoped()
+        ? lookupsApi.listResourcesScoped({ forWrite: true })
         : lookupsApi.listResources());
       setResources(resourcesData);
     } catch (err: unknown) {

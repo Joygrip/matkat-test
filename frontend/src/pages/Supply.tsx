@@ -399,7 +399,7 @@ export const Supply: React.FC = () => {
     try {
       setLoading(true);
       const resourcesData = await (user?.role === 'Manager'
-        ? lookupsApi.listResourcesScoped()
+        ? lookupsApi.listResourcesScoped({ forWrite: true })
         : lookupsApi.listResources());
       setResources(resourcesData);
     } catch (err: unknown) {

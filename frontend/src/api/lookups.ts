@@ -33,9 +33,12 @@ export const lookupsApi = {
     return apiClient.get<Project[]>('/lookups/projects/scoped');
   },
 
-  listResourcesScoped: async (costCenterId?: string): Promise<Resource[]> => {
+  listResourcesScoped: async (
+    options?: { costCenterId?: string; forWrite?: boolean }
+  ): Promise<Resource[]> => {
     const params = new URLSearchParams();
-    if (costCenterId) params.set('cost_center_id', costCenterId);
+    if (options?.costCenterId) params.set('cost_center_id', options.costCenterId);
+    if (options?.forWrite) params.set('for_write', 'true');
     const qs = params.toString();
     return apiClient.get<Resource[]>(`/lookups/resources/scoped${qs ? `?${qs}` : ''}`);
   },

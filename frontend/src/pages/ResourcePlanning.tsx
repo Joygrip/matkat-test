@@ -702,6 +702,18 @@ export const ResourcePlanning: React.FC = () => {
               <strong>
                 Resource Planning Matrix ({filteredDemandLines.length} demand / {filteredSupplyLines.length} supply lines)
               </strong>
+              {isManagerReader && (
+                <span style={{
+                  display: 'inline-block', marginLeft: 10,
+                  fontSize: 11, fontWeight: 600,
+                  padding: '2px 7px', borderRadius: 4,
+                  backgroundColor: '#fff8e6', color: '#7a5900',
+                  border: '1px solid #f0d060',
+                  verticalAlign: 'middle',
+                }}>
+                  Company view · Reader access
+                </span>
+              )}
             </Body1>
           }
         />

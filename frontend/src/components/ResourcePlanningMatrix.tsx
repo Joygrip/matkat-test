@@ -967,7 +967,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setMoveSupplyProjectsLoading(true);
     try {
       const [resources, projects] = await Promise.all([
-        lookupsApi.listResourcesScoped(),
+        lookupsApi.listResourcesScoped({ forWrite: true }),
         lookupsApi.listProjects(),
       ]);
       setMoveSupplyAllResources(resources);

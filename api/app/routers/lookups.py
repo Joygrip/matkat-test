@@ -211,13 +211,16 @@ async def list_projects_scoped(
 @router.get("/resources/scoped", response_model=list[ResourceResponse])
 async def list_resources_scoped(
     cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
+    for_write: bool = Query(False, description="When true, Manager+Reader is scoped identically to a plain Manager (write-intent pickers)"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER)),
 ):
     """
     Resources scoped to the current user's reporting line:
-    - RO/Director: only resources in their org hierarchy
-    - Admin/Finance: all active resources
+    - Manager: only resources in their CC hierarchy + delegations
+    - Manager+Reader, for_write=False: all active resources (read-expanded)
+    - Manager+Reader, for_write=True: scoped identically to plain Manager (write intent)
+    - Admin/Finance: all active resources regardless of for_write
     """
     query = db.query(Resource).filter(
         and_(
@@ -229,7 +232,9 @@ async def list_resources_scoped(
         query = query.filter(Resource.cost_center_id == cost_center_id)
     settings = get_settings()
     query = _apply_planning_exclusions(query, settings.planning_excluded_countries_list, settings.planning_excluded_email_prefixes_list)
-    if current_user.role in _SCOPED_ROLES and not current_user.is_manager_reader:
+    # Apply scope when: user is a Manager AND (for_write=True OR not is_manager_reader).
+    # for_write=True overrides the Manager+Reader read-expansion so write pickers stay correctly scoped.
+    if current_user.role in _SCOPED_ROLES and (for_write or not current_user.is_manager_reader):
         from api.app.services.reporting import ReportingService
         _rs = ReportingService(db, current_user)
         scoped_ids = list(_rs.get_accessible_resource_ids())
@@ -242,9 +247,7 @@ async def list_resources_scoped(
                 if _rid not in scoped_ids:
                     scoped_ids.append(_rid)
         # Also include the manager's own resource so they can enter their own actuals
-        mgr_user = db.query(User).filter(
-            and_(User.tenant_id == current_user.tenant_id, User.object_id == current_user.object_id)
-        ).first()
+        mgr_user = _cur_user
         if mgr_user:
             own_resource = db.query(Resource).filter(
                 and_(

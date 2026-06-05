@@ -961,6 +961,9 @@ class ActualsService:
 
         self._check_employee_owns_resource(actual.resource_id)
         self._check_pm_owns_resource(actual.resource_id)
+        # Router allows Manager role; enforce write-scope so Manager+Reader cannot
+        # resubmit actuals for employees outside their cost-center/delegation scope.
+        self._check_manager_resource_access(actual.resource_id)
         self._check_period_open(actual.year, actual.month)
 
         instance = self.db.query(ApprovalInstance).filter(

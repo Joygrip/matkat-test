@@ -34,7 +34,6 @@ def upgrade() -> None:
                     FROM finance_settings fs
                     WHERE fs.tenant_id = periods.tenant_id
                       AND fs.setting_key = 'monthly_fte_cost'
-                    LIMIT 1
                 ),
                 99000
             )
@@ -44,7 +43,11 @@ def upgrade() -> None:
     )
 
     with op.batch_alter_table("periods") as batch_op:
-        batch_op.alter_column("monthly_fte_cost", nullable=False)
+        batch_op.alter_column(
+            "monthly_fte_cost",
+            existing_type=sa.Integer(),
+            nullable=False,
+        )
 
 
 def downgrade() -> None:

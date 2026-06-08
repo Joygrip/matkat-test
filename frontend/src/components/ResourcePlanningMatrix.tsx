@@ -823,15 +823,14 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     await Promise.all(promises);
   }, [ccResources, ccPlaceholders]);
 
-  const handleExpandCC = useCallback(async (ccId: string) => {
+  const handleExpandCC = useCallback((ccId: string) => {
     setExpandedCCs(prev => {
       const next = new Set(prev);
       if (next.has(ccId)) { next.delete(ccId); return next; }
       next.add(ccId);
       return next;
     });
-    await loadCcData(ccId);
-  }, [loadCcData]);
+  }, []);
 
   const saveDemandCell = useCallback(async (
     cellKey: string,
@@ -2269,7 +2268,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                     })}
 
                     {/* Add demand line */}
-                    {canEditDemand && (
+                    {canEditDemand && (!editableCcIds || editableCcIds.has(group.ccId)) && (
                       <tr className={styles.addLineRow}>
                         <td
                           className={styles.addLineCell}
@@ -2409,7 +2408,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                     )}
 
                     {/* Add supply line */}
-                    {canEditSupply && (
+                    {canEditSupply && (!editableCcIds || editableCcIds.has(group.ccId)) && (
                       <tr className={styles.addLineRow}>
                         <td
                           className={styles.addLineCell}

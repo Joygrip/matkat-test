@@ -74,3 +74,5 @@ logs/
 frontend/.env.production
 infra/prod.parameters.json
 infra/dev.parameters.json
+infra/dev.parameters.json
+infra/prod.parameters.json

@@ -1,6 +1,7 @@
 /**
  * Main App component with routing.
  */
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Spinner, makeStyles } from '@fluentui/react-components';
 import { useAuth } from './auth/AuthProvider';
@@ -9,15 +10,18 @@ import { PeriodProvider } from './contexts/PeriodContext';
 import { AppDataProvider } from './contexts/AppDataContext';
 import { AppShell } from './components/AppShell';
 import { DevLoginPanel } from './components/DevLoginPanel';
-import { Dashboard } from './pages/Dashboard';
-import { ResourcePlanning } from './pages/ResourcePlanning';
-import { Actuals } from './pages/Actuals';
-import { Admin } from './pages/Admin';
-import { Finance } from './pages/Finance';
-import { AuditLogs } from './pages/AuditLogs';
-import { ProjectCosts } from './pages/ProjectCosts';
-import { FteInput } from './pages/FteInput';
 import { config } from './config';
+
+// Route-level lazy loading — each page is a separate JS chunk loaded on demand.
+// Pages with a default export use the direct form; named-export-only pages use .then().
+const Dashboard = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })));
+const ResourcePlanning = lazy(() => import('./pages/ResourcePlanning'));
+const Actuals = lazy(() => import('./pages/Actuals'));
+const Admin = lazy(() => import('./pages/Admin').then((m) => ({ default: m.Admin })));
+const Finance = lazy(() => import('./pages/Finance'));
+const AuditLogs = lazy(() => import('./pages/AuditLogs'));
+const ProjectCosts = lazy(() => import('./pages/ProjectCosts').then((m) => ({ default: m.ProjectCosts })));
+const FteInput = lazy(() => import('./pages/FteInput').then((m) => ({ default: m.FteInput })));
 
 // Employees manage actuals via the Dashboard; redirect them if they navigate here directly
 function ActualsRoute() {
@@ -155,22 +159,24 @@ function App() {
       <PeriodProvider>
       <AppDataProvider>
       <AppShell>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/resource-planning" element={<ResourcePlanning />} />
-          <Route path="/demand" element={<Navigate to="/resource-planning" replace />} />
-          <Route path="/supply" element={<Navigate to="/resource-planning" replace />} />
-          <Route path="/actuals" element={<ActualsRoute />} />
-          <Route path="/fte-input" element={<FteInputRoute />} />
-          <Route path="/finance" element={<Finance />} />
-          {/* Redirects for old routes */}
-          <Route path="/finance-dashboard" element={<Navigate to="/finance" replace />} />
-          <Route path="/consolidation" element={<Navigate to="/finance" replace />} />
-          <Route path="/admin" element={<Admin />} />
-          <Route path="/project-costs" element={<ProjectCosts />} />
-          <Route path="/audit-logs" element={<AuditLogs />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<Spinner size="large" label="Loading..." />}>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/resource-planning" element={<ResourcePlanning />} />
+            <Route path="/demand" element={<Navigate to="/resource-planning" replace />} />
+            <Route path="/supply" element={<Navigate to="/resource-planning" replace />} />
+            <Route path="/actuals" element={<ActualsRoute />} />
+            <Route path="/fte-input" element={<FteInputRoute />} />
+            <Route path="/finance" element={<Finance />} />
+            {/* Redirects for old routes */}
+            <Route path="/finance-dashboard" element={<Navigate to="/finance" replace />} />
+            <Route path="/consolidation" element={<Navigate to="/finance" replace />} />
+            <Route path="/admin" element={<Admin />} />
+            <Route path="/project-costs" element={<ProjectCosts />} />
+            <Route path="/audit-logs" element={<AuditLogs />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </AppShell>
       </AppDataProvider>
       </PeriodProvider>

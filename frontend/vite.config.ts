@@ -10,6 +10,19 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/@fluentui')) return 'vendor-fluent';
+          if (id.includes('node_modules/recharts')) return 'vendor-charts';
+          if (id.includes('node_modules/@azure/msal-browser') || id.includes('node_modules/@azure/msal-react')) return 'vendor-auth';
+          if (id.includes('node_modules/react-dom') || id.includes('node_modules/react-router') || id.includes('node_modules/react/') || id.includes('node_modules/scheduler') || id.includes('node_modules/history') || id.includes('node_modules/@remix-run')) return 'vendor-react';
+          if (id.includes('node_modules')) return 'vendor';
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

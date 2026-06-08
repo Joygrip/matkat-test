@@ -1275,11 +1275,12 @@ class SupplyService:
     def delete_group(
         self,
         resource_id: str,
-        project_id: str,
+        project_id: Optional[str],
         period_ids: list[str],
     ) -> int:
         """Delete all supply lines for a resource + project across the given periods.
 
+        project_id may be None for General availability supply lines (project_id IS NULL).
         Validates all periods are open before deleting any row (all-or-nothing).
         Returns the count of deleted rows.
         """
@@ -1296,18 +1297,19 @@ class SupplyService:
                 detail={"code": "NOT_FOUND", "message": "Resource not found"},
             )
 
-        # Validate project exists within tenant
-        project = self.db.query(Project).filter(
-            and_(
-                Project.id == project_id,
-                Project.tenant_id == self.current_user.tenant_id,
-            )
-        ).first()
-        if not project:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "NOT_FOUND", "message": "Project not found"},
-            )
+        # Validate project exists within tenant (skip for General availability)
+        if project_id:
+            project = self.db.query(Project).filter(
+                and_(
+                    Project.id == project_id,
+                    Project.tenant_id == self.current_user.tenant_id,
+                )
+            ).first()
+            if not project:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "NOT_FOUND", "message": "Project not found"},
+                )
 
         # Manager: only manage supply for resources in their cost center scope
         self._check_ro_resource_authorized(resource_id)
@@ -1339,12 +1341,16 @@ class SupplyService:
                     },
                 )
 
-        # Fetch matching supply lines
+        # Fetch matching supply lines — use IS NULL for General availability
+        project_filter = (
+            SupplyLine.project_id.is_(None) if project_id is None
+            else SupplyLine.project_id == project_id
+        )
         lines = self.db.query(SupplyLine).filter(
             and_(
                 SupplyLine.tenant_id == self.current_user.tenant_id,
                 SupplyLine.resource_id == resource_id,
-                SupplyLine.project_id == project_id,
+                project_filter,
                 SupplyLine.period_id.in_(period_ids),
             )
         ).all()

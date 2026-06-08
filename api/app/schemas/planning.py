@@ -119,7 +119,7 @@ class SupplyLineResponse(SupplyLineBase):
 class SupplyGroupDeleteRequest(BaseModel):
     """Request body for deleting all supply lines in a resource+project group."""
     resource_id: str
-    project_id: str
+    project_id: Optional[str] = None
     period_ids: List[str]
 
     @field_validator('period_ids')

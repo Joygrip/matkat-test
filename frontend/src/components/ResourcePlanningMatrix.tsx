@@ -937,7 +937,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     try {
       await planningApi.deleteSupplyGroup({
         resource_id: deleteSupplyGroupRow.resourceId || '',
-        project_id: deleteSupplyGroupRow.projectId || '',
+        project_id: deleteSupplyGroupRow.projectId ?? null,
         period_ids: periods.map(p => p.id),
       } as DeleteSupplyGroupRequest);
       setDeleteSupplyGroupRow(null);

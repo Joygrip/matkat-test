@@ -489,7 +489,7 @@ async def delete_supply_group(
     Delete all supply lines for a resource + project combination across the specified periods.
 
     Rules:
-    - resource_id and project_id are required.
+    - resource_id is required; project_id is optional (null = General availability).
     - All periods must be open before any deletion occurs (all-or-nothing).
     - Manager must have supply write access for the resource's cost center.
     - Demand lines and actuals are not affected.

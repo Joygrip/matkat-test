@@ -1,6 +1,7 @@
 """Development-only endpoints. Disabled in production."""
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from api.app.config import get_settings
@@ -46,7 +47,7 @@ def seed_database_for_tenant(db: Session, tenant_id: str) -> str:
     )
     db.add_all([cc_software, cc_infra])
     db.flush()
-    users = [
+    user_defs = [
         User(tenant_id=tenant_id, object_id="admin-001", email="admin@example.com", display_name="Admin User", role=UserRole.ADMIN),
         User(tenant_id=tenant_id, object_id="finance-001", email="finance@example.com", display_name="Finance User", role=UserRole.FINANCE),
         User(tenant_id=tenant_id, object_id="pm-001", email="pm@example.com", display_name="Project Manager", role=UserRole.PM),
@@ -54,9 +55,20 @@ def seed_database_for_tenant(db: Session, tenant_id: str) -> str:
         User(tenant_id=tenant_id, object_id="senior-manager-001", email="seniormanager@example.com", display_name="Senior Manager", role=UserRole.MANAGER, cost_center_id=cc_software.id),
         User(tenant_id=tenant_id, object_id="employee-001", email="employee@example.com", display_name="Employee User", role=UserRole.EMPLOYEE, cost_center_id=cc_software.id),
     ]
+    # Merge: dev-bypass middleware may have already created some users within this request's
+    # session. Upsert by (tenant_id, object_id) to avoid UNIQUE constraint failures.
+    users = []
+    for udef in user_defs:
+        existing = db.query(User).filter(
+            and_(User.tenant_id == udef.tenant_id, User.object_id == udef.object_id)
+        ).first()
+        if existing:
+            users.append(existing)
+        else:
+            db.add(udef)
+            users.append(udef)
     users[5].manager_object_id = users[3].object_id
     users[3].manager_object_id = users[4].object_id
-    db.add_all(users)
     db.flush()
     cc_software.ro_user_id = users[3].id
     cc_software.director_user_id = users[4].id

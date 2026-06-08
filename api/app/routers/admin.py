@@ -1210,7 +1210,12 @@ async def create_delegate(
                 status_code=403,
                 detail={"code": "UNAUTHORIZED_ROLE", "message": "Managers can only delegate their own approvals"},
             )
-        # Always use the Manager's own DB id — ignore whatever delegator_id was sent
+        # Reject if an explicit delegator_id was provided that does not match the calling manager.
+        if data.delegator_id and data.delegator_id != me.id:
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "UNAUTHORIZED_ROLE", "message": "Managers can only delegate their own approvals"},
+            )
         data = data.model_copy(update={"delegator_id": me.id})
     if not data.delegator_id:
         raise HTTPException(status_code=422, detail={"code": "MISSING_FIELD", "message": "delegator_id is required"})

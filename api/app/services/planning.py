@@ -289,6 +289,8 @@ class DemandService:
         self._check_pm_authorized(project)
 
         # Validate resource/placeholder exists
+        resource = None
+        placeholder = None
         if resource_id:
             resource = self.db.query(Resource).filter(
                 and_(

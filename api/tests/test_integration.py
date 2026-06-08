@@ -138,20 +138,14 @@ def test_full_monthly_cycle(client, admin_headers, finance_headers, pm_headers, 
     assert actual_resp.status_code == 200
     actual_id = actual_resp.json()["id"]
 
-    # ── 7. Employee signs actuals ──
-    sign_resp = client.post(
-        f"/actuals/{actual_id}/sign",
-        headers=employee_headers,
-    )
-    assert sign_resp.status_code == 200
-    assert sign_resp.json()["employee_signed_at"] is not None
+    # ── 7. Verify actuals were auto-signed on create (Employee create auto-signs) ──
+    assert actual_resp.json()["employee_signed_at"] is not None
 
     # ── 8. Verify audit trail was generated ──
     audit_resp = client.get("/audit-logs/", headers=admin_headers)
     assert audit_resp.status_code == 200
-    logs = audit_resp.json()
-    # Should have at minimum: cc create, project create, resource create,
-    # actual create, actual sign
+    logs = audit_resp.json()["items"]
+    # Should have at minimum: cc create, project create, resource create, actual create
     assert len(logs) >= 4
 
     actions = [(l["entity_type"], l["action"]) for l in logs]

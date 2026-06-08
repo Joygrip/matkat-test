@@ -6,10 +6,11 @@ import os
 os.environ["ENV"] = "dev"
 os.environ["DEV_AUTH_BYPASS"] = "true"
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
+os.environ["TESTING"] = "true"
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event as sa_event
 from sqlalchemy.orm import sessionmaker
 
 # Clear settings cache in case it was loaded earlier
@@ -31,6 +32,19 @@ engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": Fal
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+@sa_event.listens_for(engine, "connect")
+def _disable_sqlite_fk(dbapi_conn, connection_record):
+    """Disable FK enforcement on every connection from the test engine.
+
+    SQLite cannot determine DROP TABLE order for the users<->cost_centers circular FK.
+    FK is OFF by default in SQLite; this event listener makes it durable across all
+    pool connections so that drop_all works regardless of which connection it picks up.
+    """
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA foreign_keys=OFF")
+    cursor.close()
+
+
 def override_get_db():
     """Override database dependency for tests."""
     db = TestingSessionLocal()
@@ -44,16 +58,22 @@ def override_get_db():
 app.dependency_overrides[get_db] = override_get_db
 
 
+def _drop_all_tables():
+    """Drop all tables. FK enforcement is disabled via the engine-level event listener."""
+    Base.metadata.drop_all(bind=engine)
+
+
 @pytest.fixture(scope="function")
 def db():
     """Create fresh database for each test."""
+    _drop_all_tables()  # ensure clean slate even if a prior run left orphaned tables
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
     try:
         yield db
     finally:
         db.close()
-        Base.metadata.drop_all(bind=engine)
+        _drop_all_tables()
 
 
 @pytest.fixture(scope="function")
@@ -62,7 +82,7 @@ def client(db):
     Base.metadata.create_all(bind=engine)
     with TestClient(app) as c:
         yield c
-    Base.metadata.drop_all(bind=engine)
+    _drop_all_tables()
 
 
 @pytest.fixture

@@ -1,4 +1,5 @@
 """FastAPI Application - Resource Allocation API."""
+import os
 from http import HTTPStatus
 from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -179,7 +180,8 @@ async def startup_event():
             "Set DATABASE_URL to a SQL Server connection string in Azure App Service."
         )
 
-    notification_scheduler.start()
+    if os.getenv("TESTING", "").lower() not in ("1", "true", "yes"):
+        notification_scheduler.start()
 
     if settings.dev_auth_bypass:
         print("WARNING: DEV_AUTH_BYPASS is enabled. Do not use in production!")

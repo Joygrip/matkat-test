@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   makeStyles,
   tokens,
@@ -563,7 +563,7 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
               <tbody>
                 {matrixProjects.map((proj, projIdx) => {
                   return (
-                    <>
+                    <Fragment key={proj.id}>
                       {/* ── DEMAND row ── */}
                       <tr key={`${proj.id}-demand`} className={projIdx > 0 ? styles.matrixGroupBorder : undefined}>
                         <td
@@ -724,7 +724,7 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
                           }
                         })}
                       </tr>
-                    </>
+                    </Fragment>
                   );
                 })}
               </tbody>

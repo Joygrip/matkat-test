@@ -18,8 +18,9 @@ import {
   MenuPopover,
   MenuList,
   MenuItem,
+  Tooltip,
 } from '@fluentui/react-components';
-import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular, MoreVertical16Regular } from '@fluentui/react-icons';
+import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular, MoreHorizontalRegular } from '@fluentui/react-icons';
 import { planningApi, DemandLine, SupplyLine, MoveDemandGroupRequest, DeleteSupplyGroupRequest, MoveSupplyGroupRequest, MoveCapPeriodDetail } from '../api/planning';
 import { ApiError } from '../types';
 import { useToast } from '../hooks/useToast';
@@ -1961,18 +1962,21 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                       {canEditDemand && !row.isGeneral && (
                                         <Menu>
                                           <MenuTrigger disableButtonEnhancement>
-                                            <Button
-                                              size="small"
-                                              appearance="subtle"
-                                              icon={<MoreVertical16Regular />}
-                                              style={{
-                                                visibility: hoveredProject === row.key ? 'visible' : 'hidden',
-                                                flexShrink: 0,
-                                                minWidth: '24px',
-                                                height: '20px',
-                                                padding: 0,
-                                              }}
-                                            />
+                                            <Tooltip content="Demand actions" relationship="label" appearance="inverted" withArrow>
+                                              <Button
+                                                size="small"
+                                                appearance="subtle"
+                                                icon={<MoreHorizontalRegular />}
+                                                aria-label={`Demand actions for ${row.projectName}`}
+                                                style={{
+                                                  opacity: hoveredProject === row.key ? 1 : 0.35,
+                                                  flexShrink: 0,
+                                                  minWidth: '24px',
+                                                  height: '20px',
+                                                  padding: 0,
+                                                }}
+                                              />
+                                            </Tooltip>
                                           </MenuTrigger>
                                           <MenuPopover>
                                             <MenuList>
@@ -2073,18 +2077,21 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                       {canEditSupply && !row.isPlaceholder && (!editableCcIds || editableCcIds.has(group.ccId)) && (
                                         <Menu>
                                           <MenuTrigger disableButtonEnhancement>
-                                            <Button
-                                              size="small"
-                                              appearance="subtle"
-                                              icon={<MoreVertical16Regular />}
-                                              style={{
-                                                visibility: hoveredProject === row.key ? 'visible' : 'hidden',
-                                                flexShrink: 0,
-                                                minWidth: '24px',
-                                                height: '20px',
-                                                padding: 0,
-                                              }}
-                                            />
+                                            <Tooltip content="Supply actions" relationship="label" appearance="inverted" withArrow>
+                                              <Button
+                                                size="small"
+                                                appearance="subtle"
+                                                icon={<MoreHorizontalRegular />}
+                                                aria-label={`Supply actions for ${row.projectName}`}
+                                                style={{
+                                                  opacity: hoveredProject === row.key ? 1 : 0.35,
+                                                  flexShrink: 0,
+                                                  minWidth: '24px',
+                                                  height: '20px',
+                                                  padding: 0,
+                                                }}
+                                              />
+                                            </Tooltip>
                                           </MenuTrigger>
                                           <MenuPopover>
                                             <MenuList>

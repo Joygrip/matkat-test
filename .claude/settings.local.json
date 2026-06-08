@@ -4,7 +4,10 @@
       "Bash(python -m pytest api/tests/test_planning.py::test_create_demand_with_resource -v --no-header)",
       "Bash(python -m pytest api/tests/test_planning.py -v --no-header)",
       "Bash(python -m pytest api/tests/ -v --tb=no -q)",
-      "Bash(python -m pytest api/tests/test_approvals.py::test_delegate_sees_inbox_item api/tests/test_approvals.py::test_delegate_can_approve_step api/tests/test_approvals.py::test_delegate_attribution_in_comment api/tests/test_approvals.py::test_non_delegate_cannot_approve api/tests/test_approvals.py::test_inactive_delegate_cannot_approve api/tests/test_approvals.py::test_delegate_sees_actuals_for_delegators_resources -v --tb=short --log-level=ERROR)"
+      "Bash(python -m pytest api/tests/test_approvals.py::test_delegate_sees_inbox_item api/tests/test_approvals.py::test_delegate_can_approve_step api/tests/test_approvals.py::test_delegate_attribution_in_comment api/tests/test_approvals.py::test_non_delegate_cannot_approve api/tests/test_approvals.py::test_inactive_delegate_cannot_approve api/tests/test_approvals.py::test_delegate_sees_actuals_for_delegators_resources -v --tb=short --log-level=ERROR)",
+      "Bash(npx vite *)",
+      "Bash(python -m pytest -vv --tb=short)",
+      "Bash(python -m pytest api/tests -vv --tb=short)"
     ]
   },
   "enableAllProjectMcpServers": true,

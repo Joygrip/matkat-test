@@ -15,6 +15,7 @@ from typing import Optional, Tuple
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from sqlalchemy import or_, and_
 
 from api.app.auth.dependencies import CurrentUser
 from api.app.db.engine import SessionLocal, _get_or_create_engine
@@ -40,13 +41,36 @@ def _open_session():
 
 
 def _get_open_period(db, tenant_id: str) -> Optional[Tuple[int, int]]:
-    """Return (year, month) of the EARLIEST open period, or None if no open period exists."""
+    """Return (year, month) of the nearest open period >= today.
+
+    Prefers the earliest open period that is current or in the future so that
+    historical open periods (inserted for import purposes) do not hijack
+    date-relative notification triggers.  Falls back to the most recent open
+    period when every open period is in the past.  Returns None when no open
+    period exists at all.
+    """
+    today = date.today()
     period = (
         db.query(Period)
-        .filter(Period.tenant_id == tenant_id, Period.status == PeriodStatus.OPEN)
+        .filter(
+            Period.tenant_id == tenant_id,
+            Period.status == PeriodStatus.OPEN,
+            or_(
+                Period.year > today.year,
+                and_(Period.year == today.year, Period.month >= today.month),
+            ),
+        )
         .order_by(Period.year.asc(), Period.month.asc())
         .first()
     )
+    if period is None:
+        # Every open period is historical — use the most recent one as a fallback.
+        period = (
+            db.query(Period)
+            .filter(Period.tenant_id == tenant_id, Period.status == PeriodStatus.OPEN)
+            .order_by(Period.year.desc(), Period.month.desc())
+            .first()
+        )
     if period:
         return period.year, period.month
     return None

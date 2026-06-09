@@ -14,6 +14,7 @@ import { usePeriod } from '../contexts/PeriodContext';
 import { useAppData } from '../contexts/AppDataContext';
 import { useAuth } from '../auth/AuthProvider';
 import { formatApiError } from '../utils/errors';
+import { getNearestCurrentOrFutureOpenPeriod } from '../utils/periodUtils';
 import { MONTH_NAMES, MONTH_SHORT } from '../utils/format';
 import { SearchableFilter } from '../components/SearchableFilter';
 import { LoadingState } from '../components/LoadingState';
@@ -261,10 +262,12 @@ export const ResourcePlanning: React.FC = () => {
     }).catch(() => {});
   }, [user?.object_id, isAnyManager, isManagerReader, myResource]);
 
-  // Default KPI selection: earliest open period
+  // Default KPI selection: nearest current/future open period so that historical
+  // open periods (inserted for import purposes) don't become the default column.
   useEffect(() => {
     if (openPeriods.length > 0 && selectedPeriodIds.size === 0) {
-      setSelectedPeriodIds(new Set([openPeriods[0].id]));
+      const defaultPeriod = getNearestCurrentOrFutureOpenPeriod(openPeriods);
+      if (defaultPeriod) setSelectedPeriodIds(new Set([defaultPeriod.id]));
     }
   }, [openPeriods]);
 

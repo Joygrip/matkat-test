@@ -1827,7 +1827,12 @@ export function Admin() {
   };
 
   const handleDelete = async (item: unknown) => {
-    if (!confirm('Are you sure you want to delete this item?')) return;
+    let confirmMessage = 'Are you sure you want to delete this item?';
+    if (selectedTab === 'projects') {
+      const p = item as Project;
+      confirmMessage = `Permanently delete project "${p.name}"?\n\nThis will permanently delete the project and all demand, supply, actuals, OoP, and equipment data linked to it. This cannot be undone.`;
+    }
+    if (!confirm(confirmMessage)) return;
     try {
       switch (selectedTab) {
         case 'cost-centers':

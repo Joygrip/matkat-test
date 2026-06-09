@@ -1,4 +1,5 @@
 """Tests for admin CRUD endpoints."""
+from datetime import datetime
 
 
 # ============== ROLE GUARDS ==============
@@ -572,3 +573,324 @@ def test_admin_can_delete_delegate(client, admin_headers, db):
     get_resp = client.get("/admin/delegates", headers=admin_headers)
     ids = [d["id"] for d in get_resp.json()]
     assert "adm-grant-2" not in ids
+
+
+# ============== PROJECT HARD DELETE TESTS ==============
+
+def _make_project_delete_setup(client, admin_headers, finance_headers, db):
+    """Helper: create CC, resource, project, period. Returns dict of IDs."""
+    cc_resp = client.post(
+        "/admin/cost-centers",
+        json={"code": "CC-DEL", "name": "Delete Test CC"},
+        headers=admin_headers,
+    )
+    cc_id = cc_resp.json()["id"]
+
+    resource_resp = client.post(
+        "/admin/resources",
+        json={"cost_center_id": cc_id, "employee_id": "EMP-DEL", "display_name": "Delete Resource"},
+        headers=admin_headers,
+    )
+    resource_id = resource_resp.json()["id"]
+
+    project_resp = client.post(
+        "/admin/projects",
+        json={"code": "PRJ-DEL", "name": "Delete Me Project"},
+        headers=admin_headers,
+    )
+    project_id = project_resp.json()["id"]
+
+    # Second project – must not be affected by deleting the first
+    other_resp = client.post(
+        "/admin/projects",
+        json={"code": "PRJ-OTHER", "name": "Other Project"},
+        headers=admin_headers,
+    )
+    other_project_id = other_resp.json()["id"]
+
+    now = datetime.utcnow()
+    period_resp = client.post(
+        "/periods",
+        json={"year": now.year, "month": now.month},
+        headers=finance_headers,
+    )
+    period_id = period_resp.json()["id"]
+
+    return {
+        "cc_id": cc_id,
+        "resource_id": resource_id,
+        "project_id": project_id,
+        "other_project_id": other_project_id,
+        "period_id": period_id,
+        "year": now.year,
+        "month": now.month,
+    }
+
+
+def test_delete_project_no_children(client, admin_headers, finance_headers, db):
+    """Deleting a project with no child data actually removes the project row."""
+    s = _make_project_delete_setup(client, admin_headers, finance_headers, db)
+
+    resp = client.delete(f"/admin/projects/{s['project_id']}", headers=admin_headers)
+    assert resp.status_code == 200
+
+    # Project row must be gone — GET returns 404
+    get_resp = client.get(f"/admin/projects/{s['project_id']}", headers=admin_headers)
+    assert get_resp.status_code == 404
+
+
+def test_delete_project_removes_demand_lines(client, admin_headers, finance_headers, pm_headers, db):
+    """Deleting a project deletes all its demand lines."""
+    from api.app.models.planning import DemandLine
+    s = _make_project_delete_setup(client, admin_headers, finance_headers, db)
+
+    # Create a demand line directly (bypassing business rules for test speed)
+    demand = DemandLine(
+        tenant_id="test-tenant-001",
+        period_id=s["period_id"],
+        project_id=s["project_id"],
+        resource_id=s["resource_id"],
+        year=s["year"],
+        month=s["month"],
+        fte_percent=50,
+        created_by="admin-001",
+    )
+    db.add(demand)
+    db.commit()
+    demand_id = demand.id
+
+    resp = client.delete(f"/admin/projects/{s['project_id']}", headers=admin_headers)
+    assert resp.status_code == 200
+
+    from api.app.models.planning import DemandLine as DL
+    assert db.query(DL).filter(DL.id == demand_id).first() is None
+
+
+def test_delete_project_removes_supply_lines(client, admin_headers, finance_headers, db):
+    """Deleting a project deletes all its supply lines."""
+    from api.app.models.planning import SupplyLine
+    s = _make_project_delete_setup(client, admin_headers, finance_headers, db)
+
+    supply = SupplyLine(
+        tenant_id="test-tenant-001",
+        period_id=s["period_id"],
+        resource_id=s["resource_id"],
+        project_id=s["project_id"],
+        year=s["year"],
+        month=s["month"],
+        fte_percent=100,
+        created_by="admin-001",
+    )
+    db.add(supply)
+    db.commit()
+    supply_id = supply.id
+
+    resp = client.delete(f"/admin/projects/{s['project_id']}", headers=admin_headers)
+    assert resp.status_code == 200
+
+    from api.app.models.planning import SupplyLine as SL
+    assert db.query(SL).filter(SL.id == supply_id).first() is None
+
+
+def test_delete_project_removes_actual_lines_and_approvals(client, admin_headers, finance_headers, db):
+    """Deleting a project deletes actual lines and any approval instances/steps/actions linked to them."""
+    from api.app.models.actuals import ActualLine
+    from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalAction, ApprovalStatus, StepStatus
+    s = _make_project_delete_setup(client, admin_headers, finance_headers, db)
+
+    actual = ActualLine(
+        tenant_id="test-tenant-001",
+        period_id=s["period_id"],
+        resource_id=s["resource_id"],
+        project_id=s["project_id"],
+        year=s["year"],
+        month=s["month"],
+        actual_fte_percent=50,
+        created_by="admin-001",
+    )
+    db.add(actual)
+    db.commit()
+    actual_id = actual.id
+
+    # Attach an approval workflow to this actual
+    instance = ApprovalInstance(
+        tenant_id="test-tenant-001",
+        subject_type="actuals",
+        subject_id=actual_id,
+        status=ApprovalStatus.PENDING,
+        created_by="admin-001",
+    )
+    db.add(instance)
+    db.commit()
+    instance_id = instance.id
+
+    step = ApprovalStep(
+        instance_id=instance_id,
+        step_order=1,
+        step_name="Manager",
+        status=StepStatus.PENDING,
+    )
+    db.add(step)
+    db.commit()
+    step_id = step.id
+
+    action = ApprovalAction(
+        tenant_id="test-tenant-001",
+        instance_id=instance_id,
+        step_id=step_id,
+        action="approve",
+        performed_by="admin-001",
+    )
+    db.add(action)
+    db.commit()
+    action_id = action.id
+
+    resp = client.delete(f"/admin/projects/{s['project_id']}", headers=admin_headers)
+    assert resp.status_code == 200
+
+    assert db.query(ActualLine).filter(ActualLine.id == actual_id).first() is None
+    assert db.query(ApprovalInstance).filter(ApprovalInstance.id == instance_id).first() is None
+    assert db.query(ApprovalStep).filter(ApprovalStep.id == step_id).first() is None
+    assert db.query(ApprovalAction).filter(ApprovalAction.id == action_id).first() is None
+
+
+def test_delete_project_removes_oop_lines(client, admin_headers, finance_headers, db):
+    """Deleting a project deletes all OoP lines."""
+    from api.app.models.consolidation import OopLine
+    s = _make_project_delete_setup(client, admin_headers, finance_headers, db)
+
+    oop = OopLine(
+        tenant_id="test-tenant-001",
+        period_id=s["period_id"],
+        resource_id=s["resource_id"],
+        project_id=s["project_id"],
+        year=s["year"],
+        month=s["month"],
+        hours=10,
+        hourly_rate=500,
+        total_cost=5000,
+        created_by="admin-001",
+    )
+    db.add(oop)
+    db.commit()
+    oop_id = oop.id
+
+    resp = client.delete(f"/admin/projects/{s['project_id']}", headers=admin_headers)
+    assert resp.status_code == 200
+
+    assert db.query(OopLine).filter(OopLine.id == oop_id).first() is None
+
+
+def test_delete_project_removes_equipment_and_external_lines(client, admin_headers, finance_headers, db):
+    """Deleting a project removes ProjectEquipmentLine and ProjectExternalLine rows."""
+    from api.app.models.project_costs import ProjectEquipmentLine, ProjectExternalLine
+    s = _make_project_delete_setup(client, admin_headers, finance_headers, db)
+
+    equip = ProjectEquipmentLine(
+        tenant_id="test-tenant-001",
+        project_id=s["project_id"],
+        period_id=s["period_id"],
+        description="Test Equipment",
+        cost=10000,
+        created_by="admin-001",
+    )
+    db.add(equip)
+
+    ext = ProjectExternalLine(
+        tenant_id="test-tenant-001",
+        project_id=s["project_id"],
+        period_id=s["period_id"],
+        description="External Vendor",
+        cost=20000,
+        created_by="admin-001",
+    )
+    db.add(ext)
+    db.commit()
+    equip_id = equip.id
+    ext_id = ext.id
+
+    resp = client.delete(f"/admin/projects/{s['project_id']}", headers=admin_headers)
+    assert resp.status_code == 200
+
+    assert db.query(ProjectEquipmentLine).filter(ProjectEquipmentLine.id == equip_id).first() is None
+    assert db.query(ProjectExternalLine).filter(ProjectExternalLine.id == ext_id).first() is None
+
+
+def test_delete_project_does_not_affect_other_project(client, admin_headers, finance_headers, db):
+    """Deleting one project does not delete another project's demand lines or supply lines."""
+    from api.app.models.planning import DemandLine, SupplyLine
+    s = _make_project_delete_setup(client, admin_headers, finance_headers, db)
+
+    other_demand = DemandLine(
+        tenant_id="test-tenant-001",
+        period_id=s["period_id"],
+        project_id=s["other_project_id"],
+        resource_id=s["resource_id"],
+        year=s["year"],
+        month=s["month"],
+        fte_percent=50,
+        created_by="admin-001",
+    )
+    db.add(other_demand)
+    db.commit()
+    other_demand_id = other_demand.id
+
+    # Delete the first project
+    resp = client.delete(f"/admin/projects/{s['project_id']}", headers=admin_headers)
+    assert resp.status_code == 200
+
+    # Other project's demand line must still exist
+    assert db.query(DemandLine).filter(DemandLine.id == other_demand_id).first() is not None
+    # Other project itself must still exist
+    other_get = client.get(f"/admin/projects/{s['other_project_id']}", headers=admin_headers)
+    assert other_get.status_code == 200
+
+
+def test_pm_cannot_delete_project(client, pm_headers, admin_headers, finance_headers, db):
+    """PM does not have permission to delete a project."""
+    s = _make_project_delete_setup(client, admin_headers, finance_headers, db)
+
+    resp = client.delete(f"/admin/projects/{s['project_id']}", headers=pm_headers)
+    assert resp.status_code == 403
+
+    # Project must still exist
+    get_resp = client.get(f"/admin/projects/{s['project_id']}", headers=admin_headers)
+    assert get_resp.status_code == 200
+
+
+def test_delete_nonexistent_project_returns_404(client, admin_headers, db):
+    """Deleting a project that does not exist returns 404."""
+    resp = client.delete("/admin/projects/no-such-project-id", headers=admin_headers)
+    assert resp.status_code == 404
+
+
+def test_delete_project_not_soft_delete(client, admin_headers, finance_headers, db):
+    """DELETE endpoint actually removes the project, not just marks is_active=False."""
+    from api.app.models.core import Project
+    s = _make_project_delete_setup(client, admin_headers, finance_headers, db)
+
+    resp = client.delete(f"/admin/projects/{s['project_id']}", headers=admin_headers)
+    assert resp.status_code == 200
+
+    # The row must be completely gone from the DB
+    row = db.query(Project).filter(Project.id == s["project_id"]).first()
+    assert row is None, "Project row should be deleted, not soft-deleted"
+
+
+def test_set_project_inactive_still_works(client, admin_headers, finance_headers, db):
+    """PATCH to set is_active=False (On Hold) still works independently of DELETE."""
+    s = _make_project_delete_setup(client, admin_headers, finance_headers, db)
+
+    patch_resp = client.patch(
+        f"/admin/projects/{s['project_id']}",
+        json={"is_active": False},
+        headers=admin_headers,
+    )
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["is_active"] is False
+
+    # Project still exists in the DB; it's just inactive
+    from api.app.models.core import Project
+    row = db.query(Project).filter(Project.id == s["project_id"]).first()
+    assert row is not None
+    assert row.is_active is False

@@ -84,6 +84,11 @@ from api.app.models.core import (
     UserRole, User, CostCenter, Project, ProjectPM, Resource, Placeholder, Holiday, Settings,
     ApprovalDelegate, ManagerOverride,
 )
+from api.app.models.planning import DemandLine, SupplyLine
+from api.app.models.actuals import ActualLine
+from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalAction
+from api.app.models.consolidation import OopLine
+from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
 from api.app.schemas.admin import (
     CostCenterCreate, CostCenterUpdate, CostCenterResponse,
     ProjectCreate, ProjectUpdate, ProjectResponse,
@@ -473,16 +478,45 @@ async def delete_project(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(*MASTER_DATA_WRITE_ROLES)),
 ):
-    """Soft delete a project. (Admin, Finance)"""
+    """Hard delete a project and all related data. (Admin, Finance)"""
     project = db.query(Project).filter(
         and_(Project.id == project_id, Project.tenant_id == current_user.tenant_id)
     ).first()
     if not project:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Project not found"})
-    
-    project.is_active = False
+
+    # Collect actual_line IDs so we can delete their approval records first.
+    actual_ids = [
+        row.id for row in
+        db.query(ActualLine.id).filter(ActualLine.project_id == project_id).all()
+    ]
+
+    if actual_ids:
+        # ApprovalInstance links to actual_lines via subject_id (no FK, just a string reference).
+        instance_ids = [
+            row.id for row in
+            db.query(ApprovalInstance.id).filter(
+                ApprovalInstance.subject_type == "actuals",
+                ApprovalInstance.subject_id.in_(actual_ids),
+            ).all()
+        ]
+        if instance_ids:
+            db.query(ApprovalAction).filter(ApprovalAction.instance_id.in_(instance_ids)).delete(synchronize_session=False)
+            db.query(ApprovalStep).filter(ApprovalStep.instance_id.in_(instance_ids)).delete(synchronize_session=False)
+            db.query(ApprovalInstance).filter(ApprovalInstance.id.in_(instance_ids)).delete(synchronize_session=False)
+
+        db.query(ActualLine).filter(ActualLine.project_id == project_id).delete(synchronize_session=False)
+
+    db.query(DemandLine).filter(DemandLine.project_id == project_id).delete(synchronize_session=False)
+    db.query(SupplyLine).filter(SupplyLine.project_id == project_id).delete(synchronize_session=False)
+    db.query(OopLine).filter(OopLine.project_id == project_id).delete(synchronize_session=False)
+    db.query(ProjectExternalLine).filter(ProjectExternalLine.project_id == project_id).delete(synchronize_session=False)
+    db.query(ProjectEquipmentLine).filter(ProjectEquipmentLine.project_id == project_id).delete(synchronize_session=False)
+    db.query(ProjectPM).filter(ProjectPM.project_id == project_id).delete(synchronize_session=False)
+
+    db.delete(project)
     db.commit()
-    log_audit(db, current_user, "delete", "Project", project.id)
+    log_audit(db, current_user, "delete", "Project", project_id)
     return {"message": "Project deleted"}
 
 

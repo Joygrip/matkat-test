@@ -6,6 +6,11 @@ from pydantic import BaseModel, field_validator, model_validator
 from api.app.schemas.common import ErrorCode
 
 
+class PeriodMapping(BaseModel):
+    from_period_id: str
+    to_period_id: str
+
+
 class FTEValidatorMixin:
     """Mixin for FTE validation."""
     
@@ -135,9 +140,12 @@ class SupplyGroupMoveRequest(BaseModel):
     from_resource_id: str
     to_resource_id: str
     project_id: Optional[str] = None
-    to_project_id: str
+    to_project_id: Optional[str] = None
     period_ids: List[str]
     confirm_cap: bool = False
+    operation: Literal["move", "copy"] = "move"
+    period_mappings: Optional[List[PeriodMapping]] = None
+    merge_mode: Literal["add", "replace"] = "add"
 
     @field_validator('period_ids')
     @classmethod
@@ -148,7 +156,11 @@ class SupplyGroupMoveRequest(BaseModel):
 
     @model_validator(mode='after')
     def validate_different_target(self) -> 'SupplyGroupMoveRequest':
-        if self.from_resource_id == self.to_resource_id and self.project_id == self.to_project_id:
+        has_period_shift = bool(
+            self.period_mappings and
+            any(m.from_period_id != m.to_period_id for m in self.period_mappings)
+        )
+        if self.from_resource_id == self.to_resource_id and self.project_id == self.to_project_id and not has_period_shift:
             raise ValueError('Target resource and project cannot be the same as source')
         return self
 
@@ -188,6 +200,9 @@ class DemandGroupMoveRequest(BaseModel):
     to_project_id: str
     period_ids: List[str]
     confirm_cap: bool = False
+    operation: Literal["move", "copy"] = "move"
+    period_mappings: Optional[List[PeriodMapping]] = None
+    merge_mode: Literal["add", "replace"] = "add"
 
     @field_validator('period_ids')
     @classmethod
@@ -208,10 +223,15 @@ class DemandGroupMoveRequest(BaseModel):
             raise ValueError(f'{ErrorCode.DEMAND_XOR}: Cannot specify both to_resource_id and to_placeholder_id')
         if not self.to_resource_id and not self.to_placeholder_id:
             raise ValueError(f'{ErrorCode.DEMAND_XOR}: Must specify either to_resource_id or to_placeholder_id')
-        # Source != Target: must differ in resource/placeholder OR project
-        if self.from_resource_id and self.from_resource_id == self.to_resource_id and self.project_id == self.to_project_id:
+        # Source != Target: must differ in resource/placeholder OR project OR periods
+        # Allow same identity when period_mappings provide an actual period shift (self-row shift)
+        has_period_shift = bool(
+            self.period_mappings and
+            any(m.from_period_id != m.to_period_id for m in self.period_mappings)
+        )
+        if self.from_resource_id and self.from_resource_id == self.to_resource_id and self.project_id == self.to_project_id and not has_period_shift:
             raise ValueError('Target resource and project cannot be the same as source')
-        if self.from_placeholder_id and self.from_placeholder_id == self.to_placeholder_id and self.project_id == self.to_project_id:
+        if self.from_placeholder_id and self.from_placeholder_id == self.to_placeholder_id and self.project_id == self.to_project_id and not has_period_shift:
             raise ValueError('Target placeholder and project cannot be the same as source')
         return self
 

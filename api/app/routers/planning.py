@@ -307,6 +307,9 @@ async def move_demand_group(
         to_resource_id=data.to_resource_id,
         to_placeholder_id=data.to_placeholder_id,
         confirm_cap=data.confirm_cap,
+        operation=data.operation,
+        period_mappings=data.period_mappings,
+        merge_mode=data.merge_mode,
     )
     return {"moved": moved}
 
@@ -534,6 +537,9 @@ async def move_supply_group(
         to_project_id=data.to_project_id,
         period_ids=data.period_ids,
         confirm_cap=data.confirm_cap,
+        operation=data.operation,
+        period_mappings=data.period_mappings,
+        merge_mode=data.merge_mode,
     )
     return {"moved": moved}
 

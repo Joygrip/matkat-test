@@ -100,6 +100,9 @@ export interface MoveDemandGroupRequest {
   to_project_id: string;
   period_ids: string[];
   confirm_cap?: boolean;
+  operation?: 'move' | 'copy';
+  period_mappings?: { from_period_id: string; to_period_id: string }[];
+  merge_mode?: 'add' | 'replace';
 }
 
 export interface DeleteSupplyGroupRequest {
@@ -111,10 +114,13 @@ export interface DeleteSupplyGroupRequest {
 export interface MoveSupplyGroupRequest {
   from_resource_id: string;
   to_resource_id: string;
-  project_id?: string;
-  to_project_id: string;
+  project_id?: string | null;
+  to_project_id: string | null;
   period_ids: string[];
   confirm_cap?: boolean;
+  operation?: 'move' | 'copy';
+  period_mappings?: { from_period_id: string; to_period_id: string }[];
+  merge_mode?: 'add' | 'replace';
 }
 
 export interface MoveCapPeriodDetail {

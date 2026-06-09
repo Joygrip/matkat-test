@@ -355,6 +355,24 @@ const useStyles = makeStyles({
   matrixContainerSelecting: {
     userSelect: 'none' as const,
   },
+  // Transfer selection highlight — grape/purple, distinct from drag-select (brand blue),
+  // demand (amber), and supply (teal)
+  cellTransferSelected: {
+    backgroundColor: 'rgba(118, 74, 188, 0.15)',
+    outline: '2px solid rgba(118, 74, 188, 0.72)',
+    outlineOffset: '-2px',
+  },
+  // Payload drag preview: valid mapped target cell
+  cellPayloadPreviewTarget: {
+    outline: '2px dashed rgba(118, 74, 188, 0.85)',
+    outlineOffset: '-2px',
+    backgroundColor: 'rgba(118, 74, 188, 0.08)',
+  },
+  // Payload drag error: invalid drop target cell
+  cellPayloadDropError: {
+    outline: '2px dashed rgba(220, 38, 38, 0.85)',
+    outlineOffset: '-2px',
+  },
   // Floating popover (replaces pinned edit toolbar)
   popover: {
     position: 'fixed' as const,
@@ -443,6 +461,22 @@ interface SelectedResource {
   type: 'resource' | 'placeholder';
 }
 
+type SelectedPlanningCell = {
+  rowKey: string;
+  lineType: 'demand' | 'supply';
+  sourceResourceId: string | null;
+  sourcePlaceholderId: string | null;
+  sourceProjectId: string | null;
+  periodId: string;
+  year: number;
+  month: number;
+  value: number;
+  costCenterId: string | null;
+  // display helpers for the action bar
+  sourceName: string;
+  sourceProjectName: string;
+};
+
 export interface ResourcePlanningMatrixProps {
   demandLines: DemandLine[];
   supplyLines: SupplyLine[];
@@ -480,6 +514,35 @@ function buildResourceGroups(rows: MergedMatrixRow[]): ResourceGroup[] {
   return result;
 }
 
+// Pure helper: given sorted transferSelection and a hover target cell, compute the
+// period_mappings that would be sent to the backend (from → to). Returns null mappings
+// plus an error string when the target window doesn't contain all mapped periods.
+function computePayloadMappings(
+  sortedSelection: SelectedPlanningCell[],
+  targetYear: number,
+  targetMonth: number,
+  allPeriods: Period[],
+): { mappings: Array<{ fromId: string; toId: string }> | null; error: string | null } {
+  if (sortedSelection.length === 0) return { mappings: [], error: null };
+  const baseNum = sortedSelection[0].year * 12 + sortedSelection[0].month;
+  const targetNum = targetYear * 12 + targetMonth;
+  const mappings: Array<{ fromId: string; toId: string }> = [];
+  for (const cell of sortedSelection) {
+    const offset = cell.year * 12 + cell.month - baseNum;
+    const toNum = targetNum + offset;
+    // Reverse: year * 12 + month = toNum  (month is 1-based)
+    const toYear = Math.floor((toNum - 1) / 12);
+    const toMonth = ((toNum - 1) % 12) + 1;
+    const targetPeriod = allPeriods.find(p => p.year === toYear && p.month === toMonth);
+    if (!targetPeriod) return { mappings: null, error: 'Target period is outside the visible window' };
+    if (targetPeriod.status === 'locked') {
+      return { mappings: null, error: `Target period ${MONTH_SHORT[toMonth - 1]} ${toYear} is locked` };
+    }
+    mappings.push({ fromId: cell.periodId, toId: targetPeriod.id });
+  }
+  return { mappings, error: null };
+}
+
 export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   demandLines,
   supplyLines,
@@ -495,7 +558,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   editableCcIds,
 }) => {
   const styles = useStyles();
-  const { showApiError, showSuccess } = useToast();
+  const { showApiError, showSuccess, showInfo } = useToast();
 
   const [expandedCCs, setExpandedCCs] = useState<Set<string>>(new Set());
   const [editingCell, setEditingCell] = useState<string | null>(null);
@@ -520,6 +583,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   // Drag / bulk-edit state
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
   const [popoverPos, setPopoverPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Transfer selection state — separate from drag/bulk-edit; toggled by Ctrl/Meta+click
+  const [transferSelection, setTransferSelection] = useState<SelectedPlanningCell[]>([]);
 
   // Refs for window event handlers (avoid stale closures)
   const isDraggingRef = useRef(false);
@@ -550,6 +616,28 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     ccId: string;
   } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+
+  // Payload drag — started from the drag handle on the last transfer-selected cell.
+  const [isPayloadDragging, setIsPayloadDragging] = useState(false);
+  const isPayloadDraggingRef = useRef(false);
+  const [payloadDragCursorPos, setPayloadDragCursorPos] = useState<{ x: number; y: number } | null>(null);
+  const [payloadDropTarget, setPayloadDropTarget] = useState<{
+    periodId: string; year: number; month: number;
+    rowKey: string; lineType: 'demand' | 'supply';
+    resourceId: string | null; placeholderId: string | null; projectId: string | null;
+  } | null>(null);
+  const [payloadOperation, setPayloadOperation] = useState<'move' | 'copy'>('move');
+  const [payloadDropError, setPayloadDropError] = useState<string | null>(null);
+  const [payloadPreviewPeriodIds, setPayloadPreviewPeriodIds] = useState<Set<string>>(new Set());
+  // Refs used inside the window event handlers to avoid stale closures
+  const sortedTransferRef = useRef<SelectedPlanningCell[]>([]);
+  const periodsRef = useRef<Period[]>([]);
+  const payloadDropTargetRef = useRef<typeof payloadDropTarget>(null);
+  const payloadDropErrorRef = useRef<string | null>(null);
+  const payloadOperationRef = useRef<'move' | 'copy'>('move');
+  const payloadMappingsRef = useRef<Array<{ fromId: string; toId: string }>>([]);
+  const handlePayloadDropRef = useRef<(() => Promise<void>) | null>(null);
+
   const [hoveredColIdx, setHoveredColIdx] = useState<number | null>(null);
   const [hoveredProject, setHoveredProject] = useState<string | null>(null);
   const [dragType, setDragType] = useState<'demand' | 'supply' | null>(null);
@@ -606,6 +694,26 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [supplyCapPeriods, setSupplyCapPeriods] = useState<MoveCapPeriodDetail[]>([]);
   const [supplyCapPendingBody, setSupplyCapPendingBody] = useState<MoveSupplyGroupRequest | null>(null);
   const [confirmingSupplyCap, setConfirmingSupplyCap] = useState(false);
+
+  // Transfer dialog state (Phase 3 — cell-level copy/move)
+  const [transferDialogMode, setTransferDialogMode] = useState<'copy' | 'move' | null>(null);
+  const [transferDialogTargetResourceId, setTransferDialogTargetResourceId] = useState('');
+  const [transferDialogTargetProjectId, setTransferDialogTargetProjectId] = useState<string | null>(null);
+  const [transferDialogLoading, setTransferDialogLoading] = useState(false);
+  const [transferDialogError, setTransferDialogError] = useState<string | null>(null);
+  const [transferDialogResources, setTransferDialogResources] = useState<Resource[]>([]);
+  const [transferDialogProjects, setTransferDialogProjects] = useState<Project[]>([]);
+  const [transferDialogResourcesLoading, setTransferDialogResourcesLoading] = useState(false);
+  const [transferDialogResourceQuery, setTransferDialogResourceQuery] = useState('');
+  const [transferDialogResourceDropdownOpen, setTransferDialogResourceDropdownOpen] = useState(false);
+  const [transferDialogProjectQuery, setTransferDialogProjectQuery] = useState('');
+  const [transferDialogProjectDropdownOpen, setTransferDialogProjectDropdownOpen] = useState(false);
+
+  // Transfer cap confirmation state (separate from whole-line move cap state)
+  const [transferCapPeriods, setTransferCapPeriods] = useState<MoveCapPeriodDetail[]>([]);
+  const [transferCapPendingBody, setTransferCapPendingBody] = useState<MoveDemandGroupRequest | MoveSupplyGroupRequest | null>(null);
+  const [transferCapLineType, setTransferCapLineType] = useState<'demand' | 'supply' | null>(null);
+  const [confirmingTransferCap, setConfirmingTransferCap] = useState(false);
 
   // Add Line dialog state
   const [addLineDialogOpen, setAddLineDialogOpen] = useState(false);
@@ -715,6 +823,20 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     return result;
   }, [demandLines, supplyLines, costCenters, localDemandRows, localSupplyRows]);
 
+  // transferSelection sorted ascending by year/month — used for handle placement and mapping
+  const sortedTransfer = useMemo(() =>
+    [...transferSelection].sort((a, b) =>
+      a.year !== b.year ? a.year - b.year : a.month - b.month
+    ), [transferSelection]);
+  const lastTransferCell = sortedTransfer.length > 0 ? sortedTransfer[sortedTransfer.length - 1] : null;
+
+  // Keep refs in sync so the window event handlers never read stale values
+  sortedTransferRef.current = sortedTransfer;
+  periodsRef.current = periods;
+  payloadDropTargetRef.current = payloadDropTarget;
+  payloadDropErrorRef.current = payloadDropError;
+  payloadOperationRef.current = payloadOperation;
+
   const isRoleManager = userRole === 'Manager';
   const isRolePM = userRole === 'PM';
 
@@ -763,6 +885,23 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       !q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q)
     );
   }, [moveDemandAllProjects, moveDemandProjectQuery]);
+
+  const transferDialogFilteredResources = useMemo(() => {
+    const q = transferDialogResourceQuery.trim().toLowerCase();
+    return transferDialogResources.filter(r =>
+      !q ||
+      r.display_name.toLowerCase().includes(q) ||
+      (r.initials ? r.initials.toLowerCase().includes(q) : false) ||
+      (r.email ? r.email.toLowerCase().includes(q) : false)
+    );
+  }, [transferDialogResources, transferDialogResourceQuery]);
+
+  const transferDialogFilteredProjects = useMemo(() => {
+    const q = transferDialogProjectQuery.trim().toLowerCase();
+    return transferDialogProjects.filter(p =>
+      !q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q)
+    );
+  }, [transferDialogProjects, transferDialogProjectQuery]);
 
   const moveSupplyFilteredProjects = useMemo(() => {
     const q = moveSupplyProjectQuery.trim().toLowerCase();
@@ -1503,6 +1642,351 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     }
   }, [selectedCells, dragType, demandLines, supplyLines, onReload]);
 
+  // Toggle a cell in/out of the transfer selection (Ctrl/Meta+click).
+  // Constraint: all selected cells must share the same rowKey and lineType.
+  const handleTransferToggle = useCallback((cell: SelectedPlanningCell) => {
+    if (cell.value === 0) return;
+
+    // Deselect if already in selection
+    const existingIdx = transferSelection.findIndex(
+      c => c.rowKey === cell.rowKey && c.lineType === cell.lineType && c.periodId === cell.periodId,
+    );
+    if (existingIdx >= 0) {
+      setTransferSelection(prev => prev.filter((_, i) => i !== existingIdx));
+      return;
+    }
+
+    // Restart if different row or line type
+    if (transferSelection.length > 0) {
+      const first = transferSelection[0];
+      if (first.rowKey !== cell.rowKey || first.lineType !== cell.lineType) {
+        showInfo('Selection restarted', 'Select cells from one row only.');
+        setTransferSelection([cell]);
+        return;
+      }
+    }
+
+    // Add to existing (same row) or start fresh
+    setTransferSelection(prev => [...prev, cell]);
+  }, [transferSelection, showInfo]);
+
+  const openTransferDialog = useCallback(async (mode: 'copy' | 'move') => {
+    if (transferSelection.length === 0) return;
+    setTransferDialogMode(mode);
+    setTransferDialogTargetResourceId('');
+    setTransferDialogTargetProjectId(transferSelection[0].lineType === 'supply' ? null : '');
+    setTransferDialogError(null);
+    setTransferDialogResourceQuery('');
+    setTransferDialogProjectQuery('');
+    setTransferDialogResourcesLoading(true);
+    try {
+      const [resources, prjs] = await Promise.all([
+        lookupsApi.listResourcesScoped({ forWrite: true }),
+        lookupsApi.listProjectsScoped(),
+      ]);
+      setTransferDialogResources(resources);
+      setTransferDialogProjects(prjs);
+    } catch {
+      setTransferDialogResources([]);
+      setTransferDialogProjects([]);
+    } finally {
+      setTransferDialogResourcesLoading(false);
+    }
+  }, [transferSelection]);
+
+  const handleTransferSubmit = useCallback(async () => {
+    if (!transferDialogMode || !transferDialogTargetResourceId || transferSelection.length === 0) return;
+    const lineType = transferSelection[0].lineType;
+    if (lineType === 'demand' && !transferDialogTargetProjectId) return;
+
+    const periodIds = transferSelection.map(c => c.periodId);
+    let demandBody: MoveDemandGroupRequest | null = null;
+    let supplyBody: MoveSupplyGroupRequest | null = null;
+
+    if (lineType === 'demand') {
+      demandBody = {
+        operation: transferDialogMode,
+        from_resource_id: transferSelection[0].sourceResourceId ?? undefined,
+        from_placeholder_id: transferSelection[0].sourcePlaceholderId ?? undefined,
+        to_resource_id: transferDialogTargetResourceId,
+        project_id: transferSelection[0].sourceProjectId!,
+        to_project_id: transferDialogTargetProjectId!,
+        period_ids: periodIds,
+        confirm_cap: false,
+      };
+    } else {
+      supplyBody = {
+        operation: transferDialogMode,
+        from_resource_id: transferSelection[0].sourceResourceId!,
+        to_resource_id: transferDialogTargetResourceId,
+        project_id: transferSelection[0].sourceProjectId ?? undefined,
+        to_project_id: transferDialogTargetProjectId,
+        period_ids: periodIds,
+        confirm_cap: false,
+      };
+    }
+
+    setTransferDialogLoading(true);
+    setTransferDialogError(null);
+    try {
+      if (demandBody) {
+        await planningApi.moveDemandGroup(demandBody);
+      } else {
+        await planningApi.moveSupplyGroup(supplyBody!);
+      }
+      const verb = transferDialogMode === 'copy' ? 'Copied' : 'Moved';
+      showSuccess(`${verb} successfully`, `${verb} ${transferSelection.length} cell${transferSelection.length !== 1 ? 's' : ''}.`);
+      setTransferDialogMode(null);
+      setTransferSelection([]);
+      onReload();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.code === 'MOVE_REQUIRES_CAP_CONFIRMATION') {
+          setTransferCapPeriods(err.extras.periods as MoveCapPeriodDetail[]);
+          setTransferCapPendingBody(
+            demandBody ? { ...demandBody, confirm_cap: true } : { ...supplyBody!, confirm_cap: true }
+          );
+          setTransferCapLineType(lineType);
+          setTransferDialogMode(null);
+        } else {
+          setTransferDialogError(err.detail || err.message || 'Transfer failed.');
+        }
+      } else {
+        setTransferDialogError((err as Error).message || 'Transfer failed.');
+      }
+    } finally {
+      setTransferDialogLoading(false);
+    }
+  }, [transferDialogMode, transferDialogTargetResourceId, transferDialogTargetProjectId, transferSelection, showSuccess, onReload]);
+
+  const handleTransferCapConfirm = useCallback(async () => {
+    if (!transferCapPendingBody || !transferCapLineType) return;
+    setConfirmingTransferCap(true);
+    try {
+      if (transferCapLineType === 'demand') {
+        await planningApi.moveDemandGroup(transferCapPendingBody as MoveDemandGroupRequest);
+      } else {
+        await planningApi.moveSupplyGroup(transferCapPendingBody as MoveSupplyGroupRequest);
+      }
+      const mode = (transferCapPendingBody as MoveDemandGroupRequest).operation === 'copy' ? 'Copied' : 'Moved';
+      setTransferCapPeriods([]);
+      setTransferCapPendingBody(null);
+      setTransferCapLineType(null);
+      setTransferSelection([]);
+      onReload();
+      showSuccess(`${mode} successfully`, `${mode} with capping applied.`);
+    } catch (err) {
+      setTransferCapPeriods([]);
+      setTransferCapPendingBody(null);
+      setTransferCapLineType(null);
+      showApiError(err as Error, 'Transfer failed after cap confirmation.');
+    } finally {
+      setConfirmingTransferCap(false);
+    }
+  }, [transferCapPendingBody, transferCapLineType, onReload, showSuccess, showApiError]);
+
+  // Clears all visual payload-drag state (ghost, preview, target).
+  // Does NOT clear transferSelection — that happens only on successful submit.
+  const clearPayloadDragState = useCallback(() => {
+    setIsPayloadDragging(false);
+    isPayloadDraggingRef.current = false;
+    setPayloadDragCursorPos(null);
+    setPayloadDropTarget(null);
+    payloadDropTargetRef.current = null;
+    setPayloadDropError(null);
+    payloadDropErrorRef.current = null;
+    setPayloadPreviewPeriodIds(new Set());
+    payloadMappingsRef.current = [];
+  }, []);
+
+  // Submit a mapped transfer on mouseup. Reads all live values from refs so it is safe
+  // to invoke from inside a window event handler via handlePayloadDropRef.
+  const handlePayloadDrop = useCallback(async () => {
+    const target = payloadDropTargetRef.current;
+    const dropError = payloadDropErrorRef.current;
+    const operation = payloadOperationRef.current;
+    const sel = sortedTransferRef.current;
+    const mappings = payloadMappingsRef.current;
+
+    if (!target) { clearPayloadDragState(); return; }
+
+    if (dropError) {
+      clearPayloadDragState();
+      showInfo('Cannot drop here', dropError);
+      return;
+    }
+
+    if (sel.length === 0 || mappings.length === 0) { clearPayloadDragState(); return; }
+
+    const lineType = sel[0].lineType;
+    const periodMappings = mappings.map(m => ({ from_period_id: m.fromId, to_period_id: m.toId }));
+    const periodIds = sel.map(c => c.periodId);
+
+    // Stop the visual drag immediately (the mouse is up — the "drag" is done)
+    clearPayloadDragState();
+
+    let demandBody: MoveDemandGroupRequest | null = null;
+    let supplyBody: MoveSupplyGroupRequest | null = null;
+
+    if (lineType === 'demand') {
+      demandBody = {
+        operation,
+        from_resource_id: sel[0].sourceResourceId ?? undefined,
+        from_placeholder_id: sel[0].sourcePlaceholderId ?? undefined,
+        to_resource_id: target.resourceId ?? undefined,
+        to_placeholder_id: target.placeholderId ?? undefined,
+        project_id: sel[0].sourceProjectId!,
+        to_project_id: target.projectId ?? sel[0].sourceProjectId!,
+        period_ids: periodIds,
+        period_mappings: periodMappings,
+        merge_mode: 'replace',
+        confirm_cap: false,
+      };
+    } else {
+      supplyBody = {
+        operation,
+        from_resource_id: sel[0].sourceResourceId!,
+        to_resource_id: target.resourceId!,
+        project_id: sel[0].sourceProjectId,
+        to_project_id: target.projectId,
+        period_ids: periodIds,
+        period_mappings: periodMappings,
+        merge_mode: 'replace',
+        confirm_cap: false,
+      };
+    }
+
+    try {
+      if (demandBody) {
+        await planningApi.moveDemandGroup(demandBody);
+      } else {
+        await planningApi.moveSupplyGroup(supplyBody!);
+      }
+      const verb = operation === 'copy' ? 'Copied' : 'Moved';
+      showSuccess(`${verb} successfully`, `${verb} ${sel.length} cell${sel.length !== 1 ? 's' : ''}.`);
+      setTransferSelection([]);
+      onReload();
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'MOVE_REQUIRES_CAP_CONFIRMATION') {
+        setTransferCapPeriods(err.extras.periods as MoveCapPeriodDetail[]);
+        setTransferCapPendingBody(
+          demandBody
+            ? { ...demandBody, confirm_cap: true }
+            : { ...supplyBody!, confirm_cap: true },
+        );
+        setTransferCapLineType(lineType);
+      } else {
+        showApiError(err as Error, `Failed to ${operation} cells`);
+      }
+    }
+  }, [clearPayloadDragState, showSuccess, showApiError, showInfo, onReload]);
+
+  // Keep accessible from the window mouseup handler without stale closures.
+  handlePayloadDropRef.current = handlePayloadDrop;
+
+  // Start a payload drag from the drag handle on the last transfer-selected cell.
+  const handlePayloadDragStart = useCallback((e: React.MouseEvent, altKey: boolean) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedCells(new Set());
+    setPopoverPos(null);
+    setApplyValue('');
+    const op = altKey ? 'copy' : 'move';
+    setPayloadOperation(op);
+    payloadOperationRef.current = op;
+    setPayloadDragCursorPos({ x: e.clientX, y: e.clientY });
+    setPayloadDropTarget(null);
+    payloadDropTargetRef.current = null;
+    setPayloadDropError(null);
+    payloadDropErrorRef.current = null;
+    setPayloadPreviewPeriodIds(new Set());
+    payloadMappingsRef.current = [];
+    setIsPayloadDragging(true);
+    isPayloadDraggingRef.current = true;
+  }, []);
+
+  // Window-level mousemove/mouseup/keydown while a payload drag is active.
+  // All mutable values are read from refs to avoid stale closures in the effect.
+  useEffect(() => {
+    if (!isPayloadDragging) return;
+
+    const handleMove = (e: MouseEvent) => {
+      const op = e.altKey ? 'copy' : 'move';
+      setPayloadDragCursorPos({ x: e.clientX, y: e.clientY });
+      setPayloadOperation(op);
+      payloadOperationRef.current = op;
+
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const td = el?.closest('td[data-period-id]') as HTMLElement | null;
+
+      if (!td) {
+        setPayloadDropTarget(null);
+        payloadDropTargetRef.current = null;
+        setPayloadDropError(null);
+        payloadDropErrorRef.current = null;
+        payloadMappingsRef.current = [];
+        setPayloadPreviewPeriodIds(new Set());
+        return;
+      }
+
+      const periodId = td.dataset.periodId!;
+      const year = Number(td.dataset.year);
+      const month = Number(td.dataset.month);
+      const rowKey = td.dataset.rowKey!;
+      const lineType = td.dataset.type as 'demand' | 'supply';
+      const resourceId = td.dataset.resourceId || null;
+      const placeholderId = td.dataset.placeholderId || null;
+      const projectId = td.dataset.projectId || null;
+      const newTarget = { periodId, year, month, rowKey, lineType, resourceId, placeholderId, projectId };
+      setPayloadDropTarget(newTarget);
+      payloadDropTargetRef.current = newTarget;
+
+      const sel = sortedTransferRef.current;
+      const sourceLineType = sel[0]?.lineType;
+
+      const setErr = (msg: string) => {
+        setPayloadDropError(msg);
+        payloadDropErrorRef.current = msg;
+        payloadMappingsRef.current = [];
+        setPayloadPreviewPeriodIds(new Set());
+      };
+
+      if (lineType !== sourceLineType) {
+        setErr(`Cannot drop ${sourceLineType} onto ${lineType}`);
+        return;
+      }
+
+      const { mappings, error } = computePayloadMappings(sel, year, month, periodsRef.current);
+      if (error || !mappings) {
+        setErr(error ?? 'Invalid drop target');
+        return;
+      }
+
+      const isNoOp = rowKey === sel[0]?.rowKey && mappings.every(m => m.fromId === m.toId);
+      if (isNoOp) {
+        setErr('No movement — source and target periods are identical');
+        return;
+      }
+
+      setPayloadDropError(null);
+      payloadDropErrorRef.current = null;
+      payloadMappingsRef.current = mappings;
+      setPayloadPreviewPeriodIds(new Set(mappings.map(m => m.toId)));
+    };
+
+    const handleUp = () => { handlePayloadDropRef.current?.(); };
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') clearPayloadDragState(); };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [isPayloadDragging, clearPayloadDragState]);
+
   // For Manager: load CC resources when their CC is set in the dialog
   useEffect(() => {
     if (isRoleManager && dlgCcId) loadCcData(dlgCcId);
@@ -1621,8 +2105,36 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
   return (
     <>
+    {/* Payload drag ghost — fixed, follows cursor, pointerEvents:none so elementFromPoint sees through it */}
+    {isPayloadDragging && payloadDragCursorPos && createPortal(
+      <div
+        style={{
+          position: 'fixed',
+          left: payloadDragCursorPos.x + 16,
+          top: payloadDragCursorPos.y + 4,
+          pointerEvents: 'none',
+          zIndex: 10000,
+          backgroundColor: payloadDropError ? 'rgba(197, 48, 48, 0.93)' : 'rgba(118, 74, 188, 0.93)',
+          color: '#fff',
+          borderRadius: 6,
+          padding: '4px 10px',
+          fontSize: '12px',
+          fontWeight: 600,
+          whiteSpace: 'nowrap',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.22)',
+          lineHeight: 1.5,
+          userSelect: 'none',
+        }}
+      >
+        {payloadDropError
+          ? `⚠ ${payloadDropError}`
+          : `${payloadOperation === 'copy' ? '⊕ Copy' : '→ Move'} ${transferSelection.length} cell${transferSelection.length !== 1 ? 's' : ''}`
+        }
+      </div>,
+      document.body,
+    )}
     {/* Floating popover for drag-select bulk editing */}
-    {popoverPos && selectedCells.size > 0 && (
+    {popoverPos && selectedCells.size > 0 && !isPayloadDragging && (
       <div
         ref={popoverRef}
         className={styles.popover}
@@ -1713,6 +2225,53 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         </div>
       </div>
     </div>
+    {/* Transfer selection action bar — shown when cells are Ctrl/Meta+clicked */}
+    {transferSelection.length > 0 && (
+      <div style={{
+        padding: '6px 16px',
+        backgroundColor: 'rgba(118, 74, 188, 0.07)',
+        borderBottom: '1px solid rgba(118, 74, 188, 0.22)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        fontSize: '12.5px',
+        flexWrap: 'wrap' as const,
+      }}>
+        <span style={{ color: 'rgb(95, 56, 164)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+          {transferSelection.length} {transferSelection[0].lineType} cell{transferSelection.length !== 1 ? 's' : ''} selected
+        </span>
+        <span style={{ color: '#9b9997' }}>·</span>
+        <span style={{ color: tokens.colorNeutralForeground1, fontWeight: 500 }}>
+          {transferSelection[0].sourceName}
+        </span>
+        <span style={{ color: '#9b9997' }}>·</span>
+        <span style={{ color: tokens.colorNeutralForeground2 }}>
+          {transferSelection[0].sourceProjectName}
+        </span>
+        <span style={{ color: '#9b9997', fontSize: '11.5px' }}>
+          {transferSelection
+            .slice()
+            .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month)
+            .map(c => `${MONTH_SHORT[c.month - 1]} ${c.value}%`)
+            .join(', ')}
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <Button size="small" appearance="secondary" onClick={() => openTransferDialog('copy')}>
+            Copy to…
+          </Button>
+          <Button size="small" appearance="secondary" onClick={() => openTransferDialog('move')}>
+            Move to…
+          </Button>
+          <Button
+            size="small"
+            appearance="subtle"
+            onClick={() => setTransferSelection([])}
+          >
+            Clear
+          </Button>
+        </div>
+      </div>
+    )}
     <div style={{ position: 'relative' }}>
     {/* Sticky header — lives outside the overflow-x container so vertical sticky works */}
     <div ref={headerWrapRef} className={styles.headerWrap} onMouseLeave={() => { setHoveredColIdx(null); setHoveredProject(null); }}>
@@ -2007,17 +2566,40 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                     const isSelectable = canEditDemand && !row.isGeneral;
                                     const canEdit = isSelectable && !isDragging;
                                     const isSelected = selectedCells.has(dragCellKey);
+                                    const isTransferSelected = transferSelection.some(
+                                      c => c.lineType === 'demand' && c.periodId === period.id && c.rowKey === row.key,
+                                    );
                                     const isDimmed = isDragging && dragType !== 'demand' && dragStart?.ccId === group.ccId;
                                     const isCurPeriod = isCurrentPeriod(period);
                                     const isColHov = hoveredColIdx === colIndex;
                                     const isRowHov = hoveredProject === row.key;
-                                    const demandCellBgStyle: React.CSSProperties = (!isSelected && (isColHov || isRowHov)) ? (
+                                    // Suppress hover tint while a payload drag is in progress
+                                    const demandCellBgStyle: React.CSSProperties = (!isSelected && !isTransferSelected && !isPayloadDragging && (isColHov || isRowHov)) ? (
                                       isColHov && isRowHov
                                         ? { background: isCurPeriod ? 'rgba(30,58,95,0.14), rgba(217,119,6,0.26)' : 'rgba(30,58,95,0.12), rgba(217,119,6,0.22)' }
                                         : isColHov
                                           ? { backgroundColor: isCurPeriod ? 'rgba(217,119,6,0.22)' : 'rgba(217,119,6,0.18)' }
                                           : { background: 'rgba(30,58,95,0.08), rgba(217,119,6,0.10)' }
                                     ) : {};
+                                    // Payload drag: is this cell the handle anchor (last selected)?
+                                    const isLastTransferHandleCell = lastTransferCell !== null
+                                      && lastTransferCell.lineType === 'demand'
+                                      && lastTransferCell.rowKey === row.key
+                                      && lastTransferCell.periodId === period.id;
+                                    // Payload drag: is this cell a valid preview target?
+                                    const isPayloadPreviewTarget = isPayloadDragging
+                                      && !payloadDropError
+                                      && payloadDropTarget !== null
+                                      && payloadDropTarget.lineType === 'demand'
+                                      && payloadDropTarget.rowKey === row.key
+                                      && payloadPreviewPeriodIds.has(period.id);
+                                    // Payload drag: is this the invalid drop-start cell?
+                                    const isPayloadDropErrorCell = isPayloadDragging
+                                      && payloadDropError !== null
+                                      && payloadDropTarget !== null
+                                      && payloadDropTarget.lineType === 'demand'
+                                      && payloadDropTarget.rowKey === row.key
+                                      && period.id === payloadDropTarget.periodId;
                                     return (
                                       <td
                                         key={period.id}
@@ -2025,18 +2607,54 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                           styles.valueCell,
                                           isSelectable && styles.cellEditable,
                                           isSelected && styles.cellSelected,
+                                          isTransferSelected && styles.cellTransferSelected,
                                           isDimmed && styles.cellDimmed,
+                                          isPayloadPreviewTarget && styles.cellPayloadPreviewTarget,
+                                          isPayloadDropErrorCell && styles.cellPayloadDropError,
                                         )}
                                         style={{
                                           borderTop: rowIdx > 0 ? '2px solid #c8c4be' : '1px solid #e5e4e0',
+                                          // position:relative needed so the drag handle can be absolute
+                                          ...(isTransferSelected ? { position: 'relative' as const } : {}),
                                           ...demandCellBgStyle,
                                         }}
                                         data-row-index={demandRowIndex}
                                         data-col-index={colIndex}
                                         data-cell-key={dragCellKey}
                                         data-type="demand"
+                                        data-period-id={period.id}
+                                        data-row-key={row.key}
+                                        data-resource-id={row.resourceId ?? ''}
+                                        data-placeholder-id={row.placeholderId ?? ''}
+                                        data-project-id={row.projectId ?? ''}
+                                        data-year={period.year}
+                                        data-month={period.month}
+                                        data-period-status={period.status}
                                         onMouseDown={isSelectable
-                                          ? (e) => handleCellMouseDown(e, dragCellKey, 'demand', demandRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, group.ccId)
+                                          ? (e) => {
+                                            if (e.ctrlKey || e.metaKey) {
+                                              e.preventDefault();
+                                              e.stopPropagation();
+                                              if (dVal > 0 && period.status !== 'locked') {
+                                                handleTransferToggle({
+                                                  rowKey: row.key,
+                                                  lineType: 'demand',
+                                                  sourceResourceId: row.resourceId,
+                                                  sourcePlaceholderId: row.placeholderId,
+                                                  sourceProjectId: row.projectId,
+                                                  periodId: period.id,
+                                                  year: period.year,
+                                                  month: period.month,
+                                                  value: dVal,
+                                                  costCenterId: group.ccId,
+                                                  sourceName: row.resourceName,
+                                                  sourceProjectName: row.projectName,
+                                                });
+                                              }
+                                              return;
+                                            }
+                                            handleCellMouseDown(e, dragCellKey, 'demand', demandRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, group.ccId);
+                                          }
                                           : undefined}
                                         onMouseEnter={() => {
                                           setHoveredColIdx(colIndex);
@@ -2056,6 +2674,24 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                           onSave={val => saveDemandCell(existingCellKey, dLine, row, period, val)}
                                           styles={styles}
                                         />
+                                        {isLastTransferHandleCell && (
+                                          <div
+                                            title="Drag to move. Hold Alt to copy."
+                                            onMouseDown={e => handlePayloadDragStart(e, e.altKey)}
+                                            style={{
+                                              position: 'absolute',
+                                              bottom: 2,
+                                              right: 2,
+                                              width: 10,
+                                              height: 10,
+                                              borderRadius: 2,
+                                              backgroundColor: 'rgba(118, 74, 188, 0.85)',
+                                              cursor: 'grab',
+                                              zIndex: 2,
+                                              flexShrink: 0,
+                                            }}
+                                          />
+                                        )}
                                       </td>
                                     );
                                   })}
@@ -2122,17 +2758,40 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                     const isSelectable = canEditSupply && !row.isPlaceholder && (!editableCcIds || editableCcIds.has(group.ccId));
                                     const canEdit = isSelectable && !isDragging;
                                     const isSelected = selectedCells.has(dragCellKey);
+                                    const isTransferSelected = transferSelection.some(
+                                      c => c.lineType === 'supply' && c.periodId === period.id && c.rowKey === row.key,
+                                    );
                                     const isDimmed = isDragging && dragType !== 'supply' && dragStart?.ccId === group.ccId;
                                     const isCurPeriod = isCurrentPeriod(period);
                                     const isColHov = hoveredColIdx === colIndex;
                                     const isRowHov = hoveredProject === row.key;
-                                    const supplyCellBgStyle: React.CSSProperties = (!isSelected && (isColHov || isRowHov)) ? (
+                                    // Suppress hover tint while a payload drag is in progress
+                                    const supplyCellBgStyle: React.CSSProperties = (!isSelected && !isTransferSelected && !isPayloadDragging && (isColHov || isRowHov)) ? (
                                       isColHov && isRowHov
                                         ? { background: isCurPeriod ? 'rgba(30,58,95,0.14), rgba(13,148,136,0.26)' : 'rgba(30,58,95,0.12), rgba(13,148,136,0.22)' }
                                         : isColHov
                                           ? { backgroundColor: isCurPeriod ? 'rgba(13,148,136,0.22)' : 'rgba(13,148,136,0.18)' }
                                           : { background: 'rgba(30,58,95,0.08), rgba(13,148,136,0.10)' }
                                     ) : {};
+                                    // Payload drag: is this cell the handle anchor (last selected)?
+                                    const isLastTransferHandleCell = lastTransferCell !== null
+                                      && lastTransferCell.lineType === 'supply'
+                                      && lastTransferCell.rowKey === row.key
+                                      && lastTransferCell.periodId === period.id;
+                                    // Payload drag: is this cell a valid preview target?
+                                    const isPayloadPreviewTarget = isPayloadDragging
+                                      && !payloadDropError
+                                      && payloadDropTarget !== null
+                                      && payloadDropTarget.lineType === 'supply'
+                                      && payloadDropTarget.rowKey === row.key
+                                      && payloadPreviewPeriodIds.has(period.id);
+                                    // Payload drag: is this the invalid drop-start cell?
+                                    const isPayloadDropErrorCell = isPayloadDragging
+                                      && payloadDropError !== null
+                                      && payloadDropTarget !== null
+                                      && payloadDropTarget.lineType === 'supply'
+                                      && payloadDropTarget.rowKey === row.key
+                                      && period.id === payloadDropTarget.periodId;
                                     return (
                                       <td
                                         key={period.id}
@@ -2140,18 +2799,54 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                           styles.valueCell,
                                           isSelectable && styles.cellEditable,
                                           isSelected && styles.cellSelected,
+                                          isTransferSelected && styles.cellTransferSelected,
                                           isDimmed && styles.cellDimmed,
+                                          isPayloadPreviewTarget && styles.cellPayloadPreviewTarget,
+                                          isPayloadDropErrorCell && styles.cellPayloadDropError,
                                         )}
                                         style={{
                                           ...(!isLastProject ? { boxShadow: 'inset 0 -3px 0 #c8c4be' } : {}),
+                                          // position:relative needed so the drag handle can be absolute
+                                          ...(isTransferSelected ? { position: 'relative' as const } : {}),
                                           ...supplyCellBgStyle,
                                         }}
                                         data-row-index={supplyRowIndex}
                                         data-col-index={colIndex}
                                         data-cell-key={dragCellKey}
                                         data-type="supply"
+                                        data-period-id={period.id}
+                                        data-row-key={row.key}
+                                        data-resource-id={row.resourceId ?? ''}
+                                        data-placeholder-id={row.placeholderId ?? ''}
+                                        data-project-id={row.projectId ?? ''}
+                                        data-year={period.year}
+                                        data-month={period.month}
+                                        data-period-status={period.status}
                                         onMouseDown={isSelectable
-                                          ? (e) => handleCellMouseDown(e, dragCellKey, 'supply', supplyRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, group.ccId)
+                                          ? (e) => {
+                                            if (e.ctrlKey || e.metaKey) {
+                                              e.preventDefault();
+                                              e.stopPropagation();
+                                              if (sVal > 0 && period.status !== 'locked') {
+                                                handleTransferToggle({
+                                                  rowKey: row.key,
+                                                  lineType: 'supply',
+                                                  sourceResourceId: row.resourceId,
+                                                  sourcePlaceholderId: row.placeholderId,
+                                                  sourceProjectId: row.projectId,
+                                                  periodId: period.id,
+                                                  year: period.year,
+                                                  month: period.month,
+                                                  value: sVal,
+                                                  costCenterId: group.ccId,
+                                                  sourceName: row.resourceName,
+                                                  sourceProjectName: row.projectName,
+                                                });
+                                              }
+                                              return;
+                                            }
+                                            handleCellMouseDown(e, dragCellKey, 'supply', supplyRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, group.ccId);
+                                          }
                                           : undefined}
                                         onMouseEnter={() => {
                                           setHoveredColIdx(colIndex);
@@ -2171,6 +2866,24 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                           onSave={val => saveSupplyCell(existingCellKey, sLine, row, period, val)}
                                           styles={styles}
                                         />
+                                        {isLastTransferHandleCell && (
+                                          <div
+                                            title="Drag to move. Hold Alt to copy."
+                                            onMouseDown={e => handlePayloadDragStart(e, e.altKey)}
+                                            style={{
+                                              position: 'absolute',
+                                              bottom: 2,
+                                              right: 2,
+                                              width: 10,
+                                              height: 10,
+                                              borderRadius: 2,
+                                              backgroundColor: 'rgba(118, 74, 188, 0.85)',
+                                              cursor: 'grab',
+                                              zIndex: 2,
+                                              flexShrink: 0,
+                                            }}
+                                          />
+                                        )}
                                       </td>
                                     );
                                   })}
@@ -3233,6 +3946,195 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       </DialogSurface>
     </Dialog>
 
+    {/* Transfer Dialog — Copy to… / Move to… for cell-level selection */}
+    <Dialog
+      open={transferDialogMode !== null}
+      onOpenChange={(_, d) => {
+        if (!d.open && !transferDialogLoading) {
+          setTransferDialogMode(null);
+          setTransferDialogTargetResourceId('');
+          setTransferDialogTargetProjectId(null);
+          setTransferDialogResourceQuery('');
+          setTransferDialogProjectQuery('');
+          setTransferDialogError(null);
+        }
+      }}
+    >
+      <DialogSurface style={dlgSurfaceMove}>
+        <DialogBody>
+          <DialogTitle style={dlgTitleStyle}>
+            {transferDialogMode === 'copy' ? 'Copy' : 'Move'}{' '}
+            {transferSelection[0]?.lineType ?? ''} cells
+          </DialogTitle>
+          <DialogContent style={{ overflow: 'visible' }}>
+            <div className={styles.actionDialogContent}>
+              {/* Source summary */}
+              <div className={styles.actionDialogBodyText} style={{ borderLeft: '3px solid rgba(118,74,188,0.5)', paddingLeft: 10 }}>
+                <div><strong>{transferSelection[0]?.sourceName}</strong> · {transferSelection[0]?.sourceProjectName}</div>
+                <div style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: 2 }}>
+                  {transferSelection
+                    .slice()
+                    .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month)
+                    .map(c => `${MONTH_SHORT[c.month - 1]} ${c.year}: ${c.value}%`)
+                    .join(' · ')}
+                </div>
+              </div>
+
+              {/* Target resource picker */}
+              <div>
+                <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>
+                  Target resource
+                </div>
+                {transferDialogResourcesLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                    <Spinner size="extra-tiny" /> Loading resources…
+                  </div>
+                ) : (
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="text"
+                      value={transferDialogResourceQuery}
+                      onChange={e => { setTransferDialogResourceQuery(e.target.value); setTransferDialogTargetResourceId(''); setTransferDialogResourceDropdownOpen(true); setTransferDialogError(null); }}
+                      onFocus={() => setTransferDialogResourceDropdownOpen(true)}
+                      onBlur={() => setTimeout(() => setTransferDialogResourceDropdownOpen(false), 150)}
+                      placeholder="Search by name or initials..."
+                      style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', boxSizing: 'border-box' }}
+                    />
+                    {transferDialogResourceDropdownOpen && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1000, background: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, boxShadow: tokens.shadow8, maxHeight: 300, overflowY: 'auto' }}>
+                        {transferDialogFilteredResources.length === 0 ? (
+                          <div style={{ padding: '6px 8px', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>No matching resources</div>
+                        ) : (
+                          transferDialogFilteredResources.map(r => (
+                            <div
+                              key={r.id}
+                              onMouseDown={e => {
+                                e.preventDefault();
+                                setTransferDialogTargetResourceId(r.id);
+                                setTransferDialogResourceQuery('');
+                                setTransferDialogResourceDropdownOpen(false);
+                                setTransferDialogError(null);
+                              }}
+                              style={{ padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: tokens.fontSizeBase200, backgroundColor: r.id === transferDialogTargetResourceId ? tokens.colorNeutralBackground3 : 'transparent' }}
+                              onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = r.id === transferDialogTargetResourceId ? tokens.colorNeutralBackground3 : 'transparent'; }}
+                            >
+                              <span style={{ background: avatarColor(r.display_name), color: '#fff', borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold, flexShrink: 0 }}>
+                                {getInitials(r.display_name, r.initials)}
+                              </span>
+                              {r.display_name}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {transferDialogTargetResourceId && (
+                  <div style={{ marginTop: 4, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                    Selected: <strong>{transferDialogResources.find(r => r.id === transferDialogTargetResourceId)?.display_name ?? transferDialogTargetResourceId}</strong>
+                  </div>
+                )}
+              </div>
+
+              {/* Target project picker */}
+              <div>
+                <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>
+                  Target project{transferSelection[0]?.lineType === 'supply' ? ' (leave blank for general availability)' : ''}
+                </div>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    value={transferDialogProjectQuery}
+                    onChange={e => { setTransferDialogProjectQuery(e.target.value); setTransferDialogTargetProjectId(transferSelection[0]?.lineType === 'supply' ? null : ''); setTransferDialogProjectDropdownOpen(true); setTransferDialogError(null); }}
+                    onFocus={() => setTransferDialogProjectDropdownOpen(true)}
+                    onBlur={() => setTimeout(() => setTransferDialogProjectDropdownOpen(false), 150)}
+                    placeholder={transferSelection[0]?.lineType === 'supply' ? 'Search or leave blank for GA…' : 'Search by project name or code…'}
+                    style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', boxSizing: 'border-box' }}
+                  />
+                  {transferDialogProjectDropdownOpen && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 999, background: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, boxShadow: tokens.shadow8, maxHeight: 300, overflowY: 'auto' }}>
+                      {transferSelection[0]?.lineType === 'supply' && (!transferDialogProjectQuery.trim() || 'general availability'.includes(transferDialogProjectQuery.trim().toLowerCase())) && (
+                        <div
+                          onMouseDown={e => { e.preventDefault(); setTransferDialogTargetProjectId(null); setTransferDialogProjectQuery(''); setTransferDialogProjectDropdownOpen(false); setTransferDialogError(null); }}
+                          style={{ padding: '6px 8px', cursor: 'pointer', fontSize: tokens.fontSizeBase200, fontStyle: 'italic', backgroundColor: transferDialogTargetProjectId === null ? tokens.colorNeutralBackground3 : 'transparent' }}
+                          onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                          onMouseLeave={e => { e.currentTarget.style.backgroundColor = transferDialogTargetProjectId === null ? tokens.colorNeutralBackground3 : 'transparent'; }}
+                        >
+                          — General availability —
+                        </div>
+                      )}
+                      {transferDialogFilteredProjects.length === 0 && transferSelection[0]?.lineType !== 'supply' ? (
+                        <div style={{ padding: '6px 8px', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>No matching projects</div>
+                      ) : (
+                        transferDialogFilteredProjects.map(p => (
+                          <div
+                            key={p.id}
+                            onMouseDown={e => {
+                              e.preventDefault();
+                              setTransferDialogTargetProjectId(p.id);
+                              setTransferDialogProjectQuery('');
+                              setTransferDialogProjectDropdownOpen(false);
+                              setTransferDialogError(null);
+                            }}
+                            style={{ padding: '6px 8px', cursor: 'pointer', fontSize: tokens.fontSizeBase200, backgroundColor: p.id === transferDialogTargetProjectId ? tokens.colorNeutralBackground3 : 'transparent' }}
+                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = p.id === transferDialogTargetProjectId ? tokens.colorNeutralBackground3 : 'transparent'; }}
+                          >
+                            <span style={{ fontWeight: tokens.fontWeightSemibold }}>{p.name}</span>
+                            {p.code && <span style={{ marginLeft: 6, color: tokens.colorNeutralForeground3 }}>{p.code}</span>}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+                {transferDialogTargetProjectId !== null && transferDialogTargetProjectId !== '' && (
+                  <div style={{ marginTop: 4, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                    Selected: <strong>{transferDialogProjects.find(p => p.id === transferDialogTargetProjectId)?.name ?? transferDialogTargetProjectId}</strong>
+                  </div>
+                )}
+                {transferSelection[0]?.lineType === 'supply' && transferDialogTargetProjectId === null && !transferDialogProjectQuery && (
+                  <div style={{ marginTop: 4, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}>
+                    Target: general availability
+                  </div>
+                )}
+              </div>
+
+              {transferDialogError && (
+                <div className={styles.actionDialogError}>{transferDialogError}</div>
+              )}
+            </div>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              appearance="secondary"
+              style={compactBtn}
+              onClick={() => { setTransferDialogMode(null); setTransferDialogTargetResourceId(''); setTransferDialogTargetProjectId(null); setTransferDialogResourceQuery(''); setTransferDialogProjectQuery(''); setTransferDialogError(null); }}
+              disabled={transferDialogLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              appearance="primary"
+              style={compactBtn}
+              onClick={handleTransferSubmit}
+              disabled={
+                transferDialogLoading ||
+                !transferDialogTargetResourceId ||
+                (transferSelection[0]?.lineType === 'demand' && !transferDialogTargetProjectId) ||
+                (transferDialogTargetResourceId === transferSelection[0]?.sourceResourceId && transferDialogTargetProjectId === transferSelection[0]?.sourceProjectId) ||
+                transferDialogResourcesLoading
+              }
+              icon={transferDialogLoading ? <Spinner size="extra-tiny" /> : undefined}
+            >
+              {transferDialogMode === 'copy' ? 'Copy' : 'Move'}
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+
     {/* Demand Move Would Exceed 100% — Cap Confirmation Dialog */}
     <Dialog
       open={demandCapPeriods.length > 0}
@@ -3317,6 +4219,52 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
               onClick={handleSupplyCapConfirm}
               disabled={confirmingSupplyCap}
               icon={confirmingSupplyCap ? <Spinner size="extra-tiny" /> : undefined}
+            >
+              Proceed and cap at 100
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
+
+    {/* Transfer Would Exceed 100% — Cap Confirmation Dialog */}
+    <Dialog
+      open={transferCapPeriods.length > 0}
+      onOpenChange={(_, d) => { if (!d.open && !confirmingTransferCap) { setTransferCapPeriods([]); setTransferCapPendingBody(null); setTransferCapLineType(null); } }}
+    >
+      <DialogSurface style={{ maxWidth: 500, borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06)', padding: '20px 24px' }}>
+        <DialogBody>
+          <DialogTitle style={dlgTitleStyle}>Transfer would exceed 100%</DialogTitle>
+          <DialogContent>
+            <div className={styles.actionDialogContent}>
+              <div className={styles.actionDialogBodyText}>
+                Some target months already have {transferCapLineType} on this resource and project.
+                The transfer would exceed 100%. If you proceed, those months will be capped at 100%.
+              </div>
+              <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {transferCapPeriods.map(p => (
+                  <div key={p.period_id} style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2 }}>
+                    <strong>{p.label}</strong>: existing {p.existing_fte}% + transferred {p.moved_fte}% = {p.raw_total}%, capped to 100%
+                  </div>
+                ))}
+              </div>
+            </div>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              appearance="secondary"
+              style={compactBtn}
+              onClick={() => { setTransferCapPeriods([]); setTransferCapPendingBody(null); setTransferCapLineType(null); }}
+              disabled={confirmingTransferCap}
+            >
+              Cancel
+            </Button>
+            <Button
+              appearance="primary"
+              style={compactBtn}
+              onClick={handleTransferCapConfirm}
+              disabled={confirmingTransferCap}
+              icon={confirmingTransferCap ? <Spinner size="extra-tiny" /> : undefined}
             >
               Proceed and cap at 100
             </Button>
@@ -3446,8 +4394,8 @@ const CellEditor: React.FC<CellEditorProps> = ({
       <span
         className={styles.cellValue}
         style={colorStyle ?? { backgroundColor: 'transparent' }}
-        onClick={canEdit ? handleStartEdit : undefined}
-        title={canEdit ? 'Click to edit' : undefined}
+        onClick={canEdit ? (e: React.MouseEvent) => { if (!e.ctrlKey && !e.metaKey) handleStartEdit(); } : undefined}
+        title={canEdit ? 'Click to edit · Ctrl+click to select' : undefined}
       >
         {value}%
       </span>
@@ -3456,7 +4404,7 @@ const CellEditor: React.FC<CellEditorProps> = ({
 
   if (canEdit) {
     return (
-      <span className={styles.emptyCell} onClick={handleStartEdit} title="Click to add">
+      <span className={styles.emptyCell} onClick={(e: React.MouseEvent) => { if (!e.ctrlKey && !e.metaKey) handleStartEdit(); }} title="Click to add">
         —
       </span>
     );

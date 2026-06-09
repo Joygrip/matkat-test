@@ -27,7 +27,7 @@ import { MONTH_SHORT } from '../../utils/format';
 
 const PROJECT_COL_WIDTH = 180;
 const DESC_COL_WIDTH = 210;
-const TYPE_COL_WIDTH = 60;
+const TYPE_COL_WIDTH = 120;
 const PERIOD_COL_WIDTH = 100;
 const PROJECT_COL_PX = `${PROJECT_COL_WIDTH}px`;
 const DESC_COL_PX = `${DESC_COL_WIDTH}px`;
@@ -106,9 +106,18 @@ const useStyles = makeStyles({
     border: `1px solid ${C.line}`,
     borderRadius: '10px',
     boxShadow: '0 1px 2px rgba(15,15,15,0.04)',
-    overflow: 'hidden',
+    overflow: 'clip' as const,
   },
-  wrapper: { overflowX: 'auto', width: '100%' },
+  headerWrap: {
+    position: 'sticky' as const,
+    top: 0,
+    zIndex: 10,
+    overflow: 'hidden' as const,
+    width: '100%',
+    backgroundColor: C.surface2,
+    boxShadow: `0 1px 0 ${C.line}`,
+  },
+  wrapper: { overflowX: 'auto' as const, width: '100%', scrollbarWidth: 'none' as const, '&::-webkit-scrollbar': { display: 'none' } },
   matrixSelecting: { userSelect: 'none' as const },
   table: { borderCollapse: 'collapse', minWidth: '100%', fontSize: '13px', tableLayout: 'fixed' as const },
 
@@ -232,6 +241,8 @@ const useStyles = makeStyles({
     zIndex: 1,
     whiteSpace: 'nowrap' as const,
     minWidth: TYPE_COL_PX,
+    maxWidth: TYPE_COL_PX,
+    overflow: 'hidden' as const,
     verticalAlign: 'middle' as const,
   },
   typeCellEquip: {
@@ -242,6 +253,8 @@ const useStyles = makeStyles({
     zIndex: 1,
     whiteSpace: 'nowrap' as const,
     minWidth: TYPE_COL_PX,
+    maxWidth: TYPE_COL_PX,
+    overflow: 'hidden' as const,
     verticalAlign: 'middle' as const,
   },
   badgeOop: {
@@ -550,6 +563,14 @@ export const ProjectCostsMatrix: React.FC = () => {
   const hasDraggedRef = useRef(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
+  // Refs for sticky header + synced horizontal scrollbar
+  const headerWrapRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const fixedBarRef = useRef<HTMLDivElement>(null);
+  const phantomRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const isSyncingScrollRef = useRef(false);
+
   // ── Rename dialog ──
   const [renamingLine, setRenamingLine] = useState<{ projectId: string; projectName: string; type: 'oop'|'equip'; description: string } | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -618,6 +639,48 @@ export const ProjectCostsMatrix: React.FC = () => {
     document.addEventListener('mousedown', handleDocMouseDown);
     return () => document.removeEventListener('mousedown', handleDocMouseDown);
   }, [popoverPos]);
+
+  // Sync horizontal scroll: body ↔ sticky header ↔ fixed bottom scrollbar.
+  // Depends on `loading` so it re-runs after the matrix DOM mounts (refs are null while loading=true).
+  useEffect(() => {
+    const header = headerWrapRef.current;
+    const container = scrollContainerRef.current;
+    const fixedBar = fixedBarRef.current;
+    const phantom = phantomRef.current;
+    const table = tableRef.current;
+    if (!header || !container || !fixedBar || !phantom || !table) return;
+
+    const updatePhantomWidth = () => {
+      phantom.style.width = `${table.scrollWidth}px`;
+    };
+    updatePhantomWidth();
+
+    const ro = new ResizeObserver(updatePhantomWidth);
+    ro.observe(table);
+
+    const onContainerScroll = () => {
+      if (isSyncingScrollRef.current) return;
+      isSyncingScrollRef.current = true;
+      header.scrollLeft = container.scrollLeft;
+      fixedBar.scrollLeft = container.scrollLeft;
+      isSyncingScrollRef.current = false;
+    };
+    const onFixedBarScroll = () => {
+      if (isSyncingScrollRef.current) return;
+      isSyncingScrollRef.current = true;
+      container.scrollLeft = fixedBar.scrollLeft;
+      header.scrollLeft = fixedBar.scrollLeft;
+      isSyncingScrollRef.current = false;
+    };
+
+    container.addEventListener('scroll', onContainerScroll);
+    fixedBar.addEventListener('scroll', onFixedBarScroll);
+    return () => {
+      ro.disconnect();
+      container.removeEventListener('scroll', onContainerScroll);
+      fixedBar.removeEventListener('scroll', onFixedBarScroll);
+    };
+  }, [loading]);
 
   // ── Open periods only ──
   const openPeriods = useMemo(() => allPeriods.filter(p => p.status === 'open'), [allPeriods]);
@@ -943,6 +1006,7 @@ export const ProjectCostsMatrix: React.FC = () => {
   };
 
   const totalCols = 3 + openPeriods.length;
+  const tableWidth = FIXED_AREA_WIDTH + openPeriods.length * PERIOD_COL_WIDTH;
 
   if (loading) return <div className={styles.loading}><Spinner label="Loading project costs…" /></div>;
 
@@ -988,47 +1052,62 @@ export const ProjectCostsMatrix: React.FC = () => {
         </div>
       )}
 
-      <div className={mergeClasses(styles.wrapper, isDragging && styles.matrixSelecting)}>
-        <table className={styles.table} onMouseLeave={() => setHoveredMonth(null)}>
-          <colgroup>
-            <col style={{ width: PROJECT_COL_WIDTH }} />
-            <col style={{ width: DESC_COL_WIDTH }} />
-            <col style={{ width: TYPE_COL_WIDTH }} />
-            {openPeriods.map(period => (
-              <col key={period.id} style={{ width: PERIOD_COL_WIDTH }} />
-            ))}
-          </colgroup>
-          <thead>
-            <tr>
-              <th className={mergeClasses(styles.th, styles.thProject)} style={{ textAlign: 'left' }}>Project</th>
-              <th className={mergeClasses(styles.th, styles.thDesc)}    style={{ textAlign: 'left' }}>Name</th>
-              <th className={mergeClasses(styles.th, styles.thType)}    style={{ textAlign: 'left' }}>Type</th>
-              {openPeriods.map((p, idx) => {
-                const isColHovered = hoveredMonth === idx;
-                return (
-                  <th
-                    key={p.id}
-                    className={styles.th}
-                    style={{
-                      width: PERIOD_COL_PX,
-                      minWidth: PERIOD_COL_PX,
-                      transition: 'background-color 0.1s ease',
-                      ...(isColHovered ? { backgroundColor: 'rgba(30,58,95,0.06)' } : {}),
-                    }}
-                    onMouseEnter={() => setHoveredMonth(idx)}
-                  >
-                    <span style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: C.ink2, textTransform: 'none', letterSpacing: 0 }}>
-                      {MONTH_SHORT[p.month - 1]}
-                    </span>
-                    <span style={{ display: 'block', fontSize: '9.5px', color: C.ink4, marginTop: '1px', letterSpacing: '0.05em', textTransform: 'none' }}>
-                      {p.year}
-                    </span>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
+      <div style={{ position: 'relative' }}>
+        {/* Sticky header — lives outside the overflow-x container so vertical sticky works */}
+        <div ref={headerWrapRef} className={styles.headerWrap}>
+          <table className={styles.table} style={{ tableLayout: 'fixed', width: tableWidth, minWidth: tableWidth }}>
+            <colgroup>
+              <col style={{ width: PROJECT_COL_PX }} />
+              <col style={{ width: DESC_COL_PX }} />
+              <col style={{ width: TYPE_COL_PX }} />
+              {openPeriods.map(period => (
+                <col key={period.id} style={{ width: PERIOD_COL_PX }} />
+              ))}
+            </colgroup>
+            <thead>
+              <tr>
+                <th className={mergeClasses(styles.th, styles.thProject)} style={{ textAlign: 'left' }}>Project</th>
+                <th className={mergeClasses(styles.th, styles.thDesc)}    style={{ textAlign: 'left' }}>Name</th>
+                <th className={mergeClasses(styles.th, styles.thType)}    style={{ textAlign: 'left' }}>Type</th>
+                {openPeriods.map((p, idx) => {
+                  const isColHovered = hoveredMonth === idx;
+                  return (
+                    <th
+                      key={p.id}
+                      className={styles.th}
+                      style={{
+                        width: PERIOD_COL_PX,
+                        minWidth: PERIOD_COL_PX,
+                        transition: 'background-color 0.1s ease',
+                        ...(isColHovered ? { backgroundColor: 'rgba(30,58,95,0.06)' } : {}),
+                      }}
+                      onMouseEnter={() => setHoveredMonth(idx)}
+                    >
+                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: C.ink2, textTransform: 'none', letterSpacing: 0 }}>
+                        {MONTH_SHORT[p.month - 1]}
+                      </span>
+                      <span style={{ display: 'block', fontSize: '9.5px', color: C.ink4, marginTop: '1px', letterSpacing: '0.05em', textTransform: 'none' }}>
+                        {p.year}
+                      </span>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+          </table>
+        </div>
+        {/* Body scroll container — overflow-x: auto without breaking vertical sticky */}
+        <div ref={scrollContainerRef} className={mergeClasses(styles.wrapper, isDragging && styles.matrixSelecting)}>
+          <table ref={tableRef} className={styles.table} onMouseLeave={() => setHoveredMonth(null)} style={{ tableLayout: 'fixed', width: tableWidth, minWidth: tableWidth }}>
+            <colgroup>
+              <col style={{ width: PROJECT_COL_PX }} />
+              <col style={{ width: DESC_COL_PX }} />
+              <col style={{ width: TYPE_COL_PX }} />
+              {openPeriods.map(period => (
+                <col key={period.id} style={{ width: PERIOD_COL_PX }} />
+              ))}
+            </colgroup>
+            <tbody>
             {matrixGroups.map(group => {
               const isExpanded = expandedProjects.has(group.projectId);
               const canEditThisProject = canEditProject(group.pmUserIds);
@@ -1122,7 +1201,7 @@ export const ProjectCostsMatrix: React.FC = () => {
                           className={line.type === 'oop' ? styles.typeCellOop : styles.typeCellEquip}
                           style={{ backgroundColor: stickyBg }}
                         >
-                          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                             <span className={line.type === 'oop' ? styles.badgeOop : styles.badgeEquip}>
                               {line.type === 'oop' ? 'OoP' : 'Equip'}
                             </span>
@@ -1132,7 +1211,7 @@ export const ProjectCostsMatrix: React.FC = () => {
                                 appearance="subtle"
                                 icon={<EditRegular />}
                                 className={styles.deleteBtn}
-                                style={{ opacity: isHovered ? 1 : 0 }}
+                                style={{ opacity: isHovered ? 1 : 0.35 }}
                                 title="Edit line name"
                                 onClick={() => openRenameDialog(group, line)}
                               />
@@ -1143,7 +1222,7 @@ export const ProjectCostsMatrix: React.FC = () => {
                                 appearance="subtle"
                                 icon={<DeleteRegular />}
                                 className={styles.deleteBtn}
-                                style={{ opacity: isHovered ? 1 : 0 }}
+                                style={{ opacity: isHovered ? 1 : 0.35 }}
                                 onClick={() => {
                                   if (window.confirm(`Delete "${line.description}"? This will remove all values across all periods.`)) {
                                     handleDeleteLine(group.projectId, line.type, line.description, line.isLocal);
@@ -1306,6 +1385,21 @@ export const ProjectCostsMatrix: React.FC = () => {
             </tr>
           </tbody>
         </table>
+      </div>
+      <div
+        ref={fixedBarRef}
+        style={{
+          position: 'sticky',
+          bottom: 0,
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          height: '12px',
+          background: tokens.colorNeutralBackground2,
+          borderTop: `1px solid ${C.line}`,
+        }}
+      >
+        <div ref={phantomRef} style={{ height: '1px' }} />
+      </div>
       </div>
 
       {/* ── Rename dialog ── */}

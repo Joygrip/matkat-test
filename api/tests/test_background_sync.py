@@ -33,6 +33,7 @@ from api.app.services.background_sync import (
     create_resources_from_users,
     run_full_sync,
     _find_ro_candidate,
+    ensure_quality_control_cost_center_metadata,
 )
 
 
@@ -85,11 +86,14 @@ TENANT = "test-tenant"
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_cc(db, name, tenant=TENANT, graph_dept_name=None, protected=False, active=True):
+def make_cc(db, name, tenant=TENANT, graph_dept_name=None, protected=False, active=True,
+            location=None, code=None):
     cc = CostCenter(
-        id=generate_uuid(), tenant_id=tenant, code=name[:5].upper(),
+        id=generate_uuid(), tenant_id=tenant,
+        code=code if code else name[:5].upper(),
         name=name, graph_department_name=graph_dept_name,
         is_active=active, sync_protected=protected,
+        location=location,
     )
     db.add(cc)
     db.flush()
@@ -759,3 +763,256 @@ def test_full_sync_surfaces_assign_errors(db, settings, monkeypatch):
     assert "error" in step, "Error must be recorded in the step result"
     assert "simulated" in step["error"]
     assert result["total_errors"] >= 1, "total_errors must be incremented on step failure"
+
+
+# ---------------------------------------------------------------------------
+# QC1: ensure_quality_control_cost_center_metadata — full reconciliation
+# ---------------------------------------------------------------------------
+
+def test_qc_metadata_reconciliation(db):
+    """DK QC inactive + wrong graph_dept; PL QC owns 'Quality Control'; QC Lab unchanged."""
+    dk_qc = make_cc(db, "Quality Control DK", code="QC-DK",
+                    graph_dept_name="Quality Control DK", location="Denmark", active=False)
+    qc_lab = make_cc(db, "Quality Control Lab",
+                     graph_dept_name="Quality Control Lab", location="Denmark")
+    pl_qc = make_cc(db, "Quality Control", code="QUALI",
+                    graph_dept_name="Quality Control", location="Poland")
+    db.commit()
+
+    result = ensure_quality_control_cost_center_metadata(db, TENANT)
+    db.refresh(dk_qc)
+    db.refresh(qc_lab)
+    db.refresh(pl_qc)
+
+    # DK QC corrected
+    assert dk_qc.is_active is True
+    assert dk_qc.name == "Quality Control"
+    assert dk_qc.graph_department_name == "Quality Control"
+    assert dk_qc.location == "Denmark"
+    assert result["dk_qc_updated"] is True
+
+    # QC Lab untouched
+    assert qc_lab.graph_department_name == "Quality Control Lab"
+    assert qc_lab.name == "Quality Control Lab"
+    assert result["qc_lab_unchanged"] is True
+
+    # PL QC renamed so it no longer competes
+    assert pl_qc.graph_department_name == "Quality Control PL"
+    assert result["pl_qc_repointed"] == 1
+    assert result["warnings"] == []
+
+
+# ---------------------------------------------------------------------------
+# QC2: ensure_quality_control_cost_center_metadata — idempotent
+# ---------------------------------------------------------------------------
+
+def test_qc_metadata_idempotent(db):
+    """Second run on already-correct state reports no changes."""
+    make_cc(db, "Quality Control", code="QC-DK",
+            graph_dept_name="Quality Control", location="Denmark")
+    db.commit()
+
+    r1 = ensure_quality_control_cost_center_metadata(db, TENANT)
+    r2 = ensure_quality_control_cost_center_metadata(db, TENANT)
+
+    assert r2["dk_qc_updated"] is False
+    assert r2["pl_qc_repointed"] == 0
+
+
+# ---------------------------------------------------------------------------
+# QC3: DK user with dept="Quality Control" routes to DK QC
+# ---------------------------------------------------------------------------
+
+def test_dk_quality_control_user_routes_to_dk_qc(db, monkeypatch):
+    """DK user whose Graph dept is 'Quality Control' maps to DK Quality Control CC."""
+    dk_qc = make_cc(db, "Quality Control", code="QC-DK",
+                    graph_dept_name="Quality Control", location="Denmark")
+    dk_user = make_user(db, "dk-qc-1", "dkqc@ferrosanmd.com", cc=None)
+    dk_user.country = "Denmark"
+    db.commit()
+
+    graph_users = [{"id": "dk-qc-1", "displayName": "DK QC User",
+                    "mail": "dkqc@ferrosanmd.com", "userPrincipalName": "dkqc@ferrosanmd.com",
+                    "accountEnabled": True, "department": "Quality Control", "country": "Denmark"}]
+    _patch_graph(monkeypatch, _FakeGraph(graph_users))
+
+    result = _sync_cc_assignments(db, _FakeSettings(), TENANT)
+    db.refresh(dk_user)
+
+    assert dk_user.cost_center_id == dk_qc.id
+    assert result["assigned"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# QC4: DK user with dept="Quality Control Lab" routes to QC Lab
+# ---------------------------------------------------------------------------
+
+def test_dk_qc_lab_user_routes_to_qc_lab(db, monkeypatch):
+    """DK user whose Graph dept is 'Quality Control Lab' maps to QC Lab CC."""
+    qc_lab = make_cc(db, "Quality Control Lab",
+                     graph_dept_name="Quality Control Lab", location="Denmark")
+    lab_user = make_user(db, "lab-u-1", "lab@ferrosanmd.com", cc=None)
+    lab_user.country = "Denmark"
+    db.commit()
+
+    graph_users = [{"id": "lab-u-1", "displayName": "Lab User",
+                    "mail": "lab@ferrosanmd.com", "userPrincipalName": "lab@ferrosanmd.com",
+                    "accountEnabled": True, "department": "Quality Control Lab",
+                    "country": "Denmark"}]
+    _patch_graph(monkeypatch, _FakeGraph(graph_users))
+
+    result = _sync_cc_assignments(db, _FakeSettings(), TENANT)
+    db.refresh(lab_user)
+
+    assert lab_user.cost_center_id == qc_lab.id
+    assert result["assigned"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# QC5: PL user with dept="Quality Control" does NOT land in DK QC
+# ---------------------------------------------------------------------------
+
+def test_pl_quality_control_user_does_not_route_to_dk_qc(db, monkeypatch):
+    """PL user whose Graph dept is 'Quality Control' is NOT assigned to DK QC."""
+    dk_qc = make_cc(db, "Quality Control", code="QC-DK",
+                    graph_dept_name="Quality Control", location="Denmark")
+    pl_user = make_user(db, "pl-qc-1", "plqc@ferrosanmd.com", cc=None)
+    pl_user.country = "Poland"
+    db.commit()
+
+    graph_users = [{"id": "pl-qc-1", "displayName": "PL QC User",
+                    "mail": "plqc@ferrosanmd.com", "userPrincipalName": "plqc@ferrosanmd.com",
+                    "accountEnabled": True, "department": "Quality Control", "country": "Poland"}]
+    _patch_graph(monkeypatch, _FakeGraph(graph_users))
+
+    _sync_cc_assignments(db, _FakeSettings(), TENANT)
+    db.refresh(pl_user)
+
+    assert pl_user.cost_center_id != dk_qc.id, "PL user must not be assigned to DK QC"
+    assert pl_user.cost_center_id is None, "PL user should stay unassigned (country mismatch guard)"
+
+
+# ---------------------------------------------------------------------------
+# QC6: Country-mismatch guard is generic — also prevents non-QC cross-country
+# ---------------------------------------------------------------------------
+
+def test_country_mismatch_guard_generic(db, monkeypatch):
+    """Any CC with location set does not accept users from a different country."""
+    dk_hr = make_cc(db, "HR DK", graph_dept_name="HR DK", location="Denmark")
+    pl_user = make_user(db, "pl-hr-1", "plhr@ferrosanmd.com", cc=None)
+    pl_user.country = "Poland"
+    db.commit()
+
+    graph_users = [{"id": "pl-hr-1", "displayName": "PL HR User",
+                    "mail": "plhr@ferrosanmd.com", "userPrincipalName": "plhr@ferrosanmd.com",
+                    "accountEnabled": True, "department": "HR DK", "country": "Poland"}]
+    _patch_graph(monkeypatch, _FakeGraph(graph_users))
+
+    _sync_cc_assignments(db, _FakeSettings(), TENANT)
+    db.refresh(pl_user)
+
+    assert pl_user.cost_center_id != dk_hr.id, "PL user should not be assigned to DK HR CC"
+
+
+# ---------------------------------------------------------------------------
+# QC7: CC without location set accepts any user (guard does not fire)
+# ---------------------------------------------------------------------------
+
+def test_no_location_on_cc_allows_any_user(db, monkeypatch):
+    """CC with location=None accepts users regardless of their country (no guard)."""
+    generic_cc = make_cc(db, "Finance", graph_dept_name="Finance", location=None)
+    user = make_user(db, "fin-u-1", "fin@ferrosanmd.com", cc=None)
+    user.country = "Poland"
+    db.commit()
+
+    graph_users = [{"id": "fin-u-1", "displayName": "Finance User",
+                    "mail": "fin@ferrosanmd.com", "userPrincipalName": "fin@ferrosanmd.com",
+                    "accountEnabled": True, "department": "Finance", "country": "Poland"}]
+    _patch_graph(monkeypatch, _FakeGraph(graph_users))
+
+    _sync_cc_assignments(db, _FakeSettings(), TENANT)
+    db.refresh(user)
+
+    assert user.cost_center_id == generic_cc.id, "CC with no location should accept any user"
+
+
+# ---------------------------------------------------------------------------
+# QC8: Full sync runs QC metadata step before CC assignment
+# ---------------------------------------------------------------------------
+
+def test_full_sync_includes_ensure_qc_metadata_step(db, settings, monkeypatch):
+    """run_full_sync result includes ensure_qc_metadata step in steps dict."""
+    _patch_no_graph(monkeypatch)
+    result = run_full_sync(db, settings, TENANT)
+
+    assert "ensure_qc_metadata" in result["steps"], \
+        "ensure_qc_metadata must appear in full sync steps"
+
+
+def test_full_sync_qc_metadata_before_assignment(db, settings, monkeypatch):
+    """Full sync activates inactive DK QC before assigning DK users to it."""
+    dk_qc = make_cc(db, "Quality Control DK", code="QC-DK",
+                    graph_dept_name="Quality Control DK", location="Denmark", active=False)
+    dk_user = make_user(db, "dk-fs-qc", "dkfsqc@ferrosanmd.com", cc=None)
+    db.commit()
+
+    graph_users = [{"id": "dk-fs-qc", "displayName": "DK FS QC",
+                    "mail": "dkfsqc@ferrosanmd.com", "userPrincipalName": "dkfsqc@ferrosanmd.com",
+                    "accountEnabled": True, "department": "Quality Control", "country": "Denmark"}]
+    import api.app.services.background_sync as bs
+    monkeypatch.setattr(bs, "GraphAppClient", lambda _s: _FakeGraph(graph_users))
+
+    run_full_sync(db, _FakeSettings(), TENANT)
+    db.refresh(dk_qc)
+    db.refresh(dk_user)
+
+    assert dk_qc.is_active is True, "DK QC must be activated by metadata step before assignment"
+    assert dk_user.cost_center_id == dk_qc.id, "DK user must be assigned to activated DK QC"
+
+
+# ---------------------------------------------------------------------------
+# QC9: DK QC managers computed only from DK QC resources (not PL resources)
+# ---------------------------------------------------------------------------
+
+def test_dk_qc_managers_from_dk_resources_only(db, settings):
+    """assign_cost_center_managers assigns DK QC RO from DK CC members, not PL members."""
+    dk_qc = make_cc(db, "Quality Control", code="QC-DK",
+                    graph_dept_name="Quality Control", location="Denmark")
+    pl_qc = make_cc(db, "Quality Control PL", code="QUALI",
+                    graph_dept_name="Quality Control PL", location="Poland")
+
+    dk_ro = make_user(db, "dk-ro-mgr", "dkro@ferrosanmd.com", role=UserRole.MANAGER, cc=dk_qc)
+    dk_emp = make_user(db, "dk-ro-emp", "dkemp@ferrosanmd.com", manager_oid="dk-ro-mgr", cc=dk_qc)
+    pl_mgr = make_user(db, "pl-qc-mgr", "plmgr@ferrosanmd.com", role=UserRole.MANAGER, cc=pl_qc)
+    pl_emp = make_user(db, "pl-qc-emp", "plemp@ferrosanmd.com", manager_oid="pl-qc-mgr", cc=pl_qc)
+    db.commit()
+
+    assign_cost_center_managers(db, settings, TENANT)
+    db.refresh(dk_qc)
+    db.refresh(pl_qc)
+
+    assert dk_qc.ro_user_id == dk_ro.id, "DK QC RO must come from DK resources"
+    assert pl_qc.ro_user_id == pl_mgr.id, "PL QC RO must come from PL resources"
+    assert dk_qc.ro_user_id != pl_mgr.id, "PL manager must not be DK QC RO"
+
+
+# ---------------------------------------------------------------------------
+# QC10: ensure_qc_metadata does not deactivate unrelated CCs
+# ---------------------------------------------------------------------------
+
+def test_qc_metadata_does_not_touch_unrelated_ccs(db):
+    """ensure_quality_control_cost_center_metadata only touches QC-family CCs."""
+    unrelated = make_cc(db, "Biomaterial R&D", graph_dept_name="Biomaterial R&D", active=True)
+    finance_cc = make_cc(db, "Finance", graph_dept_name="Finance", active=True)
+    # Minimal DK QC to avoid warning
+    make_cc(db, "Quality Control", code="QC-DK",
+            graph_dept_name="Quality Control", location="Denmark")
+    db.commit()
+
+    ensure_quality_control_cost_center_metadata(db, TENANT)
+    db.refresh(unrelated)
+    db.refresh(finance_cc)
+
+    assert unrelated.is_active is True, "Unrelated CC must not be deactivated"
+    assert unrelated.graph_department_name == "Biomaterial R&D", "Unrelated CC must not be renamed"
+    assert finance_cc.is_active is True

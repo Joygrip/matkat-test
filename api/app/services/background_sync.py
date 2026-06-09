@@ -14,13 +14,14 @@ Testing checklist:
 - [ ] Sync is idempotent (running twice produces same result)
 
 Full sync steps (run_full_sync):
-  1. import_users_from_graph    — create new Entra users in DB
-  2. run_graph_sync             — refresh email / display_name / manager_object_id / is_active
-  3. _sync_cc_assignments       — assign every user to the CC matching their Graph department
-  4. _mark_empty_ccs_inactive   — soft-delete CCs with zero users (non-protected only)
-  5. promote_managers_from_graph— promote EMPLOYEE→MANAGER for anyone who manages others
-  6. create_resources_from_users— create/update Resource rows for active users
-  7. assign_cost_center_managers— set RO/Director on CCs (NULL-only; never overwrites manual values)
+  1. import_users_from_graph              — create new Entra users in DB
+  2. run_graph_sync                       — refresh email / display_name / manager_object_id / is_active
+  3. ensure_quality_control_cc_metadata  — idempotently fix QC CC names/location before assignment
+  4. _sync_cc_assignments                — assign every user to the CC matching their Graph department
+  5. _mark_empty_ccs_inactive            — soft-delete CCs with zero users (non-protected only)
+  6. promote_managers_from_graph         — promote EMPLOYEE→MANAGER for anyone who manages others
+  7. create_resources_from_users         — create/update Resource rows for active users
+  8. assign_cost_center_managers         — set RO/Director on CCs (force=True; overwrites stale values)
 
 Design invariants (non-negotiable):
   - Graph is the sole source of truth for users and their CC assignments.
@@ -78,6 +79,21 @@ def normalize_department_name(name: str) -> str:
     s = re.sub(r'\s+', ' ', s)
     s = s.replace(' and ', ' & ')
     return s
+
+
+# Country aliases used to normalize user.country and cc.location for comparison.
+_COUNTRY_ALIASES: dict[str, str] = {
+    "dk": "denmark",
+    "pl": "poland",
+}
+
+
+def _normalize_country(country: str | None) -> str:
+    """Normalize country string: lowercase, strip, expand common aliases."""
+    if not country:
+        return ""
+    norm = country.strip().lower()
+    return _COUNTRY_ALIASES.get(norm, norm)
 
 
 def _generate_cc_code(db: Session, tenant_id: str, department_name: str) -> str:
@@ -480,6 +496,21 @@ def _sync_cc_assignments(db: Session, settings: Settings, tenant_id: str) -> dic
                         print(f"sync_cc: created new CC name='{dept}' code={code}")
                     cc_by_dept[dept] = cc
 
+                # Country-mismatch guard: skip cross-country assignment when both the user's
+                # country and the CC's location are known and they differ.
+                # Prevents PL users from landing in DK-specific CCs (e.g. DK Quality Control)
+                # after ensure_quality_control_cost_center_metadata sets cc.location="Denmark".
+                if cc is not None and user.country and cc.location:
+                    u_loc = _normalize_country(user.country)
+                    cc_loc = _normalize_country(cc.location)
+                    if u_loc and cc_loc and u_loc != cc_loc:
+                        print(
+                            f"sync_cc: AMBIGUOUS_DEPARTMENT_SKIPPED user={user.object_id} "
+                            f"dept='{dept}' user_country='{user.country}' "
+                            f"→ CC='{cc.name}' cc_location='{cc.location}' (country mismatch)"
+                        )
+                        continue
+
                 # Assign user if different
                 if user.cost_center_id != cc.id:
                     user.cost_center_id = cc.id
@@ -491,7 +522,16 @@ def _sync_cc_assignments(db: Session, settings: Settings, tenant_id: str) -> dic
                     if resource:
                         resource.cost_center_id = cc.id
                     assigned += 1
-                    print(f"sync_cc: assigned user={user.object_id} → CC='{cc.name}'")
+                    # Sync reason for observability
+                    _dept_n = normalize_department_name(dept)
+                    _u_loc = _normalize_country(user.country) if user.country else ""
+                    if _dept_n == "quality control lab" and _u_loc in ("denmark", "dk"):
+                        _reason = "QC_LAB_DK_MATCH"
+                    elif _dept_n == "quality control" and _u_loc in ("denmark", "dk"):
+                        _reason = "QC_DK_DEPARTMENT_COUNTRY_MATCH"
+                    else:
+                        _reason = "GENERIC_DEPARTMENT_MATCH"
+                    print(f"sync_cc: assigned user={user.object_id} → CC='{cc.name}' [{_reason}]")
 
         except Exception as exc:
             print(f"sync_cc: error processing user={user.object_id}: {exc}")
@@ -940,6 +980,178 @@ def import_departments_from_graph(db: Session, settings: Settings, tenant_id: st
     }
 
 
+def ensure_quality_control_cost_center_metadata(db: Session, tenant_id: str) -> dict:
+    """Idempotently reconcile Quality Control cost center metadata before user assignment.
+
+    Called as an early step in run_full_sync so that _sync_cc_assignments sees
+    correct graph_department_name values and country/location before it builds
+    its cc_by_dept lookup.
+
+    Changes made (all idempotent):
+    1. DK QC (located by code=QC-DK): activate, set name/graph_department_name="Quality Control",
+       location="Denmark", sync_protected=False.
+    2. QC Lab (graph_department_name="Quality Control Lab", location=Denmark): verified, not changed.
+    3. Any active CC with graph_department_name="Quality Control" AND location=Poland is renamed
+       to "Quality Control PL" so it no longer competes for the DK key in cc_by_dept.
+
+    Never deletes or deactivates rows.
+    Returns a structured result dict included in run_full_sync output.
+    """
+    result: dict = {
+        "dk_qc_updated": False,
+        "dk_qc_before": None,
+        "dk_qc_after": None,
+        "qc_lab_unchanged": True,
+        "pl_qc_repointed": 0,
+        "duplicates_found": [],
+        "warnings": [],
+    }
+
+    # --- Locate DK QC (reads first, all writes batched at end) ---
+    dk_qc = db.query(CostCenter).filter(
+        CostCenter.tenant_id == tenant_id,
+        CostCenter.code == "QC-DK",
+    ).first()
+
+    if dk_qc is None:
+        # Fallback: Denmark CC whose graph_department_name looks like "Quality Control DK"
+        dk_qc = (
+            db.query(CostCenter)
+            .filter(
+                CostCenter.tenant_id == tenant_id,
+                CostCenter.location.in_(["Denmark", "DK"]),
+                CostCenter.sync_protected == False,
+            )
+            .filter(
+                CostCenter.graph_department_name.notin_(["Quality Control Lab"]),
+                ~CostCenter.name.like("%Lab%"),
+            )
+            .filter(
+                CostCenter.name.in_(["Quality Control DK", "Quality Control"])
+                | CostCenter.graph_department_name.in_(["Quality Control DK", "Quality Control"])
+            )
+            .first()
+        )
+
+    # --- Locate QC Lab ---
+    qc_lab = db.query(CostCenter).filter(
+        CostCenter.tenant_id == tenant_id,
+        CostCenter.graph_department_name == "Quality Control Lab",
+    ).first()
+    if qc_lab is None:
+        qc_lab = db.query(CostCenter).filter(
+            CostCenter.tenant_id == tenant_id,
+            CostCenter.name == "Quality Control Lab",
+        ).first()
+
+    # --- Find active competing CCs (graph_department_name="Quality Control", excluding DK QC) ---
+    dk_qc_id = dk_qc.id if dk_qc else None
+    competitors_q = db.query(CostCenter).filter(
+        CostCenter.tenant_id == tenant_id,
+        CostCenter.graph_department_name == "Quality Control",
+        CostCenter.is_active == True,
+    )
+    if dk_qc_id:
+        competitors_q = competitors_q.filter(CostCenter.id != dk_qc_id)
+    competitors = competitors_q.all()
+
+    # --- Apply DK QC changes ---
+    if dk_qc is None:
+        msg = (
+            "DK QC cost center not found by code=QC-DK or Denmark+QC name. "
+            "Cannot ensure metadata. Check DB manually."
+        )
+        result["warnings"].append(msg)
+        print(f"qc_metadata: WARNING — {msg}")
+    else:
+        result["dk_qc_before"] = {
+            "id": dk_qc.id, "code": dk_qc.code, "name": dk_qc.name,
+            "graph_department_name": dk_qc.graph_department_name,
+            "location": dk_qc.location, "is_active": dk_qc.is_active,
+            "sync_protected": dk_qc.sync_protected,
+        }
+
+        changed = False
+        if dk_qc.name != "Quality Control":
+            dk_qc.name = "Quality Control"
+            changed = True
+        if dk_qc.graph_department_name != "Quality Control":
+            dk_qc.graph_department_name = "Quality Control"
+            changed = True
+        if dk_qc.location not in ("Denmark", "DK"):
+            dk_qc.location = "Denmark"
+            changed = True
+        if not dk_qc.is_active:
+            dk_qc.is_active = True
+            changed = True
+        if dk_qc.sync_protected:
+            dk_qc.sync_protected = False
+            changed = True
+
+        result["dk_qc_updated"] = changed
+        result["dk_qc_after"] = {
+            "id": dk_qc.id, "code": dk_qc.code, "name": dk_qc.name,
+            "graph_department_name": dk_qc.graph_department_name,
+            "location": dk_qc.location, "is_active": dk_qc.is_active,
+            "sync_protected": dk_qc.sync_protected,
+        }
+
+        if changed:
+            print(
+                f"qc_metadata: DK QC id={dk_qc.id} updated — "
+                f"name='{dk_qc.name}' graph_dept='{dk_qc.graph_department_name}' "
+                f"location='{dk_qc.location}' is_active={dk_qc.is_active}"
+            )
+        else:
+            print(f"qc_metadata: DK QC id={dk_qc.id} already correct — no changes needed")
+
+    # --- Verify QC Lab ---
+    if qc_lab:
+        if qc_lab.is_active:
+            print(f"qc_metadata: QC Lab id={qc_lab.id} verified — is_active=True unchanged")
+        else:
+            result["warnings"].append(
+                f"QC Lab id={qc_lab.id} is_active=False — unexpected state, please review"
+            )
+            result["qc_lab_unchanged"] = False
+            print(f"qc_metadata: WARNING — QC Lab id={qc_lab.id} is_active=False")
+    else:
+        msg = "QC Lab CC (graph_department_name='Quality Control Lab') not found."
+        result["warnings"].append(msg)
+        print(f"qc_metadata: WARNING — {msg}")
+
+    # --- Rename Poland competitors ---
+    result["duplicates_found"] = [
+        {"id": c.id, "code": c.code, "name": c.name, "location": c.location}
+        for c in competitors
+    ]
+    for c in competitors:
+        c_loc = _normalize_country(c.location)
+        if c_loc == "poland":
+            old_dept = c.graph_department_name
+            c.graph_department_name = "Quality Control PL"
+            result["pl_qc_repointed"] += 1
+            print(
+                f"qc_metadata: PL QC id={c.id} code={c.code} "
+                f"graph_department_name '{old_dept}' → 'Quality Control PL'"
+            )
+        else:
+            msg = (
+                f"Competing CC id={c.id} code={c.code} location={c.location} "
+                f"has graph_department_name='Quality Control' but is NOT Poland — manual review required"
+            )
+            result["warnings"].append(msg)
+            print(f"qc_metadata: WARNING — {msg}")
+
+    db.flush()
+    print(
+        f"qc_metadata: done — dk_qc_updated={result['dk_qc_updated']} "
+        f"pl_qc_repointed={result['pl_qc_repointed']} "
+        f"warnings={len(result['warnings'])}"
+    )
+    return result
+
+
 def assign_users_to_departments(db: Session, settings: Settings, tenant_id: str) -> dict:
     """Standalone: re-assign all users to their Graph department CC.
 
@@ -988,7 +1200,17 @@ def run_full_sync(db: Session, settings: Settings, tenant_id: str, force_cc_mana
     finally:
         settings.graph_sync_deactivate_missing = original_deactivate
 
-    # Step 3: Sync CC assignments from Graph department field
+    # Step 3: Ensure QC cost center metadata is correct before user/resource assignment.
+    # This corrects DK QC graph_department_name/location/is_active and renames PL QC
+    # graph_department_name so it does not compete with DK QC in the cc_by_dept lookup.
+    try:
+        steps["ensure_qc_metadata"] = ensure_quality_control_cost_center_metadata(db, tenant_id)
+    except Exception as exc:
+        print(f"full_sync: step ensure_qc_metadata failed: {exc}")
+        steps["ensure_qc_metadata"] = {"error": str(exc)}
+        total_errors += 1
+
+    # Step 4: Sync CC assignments from Graph department field
     try:
         steps["sync_cc_assignments"] = _sync_cc_assignments(db, settings, tenant_id)
         total_errors += steps["sync_cc_assignments"].get("errors", 0)
@@ -997,7 +1219,7 @@ def run_full_sync(db: Session, settings: Settings, tenant_id: str, force_cc_mana
         steps["sync_cc_assignments"] = {"error": str(exc)}
         total_errors += 1
 
-    # Step 4: Mark empty non-protected CCs inactive
+    # Step 5: Mark empty non-protected CCs inactive
     try:
         steps["mark_empty_ccs"] = _mark_empty_ccs_inactive(db, tenant_id)
     except Exception as exc:
@@ -1005,7 +1227,7 @@ def run_full_sync(db: Session, settings: Settings, tenant_id: str, force_cc_mana
         steps["mark_empty_ccs"] = {"error": str(exc)}
         total_errors += 1
 
-    # Step 5: Promote managers
+    # Step 6: Promote managers
     try:
         steps["promote_managers"] = promote_managers_from_graph(db, settings, tenant_id)
         total_errors += steps["promote_managers"].get("errors", 0)
@@ -1014,7 +1236,7 @@ def run_full_sync(db: Session, settings: Settings, tenant_id: str, force_cc_mana
         steps["promote_managers"] = {"error": str(exc)}
         total_errors += 1
 
-    # Step 6: Create / update Resource rows
+    # Step 7: Create / update Resource rows
     try:
         steps["create_resources"] = create_resources_from_users(db, settings, tenant_id)
         total_errors += steps["create_resources"].get("errors", 0)
@@ -1023,7 +1245,7 @@ def run_full_sync(db: Session, settings: Settings, tenant_id: str, force_cc_mana
         steps["create_resources"] = {"error": str(exc)}
         total_errors += 1
 
-    # Step 7: Assign RO / Director from hierarchy
+    # Step 8: Assign RO / Director from hierarchy (force=True re-evaluates all non-protected CCs)
     try:
         steps["assign_cc_managers"] = assign_cost_center_managers(db, settings, tenant_id, force=force_cc_managers)
         errors_val = steps["assign_cc_managers"].get("errors", [])

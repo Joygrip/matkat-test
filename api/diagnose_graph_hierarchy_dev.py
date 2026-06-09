@@ -42,6 +42,12 @@ To fetch app setting NAMES (not values) from the dev App Service safely:
 import os
 import sys
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 
 def _validate_database_url() -> str:
     url = os.environ.get("DATABASE_URL", "")
@@ -92,13 +98,13 @@ _DATABASE_URL = _validate_database_url()
 
 import argparse
 import textwrap
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
 
 try:
-    from sqlalchemy import create_engine, text as sql_text
+    from sqlalchemy import create_engine, text as sql_text, func
     from sqlalchemy.orm import sessionmaker, Session
 except ImportError:
     print("ABORT: sqlalchemy not installed. Run: pip install sqlalchemy pyodbc")
@@ -255,27 +261,95 @@ def _connect_db() -> Session:
 # ============================================================
 
 
+def _find_cost_center(
+    db: Session, cost_center_name: Optional[str], cost_center_id: Optional[str]
+) -> Optional[CostCenter]:
+    """Locate a CostCenter by id (exact) or by name with exact-before-fuzzy preference.
+
+    Priority for name lookup:
+    1. Exact case-insensitive CostCenter.name
+    2. Exact case-insensitive CostCenter.code
+    3. Exact case-insensitive CostCenter.graph_department_name
+    4. Fuzzy name ILIKE with single-match-only (aborts if multiple candidates)
+    """
+    if cost_center_id:
+        return db.query(CostCenter).filter(CostCenter.id == cost_center_id).first()
+
+    if not cost_center_name:
+        return None
+
+    name_lower = cost_center_name.lower()
+
+    # 1. Exact name
+    cc = db.query(CostCenter).filter(
+        func.lower(CostCenter.name) == name_lower
+    ).first()
+    if cc:
+        return cc
+
+    # 2. Exact code
+    cc = db.query(CostCenter).filter(
+        func.lower(CostCenter.code) == name_lower
+    ).first()
+    if cc:
+        return cc
+
+    # 3. Exact graph_department_name
+    cc = db.query(CostCenter).filter(
+        func.lower(CostCenter.graph_department_name) == name_lower
+    ).first()
+    if cc:
+        return cc
+
+    # 4. Fuzzy fallback — abort if multiple candidates
+    fuzzy_matches = db.query(CostCenter).filter(
+        CostCenter.name.ilike(f"%{cost_center_name}%")
+    ).all()
+    if not fuzzy_matches:
+        fuzzy_matches = db.query(CostCenter).filter(
+            CostCenter.graph_department_name.ilike(f"%{cost_center_name}%")
+        ).all()
+
+    if len(fuzzy_matches) == 1:
+        print(f"  [WARN] No exact match; using fuzzy match: '{fuzzy_matches[0].name}'")
+        return fuzzy_matches[0]
+
+    if len(fuzzy_matches) > 1:
+        print(f"\n  ABORT: Fuzzy match for '{cost_center_name}' returned {len(fuzzy_matches)} candidates:")
+        for m in fuzzy_matches:
+            print(
+                f"    id={m.id}  code={m.code}  name={m.name!r}  "
+                f"graph_dept={m.graph_department_name!r}  location={m.location}  active={m.is_active}"
+            )
+        print("  Use a more specific --cost-center name, or --cost-center-id for exact lookup.")
+        return None
+
+    return None
+
+
 def section_c(
-    db: Session, cost_center_name: str
+    db: Session,
+    cost_center_name: Optional[str] = None,
+    cost_center_id: Optional[str] = None,
 ) -> tuple[Optional[CostCenter], list[User], list[Resource], dict[str, User]]:
     """
     Returns (cc, relevant_users, cc_resources, all_users_by_oid).
     relevant_users = CC members + target UPN users (deduplicated).
     """
-    _sep(f"C. AZURE DEV SQL STATE  —  '{cost_center_name}'")
+    label = cost_center_id if cost_center_id else cost_center_name
+    _sep(f"C. AZURE DEV SQL STATE  -  '{label}'")
 
     # ---- Find target CC ----
-    cc: Optional[CostCenter] = (
-        db.query(CostCenter)
-        .filter(CostCenter.name.ilike(f"%{cost_center_name}%"))
-        .first()
-    )
+    cc: Optional[CostCenter] = _find_cost_center(db, cost_center_name, cost_center_id)
 
     if cc is None:
-        print(f"\n  NOT FOUND: No CostCenter matching '{cost_center_name}'.")
+        print(f"\n  NOT FOUND: No CostCenter matching '{label}'.")
         print("  Active CCs in dev SQL:")
         for row in db.query(CostCenter).filter(CostCenter.is_active == True).all():
-            print(f"    code={row.code}  name={row.name!r}  graph_dept={row.graph_department_name!r}")
+            print(
+                f"    id={row.id}  code={row.code}  name={row.name!r}  "
+                f"graph_dept={row.graph_department_name!r}  location={row.location}  active={row.is_active}"
+            )
         return None, [], [], {}
 
     ro_user = db.query(User).filter(User.id == cc.ro_user_id).first() if cc.ro_user_id else None
@@ -503,7 +577,7 @@ def section_d(
         gu = entry.get("user")
         gm = entry.get("manager")
 
-        print(f"\n  ── {display_upn}")
+        print(f"\n  -- {display_upn}")
         if isinstance(gu, dict):
             print(f"     Graph OID         : {gu.get('id')}")
             print(f"     displayName       : {gu.get('displayName')}")
@@ -604,7 +678,7 @@ def section_f(
     graph_results: dict,
     all_users_by_oid: dict[str, User],
 ) -> dict:
-    _sep("F. AZURE DEV SQL vs LIVE GRAPH — COMPARISON")
+    _sep("F. AZURE DEV SQL vs LIVE GRAPH - COMPARISON")
 
     if cc is None:
         print("  Skipped — target CC not found.")
@@ -897,7 +971,7 @@ def section_h(db: Session, cc: Optional[CostCenter]) -> None:
         mgr_label = f"{mgr.display_name}{same_cc}" if mgr else (
             f"OID:{u.manager_object_id[:12]}... [NOT IN DB]" if u.manager_object_id else "NO MGR OID"
         )
-        print(f"    [{i}] {u.display_name:<26} role={u.role.value:<10} manager→ {mgr_label}")
+        print(f"    [{i}] {u.display_name:<26} role={u.role.value:<10} manager-> {mgr_label}")
 
     # ---- _find_ro_candidate trace ----
     print(f"\n  === _find_ro_candidate trace ===\n")
@@ -923,7 +997,7 @@ def section_h(db: Session, cc: Optional[CostCenter]) -> None:
 
             if mgr:
                 in_same_cc = mgr.cost_center_id == cc.id
-                marker = " ← SAME CC — RO CANDIDATE" if in_same_cc else ""
+                marker = " <- SAME CC - RO CANDIDATE" if in_same_cc else ""
                 print(
                     f"    depth={depth}: {mgr.display_name:<26} "
                     f"role={mgr.role.value:<10} "
@@ -962,7 +1036,7 @@ def section_h(db: Session, cc: Optional[CostCenter]) -> None:
             if mgr:
                 print(
                     f"    Found in DB: {mgr.display_name}  role={mgr.role.value}"
-                    f"  ← SELECTED AS RO CANDIDATE (second pass, first hit)"
+                    f"  <- SELECTED AS RO CANDIDATE (second pass, first hit)"
                 )
                 ro_candidate = mgr
                 break
@@ -1115,10 +1189,10 @@ def section_i(
         print(
             "  SQL and Graph agree on manager OIDs.\n"
             "  Root cause is either:\n"
-            "    → GRAPH_SOURCE_DATA (Graph org chart itself is wrong)\n"
-            "    → ASSIGNMENT_ALGORITHM_BUG (SQL is correct but second-pass picks wrong RO)\n"
+            "    -> GRAPH_SOURCE_DATA (Graph org chart itself is wrong)\n"
+            "    -> ASSIGNMENT_ALGORITHM_BUG (SQL is correct but second-pass picks wrong RO)\n"
             "  Check Section H dry-run: who was selected as RO candidate, and why?\n"
-            "  If second-pass selected wrong person due to DB row order → H5 confirmed."
+            "  If second-pass selected wrong person due to DB row order -> H5 confirmed."
         )
     elif local_stale == total and total > 0:
         print(
@@ -1166,17 +1240,32 @@ def main() -> None:
     )
     parser.add_argument(
         "--cost-center",
-        required=True,
-        help='Target cost center name, e.g. "Biomaterial R&D"',
+        default=None,
+        help='Target cost center name (exact or fuzzy), e.g. "Biomaterial R&D"',
+    )
+    parser.add_argument(
+        "--cost-center-id",
+        default=None,
+        help="Target cost center UUID for exact id lookup, e.g. 89ea0670-9b2f-4e58-a664-069264ebdbe8",
     )
     args = parser.parse_args()
-    cost_center_name = args.cost_center
+
+    if not args.cost_center and not args.cost_center_id:
+        parser.error("Provide --cost-center NAME or --cost-center-id UUID")
+
+    cost_center_name: Optional[str] = args.cost_center
+    cost_center_id: Optional[str] = args.cost_center_id
+    label = cost_center_id if cost_center_id else cost_center_name
 
     _sep("MatKat DEV — Graph Hierarchy Diagnostic")
-    print(f"  Target cost center : {cost_center_name!r}")
+    print(f"  Target cost center : {label!r}")
+    if cost_center_id:
+        print(f"  Lookup mode        : exact id")
+    else:
+        print(f"  Lookup mode        : name (exact-then-fuzzy)")
     print(f"  Target UPNs        : {len(TARGET_UPNS)}")
     print(f"  Mode               : READ-ONLY — no DB writes, no sync triggered")
-    print(f"  UTC timestamp      : {datetime.utcnow().isoformat()}")
+    print(f"  UTC timestamp      : {datetime.now(timezone.utc).isoformat()}")
 
     # ---- Load settings ----
     settings = _load_settings()
@@ -1192,7 +1281,9 @@ def main() -> None:
 
     try:
         # C — SQL state
-        cc, relevant_users, cc_resources, all_users_by_oid = section_c(db, cost_center_name)
+        cc, relevant_users, cc_resources, all_users_by_oid = section_c(
+            db, cost_center_name=cost_center_name, cost_center_id=cost_center_id
+        )
 
         # Token
         token: Optional[str] = None
@@ -1221,7 +1312,7 @@ def main() -> None:
         if cc_resources:
             comparison = section_f(db, cc, cc_resources, graph_results, all_users_by_oid)
         else:
-            _sep("F. AZURE DEV SQL vs LIVE GRAPH — COMPARISON")
+            _sep("F. AZURE DEV SQL vs LIVE GRAPH - COMPARISON")
             print("  No CC resources — skipped.")
 
         # G — Batch vs direct

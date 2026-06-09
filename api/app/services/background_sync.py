@@ -689,6 +689,13 @@ def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str,
         settings.graph_client_id and settings.graph_client_secret and settings.azure_tenant_id
     )
 
+    # Count protected CCs for reporting (they are excluded from the main query)
+    skipped_protected = db.query(CostCenter).filter(
+        CostCenter.tenant_id == tenant_id,
+        CostCenter.is_active == True,
+        CostCenter.sync_protected == True,
+    ).count()
+
     cost_centers: list[CostCenter] = (
         db.query(CostCenter)
         .filter(
@@ -714,30 +721,51 @@ def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str,
         if graph_users:
             graph_users_by_oid = {gu.get("id"): gu for gu in graph_users if gu.get("id")}
 
-    updated = 0
-    skipped = 0
-    errors = 0
+    ro_assigned = 0
+    ro_updated = 0
+    ro_skipped_existing = 0
+    director_assigned = 0
+    director_updated = 0
+    director_skipped_existing = 0
+    no_ro_candidate = 0
+    no_director_candidate = 0
+    error_list: list[str] = []
 
     for cc in cost_centers:
         try:
-            cc_updated = False
-
             cc_users: list[User] = db.query(User).filter(
                 User.cost_center_id == cc.id,
                 User.is_active == True,
             ).all()
 
             if not cc_users:
-                skipped += 1
                 continue
+
+            old_ro_id = cc.ro_user_id
 
             # RO — set if NULL, or overwrite if force=True
             if cc.ro_user_id is None or force:
                 ro_candidate = _find_ro_candidate(cc, cc_users, users_by_object_id)
                 if ro_candidate and ro_candidate.id != cc.ro_user_id:
+                    old_ro_name = None
+                    if old_ro_id:
+                        old_ro_user = db.query(User).filter(User.id == old_ro_id).first()
+                        old_ro_name = old_ro_user.display_name if old_ro_user else old_ro_id
+
                     cc.ro_user_id = ro_candidate.id
-                    cc_updated = True
-                    print(f"assign_cc_managers: set ro_user_id={ro_candidate.id} ('{ro_candidate.display_name}') for CC='{cc.name}'")
+
+                    if old_ro_id is None:
+                        ro_assigned += 1
+                        print(
+                            f"assign_cc_managers: assigned ro CC='{cc.name}' "
+                            f"→ '{ro_candidate.display_name}'"
+                        )
+                    else:
+                        ro_updated += 1
+                        print(
+                            f"assign_cc_managers: updated ro CC='{cc.name}' "
+                            f"old='{old_ro_name}' → new='{ro_candidate.display_name}'"
+                        )
 
                     # Set location from RO's Graph country, only if currently NULL
                     if cc.location is None and graph_configured:
@@ -748,35 +776,77 @@ def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str,
                                 cc.location = country
                                 print(f"assign_cc_managers: set location={country} for CC='{cc.name}'")
 
+                elif ro_candidate is None:
+                    no_ro_candidate += 1
+                # else: candidate equals current value — no change needed
+            else:
+                ro_skipped_existing += 1
+
+            old_dir_id = cc.director_user_id
+
             # Director — set if NULL, or overwrite if force=True (requires RO to be set)
             if (cc.director_user_id is None or force) and cc.ro_user_id:
                 ro_user = db.query(User).filter(User.id == cc.ro_user_id).first()
                 if ro_user and ro_user.manager_object_id:
                     director_candidate = users_by_object_id.get(ro_user.manager_object_id)
                     if director_candidate and director_candidate.id != cc.director_user_id:
-                        cc.director_user_id = director_candidate.id
-                        cc_updated = True
-                        print(
-                            f"assign_cc_managers: set director_user_id={director_candidate.id} "
-                            f"('{director_candidate.display_name}') for CC='{cc.name}'"
-                        )
+                        old_dir_name = None
+                        if old_dir_id:
+                            old_dir_user = db.query(User).filter(User.id == old_dir_id).first()
+                            old_dir_name = old_dir_user.display_name if old_dir_user else old_dir_id
 
-            if cc_updated:
-                updated += 1
-            else:
-                skipped += 1
+                        cc.director_user_id = director_candidate.id
+
+                        if old_dir_id is None:
+                            director_assigned += 1
+                            print(
+                                f"assign_cc_managers: assigned director CC='{cc.name}' "
+                                f"→ '{director_candidate.display_name}'"
+                            )
+                        else:
+                            director_updated += 1
+                            print(
+                                f"assign_cc_managers: updated director CC='{cc.name}' "
+                                f"old='{old_dir_name}' → new='{director_candidate.display_name}'"
+                            )
+                    elif director_candidate is None:
+                        no_director_candidate += 1
+                    # else: candidate equals current value — no change needed
+                else:
+                    no_director_candidate += 1
+            elif cc.ro_user_id:
+                director_skipped_existing += 1
 
         except Exception as exc:
-            print(f"assign_cc_managers: error processing cost_center={cc.id}: {exc}")
-            errors += 1
+            msg = f"assign_cc_managers: error processing CC id={cc.id} name='{cc.name}': {exc}"
+            print(msg)
+            error_list.append(msg)
 
     db.commit()
-    print(f"assign_cc_managers: done — updated={updated} skipped={skipped} errors={errors}")
+    total_changed = ro_assigned + ro_updated + director_assigned + director_updated
+    print(
+        f"assign_cc_managers: done — "
+        f"ro_assigned={ro_assigned} ro_updated={ro_updated} ro_skipped={ro_skipped_existing} "
+        f"dir_assigned={director_assigned} dir_updated={director_updated} "
+        f"dir_skipped={director_skipped_existing} protected={skipped_protected} "
+        f"no_ro_candidate={no_ro_candidate} no_dir_candidate={no_director_candidate} "
+        f"errors={len(error_list)}"
+    )
     return {
-        "total_cost_centers": len(cost_centers),
-        "updated": updated,
-        "skipped": skipped,
-        "errors": errors,
+        "cost_centers_checked": len(cost_centers),
+        "ro_assigned": ro_assigned,
+        "ro_updated": ro_updated,
+        "ro_skipped_existing": ro_skipped_existing,
+        "director_assigned": director_assigned,
+        "director_updated": director_updated,
+        "director_skipped_existing": director_skipped_existing,
+        "skipped_protected": skipped_protected,
+        "no_ro_candidate": no_ro_candidate,
+        "no_director_candidate": no_director_candidate,
+        "errors": error_list,
+        # legacy aliases kept for callers that use the old field names
+        "updated": total_changed,
+        "skipped": ro_skipped_existing + director_skipped_existing + no_ro_candidate,
     }
 
 
@@ -882,10 +952,12 @@ def assign_users_to_departments(db: Session, settings: Settings, tenant_id: str)
 # Full sync orchestrator
 # ---------------------------------------------------------------------------
 
-def run_full_sync(db: Session, settings: Settings, tenant_id: str, force_cc_managers: bool = False) -> dict:
+def run_full_sync(db: Session, settings: Settings, tenant_id: str, force_cc_managers: bool = True) -> dict:
     """Run all 7 Graph sync steps in sequence. Each step failure is caught independently.
 
-    force_cc_managers=True re-evaluates RO/Director on all non-protected CCs (not just NULL).
+    force_cc_managers defaults to True so that every full sync re-evaluates RO/Director on
+    all non-protected CCs, correcting stale assignments from prior manual or partial syncs.
+    Pass force_cc_managers=False only when you explicitly want to preserve existing values.
     """
     started_at = datetime.utcnow()
     steps = {}
@@ -954,7 +1026,8 @@ def run_full_sync(db: Session, settings: Settings, tenant_id: str, force_cc_mana
     # Step 7: Assign RO / Director from hierarchy
     try:
         steps["assign_cc_managers"] = assign_cost_center_managers(db, settings, tenant_id, force=force_cc_managers)
-        total_errors += steps["assign_cc_managers"].get("errors", 0)
+        errors_val = steps["assign_cc_managers"].get("errors", [])
+        total_errors += len(errors_val) if isinstance(errors_val, list) else int(errors_val)
     except Exception as exc:
         print(f"full_sync: step assign_cc_managers failed: {exc}")
         steps["assign_cc_managers"] = {"error": str(exc)}

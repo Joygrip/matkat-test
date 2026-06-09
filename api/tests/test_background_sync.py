@@ -406,7 +406,7 @@ def test_cc_with_no_manager_chain_produces_no_ro(db, settings):
 
     assert cc.ro_user_id is None
     assert cc.director_user_id is None
-    assert result["errors"] == 0
+    assert result["errors"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -516,7 +516,7 @@ def test_similar_department_names_dont_crash(db, settings):
     db.refresh(cc1)
     db.refresh(cc2)
 
-    assert result["errors"] == 0
+    assert result["errors"] == []
     assert cc1.ro_user_id == mgr1.id
     assert cc2.ro_user_id == mgr2.id
 
@@ -555,3 +555,207 @@ def test_run_full_sync_force_cc_managers(db, settings, monkeypatch):
 
     assert cc.ro_user_id == correct_ro.id
     assert cc.director_user_id == director.id
+
+
+# ---------------------------------------------------------------------------
+# E: New tests for force=True persistence and full-sync wiring
+# ---------------------------------------------------------------------------
+
+class _NoGraphSync:
+    """Shared stub: all Graph-dependent sync steps become no-ops."""
+    def list_all_users(self): return []
+    def batch_get_managers(self, oids): return {}
+    def list_all_managers(self, oids): return set()
+
+
+def _patch_no_graph(monkeypatch):
+    import api.app.services.background_sync as bs
+    monkeypatch.setattr(bs, "GraphAppClient", lambda _s: _NoGraphSync())
+
+
+# E1 — force=False: existing ro_user_id is NOT overwritten (already covered in test 2, kept for
+#        explicitness with the new return-value format)
+def test_force_false_does_not_overwrite_existing_ro(db, settings):
+    """force=False leaves a pre-existing stale ro_user_id unchanged."""
+    cc = make_cc(db, "E1 Dept")
+    anders = make_user(db, "anders-e1", "anders@t.com", role=UserRole.MANAGER, cc=cc)
+    cc.ro_user_id = anders.id
+    db.flush()
+    katja = make_user(db, "katja-e1", "katja@t.com", role=UserRole.MANAGER, manager_oid=None, cc=cc)
+    emp = make_user(db, "emp-e1", "emp@t.com", manager_oid="katja-e1", cc=cc)
+    db.commit()
+
+    result = assign_cost_center_managers(db, settings, TENANT, force=False)
+    db.refresh(cc)
+
+    assert cc.ro_user_id == anders.id, "force=False must not overwrite existing ro_user_id"
+    assert result["ro_skipped_existing"] >= 1
+
+
+# E2 — force=True: stale ro_user_id IS overwritten
+def test_force_true_overwrites_stale_ro(db, settings):
+    """force=True replaces a stale ro_user_id with the correct candidate."""
+    cc = make_cc(db, "E2 Dept")
+    anders = make_user(db, "anders-e2", "anders@t.com", role=UserRole.MANAGER, cc=cc)
+    cc.ro_user_id = anders.id
+    db.flush()
+    rasmus = make_user(db, "rasmus-e2", "rasmus@t.com", role=UserRole.MANAGER, cc=cc)
+    katja = make_user(db, "katja-e2", "katja@t.com", role=UserRole.MANAGER,
+                      manager_oid="rasmus-e2", cc=cc)
+    emp = make_user(db, "emp-e2", "emp@t.com", manager_oid="katja-e2", cc=cc)
+    db.commit()
+
+    result = assign_cost_center_managers(db, settings, TENANT, force=True)
+    db.refresh(cc)
+
+    assert cc.ro_user_id == katja.id, "force=True must update stale ro_user_id"
+    assert result["ro_updated"] >= 1
+
+
+# E3 — force=True: director correctly upserted via RO's manager chain
+def test_force_true_upserts_director(db, settings):
+    """force=True sets director_user_id from the RO's manager, even when already set."""
+    cc = make_cc(db, "E3 Dept")
+    rasmus = make_user(db, "rasmus-e3", "rasmus@t.com", role=UserRole.MANAGER, cc=cc)
+    katja = make_user(db, "katja-e3", "katja@t.com", role=UserRole.MANAGER,
+                      manager_oid="rasmus-e3", cc=cc)
+    emp = make_user(db, "emp-e3", "emp@t.com", manager_oid="katja-e3", cc=cc)
+    # Pre-set a stale director
+    cc.ro_user_id = katja.id
+    cc.director_user_id = make_user(db, "stale-dir", "stale@t.com", role=UserRole.MANAGER).id
+    db.commit()
+
+    result = assign_cost_center_managers(db, settings, TENANT, force=True)
+    db.refresh(cc)
+
+    assert cc.director_user_id == rasmus.id, "force=True must update director to RO's manager"
+    assert result["director_updated"] >= 1
+
+
+# E4 — sync_protected CC never modified, even with force=True
+def test_sync_protected_never_modified_with_force(db, settings):
+    """sync_protected=True CCs are always skipped, force=True has no effect."""
+    cc = make_cc(db, "E4 Protected", protected=True)
+    mgr = make_user(db, "mgr-e4", "mgr@t.com", role=UserRole.MANAGER, cc=cc)
+    emp = make_user(db, "emp-e4", "emp@t.com", manager_oid="mgr-e4", cc=cc)
+    db.commit()
+
+    result = assign_cost_center_managers(db, settings, TENANT, force=True)
+    db.refresh(cc)
+
+    assert cc.ro_user_id is None
+    assert cc.director_user_id is None
+    assert result["skipped_protected"] >= 1
+
+
+# E5 — run_full_sync default calls assign_cost_center_managers(force=True)
+def test_run_full_sync_default_passes_force_true(db, settings, monkeypatch):
+    """run_full_sync() with no explicit force_cc_managers arg calls assign with force=True."""
+    import api.app.services.background_sync as bs
+
+    captured = {}
+
+    def _spy_assign(db, settings, tenant_id, force=False):
+        captured["force"] = force
+        return {
+            "cost_centers_checked": 0, "ro_assigned": 0, "ro_updated": 0,
+            "ro_skipped_existing": 0, "director_assigned": 0, "director_updated": 0,
+            "director_skipped_existing": 0, "skipped_protected": 0,
+            "no_ro_candidate": 0, "no_director_candidate": 0, "errors": [],
+            "updated": 0, "skipped": 0,
+        }
+
+    monkeypatch.setattr(bs, "assign_cost_center_managers", _spy_assign)
+    _patch_no_graph(monkeypatch)
+
+    run_full_sync(db, settings, TENANT)
+
+    assert captured.get("force") is True, "Default full sync must call assign_cost_center_managers(force=True)"
+
+
+# E6 — run_full_sync commits the assignment so DB reflects updated ro_user_id
+def test_run_full_sync_commits_assignment(db, settings, monkeypatch):
+    """After run_full_sync(), the DB row for the CC has the updated ro_user_id."""
+    cc = make_cc(db, "E6 Dept", graph_dept_name="E6 Dept")
+    anders = make_user(db, "anders-e6", "anders@t.com", role=UserRole.MANAGER, cc=cc)
+    cc.ro_user_id = anders.id
+    db.flush()
+    rasmus = make_user(db, "rasmus-e6", "rasmus@t.com", role=UserRole.MANAGER, cc=cc)
+    katja = make_user(db, "katja-e6", "katja@t.com", role=UserRole.MANAGER,
+                      manager_oid="rasmus-e6", cc=cc)
+    emp = make_user(db, "emp-e6", "emp@t.com", manager_oid="katja-e6", cc=cc)
+    db.commit()
+
+    _patch_no_graph(monkeypatch)
+    run_full_sync(db, settings, TENANT)
+
+    db.expire(cc)
+    db.refresh(cc)
+    assert cc.ro_user_id == katja.id, "DB must persist updated ro_user_id after full sync"
+    assert cc.director_user_id == rasmus.id, "DB must persist updated director_user_id after full sync"
+
+
+# E7 — run_full_sync result includes assign_cc_managers step with counts
+def test_run_full_sync_result_includes_manager_step(db, settings, monkeypatch):
+    """run_full_sync result dict includes steps['assign_cc_managers'] with granular counts."""
+    _patch_no_graph(monkeypatch)
+    result = run_full_sync(db, settings, TENANT)
+
+    assert "assign_cc_managers" in result["steps"], "assign_cc_managers step must appear in result"
+    step = result["steps"]["assign_cc_managers"]
+    assert "cost_centers_checked" in step or "error" in step, \
+        "step must contain counts or an error key"
+
+
+# E8 — Biomaterial-like fixture: default full sync corrects stale RO/Director
+def test_biomaterial_like_fixture_full_sync_corrects_stale(db, settings, monkeypatch):
+    """
+    Mirrors the Biomaterial R&D scenario:
+      - CostCenter has stale ro_user_id=Anders, director_user_id already correct
+      - Resources report to Katja (in the same CC)
+      - Katja's manager is Rasmus
+      - run_full_sync() with no explicit force arg must update ro_user_id to Katja
+    """
+    bio_cc = make_cc(db, "Biomaterial R&D", graph_dept_name="Biomaterial R&D")
+    rasmus = make_user(db, "rasmus-bio", "rasmus@ferrosanmd.com", role=UserRole.MANAGER)
+    anders = make_user(db, "anders-bio", "anders@ferrosanmd.com", role=UserRole.MANAGER, cc=bio_cc)
+    katja = make_user(db, "katja-bio", "katja@ferrosanmd.com", role=UserRole.MANAGER,
+                      manager_oid="rasmus-bio", cc=bio_cc)
+    emp1 = make_user(db, "emp-bio-1", "emp1@ferrosanmd.com", manager_oid="katja-bio", cc=bio_cc)
+    emp2 = make_user(db, "emp-bio-2", "emp2@ferrosanmd.com", manager_oid="katja-bio", cc=bio_cc)
+
+    # Stale state: Anders is set as RO, Rasmus is correctly set as Director
+    bio_cc.ro_user_id = anders.id
+    bio_cc.director_user_id = rasmus.id
+    db.commit()
+
+    _patch_no_graph(monkeypatch)
+    # Trigger full sync without explicit force argument (default must be True after the fix)
+    run_full_sync(db, settings, TENANT)
+
+    db.expire(bio_cc)
+    db.refresh(bio_cc)
+    assert bio_cc.ro_user_id == katja.id, \
+        "ro_user_id must be updated to Katja (correct manager for Biomaterial R&D)"
+    assert bio_cc.director_user_id == rasmus.id, \
+        "director_user_id must remain Rasmus (Katja's manager)"
+
+
+# E9 — Exceptions in assign_cost_center_managers are surfaced, not swallowed
+def test_full_sync_surfaces_assign_errors(db, settings, monkeypatch):
+    """An exception in assign_cost_center_managers is captured in result, not swallowed."""
+    import api.app.services.background_sync as bs
+
+    def _raise_assign(db, settings, tenant_id, force=False):
+        raise RuntimeError("simulated CC manager assignment error")
+
+    monkeypatch.setattr(bs, "assign_cost_center_managers", _raise_assign)
+    _patch_no_graph(monkeypatch)
+
+    result = run_full_sync(db, settings, TENANT)
+
+    assert "assign_cc_managers" in result["steps"]
+    step = result["steps"]["assign_cc_managers"]
+    assert "error" in step, "Error must be recorded in the step result"
+    assert "simulated" in step["error"]
+    assert result["total_errors"] >= 1, "total_errors must be incremented on step failure"

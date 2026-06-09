@@ -19,6 +19,8 @@ _sync_status: dict = {
     "last_sync_at": None,
     "status": "never",
     "sync_type": None,
+    "last_result": None,
+    "last_error": None,
 }
 _sync_lock = threading.Lock()
 
@@ -50,7 +52,7 @@ def _run_sync_background(sync_type: str, tenant_id: str, **kwargs) -> None:
     try:
         logger.info("background_sync: starting %s sync for tenant %s", sync_type, tenant_id)
         if sync_type == "full":
-            result = run_full_sync(db, settings, tenant_id, force_cc_managers=kwargs.get("force_cc_managers", False))
+            result = run_full_sync(db, settings, tenant_id, force_cc_managers=kwargs.get("force_cc_managers", True))
         elif sync_type == "users":
             result = import_users_from_graph(db, settings, tenant_id)
         elif sync_type == "departments":
@@ -69,10 +71,13 @@ def _run_sync_background(sync_type: str, tenant_id: str, **kwargs) -> None:
             result = {"error": f"Unknown sync type: {sync_type}"}
         _sync_status["status"] = "completed"
         _sync_status["last_sync_at"] = datetime.now(timezone.utc).isoformat()
+        _sync_status["last_result"] = result
+        _sync_status["last_error"] = None
         logger.info("background_sync: %s sync completed: %s", sync_type, result)
     except Exception as exc:
         _sync_status["status"] = "failed"
         _sync_status["last_sync_at"] = datetime.now(timezone.utc).isoformat()
+        _sync_status["last_error"] = str(exc)
         logger.error("background_sync: %s sync failed: %s", sync_type, exc)
     finally:
         db.close()
@@ -1001,7 +1006,7 @@ async def assign_cost_center_managers_endpoint(
 
 @router.post("/sync/full")
 async def full_sync_endpoint(
-    force_cc_managers: bool = Query(False, description="When true, re-evaluates RO/Director on all non-protected CCs"),
+    force_cc_managers: bool = Query(True, description="When true (default), re-evaluates RO/Director on all non-protected CCs. Pass false to preserve existing assignments."),
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Run all Graph sync steps in sequence in the background. Admin only."""

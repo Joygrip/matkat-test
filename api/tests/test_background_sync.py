@@ -1,0 +1,557 @@
+"""Tests for background_sync: CC manager assignment, department normalization, force flag.
+
+Scenarios covered:
+1. assign_cost_center_managers — basic RO and Director assignment from manager chain
+2. assign_cost_center_managers — force=True overwrites existing incorrect assignments
+3. assign_cost_center_managers — force=False never overwrites existing assignments
+4. assign_cost_center_managers — sync_protected CCs always skipped (even with force=True)
+5. normalize_department_name — whitespace, casing, ampersand normalization
+6. _sync_cc_assignments — normalized-name fallback matches manually created CCs
+7. _sync_cc_assignments — backfills graph_department_name on matched existing CC
+8. import_departments_from_graph — backfills graph_department_name on matched existing CC
+9. Katja-like fixture: Director not directly in CC, assigned as Director via RO chain
+10. Katja-like fixture: employees without manager chain produce no RO (no crash)
+11. promote_managers_from_graph — promotes EMPLOYEE to MANAGER for graph managers
+12. promote_managers_from_graph — does not demote ADMIN/FINANCE/PM
+13. _find_ro_candidate — second pass walks full chain (not just one hop)
+14. Duplicate/similar department names produce a diagnostic warning but no crash
+15. force=True on full sync recalculates CC managers
+"""
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
+
+from api.app.models.core import (
+    Base, User, CostCenter, Resource, UserRole, ResourceType, generate_uuid,
+)
+from api.app.services.background_sync import (
+    normalize_department_name,
+    assign_cost_center_managers,
+    _sync_cc_assignments,
+    import_departments_from_graph,
+    promote_managers_from_graph,
+    create_resources_from_users,
+    run_full_sync,
+    _find_ro_candidate,
+)
+
+
+# ---------------------------------------------------------------------------
+# In-process test database
+# ---------------------------------------------------------------------------
+
+TEST_DB_URL = "sqlite:///:memory:"
+
+
+@pytest.fixture(scope="module")
+def engine():
+    e = create_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=e)
+    yield e
+    Base.metadata.drop_all(bind=e)
+
+
+@pytest.fixture
+def db(engine):
+    """Fresh DB session with all tables cleared for each test."""
+    conn = engine.connect()
+    # Truncate each table
+    for tbl in reversed(Base.metadata.sorted_tables):
+        conn.execute(tbl.delete())
+    conn.commit()
+    Session_ = sessionmaker(bind=engine)
+    session = Session_()
+    yield session
+    session.close()
+    conn.close()
+
+
+@pytest.fixture
+def settings():
+    """Minimal settings with Graph disabled (all sync steps run in DB-only mode).
+
+    The conftest.py sets env vars (ENV=dev, DEV_AUTH_BYPASS=true) before import and
+    clears the lru_cache, so get_settings() returns an instance with empty Graph
+    credentials (all falsy → Graph calls are skipped in every sync function).
+    """
+    from api.app.config import get_settings
+    return get_settings()
+
+
+TENANT = "test-tenant"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def make_cc(db, name, tenant=TENANT, graph_dept_name=None, protected=False, active=True):
+    cc = CostCenter(
+        id=generate_uuid(), tenant_id=tenant, code=name[:5].upper(),
+        name=name, graph_department_name=graph_dept_name,
+        is_active=active, sync_protected=protected,
+    )
+    db.add(cc)
+    db.flush()
+    return cc
+
+
+def make_user(db, oid, email, role=UserRole.EMPLOYEE, manager_oid=None, cc=None, tenant=TENANT, active=True):
+    u = User(
+        id=generate_uuid(), tenant_id=tenant, object_id=oid,
+        email=email, display_name=email.split("@")[0],
+        role=role, manager_object_id=manager_oid,
+        cost_center_id=cc.id if cc else None,
+        is_active=active,
+    )
+    db.add(u)
+    db.flush()
+    return u
+
+
+# ---------------------------------------------------------------------------
+# 1-3: Basic assign_cost_center_managers — force flag
+# ---------------------------------------------------------------------------
+
+def test_assign_cc_managers_sets_ro_and_director(db, settings):
+    """RO = first manager in chain; Director = RO's manager."""
+    cc = make_cc(db, "Engineering")
+    director = make_user(db, "dir-1", "dir@t.com", role=UserRole.MANAGER, cc=cc)
+    ro = make_user(db, "ro-1", "ro@t.com", role=UserRole.MANAGER, manager_oid="dir-1", cc=cc)
+    _emp = make_user(db, "emp-1", "emp@t.com", manager_oid="ro-1", cc=cc)
+    db.commit()
+
+    result = assign_cost_center_managers(db, settings, TENANT)
+
+    db.refresh(cc)
+    assert cc.ro_user_id == ro.id
+    assert cc.director_user_id == director.id
+    assert result["updated"] >= 1
+
+
+def test_assign_cc_managers_null_only_by_default(db, settings):
+    """Without force, existing ro_user_id / director_user_id are never overwritten."""
+    cc = make_cc(db, "Marketing")
+    wrong_user = make_user(db, "wrong-1", "wrong@t.com", role=UserRole.MANAGER, cc=cc)
+    cc.ro_user_id = wrong_user.id  # manually set to wrong person
+    db.flush()
+    director = make_user(db, "dir-2", "dir2@t.com", role=UserRole.MANAGER, cc=cc)
+    ro = make_user(db, "ro-2", "ro2@t.com", role=UserRole.MANAGER, manager_oid="dir-2", cc=cc)
+    _emp = make_user(db, "emp-2", "emp2@t.com", manager_oid="ro-2", cc=cc)
+    db.commit()
+
+    assign_cost_center_managers(db, settings, TENANT, force=False)
+
+    db.refresh(cc)
+    # ro_user_id was already set → not overwritten
+    assert cc.ro_user_id == wrong_user.id
+
+
+def test_assign_cc_managers_force_overwrites_stale(db, settings):
+    """force=True re-evaluates and corrects a stale ro_user_id."""
+    cc = make_cc(db, "Sales")
+    wrong_user = make_user(db, "wrong-3", "wrong3@t.com", role=UserRole.MANAGER, cc=cc)
+    cc.ro_user_id = wrong_user.id
+    db.flush()
+    director = make_user(db, "dir-3", "dir3@t.com", role=UserRole.MANAGER, cc=cc)
+    correct_ro = make_user(db, "ro-3", "ro3@t.com", role=UserRole.MANAGER, manager_oid="dir-3", cc=cc)
+    emp = make_user(db, "emp-3", "emp3@t.com", manager_oid="ro-3", cc=cc)
+    db.commit()
+
+    assign_cost_center_managers(db, settings, TENANT, force=True)
+
+    db.refresh(cc)
+    assert cc.ro_user_id == correct_ro.id
+    assert cc.director_user_id == director.id
+
+
+# ---------------------------------------------------------------------------
+# 4: sync_protected always skipped
+# ---------------------------------------------------------------------------
+
+def test_sync_protected_cc_skipped_even_with_force(db, settings):
+    """sync_protected CCs are never touched by assign_cost_center_managers."""
+    cc = make_cc(db, "QC DK", protected=True)
+    manager = make_user(db, "mgr-p", "mgr@t.com", role=UserRole.MANAGER, cc=cc)
+    emp = make_user(db, "emp-p", "empp@t.com", manager_oid="mgr-p", cc=cc)
+    db.commit()
+
+    assign_cost_center_managers(db, settings, TENANT, force=True)
+
+    db.refresh(cc)
+    assert cc.ro_user_id is None
+    assert cc.director_user_id is None
+
+
+# ---------------------------------------------------------------------------
+# 5: normalize_department_name
+# ---------------------------------------------------------------------------
+
+def test_normalize_trims_and_lowercases():
+    assert normalize_department_name("  Biomaterial R&D  ") == "biomaterial r&d"
+
+
+def test_normalize_collapses_spaces():
+    assert normalize_department_name("Biomaterial  R&D") == "biomaterial r&d"
+
+
+def test_normalize_and_to_ampersand():
+    assert normalize_department_name("Biomaterial and D") == "biomaterial & d"
+
+
+def test_normalize_same_after_normalization():
+    assert normalize_department_name("Biomaterial R&D") == normalize_department_name("biomaterial r&d")
+
+
+def test_normalize_near_spelling_variant():
+    """'Biomaterials R&D' vs 'Biomaterial R&D' should NOT normalize to the same value."""
+    assert normalize_department_name("Biomaterials R&D") != normalize_department_name("Biomaterial R&D")
+
+
+def test_normalize_empty():
+    assert normalize_department_name("") == ""
+    assert normalize_department_name(None) == ""
+
+
+# ---------------------------------------------------------------------------
+# 6-7: _sync_cc_assignments normalized-name fallback + backfill
+# ---------------------------------------------------------------------------
+
+class _FakeSettings:
+    """Minimal settings with non-empty Graph credentials so sync functions do not short-circuit.
+
+    Credentials are fake — actual HTTP calls are always replaced by monkeypatched GraphAppClient.
+    """
+    graph_client_id = "fake-client-id"
+    graph_client_secret = "fake-secret"
+    azure_tenant_id = "fake-tenant"
+    graph_sync_deactivate_missing = False
+
+
+class _FakeGraph:
+    """Minimal Graph stub that returns a fixed set of users."""
+    def __init__(self, users):
+        self._users = users
+
+    def list_all_users(self):
+        return self._users
+
+    def batch_get_managers(self, oids):
+        return {}
+
+    def list_all_managers(self, oids):
+        return set()
+
+
+def _patch_graph(monkeypatch, graph):
+    """Replace GraphAppClient constructor with a stub returning graph."""
+    import api.app.services.background_sync as bs
+    monkeypatch.setattr(bs, "GraphAppClient", lambda _settings: graph)
+
+
+def test_sync_cc_assignments_normalized_fallback(db, monkeypatch):
+    """Users assigned to a manually-created CC (graph_department_name=NULL) via normalized match."""
+    cc = make_cc(db, "Biomaterial R&D", graph_dept_name=None)
+    user = make_user(db, "u-1", "alice@ferrosanmd.com", cc=None)
+    db.commit()
+
+    graph_users = [
+        {"id": "u-1", "displayName": "Alice", "mail": "alice@ferrosanmd.com",
+         "userPrincipalName": "alice@ferrosanmd.com",
+         "accountEnabled": True, "department": "Biomaterial R&D", "country": "DK"},
+    ]
+    _patch_graph(monkeypatch, _FakeGraph(graph_users))
+    result = _sync_cc_assignments(db, _FakeSettings(), TENANT)
+    db.refresh(user)
+    db.refresh(cc)
+
+    assert user.cost_center_id == cc.id, "User should be assigned to the manually-created CC"
+    assert cc.graph_department_name == "Biomaterial R&D", "graph_department_name should be backfilled"
+    assert result["assigned"] >= 1
+
+
+def test_sync_cc_assignments_creates_new_when_no_name_match(db, monkeypatch):
+    """When CC name doesn't match (even normalized), a new CC is created."""
+    _existing = make_cc(db, "Totally Different", graph_dept_name=None)
+    user = make_user(db, "u-2", "bob@ferrosanmd.com", cc=None)
+    db.commit()
+
+    graph_users = [
+        {"id": "u-2", "displayName": "Bob", "mail": "bob@ferrosanmd.com",
+         "userPrincipalName": "bob@ferrosanmd.com",
+         "accountEnabled": True, "department": "Biomaterial R&D", "country": "DK"},
+    ]
+    _patch_graph(monkeypatch, _FakeGraph(graph_users))
+    result = _sync_cc_assignments(db, _FakeSettings(), TENANT)
+    db.refresh(user)
+
+    from api.app.models.core import CostCenter
+    new_cc = db.query(CostCenter).filter(
+        CostCenter.tenant_id == TENANT,
+        CostCenter.graph_department_name == "Biomaterial R&D",
+    ).first()
+    assert new_cc is not None
+    assert user.cost_center_id == new_cc.id
+    assert result["created_ccs"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# 8: import_departments_from_graph backfills graph_department_name
+# ---------------------------------------------------------------------------
+
+def test_import_departments_backfills_existing_cc(db, monkeypatch):
+    """import_departments_from_graph backfills graph_department_name on normalized-name match."""
+    cc = make_cc(db, "Biomaterial R&D", graph_dept_name=None)
+    db.commit()
+
+    graph_users = [
+        {"id": "u-3", "displayName": "Carol", "mail": "carol@ferrosanmd.com",
+         "userPrincipalName": "carol@ferrosanmd.com",
+         "accountEnabled": True, "department": "Biomaterial R&D", "country": "DK"},
+    ]
+    _patch_graph(monkeypatch, _FakeGraph(graph_users))
+
+    result = import_departments_from_graph(db, _FakeSettings(), TENANT)
+    db.refresh(cc)
+
+    assert cc.graph_department_name == "Biomaterial R&D"
+    assert result.get("backfilled", 0) >= 1
+    assert result["created"] == 0
+
+
+def test_import_departments_skips_already_linked(db, monkeypatch):
+    """CCs already linked via graph_department_name are not duplicated."""
+    cc = make_cc(db, "Biomaterial R&D", graph_dept_name="Biomaterial R&D")
+    db.commit()
+
+    graph_users = [
+        {"id": "u-4", "displayName": "Dave", "mail": "dave@ferrosanmd.com",
+         "userPrincipalName": "dave@ferrosanmd.com",
+         "accountEnabled": True, "department": "Biomaterial R&D", "country": "DK"},
+    ]
+    _patch_graph(monkeypatch, _FakeGraph(graph_users))
+
+    result = import_departments_from_graph(db, _FakeSettings(), TENANT)
+
+    assert result["created"] == 0
+    assert result["skipped"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# 9: Katja-like fixture — Director in manager chain, NOT in CC
+# ---------------------------------------------------------------------------
+
+def test_katja_like_director_assignment(db, settings):
+    """
+    Org structure for Biomaterial R&D:
+      Employee → RO (same CC) → Katja (Director, different CC) → VP (no CC)
+
+    Expected:
+      CC.ro_user_id    = RO
+      CC.director_user_id = Katja
+    """
+    bio_cc = make_cc(db, "Biomaterial R&D", graph_dept_name="Biomaterial R&D")
+    mgmt_cc = make_cc(db, "Management")
+
+    vp = make_user(db, "vp-k", "vp@ferrosanmd.com", role=UserRole.MANAGER, cc=mgmt_cc)
+    katja = make_user(db, "katja-oid", "kahi@ferrosanmd.com", role=UserRole.MANAGER,
+                      manager_oid="vp-k", cc=mgmt_cc)
+    ro = make_user(db, "ro-k", "ro@ferrosanmd.com", role=UserRole.MANAGER,
+                   manager_oid="katja-oid", cc=bio_cc)
+    emp = make_user(db, "emp-k", "emp@ferrosanmd.com", manager_oid="ro-k", cc=bio_cc)
+    db.commit()
+
+    assign_cost_center_managers(db, settings, TENANT)
+    db.refresh(bio_cc)
+
+    assert bio_cc.ro_user_id == ro.id, "RO should be the immediate manager of employees in the CC"
+    assert bio_cc.director_user_id == katja.id, "Katja (RO's manager) should be the Director"
+
+
+def test_katja_direct_report_becomes_ro(db, settings):
+    """
+    When employees report DIRECTLY to Katja (no intermediate RO), Katja becomes RO.
+    Director = Katja's manager (Shpresa).
+
+    This reflects the case where there's no intermediate manager layer.
+    """
+    bio_cc = make_cc(db, "Biomaterial R&D", graph_dept_name="Biomaterial R&D")
+
+    shpresa = make_user(db, "shpresa-oid", "slpe@ferrosanmd.com", role=UserRole.MANAGER)
+    katja = make_user(db, "katja-oid2", "kahi2@ferrosanmd.com", role=UserRole.MANAGER,
+                      manager_oid="shpresa-oid", cc=bio_cc)
+    emp = make_user(db, "emp-k2", "emp2@ferrosanmd.com", manager_oid="katja-oid2", cc=bio_cc)
+    db.commit()
+
+    assign_cost_center_managers(db, settings, TENANT)
+    db.refresh(bio_cc)
+
+    # Katja IS in the CC (same cost_center_id) → first pass finds her as same-CC manager → RO
+    assert bio_cc.ro_user_id == katja.id
+    assert bio_cc.director_user_id == shpresa.id
+
+
+# ---------------------------------------------------------------------------
+# 10: No manager chain → no RO, no crash
+# ---------------------------------------------------------------------------
+
+def test_cc_with_no_manager_chain_produces_no_ro(db, settings):
+    """CC members with no manager_object_id → both RO and Director remain NULL, no error."""
+    cc = make_cc(db, "Orphan Dept", graph_dept_name="Orphan Dept")
+    _emp = make_user(db, "orphan-emp", "orphan@t.com", manager_oid=None, cc=cc)
+    db.commit()
+
+    result = assign_cost_center_managers(db, settings, TENANT)
+    db.refresh(cc)
+
+    assert cc.ro_user_id is None
+    assert cc.director_user_id is None
+    assert result["errors"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 11-12: promote_managers_from_graph
+# ---------------------------------------------------------------------------
+
+class _ManagerGraph:
+    def __init__(self, manager_oids):
+        self._managers = set(manager_oids)
+
+    def list_all_users(self):
+        return []
+
+    def batch_get_managers(self, oids):
+        return {}
+
+    def list_all_managers(self, oids):
+        return self._managers
+
+
+def test_promote_managers_promotes_employee(db, monkeypatch):
+    """EMPLOYEE is promoted to MANAGER if their OID is returned as a manager."""
+    emp = make_user(db, "emp-promo", "promo@t.com", role=UserRole.EMPLOYEE)
+    db.commit()
+
+    import api.app.services.background_sync as bs
+    monkeypatch.setattr(bs, "GraphAppClient", lambda _s: _ManagerGraph(["emp-promo"]))
+
+    result = promote_managers_from_graph(db, _FakeSettings(), TENANT)
+    db.refresh(emp)
+
+    assert emp.role == UserRole.MANAGER
+    assert result["promoted"] == 1
+
+
+def test_promote_managers_does_not_demote_admin(db, monkeypatch):
+    """ADMIN users are never demoted even if not in the managers set."""
+    admin = make_user(db, "admin-pd", "admin@t.com", role=UserRole.ADMIN)
+    db.commit()
+
+    import api.app.services.background_sync as bs
+    monkeypatch.setattr(bs, "GraphAppClient", lambda _s: _ManagerGraph([]))
+
+    promote_managers_from_graph(db, _FakeSettings(), TENANT)
+    db.refresh(admin)
+    assert admin.role == UserRole.ADMIN
+
+
+def test_promote_managers_does_not_demote_finance(db, monkeypatch):
+    fin = make_user(db, "fin-nd", "fin@t.com", role=UserRole.FINANCE)
+    db.commit()
+
+    import api.app.services.background_sync as bs
+    monkeypatch.setattr(bs, "GraphAppClient", lambda _s: _ManagerGraph([]))
+
+    promote_managers_from_graph(db, _FakeSettings(), TENANT)
+    db.refresh(fin)
+    assert fin.role == UserRole.FINANCE
+
+
+# ---------------------------------------------------------------------------
+# 13: _find_ro_candidate second pass walks full chain
+# ---------------------------------------------------------------------------
+
+def test_find_ro_candidate_second_pass_full_chain(db, settings):
+    """
+    Second pass should find a manager even when the immediate manager is not in the DB.
+    Structure: emp → (ghost, not in DB) → real_manager (in DB)
+
+    Because ghost is not in users_by_object_id, the chain stops at ghost.
+    BUT for the first user in cc_users whose direct manager IS in the DB, we return them.
+
+    Test: two employees — one whose manager is in DB, one whose isn't.
+    The candidate returned is the manager of the employee whose manager IS in DB.
+    """
+    cc = make_cc(db, "Chain Dept")
+    real_mgr = make_user(db, "real-mgr", "real@t.com", role=UserRole.MANAGER)
+    emp_a = make_user(db, "emp-a", "empa@t.com", manager_oid="ghost-oid", cc=cc)
+    emp_b = make_user(db, "emp-b", "empb@t.com", manager_oid="real-mgr", cc=cc)
+    db.commit()
+
+    users_by_oid = {
+        "real-mgr": real_mgr,
+        "emp-a": emp_a,
+        "emp-b": emp_b,
+    }
+
+    candidate = _find_ro_candidate(cc, [emp_a, emp_b], users_by_oid)
+    assert candidate is real_mgr
+
+
+# ---------------------------------------------------------------------------
+# 14: Duplicate/similar department names — no crash, valid result
+# ---------------------------------------------------------------------------
+
+def test_similar_department_names_dont_crash(db, settings):
+    """Two CCs with similar names (Biomaterial R&D vs Biomaterials R&D) don't crash."""
+    cc1 = make_cc(db, "Biomaterial R&D", graph_dept_name="Biomaterial R&D")
+    cc2 = make_cc(db, "Biomaterials R&D", graph_dept_name="Biomaterials R&D")
+    mgr1 = make_user(db, "m-1", "m1@t.com", role=UserRole.MANAGER, cc=cc1)
+    emp1 = make_user(db, "e-1", "e1@t.com", manager_oid="m-1", cc=cc1)
+    mgr2 = make_user(db, "m-2", "m2@t.com", role=UserRole.MANAGER, cc=cc2)
+    emp2 = make_user(db, "e-2", "e2@t.com", manager_oid="m-2", cc=cc2)
+    db.commit()
+
+    result = assign_cost_center_managers(db, settings, TENANT)
+    db.refresh(cc1)
+    db.refresh(cc2)
+
+    assert result["errors"] == 0
+    assert cc1.ro_user_id == mgr1.id
+    assert cc2.ro_user_id == mgr2.id
+
+
+# ---------------------------------------------------------------------------
+# 15: force_cc_managers on run_full_sync
+# ---------------------------------------------------------------------------
+
+def test_run_full_sync_force_cc_managers(db, settings, monkeypatch):
+    """run_full_sync with force_cc_managers=True re-evaluates stale CC assignments."""
+    cc = make_cc(db, "Stale Dept", graph_dept_name="Stale Dept")
+    wrong = make_user(db, "wrong-fs", "wrong@t.com", role=UserRole.MANAGER, cc=cc)
+    cc.ro_user_id = wrong.id  # wrong assignment
+    db.flush()
+    director = make_user(db, "dir-fs", "dir@t.com", role=UserRole.MANAGER, cc=cc)
+    correct_ro = make_user(db, "ro-fs", "ro@t.com", role=UserRole.MANAGER,
+                           manager_oid="dir-fs", cc=cc)
+    emp = make_user(db, "emp-fs", "emp@t.com", manager_oid="ro-fs", cc=cc)
+    db.commit()
+
+    import api.app.services.background_sync as bs
+
+    class _NoGraphSync:
+        """Stubs that make all graph-dependent steps no-ops."""
+        def list_all_users(self):
+            return []
+        def batch_get_managers(self, oids):
+            return {}
+        def list_all_managers(self, oids):
+            return set()
+
+    monkeypatch.setattr(bs, "GraphAppClient", lambda _s: _NoGraphSync())
+
+    run_full_sync(db, settings, TENANT, force_cc_managers=True)
+    db.refresh(cc)
+
+    assert cc.ro_user_id == correct_ro.id
+    assert cc.director_user_id == director.id

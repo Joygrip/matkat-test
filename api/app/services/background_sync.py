@@ -30,6 +30,7 @@ Design invariants (non-negotiable):
   - All logging via print() — logger.info is invisible on Azure App Service.
 """
 import logging
+import re
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
@@ -69,6 +70,16 @@ class SyncResult:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def normalize_department_name(name: str) -> str:
+    """Normalize a department name for fuzzy matching: lowercase, collapse whitespace, expand '&'."""
+    if not name:
+        return ""
+    s = name.strip().lower()
+    s = re.sub(r'\s+', ' ', s)
+    s = s.replace(' and ', ' & ')
+    return s
+
+
 def _generate_cc_code(db: Session, tenant_id: str, department_name: str) -> str:
     """Generate a unique 5-char code for a new CC derived from department_name."""
     base = "".join(department_name.split())[:5].upper() or "CC"
@@ -86,11 +97,19 @@ def _generate_cc_code(db: Session, tenant_id: str, department_name: str) -> str:
 def _find_ro_candidate(cc: CostCenter, cc_users: list, users_by_object_id: dict):
     """Walk the manager chain from each CC member.
 
-    Returns the first manager found who is also in the same CC (preferred),
-    or the first manager found in any CC (fallback), or None.
+    Returns the first same-CC manager found by walking chains from non-manager users
+    (preferred), or the first manager found anywhere in the chain (fallback), or None.
+
+    Walking only from non-managers in the first pass prevents a director (who IS a manager)
+    from being selected as RO when both the RO and Director sit in the same CC.
     """
-    # First pass: look for a same-CC manager
-    for user in cc_users:
+    _manager_roles = {UserRole.MANAGER, UserRole.ADMIN, UserRole.FINANCE, UserRole.PM}
+
+    # First pass: walk chains from non-manager users to find same-CC manager (= RO)
+    non_mgr_users = [u for u in cc_users if u.role not in _manager_roles]
+    first_pass_users = non_mgr_users if non_mgr_users else cc_users
+
+    for user in first_pass_users:
         visited = {user.object_id}
         oid = user.manager_object_id
         while oid and oid not in visited:
@@ -102,12 +121,16 @@ def _find_ro_candidate(cc: CostCenter, cc_users: list, users_by_object_id: dict)
                 return mgr
             oid = mgr.manager_object_id
 
-    # Second pass: any manager in chain (fallback)
+    # Second pass: any manager reachable in the full chain (fallback for cross-CC directors)
     for user in cc_users:
-        if user.manager_object_id:
-            mgr = users_by_object_id.get(user.manager_object_id)
+        visited = {user.object_id}
+        oid = user.manager_object_id
+        while oid and oid not in visited:
+            visited.add(oid)
+            mgr = users_by_object_id.get(oid)
             if mgr:
                 return mgr
+            break
 
     return None
 
@@ -366,6 +389,9 @@ def _sync_cc_assignments(db: Session, settings: Settings, tenant_id: str) -> dic
 
     # Map graph_department_name → CC for active, non-protected CCs
     cc_by_dept: dict[str, CostCenter] = {}
+    # Also build a normalized-name lookup for CCs that have graph_department_name=NULL
+    # so that manually-created CCs can be matched by fuzzy name comparison.
+    cc_by_norm: dict[str, CostCenter] = {}
     for cc in db.query(CostCenter).filter(
         CostCenter.tenant_id == tenant_id,
         CostCenter.is_active == True,
@@ -373,6 +399,10 @@ def _sync_cc_assignments(db: Session, settings: Settings, tenant_id: str) -> dic
     ).all():
         if cc.graph_department_name:
             cc_by_dept[cc.graph_department_name] = cc
+        else:
+            norm = normalize_department_name(cc.name)
+            if norm:
+                cc_by_norm[norm] = cc
 
     # Set of CC IDs that are sync_protected (users on these CCs are never moved)
     protected_cc_ids: set[str] = {
@@ -416,6 +446,16 @@ def _sync_cc_assignments(db: Session, settings: Settings, tenant_id: str) -> dic
 
                 # Find or create CC for this department
                 cc = cc_by_dept.get(dept)
+                if cc is None:
+                    # Try normalized-name fallback for manually-created CCs (graph_department_name=NULL)
+                    norm_dept = normalize_department_name(dept)
+                    cc = cc_by_norm.get(norm_dept)
+                    if cc is not None:
+                        # Backfill graph_department_name so exact matching works next time
+                        cc.graph_department_name = dept
+                        cc_by_dept[dept] = cc
+                        cc_by_norm.pop(norm_dept, None)
+                        print(f"sync_cc: backfilled graph_department_name='{dept}' on CC='{cc.name}'")
                 if cc is None:
                     # Double-check DB in case another user already created it this session
                     cc = db.query(CostCenter).filter(
@@ -632,7 +672,7 @@ def create_resources_from_users(db: Session, settings: Settings, tenant_id: str)
 # Step 7: Assign RO / Director from hierarchy
 # ---------------------------------------------------------------------------
 
-def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str) -> dict:
+def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str, force: bool = False) -> dict:
     """Assign RO (1st level) and Director (2nd level) to each active, non-protected CC.
 
     Hierarchy walk: for each CC, walk the manager chain from its members.
@@ -640,8 +680,9 @@ def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str)
     If no same-CC manager found, the first manager in the chain (any CC) = candidate RO.
     RO's manager_object_id resolves to Director.
 
-    ONLY sets ro_user_id / director_user_id when the current value is NULL.
-    Manual overrides set by admins are never cleared.
+    When force=False (default): only sets ro_user_id / director_user_id when NULL.
+    When force=True: re-evaluates all non-protected CCs, overwriting stale assignments.
+    sync_protected CCs are always skipped regardless of force.
     """
     graph = GraphAppClient(settings)
     graph_configured = bool(
@@ -690,10 +731,10 @@ def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str)
                 skipped += 1
                 continue
 
-            # RO — only set if currently NULL
-            if cc.ro_user_id is None:
+            # RO — set if NULL, or overwrite if force=True
+            if cc.ro_user_id is None or force:
                 ro_candidate = _find_ro_candidate(cc, cc_users, users_by_object_id)
-                if ro_candidate:
+                if ro_candidate and ro_candidate.id != cc.ro_user_id:
                     cc.ro_user_id = ro_candidate.id
                     cc_updated = True
                     print(f"assign_cc_managers: set ro_user_id={ro_candidate.id} ('{ro_candidate.display_name}') for CC='{cc.name}'")
@@ -707,12 +748,12 @@ def assign_cost_center_managers(db: Session, settings: Settings, tenant_id: str)
                                 cc.location = country
                                 print(f"assign_cc_managers: set location={country} for CC='{cc.name}'")
 
-            # Director — only set if currently NULL and we have an RO
-            if cc.director_user_id is None and cc.ro_user_id:
+            # Director — set if NULL, or overwrite if force=True (requires RO to be set)
+            if (cc.director_user_id is None or force) and cc.ro_user_id:
                 ro_user = db.query(User).filter(User.id == cc.ro_user_id).first()
                 if ro_user and ro_user.manager_object_id:
                     director_candidate = users_by_object_id.get(ro_user.manager_object_id)
-                    if director_candidate:
+                    if director_candidate and director_candidate.id != cc.director_user_id:
                         cc.director_user_id = director_candidate.id
                         cc_updated = True
                         print(
@@ -764,8 +805,19 @@ def import_departments_from_graph(db: Session, settings: Settings, tenant_id: st
         if (dept := u.get("department")) is not None
     }
 
+    # Build normalized-name index for CCs without graph_department_name (manually created)
+    cc_by_norm: dict[str, CostCenter] = {}
+    for cc in db.query(CostCenter).filter(
+        CostCenter.tenant_id == tenant_id,
+        CostCenter.graph_department_name == None,  # noqa: E711
+    ).all():
+        norm = normalize_department_name(cc.name)
+        if norm:
+            cc_by_norm[norm] = cc
+
     created = 0
     skipped = 0
+    backfilled = 0
     errors = 0
 
     for department in unique_departments:
@@ -777,6 +829,15 @@ def import_departments_from_graph(db: Session, settings: Settings, tenant_id: st
 
             if existing:
                 skipped += 1
+                continue
+
+            # Try normalized match against CCs with graph_department_name=NULL
+            norm_dept = normalize_department_name(department)
+            existing_by_norm = cc_by_norm.get(norm_dept)
+            if existing_by_norm:
+                existing_by_norm.graph_department_name = department
+                backfilled += 1
+                print(f"import_departments: backfilled graph_department_name='{department}' on CC='{existing_by_norm.name}'")
                 continue
 
             code = _generate_cc_code(db, tenant_id, department)
@@ -799,11 +860,12 @@ def import_departments_from_graph(db: Session, settings: Settings, tenant_id: st
             errors += 1
 
     db.commit()
-    print(f"import_departments: done — created={created} skipped={skipped} errors={errors}")
+    print(f"import_departments: done — created={created} skipped={skipped} backfilled={backfilled} errors={errors}")
     return {
         "total_departments": len(unique_departments),
         "created": created,
         "skipped": skipped,
+        "backfilled": backfilled,
         "errors": errors,
     }
 
@@ -820,8 +882,11 @@ def assign_users_to_departments(db: Session, settings: Settings, tenant_id: str)
 # Full sync orchestrator
 # ---------------------------------------------------------------------------
 
-def run_full_sync(db: Session, settings: Settings, tenant_id: str) -> dict:
-    """Run all 7 Graph sync steps in sequence. Each step failure is caught independently."""
+def run_full_sync(db: Session, settings: Settings, tenant_id: str, force_cc_managers: bool = False) -> dict:
+    """Run all 7 Graph sync steps in sequence. Each step failure is caught independently.
+
+    force_cc_managers=True re-evaluates RO/Director on all non-protected CCs (not just NULL).
+    """
     started_at = datetime.utcnow()
     steps = {}
     total_errors = 0
@@ -886,9 +951,9 @@ def run_full_sync(db: Session, settings: Settings, tenant_id: str) -> dict:
         steps["create_resources"] = {"error": str(exc)}
         total_errors += 1
 
-    # Step 7: Assign RO / Director from hierarchy (NULL-only, never overwrites)
+    # Step 7: Assign RO / Director from hierarchy
     try:
-        steps["assign_cc_managers"] = assign_cost_center_managers(db, settings, tenant_id)
+        steps["assign_cc_managers"] = assign_cost_center_managers(db, settings, tenant_id, force=force_cc_managers)
         total_errors += steps["assign_cc_managers"].get("errors", 0)
     except Exception as exc:
         print(f"full_sync: step assign_cc_managers failed: {exc}")

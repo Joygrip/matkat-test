@@ -23,7 +23,7 @@ _sync_status: dict = {
 _sync_lock = threading.Lock()
 
 
-def _run_sync_background(sync_type: str, tenant_id: str) -> None:
+def _run_sync_background(sync_type: str, tenant_id: str, **kwargs) -> None:
     """Background worker: creates its own DB session and runs the requested sync."""
     from api.app.services.background_sync import (
         run_full_sync,
@@ -50,7 +50,7 @@ def _run_sync_background(sync_type: str, tenant_id: str) -> None:
     try:
         logger.info("background_sync: starting %s sync for tenant %s", sync_type, tenant_id)
         if sync_type == "full":
-            result = run_full_sync(db, settings, tenant_id)
+            result = run_full_sync(db, settings, tenant_id, force_cc_managers=kwargs.get("force_cc_managers", False))
         elif sync_type == "users":
             result = import_users_from_graph(db, settings, tenant_id)
         elif sync_type == "departments":
@@ -60,7 +60,7 @@ def _run_sync_background(sync_type: str, tenant_id: str) -> None:
         elif sync_type == "resources":
             result = create_resources_from_users(db, settings, tenant_id)
         elif sync_type == "cc-managers":
-            result = assign_cost_center_managers(db, settings, tenant_id)
+            result = assign_cost_center_managers(db, settings, tenant_id, force=kwargs.get("force", False))
         elif sync_type == "graph-users":
             from api.app.services.reporting import ReportingService
             result = run_graph_sync(db, settings, tenant_id).as_dict()
@@ -953,10 +953,11 @@ async def create_resources_endpoint(
 
 @router.post("/sync/assign-cost-center-managers")
 async def assign_cost_center_managers_endpoint(
+    force: bool = Query(False, description="When true, re-evaluates all non-protected CCs (not just NULL assignments)"),
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Assign RO (1st level) and Director (2nd level) managers to each cost center based on user hierarchy."""
-    threading.Thread(target=_run_sync_background, args=("cc-managers", current_user.tenant_id), daemon=True).start()
+    threading.Thread(target=_run_sync_background, args=("cc-managers", current_user.tenant_id), kwargs={"force": force}, daemon=True).start()
     return {
         "status": "started",
         "message": "Cost center manager assignment started in background.",
@@ -966,10 +967,11 @@ async def assign_cost_center_managers_endpoint(
 
 @router.post("/sync/full")
 async def full_sync_endpoint(
+    force_cc_managers: bool = Query(False, description="When true, re-evaluates RO/Director on all non-protected CCs"),
     current_user: CurrentUser = Depends(require_roles(*WRITE_ROLES)),
 ):
     """Run all Graph sync steps in sequence in the background. Admin only."""
-    threading.Thread(target=_run_sync_background, args=("full", current_user.tenant_id), daemon=True).start()
+    threading.Thread(target=_run_sync_background, args=("full", current_user.tenant_id), kwargs={"force_cc_managers": force_cc_managers}, daemon=True).start()
     return {
         "status": "started",
         "message": "Full sync started in background. This may take a few minutes.",

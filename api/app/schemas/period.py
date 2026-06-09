@@ -1,6 +1,6 @@
 """Period-related schemas."""
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel
 
 from api.app.models.core import PeriodStatus
@@ -41,3 +41,17 @@ class PeriodLockRequest(BaseModel):
 class PeriodUnlockRequest(BaseModel):
     """Request to unlock a period."""
     reason: str
+
+
+class CreateYearRequest(BaseModel):
+    """Request to bulk-create all 12 months of a given year."""
+    year: int
+    status: Literal["auto", "open", "locked"] = "auto"
+
+
+class CreateYearResponse(BaseModel):
+    """Result of a bulk-create-year operation."""
+    year: int
+    status_used: str
+    created: int
+    skipped_existing: int

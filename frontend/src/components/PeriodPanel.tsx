@@ -32,7 +32,7 @@ import {
   AddRegular,
 } from '@fluentui/react-icons';
 import { Period } from '../types';
-import { periodsApi } from '../api/periods';
+import { periodsApi, CreateYearResponse } from '../api/periods';
 import { useToast } from '../hooks/useToast';
 import { useAuth } from '../auth/AuthProvider';
 import { usePeriod } from '../contexts/PeriodContext';
@@ -222,6 +222,12 @@ export function PeriodPanel({
   const [bulkToMonth, setBulkToMonth] = useState(12);
   const [bulkCreating, setBulkCreating] = useState(false);
 
+  // Add Year dialog state (create all 12 months for an arbitrary year)
+  const [addYearDialogOpen, setAddYearDialogOpen] = useState(false);
+  const [addYearInput, setAddYearInput] = useState<string>(String(currentYear - 1));
+  const [addYearStatus, setAddYearStatus] = useState<'auto' | 'open' | 'locked'>('auto');
+  const [addYearLoading, setAddYearLoading] = useState(false);
+
   const isFinanceOrAdmin = user?.role === 'Finance' || user?.role === 'Admin';
 
   useEffect(() => {
@@ -291,6 +297,45 @@ export function PeriodPanel({
     const nextYear = maxAvailableYear + 1;
     setManualYears(prev => new Set([...prev, nextYear]));
     handleChangeYear(nextYear);
+  };
+
+  const openAddYearDialog = () => {
+    setAddYearInput(String(currentYear - 1));
+    setAddYearStatus('auto');
+    setAddYearDialogOpen(true);
+  };
+
+  const resolvedAddYearStatus = (year: number, mode: 'auto' | 'open' | 'locked'): string => {
+    if (mode === 'open') return 'open';
+    if (mode === 'locked') return 'locked';
+    return year < currentYear ? 'locked' : 'open';
+  };
+
+  const handleAddYearConfirm = async () => {
+    const year = parseInt(addYearInput, 10);
+    if (isNaN(year) || year < 2000 || year > currentYear + 20) return;
+    setAddYearLoading(true);
+    try {
+      const result: CreateYearResponse = await periodsApi.createYear(year, addYearStatus);
+      const statusLabel = result.status_used === 'locked' ? 'locked' : 'open';
+      if (result.created > 0) {
+        showSuccess(
+          'Year Added',
+          `${result.created} ${statusLabel} period${result.created !== 1 ? 's' : ''} created for ${year}.` +
+          (result.skipped_existing > 0 ? ` ${result.skipped_existing} month${result.skipped_existing !== 1 ? 's' : ''} already existed.` : ''),
+        );
+      } else {
+        showSuccess('Nothing to Create', `All periods for ${year} already exist.`);
+      }
+      setAddYearDialogOpen(false);
+      await loadPeriods();
+      refreshContextPeriods();
+      setActiveYear(year);
+    } catch (error) {
+      showApiError(error as Error, `Failed to create periods for ${year}`);
+    } finally {
+      setAddYearLoading(false);
+    }
   };
 
   const selectFallbackForYear = (year: number, yearPeriods: Period[] = periods.filter(p => p.year === year)) => {
@@ -427,9 +472,14 @@ export function PeriodPanel({
 
         <div className={styles.actionsRow}>
           {isFinanceOrAdmin && (
-            <Button appearance="secondary" size="small" icon={<AddRegular />} onClick={() => openBulkDialog()}>
-              Create Periods
-            </Button>
+            <>
+              <Button appearance="secondary" size="small" icon={<AddRegular />} onClick={openAddYearDialog}>
+                Add Year
+              </Button>
+              <Button appearance="secondary" size="small" icon={<AddRegular />} onClick={() => openBulkDialog()}>
+                Create Periods
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -591,6 +641,79 @@ export function PeriodPanel({
                 disabled={!unlockReason.trim()}
               >
                 Unlock Period
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
+      {/* Add Year Dialog */}
+      <Dialog open={addYearDialogOpen} onOpenChange={(_, data) => { if (!addYearLoading) setAddYearDialogOpen(data.open); }}>
+        <DialogSurface style={{ minWidth: 400 }}>
+          <DialogBody>
+            <DialogTitle>Add Year</DialogTitle>
+            <DialogContent>
+              <Body1 style={{ display: 'block', marginBottom: tokens.spacingVerticalM, color: tokens.colorNeutralForeground2 }}>
+                Creates all 12 months for the selected year. Months that already exist are skipped.
+              </Body1>
+
+              <div className={styles.dialogField}>
+                <Label htmlFor="add-year-input">Year</Label>
+                <Input
+                  id="add-year-input"
+                  type="number"
+                  value={addYearInput}
+                  onChange={(_, data) => setAddYearInput(data.value)}
+                  min={2000}
+                  max={currentYear + 20}
+                  style={{ width: '140px' }}
+                />
+              </div>
+
+              <div className={styles.dialogField}>
+                <Label htmlFor="add-year-status">Status</Label>
+                <select
+                  id="add-year-status"
+                  className={styles.nativeSelect}
+                  value={addYearStatus}
+                  onChange={e => setAddYearStatus(e.target.value as 'auto' | 'open' | 'locked')}
+                >
+                  <option value="auto">Auto (recommended)</option>
+                  <option value="locked">Locked</option>
+                  <option value="open">Open</option>
+                </select>
+              </div>
+
+              {(() => {
+                const year = parseInt(addYearInput, 10);
+                if (isNaN(year)) return null;
+                const resolved = resolvedAddYearStatus(year, addYearStatus);
+                const isHistorical = year < currentYear;
+                return (
+                  <Body1 style={{
+                    display: 'block',
+                    marginTop: tokens.spacingVerticalXS,
+                    color: resolved === 'locked' ? tokens.colorNeutralForeground3 : tokens.colorBrandForeground1,
+                    fontSize: tokens.fontSizeBase200,
+                  }}>
+                    {isHistorical && addYearStatus === 'auto'
+                      ? `Historical year — will be created as locked so it does not become an active planning period.`
+                      : `Periods will be created as ${resolved}.`}
+                  </Body1>
+                );
+              })()}
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="secondary" onClick={() => setAddYearDialogOpen(false)} disabled={addYearLoading}>
+                Cancel
+              </Button>
+              <Button
+                appearance="primary"
+                onClick={handleAddYearConfirm}
+                disabled={addYearLoading || isNaN(parseInt(addYearInput, 10))}
+                icon={addYearLoading ? <Spinner size="tiny" /> : undefined}
+              >
+                {addYearLoading ? 'Creating…' : 'Add Year'}
               </Button>
             </DialogActions>
           </DialogBody>

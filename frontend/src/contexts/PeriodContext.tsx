@@ -6,7 +6,7 @@
  */
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { periodsApi, Period } from '../api/periods';
-import { getNearestCurrentOrFutureOpenPeriod } from '../utils/periodUtils';
+import { getEarliestOpenPeriod } from '../utils/periodUtils';
 
 interface PeriodContextValue {
   periods: Period[];
@@ -31,8 +31,8 @@ export function PeriodProvider({ children }: { children: ReactNode }) {
       .then((data) => {
         setPeriods(data);
         if (data.length > 0 && !selectedPeriodId) {
-          const nearest = getNearestCurrentOrFutureOpenPeriod(data);
-          setSelectedPeriodId(nearest?.id || data[0].id);
+          const earliest = getEarliestOpenPeriod(data);
+          setSelectedPeriodId(earliest?.id || data[0].id);
         }
       })
       .catch((err) => {

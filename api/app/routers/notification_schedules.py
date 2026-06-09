@@ -5,7 +5,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import or_, and_
 from sqlalchemy.orm import Session
 
 from api.app.auth.dependencies import require_roles, CurrentUser
@@ -132,36 +131,20 @@ def _get_or_404(db: Session, schedule_id: str, tenant_id: str) -> NotificationSc
 
 
 def _current_open_period(db: Session, tenant_id: str):
-    """Return (year, month) of the nearest open period >= today.
+    """Return (year, month) of the earliest open period.
 
-    Mirrors scheduler._get_open_period: prefers current/future open periods so
-    that historical open periods do not distort schedule previews.  Falls back
-    to the most recent open period when all open periods are in the past, then
-    to today's calendar month when no open period exists at all.
+    Mirrors scheduler._get_open_period: open status defines the active planning
+    window.  Falls back to today's calendar month when no open period exists.
     """
-    today = date.today()
     period = (
         db.query(Period)
-        .filter(
-            Period.tenant_id == tenant_id,
-            Period.status == PeriodStatus.OPEN,
-            or_(
-                Period.year > today.year,
-                and_(Period.year == today.year, Period.month >= today.month),
-            ),
-        )
+        .filter(Period.tenant_id == tenant_id, Period.status == PeriodStatus.OPEN)
         .order_by(Period.year.asc(), Period.month.asc())
         .first()
     )
-    if period is None:
-        period = (
-            db.query(Period)
-            .filter(Period.tenant_id == tenant_id, Period.status == PeriodStatus.OPEN)
-            .order_by(Period.year.desc(), Period.month.desc())
-            .first()
-        )
     if period:
         return period.year, period.month
+    today = date.today()
     return today.year, today.month
 
 

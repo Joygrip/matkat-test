@@ -1,29 +1,17 @@
 import type { Period } from '../types';
 
 /**
- * Returns the nearest open period whose year/month >= the current year/month.
- * Falls back to the most recent open period when all open periods are in the past.
- * Returns null when no open periods exist at all.
+ * Returns the earliest OPEN period by year/month, or null when no open periods exist.
  *
- * Use this everywhere the app must pick a "current" period as a default so that
- * historical open periods (inserted for import purposes) do not hijack the
- * default selection.
+ * In MatKat, OPEN status defines the active planning window.  The earliest open
+ * period is always the default active period — the product does not use today's
+ * calendar date to pick a default.  Historical years are expected to be LOCKED,
+ * so they are automatically excluded from this result.
  */
-export function getNearestCurrentOrFutureOpenPeriod(periods: Period[]): Period | null {
-  const now = new Date();
-  // 1-indexed month arithmetic: Jan 2026 → 2026*12 + 1 = 24313
-  const currentYM = now.getFullYear() * 12 + now.getMonth() + 1;
-
-  const openPeriods = [...periods]
+export function getEarliestOpenPeriod(periods: Period[]): Period | null {
+  const sorted = [...periods]
     .filter(p => p.status === 'open')
     .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
 
-  if (openPeriods.length === 0) return null;
-
-  // Prefer the earliest open period that is current or in the future.
-  const currentOrFuture = openPeriods.find(p => p.year * 12 + p.month >= currentYM);
-  if (currentOrFuture) return currentOrFuture;
-
-  // Every open period is historical — return the most recent one as a graceful fallback.
-  return openPeriods[openPeriods.length - 1];
+  return sorted[0] ?? null;
 }

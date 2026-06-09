@@ -22,7 +22,7 @@ import { DashboardSection } from './DashboardSection';
 import { actualsApi, ActualLine, ActualApprovalStatus } from '../../api/actuals';
 import { planningApi, DemandLine, SupplyLine } from '../../api/planning';
 import { useAppData } from '../../contexts/AppDataContext';
-import { getNearestCurrentOrFutureOpenPeriod } from '../../utils/periodUtils';
+import { getEarliestOpenPeriod } from '../../utils/periodUtils';
 import type { Period, MeResponse } from '../../types/index';
 import { MONTH_SHORT } from '../../utils/format';
 import { MyActualsMatrix } from '../actuals/MyActualsMatrix';
@@ -96,10 +96,9 @@ export function EmployeeView({ periods }: Props) {
       .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month),
     [periods],
   );
-  // Use nearest current/future open period so historical open periods don't
-  // hijack the KPI strip when past years are present as open.
+  // KPI anchor = earliest open period (the active planning window by product rule).
   const earliestPeriod = useMemo(
-    () => getNearestCurrentOrFutureOpenPeriod(periods),
+    () => getEarliestOpenPeriod(periods),
     [periods],
   );
   const periodName = earliestPeriod ? fmtPeriod(earliestPeriod) : '—';

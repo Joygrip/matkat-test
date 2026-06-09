@@ -231,3 +231,103 @@ def test_create_period_copies_latest_prior_period_monthly_fte_cost(client, finan
     )
     assert feb.status_code == 200
     assert feb.json()["monthly_fte_cost"] == 111111
+
+
+# ── POST /periods/years ────────────────────────────────────────────────────────
+
+class TestCreateYear:
+    def test_auto_past_year_creates_locked(self, client, finance_headers, db):
+        """status=auto + past year → all 12 created as locked."""
+        resp = client.post("/periods/years", json={"year": 2020, "status": "auto"}, headers=finance_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["year"] == 2020
+        assert data["status_used"] == "locked"
+        assert data["created"] == 12
+        assert data["skipped_existing"] == 0
+
+        # Verify status in DB via list endpoint
+        list_resp = client.get("/periods", headers=finance_headers)
+        created = [p for p in list_resp.json() if p["year"] == 2020]
+        assert len(created) == 12
+        assert all(p["status"] == "locked" for p in created)
+
+    def test_auto_current_year_creates_open(self, client, finance_headers, db):
+        """status=auto + current year → created as open."""
+        current_year = datetime.now(tz=timezone.utc).year
+        resp = client.post("/periods/years", json={"year": current_year, "status": "auto"}, headers=finance_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status_used"] == "open"
+        assert data["created"] == 12
+
+        list_resp = client.get("/periods", headers=finance_headers)
+        created = [p for p in list_resp.json() if p["year"] == current_year]
+        assert all(p["status"] == "open" for p in created)
+
+    def test_explicit_open_creates_open_for_past_year(self, client, finance_headers, db):
+        """status=open forces open even for past year."""
+        resp = client.post("/periods/years", json={"year": 2019, "status": "open"}, headers=finance_headers)
+        assert resp.status_code == 200
+        assert resp.json()["status_used"] == "open"
+        assert resp.json()["created"] == 12
+
+        list_resp = client.get("/periods", headers=finance_headers)
+        created = [p for p in list_resp.json() if p["year"] == 2019]
+        assert all(p["status"] == "open" for p in created)
+
+    def test_explicit_locked_creates_locked_for_future_year(self, client, finance_headers, db):
+        """status=locked forces locked even for future year."""
+        current_year = datetime.now(tz=timezone.utc).year
+        resp = client.post("/periods/years", json={"year": current_year + 1, "status": "locked"}, headers=finance_headers)
+        assert resp.status_code == 200
+        assert resp.json()["status_used"] == "locked"
+        assert resp.json()["created"] == 12
+
+    def test_skips_existing_months(self, client, finance_headers, db):
+        """Months that already exist are skipped, not updated."""
+        # Pre-create Jan–Mar 2030 as open
+        for month in range(1, 4):
+            client.post("/periods", json={"year": 2030, "month": month}, headers=finance_headers)
+
+        resp = client.post("/periods/years", json={"year": 2030, "status": "locked"}, headers=finance_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["created"] == 9       # Apr–Dec
+        assert data["skipped_existing"] == 3  # Jan–Mar
+
+        # Pre-existing months keep their original open status (not overwritten to locked)
+        list_resp = client.get("/periods", headers=finance_headers)
+        existing = [p for p in list_resp.json() if p["year"] == 2030 and p["month"] in (1, 2, 3)]
+        assert all(p["status"] == "open" for p in existing)
+
+    def test_all_months_exist_returns_zero_created(self, client, finance_headers, db):
+        """If all 12 months already exist, created=0."""
+        current_year = datetime.now(tz=timezone.utc).year
+        # Create all 12 first
+        client.post("/periods/years", json={"year": current_year, "status": "open"}, headers=finance_headers)
+        # Call again
+        resp = client.post("/periods/years", json={"year": current_year, "status": "open"}, headers=finance_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["created"] == 0
+        assert data["skipped_existing"] == 12
+
+    def test_monthly_fte_cost_populated(self, client, finance_headers, db):
+        """Created periods have a non-zero monthly_fte_cost."""
+        resp = client.post("/periods/years", json={"year": 2021, "status": "locked"}, headers=finance_headers)
+        assert resp.status_code == 200
+
+        list_resp = client.get("/periods", headers=finance_headers)
+        created = [p for p in list_resp.json() if p["year"] == 2021]
+        assert all(p["monthly_fte_cost"] > 0 for p in created)
+
+    def test_unauthorized_role_rejected(self, client, pm_headers, db):
+        """Non-Finance/Admin roles cannot call POST /periods/years."""
+        resp = client.post("/periods/years", json={"year": 2025, "status": "auto"}, headers=pm_headers)
+        assert resp.status_code == 403
+
+    def test_year_out_of_range_rejected(self, client, finance_headers, db):
+        """Years outside the valid range are rejected."""
+        resp = client.post("/periods/years", json={"year": 1999, "status": "auto"}, headers=finance_headers)
+        assert resp.status_code == 422

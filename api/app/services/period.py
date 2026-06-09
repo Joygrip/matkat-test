@@ -1,5 +1,5 @@
 """Period management service."""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -100,6 +100,68 @@ class PeriodService:
         )
         
         return period
+
+    def create_year(self, year: int, status_mode: str = "auto") -> dict:
+        """Bulk-create all 12 months for a given year, skipping months that already exist.
+
+        status_mode:
+          'auto'   → locked for year < current_year, open otherwise
+          'open'   → all 12 months created as open
+          'locked' → all 12 months created as locked
+        """
+        current_year = datetime.now(tz=timezone.utc).year
+
+        if year < 2000 or year > current_year + 20:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "VALIDATION_ERROR",
+                    "message": f"Year must be between 2000 and {current_year + 20}.",
+                },
+            )
+
+        if status_mode == "locked":
+            period_status = PeriodStatus.LOCKED
+            status_used = "locked"
+        elif status_mode == "open":
+            period_status = PeriodStatus.OPEN
+            status_used = "open"
+        else:
+            period_status = PeriodStatus.LOCKED if year < current_year else PeriodStatus.OPEN
+            status_used = "locked" if year < current_year else "open"
+
+        now = datetime.now(tz=timezone.utc)
+        created = 0
+        skipped = 0
+
+        for month in range(1, 13):
+            if self.get_by_year_month(year, month):
+                skipped += 1
+                continue
+            monthly_fte_cost = self._resolve_default_monthly_fte_cost(year, month)
+            period = Period(
+                tenant_id=self.current_user.tenant_id,
+                year=year,
+                month=month,
+                monthly_fte_cost=monthly_fte_cost,
+                status=period_status,
+                locked_at=now if period_status == PeriodStatus.LOCKED else None,
+                locked_by=self.current_user.object_id if period_status == PeriodStatus.LOCKED else None,
+            )
+            self.db.add(period)
+            created += 1
+
+        if created > 0:
+            self.db.commit()
+            log_audit(
+                self.db, self.current_user,
+                action="create_year",
+                entity_type="Period",
+                entity_id=f"{self.current_user.tenant_id}:{year}",
+                new_values={"year": year, "status": status_used, "created": created, "skipped": skipped},
+            )
+
+        return {"year": year, "status_used": status_used, "created": created, "skipped_existing": skipped}
 
     def _resolve_default_monthly_fte_cost(self, year: int, month: int) -> int:
         """Resolve default rate for a newly created period.

@@ -6,6 +6,13 @@ import { Period } from '../types';
 
 export type { Period };
 
+export interface CreateYearResponse {
+  year: number;
+  status_used: string;
+  created: number;
+  skipped_existing: number;
+}
+
 export const periodsApi = {
   list: () => apiClient.get<Period[]>('/periods'),
   
@@ -20,4 +27,7 @@ export const periodsApi = {
   
   unlock: (id: string, reason: string) =>
     apiClient.post<Period>(`/periods/${id}/unlock`, { reason }),
+
+  createYear: (year: number, status: 'auto' | 'open' | 'locked') =>
+    apiClient.post<CreateYearResponse>('/periods/years', { year, status }),
 };

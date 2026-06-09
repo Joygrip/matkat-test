@@ -10,6 +10,8 @@ from api.app.schemas.period import (
     PeriodResponse,
     PeriodLockRequest,
     PeriodUnlockRequest,
+    CreateYearRequest,
+    CreateYearResponse,
 )
 from api.app.services.period import get_period_service
 
@@ -89,6 +91,26 @@ async def create_period(
     """
     service = get_period_service(db, current_user)
     return service.create(data.year, data.month)
+
+
+@router.post("/years", response_model=CreateYearResponse, status_code=200)
+async def create_year(
+    data: CreateYearRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE)),
+):
+    """
+    Bulk-create all 12 months of a given year, skipping months that already exist.
+
+    status='auto'   → past years (< current year) created as locked, current/future as open.
+    status='locked' → all months created as locked.
+    status='open'   → all months created as open.
+
+    Returns a summary: how many were created vs skipped.
+    Finance and Admin only.
+    """
+    service = get_period_service(db, current_user)
+    return service.create_year(data.year, data.status)
 
 
 @router.post("/{period_id}/lock", response_model=PeriodResponse)

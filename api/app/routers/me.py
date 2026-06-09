@@ -78,6 +78,22 @@ async def get_me(current_user: CurrentUser = Depends(get_current_user)):
     """
     Get current authenticated user information.
     """
+    is_manager_pm = (
+        current_user.role == UserRole.MANAGER
+        and current_user.secondary_role == UserRole.PM.value
+    )
+    is_manager_reader = (
+        current_user.role == UserRole.MANAGER
+        and current_user.secondary_role == UserRole.READER.value
+    )
+    can_pm = current_user.role == UserRole.PM or is_manager_pm
+    can_manage = current_user.role == UserRole.MANAGER
+
+    permissions = get_permissions_for_role(current_user.role)
+    if is_manager_pm:
+        pm_permissions = get_permissions_for_role(UserRole.PM)
+        permissions = list(dict.fromkeys(permissions + pm_permissions))
+
     return MeResponse(
         id=current_user.id,
         tenant_id=current_user.tenant_id,
@@ -86,5 +102,9 @@ async def get_me(current_user: CurrentUser = Depends(get_current_user)):
         display_name=current_user.display_name,
         role=current_user.role.value,
         secondary_role=current_user.secondary_role,
-        permissions=get_permissions_for_role(current_user.role),
+        is_manager_pm=is_manager_pm,
+        is_manager_reader=is_manager_reader,
+        can_pm=can_pm,
+        can_manage=can_manage,
+        permissions=permissions,
     )

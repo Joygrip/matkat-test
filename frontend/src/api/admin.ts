@@ -103,6 +103,7 @@ export interface AdminUser {
   display_name: string;
   email: string;
   role: string;
+  secondary_role?: string | null;
   cost_center_name?: string | null;
   initials?: string | null;
 }

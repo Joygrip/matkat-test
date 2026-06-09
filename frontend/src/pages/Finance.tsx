@@ -20,7 +20,7 @@ import {
 } from '../api/consolidation';
 import { usePeriod } from '../contexts/PeriodContext';
 import { useToast } from '../hooks/useToast';
-import { useAuth, useHasRole } from '../auth/AuthProvider';
+import { useAuth, useHasRole, useCanPM } from '../auth/AuthProvider';
 
 // Tab components
 import { ConsolidatedCostChart } from '../components/finance/ConsolidatedCostChart';
@@ -72,10 +72,11 @@ export const Finance: React.FC = () => {
   const styles = useStyles();
   const { showApiError } = useToast();
   const { user } = useAuth();
+  const canPM = useCanPM();
   const canSeeStats = useHasRole('Finance', 'Manager', 'Admin');
   const canSeeSnapshots = useHasRole('Finance', 'Admin');
-  const canSeeProjectCosts = useHasRole('Finance', 'Admin', 'PM');
-  const isPM = user?.role === 'PM';
+  const canSeeProjectCosts = useHasRole('Finance', 'Admin', 'PM') || canPM;
+  const isPM = user?.role === 'PM' || canPM;
 
   // ── Period ──
   const {

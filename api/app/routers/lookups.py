@@ -183,10 +183,15 @@ async def list_projects_scoped(
     """
     Projects scoped to the current user:
     - PM: only projects where this user is explicitly an assigned PM
-    - Admin/Finance: all projects (same as /lookups/projects)
+    - Manager+PM (secondary_role=PM): same as primary PM — assigned projects only
+    - Admin/Finance/plain Manager: all projects (same as /lookups/projects)
     """
     query = db.query(Project).filter(Project.tenant_id == current_user.tenant_id)
-    if current_user.role == UserRole.PM:
+    is_effective_pm = (
+        current_user.role == UserRole.PM
+        or (current_user.role == UserRole.MANAGER and current_user.secondary_role == UserRole.PM.value)
+    )
+    if is_effective_pm:
         pm_user = db.query(User).filter(
             and_(
                 User.tenant_id == current_user.tenant_id,
@@ -279,7 +284,16 @@ async def list_users(
         )
     )
     if role:
-        query = query.filter(User.role == role)
+        if role == UserRole.PM.value:
+            # Effective PM: primary PM role OR Manager with secondary_role='PM'
+            query = query.filter(
+                or_(
+                    User.role == UserRole.PM,
+                    and_(User.role == UserRole.MANAGER, User.secondary_role == UserRole.PM.value),
+                )
+            )
+        else:
+            query = query.filter(User.role == role)
     users = query.order_by(User.display_name).all()
     cc_ids = {u.cost_center_id for u in users if u.cost_center_id}
     cc_name_map: dict[str, str] = {}
@@ -301,6 +315,7 @@ async def list_users(
             "display_name": u.display_name,
             "email": u.email,
             "role": u.role,
+            "secondary_role": u.secondary_role,
             "cost_center_name": cc_name_map.get(u.cost_center_id) if u.cost_center_id else None,
             "initials": initials_map.get(u.id),
         }

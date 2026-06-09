@@ -8,6 +8,9 @@ export type UserRole = 'Admin' | 'Finance' | 'PM' | 'Manager' | 'Employee' | 'Re
 // Period status
 export type PeriodStatus = 'open' | 'locked';
 
+// Valid secondary roles
+export type SecondaryRole = 'Reader' | 'PM';
+
 // Current user info
 export interface MeResponse {
   id: string;
@@ -16,8 +19,13 @@ export interface MeResponse {
   email: string;
   display_name: string;
   role: UserRole;
-  secondary_role?: string;
+  secondary_role?: SecondaryRole | string;
   permissions: string[];
+  // Computed effective-role flags from backend
+  is_manager_reader?: boolean;
+  is_manager_pm?: boolean;
+  can_pm?: boolean;
+  can_manage?: boolean;
 }
 
 // Health response

@@ -184,7 +184,7 @@ export function useAuth() {
   return context;
 }
 
-// Hook to check role
+// Hook to check role (checks primary role; use can_pm/can_manage for effective role checks)
 export function useHasRole(...roles: UserRole[]) {
   const { user } = useAuth();
   return user ? roles.includes(user.role) : false;
@@ -193,5 +193,17 @@ export function useHasRole(...roles: UserRole[]) {
 // Hook to check if user is Manager with Reader secondary role
 export function useIsManagerReader() {
   const { user } = useAuth();
-  return user?.role === 'Manager' && user?.secondary_role === 'Reader';
+  return user?.is_manager_reader ?? (user?.role === 'Manager' && user?.secondary_role === 'Reader');
+}
+
+// Hook to check if user is Manager with PM secondary role
+export function useIsManagerPM() {
+  const { user } = useAuth();
+  return user?.is_manager_pm ?? (user?.role === 'Manager' && user?.secondary_role === 'PM');
+}
+
+// Hook: true if user has effective PM capability (primary PM or secondary PM)
+export function useCanPM() {
+  const { user } = useAuth();
+  return user?.can_pm ?? (user?.role === 'PM' || user?.secondary_role === 'PM');
 }

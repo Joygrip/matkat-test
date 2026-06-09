@@ -52,6 +52,10 @@ class MeResponse(BaseModel):
     display_name: str
     role: str
     secondary_role: Optional[str] = None
+    is_manager_pm: bool = False
+    is_manager_reader: bool = False
+    can_pm: bool = False
+    can_manage: bool = False
     permissions: list[str]
 
     class Config:

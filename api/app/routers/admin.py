@@ -438,6 +438,17 @@ async def create_project(
     db.add(project)
     db.flush()
     for user_id in pm_user_ids:
+        candidate = db.query(User).filter(
+            and_(User.id == user_id, User.tenant_id == current_user.tenant_id)
+        ).first()
+        if not candidate:
+            raise HTTPException(status_code=422, detail={"code": "PM_USER_NOT_FOUND", "message": f"User {user_id} not found."})
+        is_eligible = (
+            candidate.role == UserRole.PM
+            or (candidate.role == UserRole.MANAGER and candidate.secondary_role == UserRole.PM.value)
+        )
+        if not is_eligible:
+            raise HTTPException(status_code=422, detail={"code": "USER_NOT_PM_ELIGIBLE", "message": "User must be a Project Manager or a Manager with secondary Project Manager role."})
         db.add(ProjectPM(project_id=project.id, user_id=user_id, tenant_id=current_user.tenant_id))
     db.commit()
     db.refresh(project)
@@ -469,6 +480,17 @@ async def update_project(
     if pm_user_ids is not None:
         db.query(ProjectPM).filter(ProjectPM.project_id == project.id).delete()
         for user_id in pm_user_ids:
+            candidate = db.query(User).filter(
+                and_(User.id == user_id, User.tenant_id == current_user.tenant_id)
+            ).first()
+            if not candidate:
+                raise HTTPException(status_code=422, detail={"code": "PM_USER_NOT_FOUND", "message": f"User {user_id} not found."})
+            is_eligible = (
+                candidate.role == UserRole.PM
+                or (candidate.role == UserRole.MANAGER and candidate.secondary_role == UserRole.PM.value)
+            )
+            if not is_eligible:
+                raise HTTPException(status_code=422, detail={"code": "USER_NOT_PM_ELIGIBLE", "message": "User must be a Project Manager or a Manager with secondary Project Manager role."})
             db.add(ProjectPM(project_id=project.id, user_id=user_id, tenant_id=current_user.tenant_id))
 
     db.commit()
@@ -1161,18 +1183,24 @@ async def set_admin_user_secondary_role(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN)),
 ):
-    """Set or clear a user's secondary role. Only 'Reader' or null is accepted. Admin only."""
+    """Set or clear a user's secondary role. 'Reader' or 'PM' (Manager only) or null. Admin only."""
     secondary_role = data.get("secondary_role")
-    if secondary_role is not None and secondary_role != UserRole.READER.value:
+    _VALID_SECONDARY_ROLES = {UserRole.READER.value, UserRole.PM.value}
+    if secondary_role is not None and secondary_role not in _VALID_SECONDARY_ROLES:
         raise HTTPException(
             status_code=400,
-            detail={"code": "INVALID_SECONDARY_ROLE", "message": "secondary_role must be 'Reader' or null"},
+            detail={"code": "INVALID_SECONDARY_ROLE", "message": "secondary_role must be 'Reader', 'PM', or null"},
         )
     user = db.query(User).filter(
         and_(User.id == user_id, User.tenant_id == current_user.tenant_id)
     ).first()
     if not user:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "User not found"})
+    if secondary_role == UserRole.PM.value and user.role != UserRole.MANAGER:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_SECONDARY_ROLE", "message": "secondary_role 'PM' can only be set on Manager users"},
+        )
     old_secondary_role = user.secondary_role
     user.secondary_role = secondary_role
     db.commit()

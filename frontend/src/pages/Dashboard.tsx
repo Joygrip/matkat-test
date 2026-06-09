@@ -6,7 +6,7 @@ import {
   Skeleton,
   SkeletonItem,
 } from '@fluentui/react-components';
-import { useAuth, useIsManagerReader } from '../auth/AuthProvider';
+import { useAuth, useIsManagerReader, useIsManagerPM } from '../auth/AuthProvider';
 import { planningApi } from '../api/planning';
 import { actualsApi } from '../api/actuals';
 import { lookupsApi } from '../api/lookups';
@@ -18,6 +18,7 @@ import type { Period } from '../types/index';
 import { EmployeeView } from '../components/dashboard/EmployeeView';
 import { PMDashboard } from '../components/dashboard/PMDashboard';
 import { ManagerDashboard } from '../components/dashboard/ManagerDashboard';
+import { ManagerPMDashboard } from '../components/dashboard/ManagerPMDashboard';
 import { FinanceDashboard } from '../components/dashboard/FinanceDashboard';
 import { ReaderView } from '../components/dashboard/ReaderView';
 import { AdminView } from '../components/dashboard/AdminView';
@@ -64,6 +65,7 @@ export function Dashboard() {
   const styles = useStyles();
   const { user } = useAuth();
   const isManagerReader = useIsManagerReader();
+  const isManagerPM = useIsManagerPM();
   const { periods, loading: periodsLoading } = usePeriod();
   const { costCenters, projects, myResource, appDataLoading } = useAppData();
 
@@ -173,7 +175,20 @@ export function Dashboard() {
         />
       )}
 
-      {user.role === 'Manager' && !isManagerReader && (
+      {isManagerPM && (
+        <ManagerPMDashboard
+          demandLines={allDemandLines}
+          supplyLines={allSupplyLines}
+          costCenters={costCenters}
+          projects={projects}
+          periods={periods}
+          approvalStatuses={approvalStatuses}
+          user={user}
+          userCcId={userCcId}
+        />
+      )}
+
+      {user.role === 'Manager' && !isManagerReader && !isManagerPM && (
         <ManagerDashboard
           demandLines={allDemandLines}
           supplyLines={allSupplyLines}

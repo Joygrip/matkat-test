@@ -2377,11 +2377,12 @@ export function Admin() {
                         >
                           <option value="">None</option>
                           <option value="Reader">Reader</option>
+                          <option value="PM">Project Manager</option>
                         </select>
                       ) : (
                         u.secondary_role ? (
                           <Badge appearance="filled" color="informative" style={{ fontSize: '11px' }}>
-                            {u.secondary_role}
+                            {u.secondary_role === 'PM' ? 'Project Manager' : u.secondary_role}
                           </Badge>
                         ) : (
                           <span style={{ color: 'var(--colorNeutralForeground3)' }}>—</span>
@@ -2503,7 +2504,7 @@ export function Admin() {
               >
                 {pmUsers.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.display_name} ({u.email})
+                    {u.display_name}{u.secondary_role === 'PM' ? ' (Manager+PM)' : ''} ({u.email})
                   </option>
                 ))}
               </select>

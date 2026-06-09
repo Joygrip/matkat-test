@@ -24,8 +24,13 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const load = () => {
     if (!user) return;
     const role = user.role;
+    // Pure PM uses listProjectsScoped() — returns only assigned PM projects.
+    // Manager+PM uses listProjects() to keep the general project list broad (same as plain
+    // Manager) so ResourcePlanning filters and other pages are not narrowed. The PM section
+    // of ManagerPMDashboard fetches its own scoped list independently.
+    const isPurePM = role === 'PM';
     const projectsFetch =
-      role === 'PM' || role === 'Finance' || role === 'Admin'
+      role === 'Finance' || role === 'Admin' || isPurePM
         ? lookupsApi.listProjectsScoped()
         : lookupsApi.listProjects();
 
@@ -42,7 +47,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (user?.role) load();
-  }, [user?.role]);
+  }, [user?.role, user?.secondary_role]);
 
   return (
     <AppDataContext.Provider value={{ costCenters, projects, myResource, appDataLoading, refreshAppData: load }}>

@@ -124,8 +124,16 @@ class ProjectCostSummaryResponse(BaseModel):
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _get_pm_project_ids(db: Session, current_user: CurrentUser) -> Optional[list[str]]:
-    """Return project IDs owned by the current PM, or None if Finance/Admin (unrestricted)."""
-    if current_user.role != UserRole.PM:
+    """Return project IDs owned by the current effective PM, or None if Finance/Admin (unrestricted).
+
+    Effective PM = primary PM role, or Manager with secondary_role=PM.
+    Returns None (no restriction) for all other roles.
+    """
+    is_effective_pm = (
+        current_user.role == UserRole.PM
+        or (current_user.role == UserRole.MANAGER and current_user.secondary_role == UserRole.PM.value)
+    )
+    if not is_effective_pm:
         return None
     pm_user = db.query(User).filter(
         User.tenant_id == current_user.tenant_id,

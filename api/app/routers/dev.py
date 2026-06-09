@@ -51,7 +51,7 @@ def seed_database_for_tenant(db: Session, tenant_id: str) -> str:
         User(tenant_id=tenant_id, object_id="admin-001", email="admin@example.com", display_name="Admin User", role=UserRole.ADMIN),
         User(tenant_id=tenant_id, object_id="finance-001", email="finance@example.com", display_name="Finance User", role=UserRole.FINANCE),
         User(tenant_id=tenant_id, object_id="pm-001", email="pm@example.com", display_name="Project Manager", role=UserRole.PM),
-        User(tenant_id=tenant_id, object_id="manager-001", email="manager@example.com", display_name="Manager", role=UserRole.MANAGER, cost_center_id=cc_software.id),
+        User(tenant_id=tenant_id, object_id="manager-001", email="manager@example.com", display_name="Manager", role=UserRole.MANAGER, secondary_role=UserRole.PM.value, cost_center_id=cc_software.id),
         User(tenant_id=tenant_id, object_id="senior-manager-001", email="seniormanager@example.com", display_name="Senior Manager", role=UserRole.MANAGER, cost_center_id=cc_software.id),
         User(tenant_id=tenant_id, object_id="employee-001", email="employee@example.com", display_name="Employee User", role=UserRole.EMPLOYEE, cost_center_id=cc_software.id),
     ]
@@ -92,6 +92,7 @@ def seed_database_for_tenant(db: Session, tenant_id: str) -> str:
     db.add_all([
         ProjectPM(project_id=projects[0].id, user_id=users[2].id, tenant_id=tenant_id),
         ProjectPM(project_id=projects[1].id, user_id=users[2].id, tenant_id=tenant_id),
+        ProjectPM(project_id=projects[0].id, user_id=users[3].id, tenant_id=tenant_id),
     ])
     # Create resources
     resources = [

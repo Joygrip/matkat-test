@@ -489,8 +489,10 @@ export interface ResourcePlanningMatrixProps {
   userRole: string;
   managedCcIds: Set<string>;
   allCostCenters: CostCenter[];
-  /** When set (ManagerReader), restricts the Add Line CC dropdown to own + delegated CCs. */
+  /** When set (Manager/ManagerReader), restricts the supply Add Line CC dropdown to own + delegated CCs. */
   editableCcIds?: Set<string>;
+  /** True when user has effective PM capability (primary PM or Manager+PM secondary role). */
+  canPM?: boolean;
 }
 
 function parseResOrPh(val: string): { resourceId?: string; placeholderId?: string } {
@@ -556,6 +558,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   managedCcIds,
   allCostCenters,
   editableCcIds,
+  canPM = false,
 }) => {
   const styles = useStyles();
   const { showApiError, showSuccess, showInfo } = useToast();
@@ -729,6 +732,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [dlgShowResourceDropdown, setDlgShowResourceDropdown] = useState(false);
   const [dlgAllResources, setDlgAllResources] = useState<Resource[]>([]);
   const [dlgAllPlaceholders, setDlgAllPlaceholders] = useState<Placeholder[]>([]);
+  const [dlgPmProjects, setDlgPmProjects] = useState<Project[]>([]);
+  const [dlgPmProjectsLoading, setDlgPmProjectsLoading] = useState(false);
   const [dlgPeriodDragging, setDlgPeriodDragging] = useState(false);
   const [dlgPeriodDragAdd, setDlgPeriodDragAdd] = useState(true);
 
@@ -840,13 +845,32 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const isRoleManager = userRole === 'Manager';
   const isRolePM = userRole === 'PM';
 
+  /*
+   * Manager+PM scope model:
+   *
+   * DEMAND:
+   *   resources/cost centers = all active planning resources (listResources, no CC scope)
+   *   projects              = assigned PM projects only (listProjectsScoped)
+   *   backend enforces: unassigned project demand writes → 403
+   *
+   * SUPPLY:
+   *   resources/cost centers = managed/delegated Manager CCs only (listResourcesScoped forWrite)
+   *   projects               = all active projects (listProjects)
+   *   backend enforces: resource outside Manager write scope → 403
+   *
+   * Dashboard / RA Overview:
+   *   read scope = Manager visible data UNION assigned PM project data (backend union query)
+   */
   const dlgFilteredResources = useMemo(() => {
     const query = dlgResourceQuery.toLowerCase();
     const matchesResource = (r: Resource) =>
       !query ||
       r.display_name.toLowerCase().includes(query) ||
       (r.initials ? r.initials.toLowerCase().includes(query) : false);
-    if (isRoleManager) {
+    // Manager+PM adding demand uses the full resource list (same as primary PM).
+    // Plain Manager or Manager+PM adding supply stays CC-scoped.
+    const useAllResources = !isRoleManager || (canPM && dlgLineType === 'demand');
+    if (!useAllResources) {
       if (!dlgCcId) return { resources: [] as Resource[], placeholders: [] as Placeholder[] };
       const resources = (ccResources[dlgCcId] ?? []).filter(matchesResource);
       const placeholders = dlgLineType === 'demand'
@@ -859,7 +883,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       ? dlgAllPlaceholders.filter(ph => !query || ph.name.toLowerCase().includes(query))
       : [];
     return { resources, placeholders };
-  }, [isRoleManager, dlgCcId, dlgResourceQuery, dlgLineType, ccResources, ccPlaceholders, dlgAllResources, dlgAllPlaceholders]);
+  }, [isRoleManager, canPM, dlgCcId, dlgResourceQuery, dlgLineType, ccResources, ccPlaceholders, dlgAllResources, dlgAllPlaceholders]);
 
   const moveDemandFilteredResources = useMemo(() => {
     const q = moveDemandQuery.trim().toLowerCase();
@@ -910,9 +934,33 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     );
   }, [moveSupplyAllProjects, moveSupplyProjectQuery]);
 
+  // When Manager+PM opens inline demand add, load full resource list and PM-scoped projects.
+  // The dialog and inline form never open simultaneously so dlgAllResources/dlgPmProjects are safe to reuse.
+  useEffect(() => {
+    if (!canPM || !addDemandCC) return;
+    if (dlgAllResources.length === 0) {
+      lookupsApi.listResources().then(setDlgAllResources).catch(() => {});
+      lookupsApi.listPlaceholders().then(setDlgAllPlaceholders).catch(() => {});
+    }
+    if (dlgPmProjects.length === 0) {
+      setDlgPmProjectsLoading(true);
+      lookupsApi.listProjectsScoped().then(p => { setDlgPmProjects(p); setDlgPmProjectsLoading(false); }).catch(() => setDlgPmProjectsLoading(false));
+    }
+  }, [addDemandCC]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const addDemandFilteredResAndPh = useMemo(() => {
     if (!addDemandCC) return { resources: [] as Resource[], placeholders: [] as Placeholder[] };
     const q = addDemandResQuery.trim().toLowerCase();
+    // Manager+PM demand: use the full planning resource list, not CC-scoped list.
+    if (canPM) {
+      const resources = dlgAllResources.filter(r => !q ||
+        r.display_name.toLowerCase().includes(q) ||
+        (r.initials ? r.initials.toLowerCase().includes(q) : getInitials(r.display_name).toLowerCase().includes(q)) ||
+        (r.email ? r.email.toLowerCase().includes(q) : false)
+      );
+      const placeholders = dlgAllPlaceholders.filter(ph => !q || ph.name.toLowerCase().includes(q));
+      return { resources, placeholders };
+    }
     const resources = (ccResources[addDemandCC] ?? []).filter(r => !q ||
       r.display_name.toLowerCase().includes(q) ||
       (r.initials ? r.initials.toLowerCase().includes(q) : getInitials(r.display_name).toLowerCase().includes(q)) ||
@@ -922,12 +970,14 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       !q || ph.name.toLowerCase().includes(q)
     );
     return { resources, placeholders };
-  }, [addDemandCC, addDemandResQuery, ccResources, ccPlaceholders]);
+  }, [canPM, addDemandCC, addDemandResQuery, ccResources, ccPlaceholders, dlgAllResources, dlgAllPlaceholders]);
 
   const addDemandFilteredProjects = useMemo(() => {
     const q = addDemandProjectQuery.trim().toLowerCase();
-    return projects.filter(p => !q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q));
-  }, [addDemandProjectQuery, projects]);
+    // Manager+PM demand: scope project list to PM-assigned projects only.
+    const sourceProjects = (isRoleManager && canPM) ? dlgPmProjects : projects;
+    return sourceProjects.filter(p => p.is_active !== false && (!q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q)));
+  }, [addDemandProjectQuery, projects, isRoleManager, canPM, dlgPmProjects]);
 
   const addSupplyFilteredResources = useMemo(() => {
     if (!addSupplyCC) return [] as Resource[];
@@ -1316,16 +1366,24 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     const placeholderId = parsed.placeholderId || null;
     let resourceName = '—';
     if (resourceId) {
-      resourceName = ccResources[ccId]?.find(r => r.id === resourceId)?.display_name || resourceId;
+      // For Manager+PM inline demand add, resource may be from dlgAllResources (full list),
+      // not from CC-scoped ccResources. Check both.
+      resourceName = ccResources[ccId]?.find(r => r.id === resourceId)?.display_name
+        || dlgAllResources.find(r => r.id === resourceId)?.display_name
+        || resourceId;
     } else if (placeholderId) {
-      resourceName = ccPlaceholders[ccId]?.find(p => p.id === placeholderId)?.name || placeholderId;
+      resourceName = ccPlaceholders[ccId]?.find(p => p.id === placeholderId)?.name
+        || dlgAllPlaceholders.find(p => p.id === placeholderId)?.name
+        || placeholderId;
     }
     const projectName = projects.find(p => p.id === projectId)?.name || projectId;
     const key = resourceId ? `r:${resourceId}|p:${projectId}` : `ph:${placeholderId}|p:${projectId}`;
 
     if (!allRows.find(r => r.key === key)) {
       const resourceInitials = resourceId
-        ? (ccResources[ccId]?.find(r => r.id === resourceId)?.initials || null)
+        ? (ccResources[ccId]?.find(r => r.id === resourceId)?.initials
+            || dlgAllResources.find(r => r.id === resourceId)?.initials
+            || null)
         : null;
       const newRow: LocalRow = {
         key, resourceId, resourceName, resourceInitials, placeholderId,
@@ -1335,7 +1393,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     }
     setAddDemandCC(null);
     setAddDemandForm({ resOrPh: '', projectId: '' });
-  }, [addDemandForm, ccResources, ccPlaceholders, projects]);
+  }, [addDemandForm, ccResources, ccPlaceholders, dlgAllResources, dlgAllPlaceholders, projects]);
 
   const handleAddSupplyLine = useCallback(async (ccId: string, allRows: MergedMatrixRow[]) => {
     const { resourceId, projectId } = addSupplyForm;
@@ -1987,10 +2045,27 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     };
   }, [isPayloadDragging, clearPayloadDragState]);
 
-  // For Manager: load CC resources when their CC is set in the dialog
+  // For Manager (supply path) or Manager+PM switching to supply: load CC resources when CC is set.
+  // For Manager+PM in demand mode, dlgAllResources is populated by openAddLineDialog / the effect below.
   useEffect(() => {
-    if (isRoleManager && dlgCcId) loadCcData(dlgCcId);
-  }, [dlgCcId]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Load CC-scoped resources for Manager in supply mode; skip for demand (uses full list).
+  if (isRoleManager && dlgCcId && dlgLineType === 'supply') loadCcData(dlgCcId);
+  }, [dlgCcId, dlgLineType]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // For demand mode: ensure the full resource list is loaded when dialog is open.
+  // Covers Manager+PM and Finance/Admin who switch to demand via the line-type radio.
+  useEffect(() => {
+    if (!addLineDialogOpen) return;
+    if (dlgLineType === 'demand' && !isRoleManager && dlgAllResources.length === 0) {
+      // Pure PM / Finance / Admin
+      lookupsApi.listResources().then(setDlgAllResources).catch(() => {});
+      lookupsApi.listPlaceholders().then(setDlgAllPlaceholders).catch(() => {});
+    } else if (isRoleManager && canPM && dlgLineType === 'demand' && dlgAllResources.length === 0) {
+      // Manager+PM demand
+      lookupsApi.listResources().then(setDlgAllResources).catch(() => {});
+      lookupsApi.listPlaceholders().then(setDlgAllPlaceholders).catch(() => {});
+    }
+  }, [dlgLineType, addLineDialogOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // End period drag selection on global mouseup
   useEffect(() => {
@@ -2000,14 +2075,19 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     return () => window.removeEventListener('mouseup', handleUp);
   }, [dlgPeriodDragging]);
 
-  const openAddLineDialog = useCallback(() => {
-    const defaultLineType: 'demand' | 'supply' = isRolePM ? 'demand' : isRoleManager ? 'supply' : 'demand';
-    // Default to own CC; if not available, pick first editable CC (or first visible CC).
-    // Use allCostCenters so managers see every managed CC, not just those visible under current filters.
+  const openAddLineDialog = useCallback((explicitLineType?: 'demand' | 'supply') => {
+    // If explicit type is passed (from "Add Demand" / "Add Supply" buttons), use it.
+    // Otherwise: pure PM → demand; pure Manager → supply; Manager+PM defaults to demand;
+    // Finance/Admin → demand as a reasonable starting default.
+    const defaultLineType: 'demand' | 'supply' =
+      explicitLineType !== undefined ? explicitLineType
+      : isRoleManager && !canPM ? 'supply'
+      : 'demand';
+    // Default to own CC for supply; CC is auto-detected from resource selection for demand.
     const editableCostCenters = editableCcIds
       ? allCostCenters.filter(c => editableCcIds.has(c.id))
       : costCenters;
-    const defaultCcId = isRoleManager
+    const defaultCcId = isRoleManager && defaultLineType === 'supply'
       ? ([...managedCcIds][0] || editableCostCenters[0]?.id || costCenters[0]?.id || '')
       : '';
     setDlgLineType(defaultLineType);
@@ -2022,8 +2102,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDlgShowResourceDropdown(false);
     setDlgAllResources([]);
     setDlgAllPlaceholders([]);
+    setDlgPmProjects([]);
     setDlgPeriodDragging(false);
-    if (isRoleManager) {
+    // Supply mode (Manager or Manager+PM): load CC-scoped resources.
+    // Demand mode (PM, Manager+PM, Finance, Admin): load full resource list.
+    const isSupplyMode = isRoleManager && defaultLineType === 'supply';
+    if (isSupplyMode) {
       if (defaultCcId) loadCcData(defaultCcId);
     } else {
       lookupsApi.listResources().then(setDlgAllResources).catch(() => {});
@@ -2031,8 +2115,52 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         lookupsApi.listPlaceholders().then(setDlgAllPlaceholders).catch(() => {});
       }
     }
+    // For Manager+PM demand: fetch PM-assigned projects for the project dropdown.
+    if (isRoleManager && canPM && defaultLineType === 'demand') {
+      setDlgPmProjectsLoading(true);
+      setDlgPmProjects([]);
+      lookupsApi.listProjectsScoped()
+        .then(p => { setDlgPmProjects(p); setDlgPmProjectsLoading(false); })
+        .catch(() => setDlgPmProjectsLoading(false));
+    }
     setAddLineDialogOpen(true);
-  }, [isRolePM, isRoleManager, managedCcIds, costCenters, allCostCenters, editableCcIds, loadCcData]);
+  }, [isRoleManager, canPM, managedCcIds, costCenters, allCostCenters, editableCcIds, loadCcData]);
+
+  // Dialog line-type switch handlers — used by the selectable Line Type control shown for
+  // Finance/Admin and Manager+PM (both can add either demand or supply).
+  const handleDlgSwitchToDemand = useCallback(() => {
+    setDlgLineType('demand');
+    setDlgSelectedResources([]);
+    setDlgResourceQuery('');
+    setDlgCcId(''); // CC auto-derived from resource selection in demand mode
+    lookupsApi.listPlaceholders().then(setDlgAllPlaceholders).catch(() => {});
+    if (isRoleManager && canPM) {
+      // Manager+PM demand: need full resource list and PM-scoped project list
+      if (dlgAllResources.length === 0) {
+        lookupsApi.listResources().then(setDlgAllResources).catch(() => {});
+      }
+      setDlgPmProjectsLoading(true);
+      setDlgPmProjects([]);
+      lookupsApi.listProjectsScoped()
+        .then(p => { setDlgPmProjects(p); setDlgPmProjectsLoading(false); })
+        .catch(() => setDlgPmProjectsLoading(false));
+    }
+  }, [isRoleManager, canPM, dlgAllResources.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleDlgSwitchToSupply = useCallback(() => {
+    setDlgLineType('supply');
+    setDlgSelectedResources(prev => prev.filter(r => r.type === 'resource'));
+    setDlgResourceQuery('');
+    setDlgAllPlaceholders([]);
+    setDlgPmProjects([]);
+    if (isRoleManager) {
+      // Manager+PM supply: set default Manager CC so the CC dropdown has a selection
+      const defaultCc = [...managedCcIds][0] || (editableCcIds ? [...editableCcIds][0] : '') || '';
+      setDlgCcId(defaultCc);
+    } else {
+      setDlgCcId(''); // Finance/Admin: CC auto-detected from resource selection
+    }
+  }, [isRoleManager, managedCcIds, editableCcIds]);
 
   const handleDlgSave = useCallback(async () => {
     const fteVal = Number(dlgFte);
@@ -2192,14 +2320,35 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       </div>
     )}
     <div style={{ padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`, borderBottom: `1px solid #e5e4e0`, display: 'flex', alignItems: 'center', gap: 12, backgroundColor: '#ffffff' }}>
-      <Button
-        size="small"
-        appearance="primary"
-        icon={<Add24Regular />}
-        onClick={openAddLineDialog}
-      >
-        Add Line
-      </Button>
+      {isRoleManager && canPM ? (
+        <>
+          <Button
+            size="small"
+            appearance="primary"
+            icon={<Add24Regular />}
+            onClick={() => openAddLineDialog('demand')}
+          >
+            Add Demand
+          </Button>
+          <Button
+            size="small"
+            appearance="outline"
+            icon={<Add24Regular />}
+            onClick={() => openAddLineDialog('supply')}
+          >
+            Add Supply
+          </Button>
+        </>
+      ) : (
+        <Button
+          size="small"
+          appearance="primary"
+          icon={<Add24Regular />}
+          onClick={() => openAddLineDialog()}
+        >
+          Add Line
+        </Button>
+      )}
       {/* Legend */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 8, fontSize: '11.5px', color: '#6b6966' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -2987,8 +3136,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                       );
                     })}
 
-                    {/* Add demand line */}
-                    {canEditDemand && (!editableCcIds || editableCcIds.has(group.ccId)) && (
+                    {/* Add demand line — always visible for effective PM (canPM), otherwise
+                        restricted to Manager's editable CCs. Supply actions stay CC-gated. */}
+                    {canEditDemand && (!editableCcIds || editableCcIds.has(group.ccId) || canPM) && (
                       <tr className={styles.addLineRow}>
                         <td
                           className={styles.addLineCell}
@@ -3303,19 +3453,20 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
           <DialogContent>
             <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, paddingTop: tokens.spacingVerticalS }}>
 
-              {/* Line Type — Finance/Admin only; fixed label for PM and Manager */}
-              {!isRolePM && !isRoleManager ? (
+              {/* Line Type — selectable for Finance/Admin and Manager+PM (can do both).
+                  Fixed label for pure PM (demand only) and pure Manager (supply only). */}
+              {(!isRolePM && !isRoleManager) || (isRoleManager && canPM) ? (
                 <div>
                   <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>Line Type</div>
                   <div style={{ display: 'flex', gap: tokens.spacingHorizontalL }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: tokens.fontSizeBase300 }}>
                       <input type="radio" name="dlgLineType" value="demand" checked={dlgLineType === 'demand'}
-                        onChange={() => { setDlgLineType('demand'); setDlgSelectedResources([]); setDlgResourceQuery(''); setDlgCcId(''); lookupsApi.listPlaceholders().then(setDlgAllPlaceholders).catch(() => {}); }} />
+                        onChange={handleDlgSwitchToDemand} />
                       Demand
                     </label>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: tokens.fontSizeBase300 }}>
                       <input type="radio" name="dlgLineType" value="supply" checked={dlgLineType === 'supply'}
-                        onChange={() => { setDlgLineType('supply'); setDlgSelectedResources(prev => prev.filter(r => r.type === 'resource')); setDlgResourceQuery(''); setDlgCcId(''); setDlgAllPlaceholders([]); }} />
+                        onChange={handleDlgSwitchToSupply} />
                       Supply
                     </label>
                   </div>
@@ -3326,8 +3477,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                 </div>
               )}
 
-              {/* Cost Center — locked for Manager; auto-detected from selections for others */}
-              {isRoleManager ? (
+              {/* Cost Center — locked for Manager in supply mode; auto-detected from resource in demand mode.
+                  Manager+PM in demand mode: CC comes from resource selection, not pre-selected. */}
+              {isRoleManager && (dlgLineType === 'supply' || !canPM) ? (
                 <div>
                   <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>Cost Center</div>
                   {(editableCcIds ? editableCcIds.size > 1 : costCenters.length > 1) ? (
@@ -3399,7 +3551,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                     onFocus={() => setDlgShowResourceDropdown(true)}
                     onBlur={() => setTimeout(() => setDlgShowResourceDropdown(false), 150)}
                     placeholder="Type name or initials…"
-                    disabled={isRoleManager && !dlgCcId}
+                    disabled={isRoleManager && dlgLineType === 'supply' && !dlgCcId}
                     style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, width: '100%', boxSizing: 'border-box' }}
                   />
                   {dlgShowResourceDropdown && (dlgFilteredResources.resources.length > 0 || dlgFilteredResources.placeholders.length > 0) && (
@@ -3490,16 +3642,29 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                 <div style={{ marginBottom: 4, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold }}>
                   Project{dlgLineType === 'supply' ? ' (optional)' : ''}
                 </div>
-                <select
-                  value={dlgProjectId}
-                  onChange={e => setDlgProjectId(e.target.value)}
-                  style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, minWidth: 240 }}
-                >
-                  <option value="">{dlgLineType === 'supply' ? '— General availability —' : 'Select project…'}</option>
-                  {projects.filter(p => p.is_active).map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
+                {isRoleManager && canPM && dlgLineType === 'demand' && dlgPmProjectsLoading ? (
+                  <div style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground3, minWidth: 240 }}>
+                    Loading assigned projects…
+                  </div>
+                ) : isRoleManager && canPM && dlgLineType === 'demand' && dlgPmProjects.length === 0 ? (
+                  <div style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground3, minWidth: 240 }}>
+                    No assigned projects — ask Admin to assign you as Project Manager.
+                  </div>
+                ) : (
+                  <select
+                    value={dlgProjectId}
+                    onChange={e => setDlgProjectId(e.target.value)}
+                    style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, minWidth: 240 }}
+                  >
+                    <option value="">{dlgLineType === 'supply' ? '— General availability —' : 'Select project…'}</option>
+                    {(isRoleManager && canPM && dlgLineType === 'demand'
+                      ? dlgPmProjects
+                      : projects.filter(p => p.is_active)
+                    ).map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {/* Periods — drag to select multiple */}

@@ -12,7 +12,7 @@ import { adminApi } from '../api/admin';
 import { lookupsApi } from '../api/lookups';
 import { usePeriod } from '../contexts/PeriodContext';
 import { useAppData } from '../contexts/AppDataContext';
-import { useAuth } from '../auth/AuthProvider';
+import { useAuth, useCanPM } from '../auth/AuthProvider';
 import { formatApiError } from '../utils/errors';
 import { getEarliestOpenPeriod } from '../utils/periodUtils';
 import { MONTH_NAMES, MONTH_SHORT } from '../utils/format';
@@ -181,7 +181,8 @@ export const ResourcePlanning: React.FC = () => {
   const styles = useStyles();
   const { user } = useAuth();
 
-  const canEditDemand = user?.role === 'PM' || user?.role === 'Finance' || user?.role === 'Admin';
+  const canPM = useCanPM();
+  const canEditDemand = user?.role === 'PM' || user?.role === 'Finance' || user?.role === 'Admin' || canPM;
   const isManagerReader = user?.role === 'Manager' && user?.secondary_role === 'Reader';
   const canEditSupply = user?.role === 'Manager' || user?.role === 'Finance' || user?.role === 'Admin';
   const isManager = user?.role === 'Manager' && !isManagerReader;
@@ -734,6 +735,7 @@ export const ResourcePlanning: React.FC = () => {
           managedCcIds={managedCcIds}
           allCostCenters={costCenters}
           editableCcIds={editableCcIds ?? undefined}
+          canPM={canPM}
         />
       </Card>
     </div>

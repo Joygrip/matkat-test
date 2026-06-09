@@ -524,12 +524,12 @@ export const ProjectCostsMatrix: React.FC = () => {
   const { showApiError } = useToast();
 
   const isFinanceOrAdmin = user?.role === 'Finance' || user?.role === 'Admin';
-  const isPM = user?.role === 'PM';
-
-  // The backend's /lookups/projects/scoped already restricts PMs to their assigned
-  // projects only, so any project returned to a PM is one they can edit.
+  // Effective PM: primary role PM or Manager with secondary_role=PM.
+  // Backend /lookups/projects/scoped already restricts effective PMs to their assigned
+  // projects only, so any project returned is one they can edit.
   // pm_user_ids in the response contains internal DB UUIDs, not Azure AD object_ids,
   // so we cannot reliably compare them in the frontend.
+  const isPM = user?.role === 'PM' || !!(user?.can_pm ?? user?.secondary_role === 'PM');
   const canEditProject = useCallback((_pmUserIds: string[]): boolean => {
     return isFinanceOrAdmin || isPM;
   }, [isFinanceOrAdmin, isPM]);

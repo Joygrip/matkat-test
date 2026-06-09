@@ -96,15 +96,19 @@ class DemandService:
         return period
     
     def _check_pm_authorized(self, project: Project) -> None:
-        """Raise 403 if the current user is a PM but not an assigned PM for this project.
+        """Raise 403 if the current user is an effective PM but not assigned to this project.
 
+        Effective PM = primary PM role, or Manager with secondary_role=PM.
         Only enforced when the project has assigned PMs.
-        If no PMs are assigned, any PM-role user may manage demand.
         """
-        if self.current_user.role != UserRole.PM:
+        is_effective_pm = (
+            self.current_user.role == UserRole.PM
+            or (self.current_user.role == UserRole.MANAGER and self.current_user.secondary_role == UserRole.PM.value)
+        )
+        if not is_effective_pm:
             return
         if not project.pm_users:
-            return  # No PMs assigned — any PM can manage demand
+            return  # No PMs assigned — any effective PM can manage demand
 
         assigned_oids = {u.object_id for u in project.pm_users}
         if self.current_user.object_id not in assigned_oids:
@@ -175,11 +179,14 @@ class DemandService:
 
         # RO/Director: restrict to resources within their reporting line
         scoped_ids = self._get_scoped_resource_ids()
-        if scoped_ids is not None:
-            query = query.filter(DemandLine.resource_id.in_(scoped_ids))
 
-        # PM: restrict to projects they are assigned to
-        if self.current_user.role == UserRole.PM:
+        is_manager_pm = (
+            self.current_user.role == UserRole.MANAGER
+            and self.current_user.secondary_role == UserRole.PM.value
+        )
+
+        if is_manager_pm:
+            # Manager+PM: UNION of CC-scoped resources AND PM-assigned project demand
             pm_user = self.db.query(User).filter(
                 and_(
                     User.tenant_id == self.current_user.tenant_id,
@@ -193,9 +200,39 @@ class DemandService:
                     .filter(ProjectPM.user_id == pm_user.id)
                     .all()
                 ]
-                query = query.filter(DemandLine.project_id.in_(pm_project_ids))
             else:
-                query = query.filter(False)
+                pm_project_ids = []
+            if scoped_ids is not None:
+                query = query.filter(
+                    or_(
+                        DemandLine.resource_id.in_(scoped_ids),
+                        DemandLine.project_id.in_(pm_project_ids),
+                    )
+                )
+            else:
+                query = query.filter(DemandLine.project_id.in_(pm_project_ids))
+        else:
+            if scoped_ids is not None:
+                query = query.filter(DemandLine.resource_id.in_(scoped_ids))
+
+            # Primary PM: restrict to assigned projects
+            if self.current_user.role == UserRole.PM:
+                pm_user = self.db.query(User).filter(
+                    and_(
+                        User.tenant_id == self.current_user.tenant_id,
+                        User.object_id == self.current_user.object_id,
+                    )
+                ).first()
+                if pm_user:
+                    pm_project_ids = [
+                        r.project_id
+                        for r in self.db.query(ProjectPM.project_id)
+                        .filter(ProjectPM.user_id == pm_user.id)
+                        .all()
+                    ]
+                    query = query.filter(DemandLine.project_id.in_(pm_project_ids))
+                else:
+                    query = query.filter(False)
 
         return query.all()
 

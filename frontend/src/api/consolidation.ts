@@ -129,8 +129,9 @@ export interface SnapshotDetail extends Snapshot {
 }
 
 export const consolidationApi = {
-  async getDashboard(periodId: string): Promise<ConsolidationDashboard> {
-    return apiClient.get<ConsolidationDashboard>(`/consolidation/dashboard/${periodId}`);
+  async getDashboard(periodId: string, scope?: 'pm' | 'default'): Promise<ConsolidationDashboard> {
+    const params = scope === 'pm' ? '?scope=pm' : '';
+    return apiClient.get<ConsolidationDashboard>(`/consolidation/dashboard/${periodId}${params}`);
   },
   
   async publishSnapshot(periodId: string, name: string, description?: string): Promise<Snapshot> {

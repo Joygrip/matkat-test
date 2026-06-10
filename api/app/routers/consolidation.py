@@ -2,7 +2,7 @@
 import csv
 import io
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -120,6 +120,7 @@ def _to_response(snapshot, include_lines: bool = False):
 @router.get("/dashboard/{period_id}")
 async def get_dashboard(
     period_id: str,
+    scope: str = Query("default", description="Dashboard scope: 'default' or 'pm'. 'pm' bypasses Manager CC filtering for Manager+PM users only."),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER, UserRole.PM
@@ -130,10 +131,15 @@ async def get_dashboard(
 
     Shows demand vs supply gaps, orphan demands, and over-allocations.
 
+    scope="default" — Manager users see only their managed/delegated CCs.
+    scope="pm"      — Manager+PM users receive full-org data so the frontend
+                      FinanceOverview component can apply PM project filtering.
+                      Has no effect for plain Manager, Finance, Admin, or PM.
+
     Accessible to: Admin, Finance, Manager, PM (view only)
     """
     service = ConsolidationService(db, current_user)
-    return service.get_dashboard(period_id)
+    return service.get_dashboard(period_id, scope=scope)
 
 
 @router.post("/publish/{period_id}", response_model=SnapshotResponse)

@@ -48,12 +48,18 @@ class ConsolidationService:
         return (None, "Unassigned")
 
     # ------------------------------------------------------------------ dashboard
-    def get_dashboard(self, period_id: str) -> Dict[str, Any]:
+    def get_dashboard(self, period_id: str, scope: str = "default") -> Dict[str, Any]:
         """
         Get consolidation dashboard data for a period, grouped by cost center.
 
         Returns a cost-center list with per-resource/placeholder breakdowns
         plus flat over-allocations for quick scanning.
+
+        scope="default" — Manager users see only their managed/delegated CCs.
+        scope="pm"      — Manager+PM users bypass the Manager CC filter so
+                          FinanceOverview can apply PM project-ID filtering on
+                          the full org payload.  Plain Manager is unaffected
+                          (Manager CC filter still applies).
         """
         period = PeriodService(self.db, self.current_user).get_by_id(period_id)
 
@@ -242,9 +248,21 @@ class ConsolidationService:
         cost_centers_list.sort(key=lambda c: c["cost_center_name"] or "")
 
         # Manager restriction: filter to cost centers they manage (ro_user_id or director_user_id)
-        # Also include cost centers of any delegators who have granted this manager delegation
-        # Manager+Reader combo users (is_manager_reader) bypass this filter to see the full org.
-        if self.current_user.role == "Manager" and not self.current_user.is_manager_reader:
+        # Also include cost centers of any delegators who have granted this manager delegation.
+        # Two bypass conditions skip this filter:
+        #   is_manager_reader — sees full org (existing behaviour)
+        #   is_manager_pm + scope="pm" — PM tab needs full-org data so FinanceOverview
+        #       can apply its own project-ID filtering across all cost centers touched by
+        #       the Manager's assigned PM projects.  Plain Manager is unaffected.
+        is_pm_scope_for_manager_pm = (
+            scope == "pm"
+            and self.current_user.is_manager_pm
+        )
+        if (
+            self.current_user.role == "Manager"
+            and not self.current_user.is_manager_reader
+            and not is_pm_scope_for_manager_pm
+        ):
             manager_user = self.db.query(User).filter(
                 and_(
                     User.tenant_id == self.current_user.tenant_id,

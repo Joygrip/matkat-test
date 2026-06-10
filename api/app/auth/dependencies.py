@@ -53,6 +53,10 @@ class CurrentUser(BaseModel):
     def is_manager_reader(self) -> bool:
         return self.role == UserRole.MANAGER and self.secondary_role == UserRole.READER.value
 
+    @property
+    def is_manager_pm(self) -> bool:
+        return self.role == UserRole.MANAGER and self.secondary_role == UserRole.PM.value
+
     def has_role(self, *roles: UserRole) -> bool:
         """Check if user has any of the specified roles (primary or secondary)."""
         return (

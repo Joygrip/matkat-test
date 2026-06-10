@@ -481,3 +481,281 @@ def test_download_snapshot_csv_has_expected_rows(client, db):
     # Check supply row
     assert "supply" in lines[2]
     assert "100" in lines[2]
+
+
+# ── Manager+PM dashboard scope tests ──────────────────────────────────────────
+
+def _setup_manager_pm_fixture(db, tenant_id: str):
+    """
+    Shared fixture data for Manager+PM scope tests.
+
+    Topology:
+      manager-pm-user  (role=Manager, secondary_role=PM)
+        ↳ ro_user_id of cc-mpm-managed (Managed CC)
+
+      cc-mpm-other  (Other CC — not managed by this user)
+
+      res-mpm-a  in cc-mpm-managed
+      res-mpm-b  in cc-mpm-other
+
+      project-mpm-alpha  has demand for both resources (spans both CCs)
+
+    This lets tests verify that scope=pm returns both CCs while scope=default
+    (Manager tab) returns only cc-mpm-managed.
+    """
+    from api.app.models.core import User, CostCenter, Resource, Project, UserRole
+    from api.app.models.planning import DemandLine, SupplyLine
+
+    # Create the Manager+PM user directly so we get their DB id for the CC link
+    manager_pm_user = User(
+        tenant_id=tenant_id,
+        object_id="mpm-obj-001",
+        email="mpm@test.com",
+        display_name="Manager PM User",
+        role=UserRole.MANAGER,
+        secondary_role=UserRole.PM.value,
+        is_active=True,
+    )
+    db.add(manager_pm_user)
+    db.flush()  # populate manager_pm_user.id
+
+    cc_managed = CostCenter(
+        id="cc-mpm-managed",
+        tenant_id=tenant_id,
+        name="Managed CC",
+        code="MAN",
+        ro_user_id=manager_pm_user.id,
+    )
+    cc_other = CostCenter(
+        id="cc-mpm-other",
+        tenant_id=tenant_id,
+        name="Other CC",
+        code="OTH",
+    )
+    db.add(cc_managed)
+    db.add(cc_other)
+
+    res_a = Resource(
+        id="res-mpm-a",
+        tenant_id=tenant_id,
+        display_name="Resource A",
+        cost_center_id="cc-mpm-managed",
+        employee_id="EMP-MPA",
+    )
+    res_b = Resource(
+        id="res-mpm-b",
+        tenant_id=tenant_id,
+        display_name="Resource B",
+        cost_center_id="cc-mpm-other",
+        employee_id="EMP-MPB",
+    )
+    db.add(res_a)
+    db.add(res_b)
+
+    project = Project(
+        id="proj-mpm-alpha",
+        tenant_id=tenant_id,
+        name="Alpha",
+        code="ALP",
+    )
+    db.add(project)
+
+    from api.app.models.core import Period
+    period = Period(
+        id="period-mpm-1",
+        tenant_id=tenant_id,
+        year=2026,
+        month=7,
+        status="open",
+    )
+    db.add(period)
+
+    # Demand for both resources under the same PM project
+    db.add(DemandLine(
+        id="dl-mpm-a",
+        tenant_id=tenant_id,
+        period_id="period-mpm-1",
+        project_id="proj-mpm-alpha",
+        resource_id="res-mpm-a",
+        year=2026, month=7, fte_percent=80, created_by="mpm-obj-001",
+    ))
+    db.add(DemandLine(
+        id="dl-mpm-b",
+        tenant_id=tenant_id,
+        period_id="period-mpm-1",
+        project_id="proj-mpm-alpha",
+        resource_id="res-mpm-b",
+        year=2026, month=7, fte_percent=60, created_by="mpm-obj-001",
+    ))
+    db.commit()
+
+    return manager_pm_user
+
+
+def test_plain_manager_default_scope_sees_only_managed_cc(client, db):
+    """Plain Manager (no secondary_role) with default scope sees only their managed CC."""
+    from api.app.models.core import User, CostCenter, Resource, Project, Period, UserRole
+    from api.app.models.planning import DemandLine
+
+    tenant_id = "test-tenant"
+
+    plain_manager = User(
+        tenant_id=tenant_id,
+        object_id="pm-plain-obj-001",
+        email="plain-manager@test.com",
+        display_name="Plain Manager",
+        role=UserRole.MANAGER,
+        is_active=True,
+    )
+    db.add(plain_manager)
+    db.flush()
+
+    cc_mine = CostCenter(id="cc-plain-mine", tenant_id=tenant_id, name="My CC", code="MCM", ro_user_id=plain_manager.id)
+    cc_theirs = CostCenter(id="cc-plain-other", tenant_id=tenant_id, name="Their CC", code="TCM")
+    db.add(cc_mine)
+    db.add(cc_theirs)
+
+    db.add(Resource(id="res-plain-a", tenant_id=tenant_id, display_name="Alice", cost_center_id="cc-plain-mine", employee_id="EP-A"))
+    db.add(Resource(id="res-plain-b", tenant_id=tenant_id, display_name="Bob", cost_center_id="cc-plain-other", employee_id="EP-B"))
+    db.add(Project(id="proj-plain-1", tenant_id=tenant_id, name="Proj1", code="PP1"))
+    db.add(Period(id="period-plain-1", tenant_id=tenant_id, year=2026, month=7, status="open"))
+    db.add(DemandLine(id="dl-plain-a", tenant_id=tenant_id, period_id="period-plain-1", project_id="proj-plain-1", resource_id="res-plain-a", year=2026, month=7, fte_percent=50, created_by="pm-plain-obj-001"))
+    db.add(DemandLine(id="dl-plain-b", tenant_id=tenant_id, period_id="period-plain-1", project_id="proj-plain-1", resource_id="res-plain-b", year=2026, month=7, fte_percent=50, created_by="pm-plain-obj-001"))
+    db.commit()
+
+    headers = {
+        "X-Dev-Role": "Manager",
+        "X-Dev-Tenant": tenant_id,
+        "X-Dev-User-Id": "pm-plain-obj-001",
+    }
+    response = client.get("/consolidation/dashboard/period-plain-1", headers=headers)
+    assert response.status_code == 200
+    cc_names = [cc["cost_center_name"] for cc in response.json()["cost_centers"]]
+    assert "My CC" in cc_names
+    assert "Their CC" not in cc_names
+
+
+def test_plain_manager_scope_pm_still_sees_only_managed_cc(client, db):
+    """Plain Manager requesting scope=pm still gets Manager-scoped data (no bypass)."""
+    from api.app.models.core import User, CostCenter, Resource, Project, Period, UserRole
+    from api.app.models.planning import DemandLine
+
+    tenant_id = "test-tenant"
+
+    plain_manager = User(
+        tenant_id=tenant_id,
+        object_id="pm-plain-obj-002",
+        email="plain-manager2@test.com",
+        display_name="Plain Manager 2",
+        role=UserRole.MANAGER,
+        is_active=True,
+    )
+    db.add(plain_manager)
+    db.flush()
+
+    cc_mine = CostCenter(id="cc-p2-mine", tenant_id=tenant_id, name="Mine CC", code="M2M", ro_user_id=plain_manager.id)
+    cc_theirs = CostCenter(id="cc-p2-other", tenant_id=tenant_id, name="Other CC2", code="O2C")
+    db.add(cc_mine)
+    db.add(cc_theirs)
+
+    db.add(Resource(id="res-p2-a", tenant_id=tenant_id, display_name="Alice2", cost_center_id="cc-p2-mine", employee_id="EP2-A"))
+    db.add(Resource(id="res-p2-b", tenant_id=tenant_id, display_name="Bob2", cost_center_id="cc-p2-other", employee_id="EP2-B"))
+    db.add(Project(id="proj-p2-1", tenant_id=tenant_id, name="Proj2", code="PP2"))
+    db.add(Period(id="period-p2-1", tenant_id=tenant_id, year=2026, month=8, status="open"))
+    db.add(DemandLine(id="dl-p2-a", tenant_id=tenant_id, period_id="period-p2-1", project_id="proj-p2-1", resource_id="res-p2-a", year=2026, month=8, fte_percent=50, created_by="pm-plain-obj-002"))
+    db.add(DemandLine(id="dl-p2-b", tenant_id=tenant_id, period_id="period-p2-1", project_id="proj-p2-1", resource_id="res-p2-b", year=2026, month=8, fte_percent=50, created_by="pm-plain-obj-002"))
+    db.commit()
+
+    headers = {
+        "X-Dev-Role": "Manager",
+        "X-Dev-Tenant": tenant_id,
+        "X-Dev-User-Id": "pm-plain-obj-002",
+    }
+    # scope=pm must NOT expand a plain Manager's view
+    response = client.get("/consolidation/dashboard/period-p2-1?scope=pm", headers=headers)
+    assert response.status_code == 200
+    cc_names = [cc["cost_center_name"] for cc in response.json()["cost_centers"]]
+    assert "Mine CC" in cc_names
+    assert "Other CC2" not in cc_names
+
+
+def test_manager_pm_default_scope_returns_managed_cc_only(client, db):
+    """Manager+PM default scope (Manager tab) returns only managed CC."""
+    tenant_id = "test-tenant"
+    _setup_manager_pm_fixture(db, tenant_id)
+
+    headers = {
+        "X-Dev-Role": "Manager",
+        "X-Dev-Secondary-Role": "PM",
+        "X-Dev-Tenant": tenant_id,
+        "X-Dev-User-Id": "mpm-obj-001",
+    }
+    response = client.get("/consolidation/dashboard/period-mpm-1", headers=headers)
+    assert response.status_code == 200
+    cc_names = [cc["cost_center_name"] for cc in response.json()["cost_centers"]]
+    assert "Managed CC" in cc_names
+    assert "Other CC" not in cc_names, "Manager tab must not expose cost centers outside manager scope"
+
+
+def test_manager_pm_scope_pm_returns_full_org_data(client, db):
+    """Manager+PM scope=pm (PM tab) returns all CCs so frontend can filter by PM project IDs."""
+    tenant_id = "test-tenant"
+    _setup_manager_pm_fixture(db, tenant_id)
+
+    headers = {
+        "X-Dev-Role": "Manager",
+        "X-Dev-Secondary-Role": "PM",
+        "X-Dev-Tenant": tenant_id,
+        "X-Dev-User-Id": "mpm-obj-001",
+    }
+    response = client.get("/consolidation/dashboard/period-mpm-1?scope=pm", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    cc_names = [cc["cost_center_name"] for cc in data["cost_centers"]]
+    assert "Managed CC" in cc_names, "PM tab must include manager's own CC"
+    assert "Other CC" in cc_names, "PM tab must include CCs outside manager scope that PM project touches"
+
+
+def test_manager_reader_default_scope_still_sees_full_org(client, db):
+    """Manager+Reader bypass is unchanged — full org data regardless of scope param."""
+    from api.app.models.core import User, CostCenter, Resource, Project, Period, UserRole
+    from api.app.models.planning import DemandLine
+
+    tenant_id = "test-tenant"
+
+    mr_user = User(
+        tenant_id=tenant_id,
+        object_id="mr-obj-001",
+        email="mr@test.com",
+        display_name="Manager Reader",
+        role=UserRole.MANAGER,
+        secondary_role=UserRole.READER.value,
+        is_active=True,
+    )
+    db.add(mr_user)
+    db.flush()
+
+    cc_a = CostCenter(id="cc-mr-a", tenant_id=tenant_id, name="CC Alpha", code="CCA")
+    cc_b = CostCenter(id="cc-mr-b", tenant_id=tenant_id, name="CC Beta", code="CCB")
+    db.add(cc_a)
+    db.add(cc_b)
+
+    db.add(Resource(id="res-mr-a", tenant_id=tenant_id, display_name="Alice MR", cost_center_id="cc-mr-a", employee_id="MRA"))
+    db.add(Resource(id="res-mr-b", tenant_id=tenant_id, display_name="Bob MR", cost_center_id="cc-mr-b", employee_id="MRB"))
+    db.add(Project(id="proj-mr-1", tenant_id=tenant_id, name="MR Proj", code="MRP"))
+    db.add(Period(id="period-mr-1", tenant_id=tenant_id, year=2026, month=9, status="open"))
+    db.add(DemandLine(id="dl-mr-a", tenant_id=tenant_id, period_id="period-mr-1", project_id="proj-mr-1", resource_id="res-mr-a", year=2026, month=9, fte_percent=100, created_by="mr-obj-001"))
+    db.add(DemandLine(id="dl-mr-b", tenant_id=tenant_id, period_id="period-mr-1", project_id="proj-mr-1", resource_id="res-mr-b", year=2026, month=9, fte_percent=100, created_by="mr-obj-001"))
+    db.commit()
+
+    headers = {
+        "X-Dev-Role": "Manager",
+        "X-Dev-Secondary-Role": "Reader",
+        "X-Dev-Tenant": tenant_id,
+        "X-Dev-User-Id": "mr-obj-001",
+    }
+    response = client.get("/consolidation/dashboard/period-mr-1", headers=headers)
+    assert response.status_code == 200
+    cc_names = [cc["cost_center_name"] for cc in response.json()["cost_centers"]]
+    assert "CC Alpha" in cc_names
+    assert "CC Beta" in cc_names

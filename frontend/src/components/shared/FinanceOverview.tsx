@@ -67,7 +67,9 @@ export function FinanceOverview({
   const fetchDashboard = async (periodId: string) => {
     setLoading(true);
     try {
-      const data = await consolidationApi.getDashboard(periodId);
+      // Manager+PM PM tab needs full-org data so projectIds filtering works across
+      // all cost centers touched by assigned PM projects, not just the Manager's CC.
+      const data = await consolidationApi.getDashboard(periodId, scope === 'pm' ? 'pm' : undefined);
       setDashboard(data);
       onDashboardLoaded?.(data);
     } catch (err) {
@@ -227,7 +229,7 @@ export function FinanceOverview({
   const handleDashboardChanged = async () => {
     if (!localPeriodId) return;
     try {
-      const data = await consolidationApi.getDashboard(localPeriodId);
+      const data = await consolidationApi.getDashboard(localPeriodId, scope === 'pm' ? 'pm' : undefined);
       setDashboard(data);
       onDashboardLoaded?.(data);
     } catch { /* best-effort; the optimistic UI already reflects the change */ }

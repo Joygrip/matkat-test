@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { buildProjectLines, periodTotal } from './buildMatrixLines';
+import type { PeriodCell, MatrixLine } from './buildMatrixLines';
 import {
   Button,
   Dialog,
@@ -63,30 +65,16 @@ function fmtDKK(cents: number): string {
   return new Intl.NumberFormat('da-DK').format(Math.round(cents / 100));
 }
 
-function makeCellKey(projectId: string, type: string, description: string, periodId: string): string {
-  return `${projectId}::${type}::${encodeURIComponent(description)}::${periodId}`;
+function makeCellKey(projectId: string, lineKey: string, periodId: string): string {
+  return `${projectId}||||${lineKey}||||${periodId}`;
 }
 
-function parseCellKey(key: string): { projectId: string; type: 'oop'|'equip'; description: string; periodId: string } {
-  const parts = key.split('::');
-  return { projectId: parts[0], type: parts[1] as 'oop'|'equip', description: decodeURIComponent(parts[2]), periodId: parts[3] };
+function parseCellKey(key: string): { projectId: string; lineKey: string; periodId: string } {
+  const parts = key.split('||||');
+  return { projectId: parts[0], lineKey: parts[1], periodId: parts[2] };
 }
 
 // ─── Data types ───────────────────────────────────────────────────────────────
-
-interface PeriodCell {
-  id: string;
-  cost: number;
-  isMulti: boolean;
-}
-
-interface MatrixLine {
-  lineKey: string;
-  description: string;
-  type: 'oop' | 'equip';
-  isLocal: boolean;
-  costsByPeriod: Map<string, PeriodCell>;
-}
 
 interface ProjectGroup {
   projectId: string;
@@ -478,15 +466,6 @@ const CostCellEditor: React.FC<CostCellEditorProps> = ({
 
   if (isSaving) return <Spinner size="extra-tiny" />;
 
-  if (cell?.isMulti) {
-    return (
-      <span className={styles.multiCell} title="Multiple line items — use list view to manage">
-        {fmtDKK(cell.cost)}{' '}
-        <span style={{ fontSize: '10px', color: tokens.colorNeutralForeground4 }}>(multi)</span>
-      </span>
-    );
-  }
-
   if (isEditing) {
     return (
       <input
@@ -571,7 +550,7 @@ export const ProjectCostsMatrix: React.FC = () => {
   const isSyncingScrollRef = useRef(false);
 
   // ── Rename dialog ──
-  const [renamingLine, setRenamingLine] = useState<{ projectId: string; projectName: string; type: 'oop'|'equip'; description: string } | null>(null);
+  const [renamingLine, setRenamingLine] = useState<{ projectId: string; projectName: string; lineKey: string; type: 'oop'|'equip'; description: string } | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [renameError, setRenameError] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
@@ -688,64 +667,11 @@ export const ProjectCostsMatrix: React.FC = () => {
   // ── Build matrix groups ──
   const matrixGroups = useMemo<ProjectGroup[]>(() => {
     return projects.map(proj => {
-      const oopDescMap = new Map<string, Map<string, Array<{ id: string; cost: number }>>>();
-      for (const l of extLines) {
-        if (l.project_id !== proj.id || !openPeriodIds.has(l.period_id)) continue;
-        const desc = l.description ?? '—';
-        if (!oopDescMap.has(desc)) oopDescMap.set(desc, new Map());
-        const pm = oopDescMap.get(desc)!;
-        const arr = pm.get(l.period_id) ?? [];
-        arr.push({ id: l.id, cost: l.cost });
-        pm.set(l.period_id, arr);
-      }
-
-      const equipDescMap = new Map<string, Map<string, Array<{ id: string; cost: number }>>>();
-      for (const l of equipLines) {
-        if (l.project_id !== proj.id || !openPeriodIds.has(l.period_id)) continue;
-        const desc = l.description ?? '—';
-        if (!equipDescMap.has(desc)) equipDescMap.set(desc, new Map());
-        const pm = equipDescMap.get(desc)!;
-        const arr = pm.get(l.period_id) ?? [];
-        arr.push({ id: l.id, cost: l.cost });
-        pm.set(l.period_id, arr);
-      }
-
-      const lines: MatrixLine[] = [];
-
-      for (const [desc, periodMap] of oopDescMap) {
-        const costsByPeriod = new Map<string, PeriodCell>();
-        for (const [periodId, items] of periodMap) {
-          costsByPeriod.set(periodId, { id: items[0].id, cost: items.reduce((s, i) => s + i.cost, 0), isMulti: items.length > 1 });
-        }
-        lines.push({ lineKey: `oop::${encodeURIComponent(desc)}`, description: desc, type: 'oop', isLocal: false, costsByPeriod });
-      }
-
-      for (const [desc, periodMap] of equipDescMap) {
-        const costsByPeriod = new Map<string, PeriodCell>();
-        for (const [periodId, items] of periodMap) {
-          costsByPeriod.set(periodId, { id: items[0].id, cost: items.reduce((s, i) => s + i.cost, 0), isMulti: items.length > 1 });
-        }
-        lines.push({ lineKey: `equip::${encodeURIComponent(desc)}`, description: desc, type: 'equip', isLocal: false, costsByPeriod });
-      }
-
-      for (const local of localLines) {
-        if (local.projectId !== proj.id) continue;
-        const lk = `${local.type}::${encodeURIComponent(local.description)}`;
-        if (!lines.find(l => l.lineKey === lk)) {
-          lines.push({ lineKey: lk, description: local.description, type: local.type, isLocal: true, costsByPeriod: new Map() });
-        }
-      }
-
-      lines.sort((a, b) => {
-        if (a.type !== b.type) return a.type === 'oop' ? -1 : 1;
-        return a.description.localeCompare(b.description);
-      });
-
+      const lines = buildProjectLines(proj.id, extLines, equipLines, localLines, openPeriodIds);
       const totalsByPeriod = new Map<string, number>();
       for (const period of openPeriods) {
-        totalsByPeriod.set(period.id, lines.reduce((s, l) => s + (l.costsByPeriod.get(period.id)?.cost ?? 0), 0));
+        totalsByPeriod.set(period.id, periodTotal(lines, period.id));
       }
-
       return { projectId: proj.id, projectName: proj.name, pmUserIds: proj.pm_user_ids ?? [], lines, totalsByPeriod };
     });
   }, [projects, extLines, equipLines, localLines, openPeriods, openPeriodIds]);
@@ -767,7 +693,7 @@ export const ProjectCostsMatrix: React.FC = () => {
 
   // ── Rename dialog handlers ──
   const openRenameDialog = useCallback((group: ProjectGroup, line: MatrixLine) => {
-    setRenamingLine({ projectId: group.projectId, projectName: group.projectName, type: line.type, description: line.description });
+    setRenamingLine({ projectId: group.projectId, projectName: group.projectName, lineKey: line.lineKey, type: line.type, description: line.description });
     setRenameValue(line.description);
     setRenameError('');
   }, []);
@@ -786,17 +712,19 @@ export const ProjectCostsMatrix: React.FC = () => {
     setRenameError('');
     try {
       const group = matrixGroups.find(g => g.projectId === renamingLine.projectId);
-      const line = group?.lines.find(l => l.type === renamingLine.type && l.description === renamingLine.description);
-      if (line && !line.isLocal) {
+      // Find the exact visible MatrixLine by its stable lineKey.
+      // This ensures an overflow row (oop:<id>) only renames its own backend row,
+      // and a primary row (oop::<desc>) only renames the backend rows it contains —
+      // never touching other MatrixLines that happen to share the same description.
+      const line = (group?.lines ?? []).find(l => l.lineKey === renamingLine.lineKey && !l.isLocal);
+      if (line) {
         const promises: Promise<unknown>[] = [];
         for (const [, cell] of line.costsByPeriod) {
-          if (!cell.isMulti) {
-            promises.push(
-              renamingLine.type === 'oop'
-                ? projectCostsApi.updateExternal(cell.id, { description: trimmed })
-                : projectCostsApi.updateEquipment(cell.id, { description: trimmed }),
-            );
-          }
+          promises.push(
+            line.type === 'oop'
+              ? projectCostsApi.updateExternal(cell.id, { description: trimmed })
+              : projectCostsApi.updateEquipment(cell.id, { description: trimmed }),
+          );
         }
         await Promise.all(promises);
         await load(false);
@@ -812,6 +740,7 @@ export const ProjectCostsMatrix: React.FC = () => {
   // ── Cell save ──
   const saveCostCell = useCallback(async (
     projectId: string,
+    lineKey: string,
     type: 'oop' | 'equip',
     description: string,
     periodId: string,
@@ -819,7 +748,7 @@ export const ProjectCostsMatrix: React.FC = () => {
     isLocal: boolean,
     dkkValue: number,
   ) => {
-    const cellKey = makeCellKey(projectId, type, description, periodId);
+    const cellKey = makeCellKey(projectId, lineKey, periodId);
     setSavingCells(prev => new Set(prev).add(cellKey));
     const cents = Math.round(dkkValue * 100);
     try {
@@ -853,20 +782,18 @@ export const ProjectCostsMatrix: React.FC = () => {
   }, [load, showApiError]);
 
   // ── Delete entire line (all periods) ──
-  const handleDeleteLine = useCallback(async (projectId: string, type: 'oop'|'equip', description: string, isLocal: boolean) => {
+  const handleDeleteLine = useCallback(async (projectId: string, lineKey: string, type: 'oop'|'equip', description: string, isLocal: boolean) => {
     if (isLocal) {
       setLocalLines(prev => prev.filter(l => !(l.projectId === projectId && l.type === type && l.description === description)));
       return;
     }
     const group = matrixGroups.find(g => g.projectId === projectId);
-    const line = group?.lines.find(l => l.type === type && l.description === description);
+    const line = group?.lines.find(l => l.lineKey === lineKey);
     if (!line) return;
     try {
       const promises: Promise<void>[] = [];
       for (const [, cell] of line.costsByPeriod) {
-        if (!cell.isMulti) {
-          promises.push(type === 'oop' ? projectCostsApi.deleteExternal(cell.id) : projectCostsApi.deleteEquipment(cell.id));
-        }
+        promises.push(type === 'oop' ? projectCostsApi.deleteExternal(cell.id) : projectCostsApi.deleteEquipment(cell.id));
       }
       await Promise.all(promises);
       await load(false);
@@ -933,8 +860,7 @@ export const ProjectCostsMatrix: React.FC = () => {
       if (lIdx < minRow || lIdx > maxRow) return;
       openPeriods.forEach((period, pIdx) => {
         if (pIdx < minCol || pIdx > maxCol) return;
-        if (line.costsByPeriod.get(period.id)?.isMulti) return;
-        newSel.add(makeCellKey(projectId, line.type, line.description, period.id));
+        newSel.add(makeCellKey(projectId, line.lineKey, period.id));
       });
     });
     setSelectedCells(newSel);
@@ -948,13 +874,13 @@ export const ProjectCostsMatrix: React.FC = () => {
     try {
       const promises: Promise<void>[] = [];
       for (const ck of selectedCells) {
-        const { projectId, type, description, periodId } = parseCellKey(ck);
+        const { projectId, lineKey, periodId } = parseCellKey(ck);
         const group = matrixGroups.find(g => g.projectId === projectId);
         if (!group) continue;
-        const line = group.lines.find(l => l.type === type && l.description === description);
+        const line = group.lines.find(l => l.lineKey === lineKey);
         if (!line) continue;
+        const { type, description } = line;
         const cell = line.costsByPeriod.get(periodId);
-        if (cell?.isMulti) continue;
         const existingId = cell?.id ?? null;
         const cents = Math.round(dkkValue * 100);
         if (type === 'oop') {
@@ -1223,7 +1149,7 @@ export const ProjectCostsMatrix: React.FC = () => {
                                 style={{ opacity: isHovered ? 1 : 0.35 }}
                                 onClick={() => {
                                   if (window.confirm(`Delete "${line.description}"? This will remove all values across all periods.`)) {
-                                    handleDeleteLine(group.projectId, line.type, line.description, line.isLocal);
+                                    handleDeleteLine(group.projectId, line.lineKey, line.type, line.description, line.isLocal);
                                   }
                                 }}
                               />
@@ -1233,9 +1159,9 @@ export const ProjectCostsMatrix: React.FC = () => {
 
                         {openPeriods.map((period, colIdx) => {
                           const cell = line.costsByPeriod.get(period.id);
-                          const cellKey = makeCellKey(group.projectId, line.type, line.description, period.id);
+                          const cellKey = makeCellKey(group.projectId, line.lineKey, period.id);
                           const isSelected = selectedCells.has(cellKey);
-                          const canDrag = canEditThisProject && !cell?.isMulti;
+                          const canDrag = canEditThisProject;
 
                           return (
                             <td
@@ -1258,10 +1184,10 @@ export const ProjectCostsMatrix: React.FC = () => {
                                 cell={cell}
                                 isEditing={editingCell === cellKey}
                                 isSaving={savingCells.has(cellKey)}
-                                canEdit={canEditThisProject && !isDragging && !cell?.isMulti}
+                                canEdit={canEditThisProject && !isDragging}
                                 onStartEdit={() => setEditingCell(cellKey)}
                                 onCancel={() => setEditingCell(null)}
-                                onSave={val => saveCostCell(group.projectId, line.type, line.description, period.id, cell?.id ?? null, line.isLocal, val)}
+                                onSave={val => saveCostCell(group.projectId, line.lineKey, line.type, line.description, period.id, cell?.id ?? null, line.isLocal, val)}
                                 styles={styles}
                               />
                             </td>

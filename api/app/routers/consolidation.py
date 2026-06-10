@@ -235,7 +235,7 @@ async def download_snapshot_csv(
         """Convert cents to whole DKK for human-readable columns. Returns '' for None."""
         if cents is None:
             return ""
-        return cents // 100
+        return int(cents / 100)
 
     output = io.StringIO()
     writer = csv.writer(output)

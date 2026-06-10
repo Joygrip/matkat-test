@@ -465,14 +465,14 @@ const CostCellEditor: React.FC<CostCellEditorProps> = ({
   const [inputVal, setInputVal] = useState('');
 
   const handleStartEdit = () => {
-    setInputVal(cell && cell.cost > 0 ? String(Math.round(cell.cost / 100)) : '');
+    setInputVal(cell && cell.cost !== 0 ? String(Math.round(cell.cost / 100)) : '');
     onStartEdit();
     setTimeout(() => inputRef.current?.select(), 0);
   };
 
   const commit = () => {
     const num = inputVal === '' ? 0 : parseFloat(inputVal);
-    if (isNaN(num) || num < 0) { onCancel(); return; }
+    if (isNaN(num)) { onCancel(); return; }
     onSave(Math.round(num));
   };
 
@@ -492,7 +492,6 @@ const CostCellEditor: React.FC<CostCellEditorProps> = ({
       <input
         ref={inputRef}
         type="number"
-        min={0}
         step={1}
         value={inputVal}
         className={styles.cellInput}
@@ -504,7 +503,7 @@ const CostCellEditor: React.FC<CostCellEditorProps> = ({
     );
   }
 
-  if (cell && cell.cost > 0) {
+  if (cell && cell.cost !== 0) {
     return (
       <span className={styles.cellValue} onClick={canEdit ? handleStartEdit : undefined} title={canEdit ? 'Click to edit' : undefined}>
         {fmtDKK(cell.cost)}
@@ -825,23 +824,23 @@ export const ProjectCostsMatrix: React.FC = () => {
     const cents = Math.round(dkkValue * 100);
     try {
       if (type === 'oop') {
-        if (cents > 0 && !existingId) {
+        if (cents !== 0 && !existingId) {
           await projectCostsApi.createExternal({ project_id: projectId, period_id: periodId, description, cost: cents });
-        } else if (cents > 0 && existingId) {
+        } else if (cents !== 0 && existingId) {
           await projectCostsApi.updateExternal(existingId, { cost: cents });
         } else if (cents === 0 && existingId) {
           await projectCostsApi.deleteExternal(existingId);
         }
       } else {
-        if (cents > 0 && !existingId) {
+        if (cents !== 0 && !existingId) {
           await projectCostsApi.createEquipment({ project_id: projectId, period_id: periodId, description, cost: cents });
-        } else if (cents > 0 && existingId) {
+        } else if (cents !== 0 && existingId) {
           await projectCostsApi.updateEquipment(existingId, { cost: cents });
         } else if (cents === 0 && existingId) {
           await projectCostsApi.deleteEquipment(existingId);
         }
       }
-      if (isLocal && cents > 0) {
+      if (isLocal && cents !== 0) {
         setLocalLines(prev => prev.filter(l => !(l.projectId === projectId && l.type === type && l.description === description)));
       }
       await load(false);
@@ -959,12 +958,12 @@ export const ProjectCostsMatrix: React.FC = () => {
         const existingId = cell?.id ?? null;
         const cents = Math.round(dkkValue * 100);
         if (type === 'oop') {
-          if (cents > 0 && !existingId) promises.push(projectCostsApi.createExternal({ project_id: projectId, period_id: periodId, description, cost: cents }).then(() => {}));
-          else if (cents > 0 && existingId) promises.push(projectCostsApi.updateExternal(existingId, { cost: cents }).then(() => {}));
+          if (cents !== 0 && !existingId) promises.push(projectCostsApi.createExternal({ project_id: projectId, period_id: periodId, description, cost: cents }).then(() => {}));
+          else if (cents !== 0 && existingId) promises.push(projectCostsApi.updateExternal(existingId, { cost: cents }).then(() => {}));
           else if (cents === 0 && existingId) promises.push(projectCostsApi.deleteExternal(existingId));
         } else {
-          if (cents > 0 && !existingId) promises.push(projectCostsApi.createEquipment({ project_id: projectId, period_id: periodId, description, cost: cents }).then(() => {}));
-          else if (cents > 0 && existingId) promises.push(projectCostsApi.updateEquipment(existingId, { cost: cents }).then(() => {}));
+          if (cents !== 0 && !existingId) promises.push(projectCostsApi.createEquipment({ project_id: projectId, period_id: periodId, description, cost: cents }).then(() => {}));
+          else if (cents !== 0 && existingId) promises.push(projectCostsApi.updateEquipment(existingId, { cost: cents }).then(() => {}));
           else if (cents === 0 && existingId) promises.push(projectCostsApi.deleteEquipment(existingId));
         }
       }
@@ -983,7 +982,7 @@ export const ProjectCostsMatrix: React.FC = () => {
 
   const handleApply = useCallback(async () => {
     const num = parseFloat(applyValue);
-    if (isNaN(num) || num < 0) return;
+    if (isNaN(num) || num === 0) return;
     await handleApplyValue(num);
   }, [applyValue, handleApplyValue]);
 
@@ -1025,7 +1024,6 @@ export const ProjectCostsMatrix: React.FC = () => {
           </span>
           <input
             type="number"
-            min={0}
             step={1}
             placeholder="DKK"
             value={applyValue}
@@ -1154,7 +1152,7 @@ export const ProjectCostsMatrix: React.FC = () => {
                           }}
                           onMouseEnter={() => setHoveredMonth(colIdx)}
                         >
-                          {total > 0 ? fmtDKK(total) : <span style={{ color: C.ink5, fontWeight: 400 }}>—</span>}
+                          {total !== 0 ? fmtDKK(total) : <span style={{ color: C.ink5, fontWeight: 400 }}>—</span>}
                         </td>
                       );
                     })}
@@ -1340,7 +1338,7 @@ export const ProjectCostsMatrix: React.FC = () => {
                     style={hoveredMonth === colIdx ? { backgroundColor: 'rgba(30,58,95,0.06)', transition: 'background-color 0.1s ease' } : undefined}
                     onMouseEnter={() => setHoveredMonth(colIdx)}
                   >
-                    {val > 0 ? fmtDKK(val) : <span style={{ color: C.ink5, fontWeight: 400 }}>—</span>}
+                    {val !== 0 ? fmtDKK(val) : <span style={{ color: C.ink5, fontWeight: 400 }}>—</span>}
                   </td>
                 );
               })}
@@ -1362,7 +1360,7 @@ export const ProjectCostsMatrix: React.FC = () => {
                     style={hoveredMonth === colIdx ? { backgroundColor: 'rgba(30,58,95,0.06)', transition: 'background-color 0.1s ease' } : undefined}
                     onMouseEnter={() => setHoveredMonth(colIdx)}
                   >
-                    {val > 0 ? fmtDKK(val) : <span style={{ color: C.ink5, fontWeight: 400 }}>—</span>}
+                    {val !== 0 ? fmtDKK(val) : <span style={{ color: C.ink5, fontWeight: 400 }}>—</span>}
                   </td>
                 );
               })}
@@ -1378,7 +1376,7 @@ export const ProjectCostsMatrix: React.FC = () => {
                     style={hoveredMonth === colIdx ? { backgroundColor: 'rgba(30,58,95,0.08)', transition: 'background-color 0.1s ease' } : undefined}
                     onMouseEnter={() => setHoveredMonth(colIdx)}
                   >
-                    {total > 0 ? fmtDKK(total) : <span style={{ color: C.ink5, fontWeight: 400 }}>—</span>}
+                    {total !== 0 ? fmtDKK(total) : <span style={{ color: C.ink5, fontWeight: 400 }}>—</span>}
                   </td>
                 );
               })}

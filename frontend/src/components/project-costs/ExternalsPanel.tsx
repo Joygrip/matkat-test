@@ -194,7 +194,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
     const cost = Math.round(parseFloat(form.cost) * 100);
     if (!form.project_id) return showError('Project is required');
     if (!form.description.trim()) return showError('Name / Description is required');
-    if (isNaN(cost) || cost < 1) return showError('Cost must be a positive number');
+    if (isNaN(cost) || cost === 0) return showError('Cost must be non-zero');
 
     setSaving(true);
     try {
@@ -360,7 +360,6 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
                 <Label required>Cost (DKK)</Label>
                 <Input
                   type="number"
-                  min="0.01"
                   step="0.01"
                   value={form.cost}
                   onChange={(_, d) => setForm((f) => ({ ...f, cost: d.value }))}

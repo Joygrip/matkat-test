@@ -31,9 +31,9 @@ class ExternalLineCreate(BaseModel):
 
     @field_validator("cost")
     @classmethod
-    def cost_positive(cls, v: int) -> int:
-        if v < 1:
-            raise ValueError("cost must be at least 1 cent")
+    def cost_nonzero(cls, v: int) -> int:
+        if v == 0:
+            raise ValueError("cost must be non-zero")
         return v
 
 
@@ -45,9 +45,9 @@ class ExternalLineUpdate(BaseModel):
 
     @field_validator("cost")
     @classmethod
-    def cost_positive(cls, v: Optional[int]) -> Optional[int]:
-        if v is not None and v < 1:
-            raise ValueError("cost must be at least 1 cent")
+    def cost_nonzero(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v == 0:
+            raise ValueError("cost must be non-zero")
         return v
 
 
@@ -75,9 +75,9 @@ class EquipmentLineCreate(BaseModel):
 
     @field_validator("cost")
     @classmethod
-    def cost_positive(cls, v: int) -> int:
-        if v < 1:
-            raise ValueError("cost must be at least 1 cent")
+    def cost_nonzero(cls, v: int) -> int:
+        if v == 0:
+            raise ValueError("cost must be non-zero")
         return v
 
 
@@ -87,9 +87,9 @@ class EquipmentLineUpdate(BaseModel):
 
     @field_validator("cost")
     @classmethod
-    def cost_positive(cls, v: Optional[int]) -> Optional[int]:
-        if v is not None and v < 1:
-            raise ValueError("cost must be at least 1 cent")
+    def cost_nonzero(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v == 0:
+            raise ValueError("cost must be non-zero")
         return v
 
 

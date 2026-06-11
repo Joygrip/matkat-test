@@ -657,8 +657,14 @@ class FinanceService:
         project_id: Optional[str] = None,
         cost_center_id: Optional[str] = None,
         cost_center_code: Optional[str] = None,
+        scope: str = "default",
     ) -> ConsolidatedCostDetail:
-        """Return per-line detail for one project or cost center + period."""
+        """Return per-line detail for one project or cost center + period.
+
+        scope="pm" bypasses Manager resource scoping for Manager+PM users and applies
+        PM project filtering instead (same as get_consolidated_costs scope=pm).
+        Plain Manager is unaffected.
+        """
         from api.app.models.planning import DemandLine
         from api.app.models.actuals import ActualLine
         from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
@@ -671,6 +677,11 @@ class FinanceService:
             raise HTTPException(status_code=404, detail="Period not found.")
 
         monthly_fte_cost = self._get_monthly_fte_cost_for_period(period.id)
+
+        is_pm_scope_for_manager_pm = (
+            scope == "pm"
+            and self.current_user.is_manager_pm
+        )
 
         if cost_center_id or cost_center_code:
             # CC mode — filter lines by Resource.cost_center_id.
@@ -707,7 +718,7 @@ class FinanceService:
 
             # PM restriction: collect allowed project IDs up front
             cc_pm_project_ids: Optional[list] = None
-            if self.current_user.role == "PM":
+            if self.current_user.role == "PM" or is_pm_scope_for_manager_pm:
                 pm_user = self.db.query(User).filter(
                     User.tenant_id == self.current_user.tenant_id,
                     User.object_id == self.current_user.object_id,
@@ -724,7 +735,11 @@ class FinanceService:
 
             # Manager restriction (non-Reader): scope to accessible resources only
             cc_manager_resource_ids: Optional[list] = None
-            if self.current_user.role == "Manager" and not self.current_user.is_manager_reader:
+            if (
+                self.current_user.role == "Manager"
+                and not self.current_user.is_manager_reader
+                and not is_pm_scope_for_manager_pm
+            ):
                 from api.app.services.reporting import ReportingService
                 _rs = ReportingService(self.db, self.current_user)
                 _ids = list(_rs.get_accessible_resource_ids())
@@ -856,7 +871,7 @@ class FinanceService:
             )
 
         # Project mode
-        if self.current_user.role == "PM":
+        if self.current_user.role == "PM" or is_pm_scope_for_manager_pm:
             pm_user = self.db.query(User).filter(
                 User.tenant_id == self.current_user.tenant_id,
                 User.object_id == self.current_user.object_id,
@@ -890,7 +905,11 @@ class FinanceService:
 
         # Manager restriction (non-Reader): scope demand/actual to accessible resources
         proj_manager_resource_ids: Optional[list] = None
-        if self.current_user.role == "Manager" and not self.current_user.is_manager_reader:
+        if (
+            self.current_user.role == "Manager"
+            and not self.current_user.is_manager_reader
+            and not is_pm_scope_for_manager_pm
+        ):
             from api.app.services.reporting import ReportingService
             _rs = ReportingService(self.db, self.current_user)
             _ids = list(_rs.get_accessible_resource_ids())
@@ -1015,10 +1034,11 @@ class FinanceService:
         project_id: Optional[str] = None,
         cost_center_id: Optional[str] = None,
         cost_center_code: Optional[str] = None,
+        scope: str = "default",
     ) -> list:
         """Return detail for a single period (year+month provided) or all open periods."""
         if year is not None and month is not None:
-            return [self.get_consolidated_cost_detail(year, month, project_id, cost_center_id, cost_center_code)]
+            return [self.get_consolidated_cost_detail(year, month, project_id, cost_center_id, cost_center_code, scope=scope)]
         periods = sorted(
             PeriodService(self.db, self.current_user).list_open(),
             key=lambda p: (p.year, p.month),
@@ -1026,7 +1046,7 @@ class FinanceService:
         results = []
         for p in periods:
             try:
-                results.append(self.get_consolidated_cost_detail(p.year, p.month, project_id, cost_center_id, cost_center_code))
+                results.append(self.get_consolidated_cost_detail(p.year, p.month, project_id, cost_center_id, cost_center_code, scope=scope))
             except Exception:
                 pass
         return results
@@ -1075,8 +1095,15 @@ class FinanceService:
         year: Optional[int] = None,
         month: Optional[int] = None,
         group_by: str = "id",
+        scope: str = "default",
     ) -> ConsolidatedCostResponse:
-        """Aggregate planned labor, actual labor, externals, and equipment costs per project/period."""
+        """Aggregate planned labor, actual labor, externals, and equipment costs per project/period.
+
+        scope="default" — Manager users are scoped to their reporting-hierarchy resources.
+        scope="pm"      — Manager+PM users bypass the Manager resource filter and instead
+                          see only their assigned PM projects (same as solo PM behaviour).
+                          Plain Manager is unaffected (Manager resource filter still applies).
+        """
         from collections import defaultdict
         from api.app.models.planning import DemandLine
         from api.app.models.actuals import ActualLine
@@ -1101,10 +1128,25 @@ class FinanceService:
 
         monthly_fte_costs_by_period = self._get_monthly_fte_costs_by_period(set(period_ids))
 
+        # Manager+PM has two valid cost-overview scopes:
+        #   "default" — Manager resource scope (reporting hierarchy), same as plain Manager.
+        #   "pm"      — bypass Manager resource filter; apply PM project filter instead so
+        #               the PM tab can see costs across all CCs touched by assigned PM projects.
+        #               Plain Manager calling scope=pm is NOT bypassed.
+        is_pm_scope_for_manager_pm = (
+            scope == "pm"
+            and self.current_user.is_manager_pm
+        )
+
         # 3a. Manager role restriction — scope to accessible resources via reporting hierarchy.
         # Manager+Reader bypasses this and sees all data (same view as Finance).
+        # Manager+PM in pm scope also bypasses this; PM project filter applies instead (3b).
         scoped_resource_ids: Optional[set] = None
-        if self.current_user.role == "Manager" and not self.current_user.is_manager_reader:
+        if (
+            self.current_user.role == "Manager"
+            and not self.current_user.is_manager_reader
+            and not is_pm_scope_for_manager_pm
+        ):
             from api.app.services.reporting import ReportingService
             rs = ReportingService(self.db, self.current_user)
             ids = list(rs.get_accessible_resource_ids())
@@ -1120,9 +1162,10 @@ class FinanceService:
                 return ConsolidatedCostResponse(data=[], monthly_fte_cost=fallback_monthly_fte_cost)
             scoped_resource_ids = set(ids)
 
-        # 3b. PM role restriction — only their own projects
+        # 3b. PM role restriction — only their own projects.
+        # Applies for primary PM role OR Manager+PM requesting pm scope.
         pm_project_ids: Optional[set] = None
-        if self.current_user.role == "PM":
+        if self.current_user.role == "PM" or is_pm_scope_for_manager_pm:
             pm_user = self.db.query(User).filter(
                 User.tenant_id == self.current_user.tenant_id,
                 User.object_id == self.current_user.object_id,

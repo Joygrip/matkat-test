@@ -2320,35 +2320,14 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       </div>
     )}
     <div style={{ padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`, borderBottom: `1px solid #e5e4e0`, display: 'flex', alignItems: 'center', gap: 12, backgroundColor: '#ffffff' }}>
-      {isRoleManager && canPM ? (
-        <>
-          <Button
-            size="small"
-            appearance="primary"
-            icon={<Add24Regular />}
-            onClick={() => openAddLineDialog('demand')}
-          >
-            Add Demand
-          </Button>
-          <Button
-            size="small"
-            appearance="outline"
-            icon={<Add24Regular />}
-            onClick={() => openAddLineDialog('supply')}
-          >
-            Add Supply
-          </Button>
-        </>
-      ) : (
-        <Button
-          size="small"
-          appearance="primary"
-          icon={<Add24Regular />}
-          onClick={() => openAddLineDialog()}
-        >
-          Add Line
-        </Button>
-      )}
+      <Button
+        size="small"
+        appearance="primary"
+        icon={<Add24Regular />}
+        onClick={() => openAddLineDialog()}
+      >
+        Add line
+      </Button>
       {/* Legend */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 8, fontSize: '11.5px', color: '#6b6966' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -2416,7 +2395,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
             appearance="subtle"
             onClick={() => setTransferSelection([])}
           >
-            Clear
+            Close
           </Button>
         </div>
       </div>

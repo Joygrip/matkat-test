@@ -129,9 +129,9 @@ interface DrawerState {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-interface Props { latestSnapshot?: Snapshot | null; }
+interface Props { latestSnapshot?: Snapshot | null; scope?: 'pm' | 'default'; }
 
-export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latestSnapshot }) => {
+export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latestSnapshot, scope }) => {
   const { periods } = usePeriod();
 
   // Data
@@ -180,11 +180,11 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
     lockedCacheRef.current.clear();
     setLockedRawData([]);
     setLoading(true);
-    getConsolidatedCosts({ group_by: groupBy })
+    getConsolidatedCosts({ group_by: groupBy, scope })
       .then(res => setRawData(res.data))
       .catch(() => setRawData([]))
       .finally(() => setLoading(false));
-  }, [groupBy]);
+  }, [groupBy, scope]);
 
   // Lazily fetch data for a selected locked period and cache it
   useEffect(() => {
@@ -199,13 +199,13 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
       setLockedRawData(cached);
       return;
     }
-    getConsolidatedCosts({ year: lockedPeriod.year, month: lockedPeriod.month, group_by: groupBy })
+    getConsolidatedCosts({ year: lockedPeriod.year, month: lockedPeriod.month, group_by: groupBy, scope })
       .then(res => {
         lockedCacheRef.current.set(key, res.data);
         setLockedRawData(res.data);
       })
       .catch(() => setLockedRawData([]));
-  }, [selectedPeriodIds, periods, groupBy]);
+  }, [selectedPeriodIds, periods, groupBy, scope]);
 
 
   useEffect(() => {
@@ -486,18 +486,18 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
 
       if (targetYear !== undefined) {
         // Heatmap cell click: fetch that specific month only
-        fetchPromise = getConsolidatedCostDetail({ ...baseParams, year: targetYear, month: targetMonth! });
+        fetchPromise = getConsolidatedCostDetail({ ...baseParams, year: targetYear, month: targetMonth!, scope });
       } else if (selectedPeriodIds.size > 0) {
         // Period pills active: fetch each selected period (including locked/archive) and merge
         const selPeriods = periods
           .filter(p => selectedPeriodIds.has(p.id))
           .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
         fetchPromise = Promise.all(
-          selPeriods.map(p => getConsolidatedCostDetail({ ...baseParams, year: p.year, month: p.month }))
+          selPeriods.map(p => getConsolidatedCostDetail({ ...baseParams, year: p.year, month: p.month, scope }))
         ).then(arrays => arrays.flat());
       } else {
         // No period filter: fetch all open periods
-        fetchPromise = getConsolidatedCostDetail(baseParams);
+        fetchPromise = getConsolidatedCostDetail({ ...baseParams, scope });
       }
 
       fetchPromise

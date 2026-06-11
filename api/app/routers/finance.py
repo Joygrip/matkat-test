@@ -79,6 +79,7 @@ async def consolidated_cost_detail(
     project_id: Optional[str] = Query(None),
     cost_center_id: Optional[str] = Query(None),
     cost_center_code: Optional[str] = Query(None),
+    scope: str = Query("default", description="'pm' bypasses Manager resource scoping for Manager+PM users only."),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM,
@@ -93,6 +94,7 @@ async def consolidated_cost_detail(
     cost_center_code aggregates all CCs sharing that code (family drill-down).
     When both cost_center_id and cost_center_code are provided, cost_center_id takes precedence.
     PM role is restricted to their own projects (403 otherwise).
+    scope="pm": Manager+PM users receive PM-project-scoped data instead of Manager-resource-scoped data.
     Accessible to: Admin, Finance, PM, Director, RO
     """
     cc_identifier_count = sum([bool(project_id), bool(cost_center_id), bool(cost_center_code)])
@@ -109,6 +111,7 @@ async def consolidated_cost_detail(
         project_id=project_id,
         cost_center_id=cost_center_id,
         cost_center_code=cost_center_code,
+        scope=scope,
     )
 
 
@@ -119,6 +122,7 @@ async def consolidated_costs(
     year: Optional[int] = Query(None),
     month: Optional[int] = Query(None),
     group_by: str = Query("id"),
+    scope: str = Query("default", description="'pm' bypasses Manager resource scoping for Manager+PM users only."),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM,
@@ -132,12 +136,13 @@ async def consolidated_costs(
     group_by=id (default): one row per cost center UUID.
     group_by=code: rows merged by cost_center.code; cost_center_name returns the code.
     PM role is restricted to their own projects.
+    scope="pm": Manager+PM users receive PM-project-scoped data instead of Manager-resource-scoped data.
     Accessible to: Admin, Finance, PM, Director, RO
     """
     if group_by not in ("id", "code"):
         raise HTTPException(status_code=400, detail='group_by must be "id" or "code".')
     service = FinanceService(db, current_user)
-    return service.get_consolidated_costs(project_id, cost_center_id, year=year, month=month, group_by=group_by)
+    return service.get_consolidated_costs(project_id, cost_center_id, year=year, month=month, group_by=group_by, scope=scope)
 
 
 @router.get("/settings/{key}", response_model=FinanceSettingResponse)

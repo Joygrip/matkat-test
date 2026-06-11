@@ -97,6 +97,7 @@ export async function getConsolidatedCosts(params?: {
   year?: number;
   month?: number;
   group_by?: 'id' | 'code';
+  scope?: 'pm' | 'default';
 }): Promise<ConsolidatedCostResponse> {
   const query = new URLSearchParams();
   if (params?.project_id) query.append('project_id', params.project_id);
@@ -104,6 +105,7 @@ export async function getConsolidatedCosts(params?: {
   if (params?.year != null) query.append('year', String(params.year));
   if (params?.month != null) query.append('month', String(params.month));
   if (params?.group_by) query.append('group_by', params.group_by);
+  if (params?.scope === 'pm') query.append('scope', 'pm');
   const qs = query.toString();
   return apiClient.get<ConsolidatedCostResponse>(`/finance/consolidated-costs${qs ? `?${qs}` : ''}`);
 }
@@ -160,6 +162,7 @@ export async function getConsolidatedCostDetail(params: {
   project_id?: string;
   cost_center_id?: string;
   cost_center_code?: string;
+  scope?: 'pm' | 'default';
 }): Promise<ConsolidatedCostDetail[]> {
   const query = new URLSearchParams();
   if (params.year != null) query.append('year', String(params.year));
@@ -167,5 +170,6 @@ export async function getConsolidatedCostDetail(params: {
   if (params.project_id) query.append('project_id', params.project_id);
   if (params.cost_center_id) query.append('cost_center_id', params.cost_center_id);
   if (params.cost_center_code) query.append('cost_center_code', params.cost_center_code);
+  if (params.scope === 'pm') query.append('scope', 'pm');
   return apiClient.get<ConsolidatedCostDetail[]>(`/finance/consolidated-costs/detail?${query.toString()}`);
 }

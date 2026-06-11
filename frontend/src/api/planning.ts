@@ -135,24 +135,27 @@ export interface MoveCapPeriodDetail {
 export interface AllLinesFilter {
   projectId?: string;
   costCenterId?: string;
+  /** When true, locked periods are included (read-only historical view) */
+  includeLocked?: boolean;
 }
+
+const allLinesParams = (filters?: AllLinesFilter): string => {
+  const params = new URLSearchParams();
+  if (filters?.projectId) params.set('project_id', filters.projectId);
+  if (filters?.costCenterId) params.set('cost_center_id', filters.costCenterId);
+  if (filters?.includeLocked) params.set('open_periods_only', 'false');
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+};
 
 export const planningApi = {
   // Demand Lines
   async getAllDemandLines(filters?: AllLinesFilter): Promise<DemandLine[]> {
-    const params = new URLSearchParams();
-    if (filters?.projectId) params.set('project_id', filters.projectId);
-    if (filters?.costCenterId) params.set('cost_center_id', filters.costCenterId);
-    const qs = params.toString();
-    return apiClient.get<DemandLine[]>(`/demand-lines/all${qs ? `?${qs}` : ''}`);
+    return apiClient.get<DemandLine[]>(`/demand-lines/all${allLinesParams(filters)}`);
   },
 
   async getAllSupplyLines(filters?: AllLinesFilter): Promise<SupplyLine[]> {
-    const params = new URLSearchParams();
-    if (filters?.projectId) params.set('project_id', filters.projectId);
-    if (filters?.costCenterId) params.set('cost_center_id', filters.costCenterId);
-    const qs = params.toString();
-    return apiClient.get<SupplyLine[]>(`/supply-lines/all${qs ? `?${qs}` : ''}`);
+    return apiClient.get<SupplyLine[]>(`/supply-lines/all${allLinesParams(filters)}`);
   },
 
   async getDemandLines(periodId?: string, filters?: Omit<PlanningFilters, 'periodId'>): Promise<DemandLine[]> {

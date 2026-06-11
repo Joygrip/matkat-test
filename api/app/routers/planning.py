@@ -128,6 +128,7 @@ def _enrich_supply(line) -> SupplyLineResponse:
 async def list_all_open_demand_lines(
     project_id: Optional[str] = Query(None, description="Filter by project_id"),
     cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
+    open_periods_only: bool = Query(True, description="When false, locked periods are included (read-only historical view)"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER,
@@ -136,7 +137,7 @@ async def list_all_open_demand_lines(
 ):
     """Return all demand lines across every open period in a single query."""
     service = DemandService(db, current_user)
-    lines = service.get_all(project_id=project_id, open_periods_only=True, cost_center_id=cost_center_id)
+    lines = service.get_all(project_id=project_id, open_periods_only=open_periods_only, cost_center_id=cost_center_id)
     return [_enrich_demand(line) for line in lines]
 
 
@@ -368,6 +369,7 @@ async def bulk_demand_lines(
 async def list_all_open_supply_lines(
     cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
     project_id: Optional[str] = Query(None, description="Filter by project_id"),
+    open_periods_only: bool = Query(True, description="When false, locked periods are included (read-only historical view)"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER,
@@ -376,7 +378,7 @@ async def list_all_open_supply_lines(
 ):
     """Return all supply lines across every open period in a single query."""
     service = SupplyService(db, current_user)
-    lines = service.get_all(open_periods_only=True, cost_center_id=cost_center_id, project_id=project_id)
+    lines = service.get_all(open_periods_only=open_periods_only, cost_center_id=cost_center_id, project_id=project_id)
     return [_enrich_supply(line) for line in lines]
 
 

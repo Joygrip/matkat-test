@@ -4,6 +4,8 @@ import {
   Button,
   Card,
   CardHeader,
+  Tab,
+  TabList,
   tokens,
   makeStyles,
 } from '@fluentui/react-components';
@@ -42,6 +44,9 @@ const _cache: {
   loading: false,
 }
 const CACHE_TTL_MS = 60_000
+
+// History view shows at most this many locked months (most recent first)
+const HISTORY_MAX_MONTHS = 12;
 
 const fmtPeriodShort = (p: Period) => `${MONTH_SHORT[p.month - 1]} '${String(p.year).slice(2)}`;
 const fmtPeriodFull = (p: Period) => `${MONTH_NAMES[p.month - 1]} ${p.year}`;
@@ -222,6 +227,25 @@ export const ResourcePlanning: React.FC = () => {
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
   const [selectedPeriodIds, setSelectedPeriodIds] = useState<Set<string>>(new Set());
 
+  // Planning shows open periods (editable); History shows locked periods read-only.
+  // Historical lines live in separate state so the planning cache/optimistic
+  // patching is never polluted with locked-period data.
+  const [viewMode, setViewMode] = useState<'planning' | 'history'>('planning');
+  const viewModeRef = useRef<'planning' | 'history'>('planning');
+  useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
+  const [historyDemandLines, setHistoryDemandLines] = useState<DemandLine[]>([]);
+  const [historySupplyLines, setHistorySupplyLines] = useState<SupplyLine[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const historyLoadedRef = useRef(false);
+
+  const lockedRecentPeriods = useMemo(
+    () => contextPeriods
+      .filter(p => p.status !== 'open')
+      .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month))
+      .slice(-HISTORY_MAX_MONTHS),
+    [contextPeriods]
+  );
+
   // Derive open periods from context whenever it updates
   useEffect(() => {
     if (contextPeriods.length > 0) {
@@ -261,6 +285,8 @@ export const ResourcePlanning: React.FC = () => {
     }
     if (previousFilterKeyRef.current === filterKey) return;
     previousFilterKeyRef.current = filterKey;
+    // History mode filters client-side over already-loaded locked lines — no refetch
+    if (viewModeRef.current === 'history') return;
     if (import.meta.env.DEV) console.log('[RP fetch] filter changed → reloadLines', { filterKey });
     reloadLines();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -303,11 +329,48 @@ export const ResourcePlanning: React.FC = () => {
 
   // Default selected column = earliest open period (active planning window).
   useEffect(() => {
+    if (viewMode !== 'planning') return;
     if (openPeriods.length > 0 && selectedPeriodIds.size === 0) {
       const defaultPeriod = getEarliestOpenPeriod(openPeriods);
       if (defaultPeriod) setSelectedPeriodIds(new Set([defaultPeriod.id]));
     }
-  }, [openPeriods]);
+  }, [openPeriods, viewMode]);
+
+  // Mode switch: reset the period selection to a sensible default for the mode.
+  const switchViewMode = useCallback((mode: 'planning' | 'history') => {
+    setViewMode(mode);
+    if (mode === 'history') {
+      setSelectedPeriodIds(new Set(lockedRecentPeriods.map(p => p.id)));
+    } else {
+      const defaultPeriod = getEarliestOpenPeriod(openPeriods);
+      setSelectedPeriodIds(defaultPeriod ? new Set([defaultPeriod.id]) : new Set());
+    }
+  }, [lockedRecentPeriods, openPeriods]);
+
+  // Lazily load historical (locked-period) lines once, on first History visit.
+  // Kept out of the planning module cache on purpose.
+  useEffect(() => {
+    if (viewMode !== 'history' || historyLoadedRef.current) return;
+    historyLoadedRef.current = true;
+    setHistoryLoading(true);
+    const lockedIds = new Set(lockedRecentPeriods.map(p => p.id));
+    Promise.all([
+      planningApi.getAllDemandLines({ includeLocked: true }),
+      planningApi.getAllSupplyLines({ includeLocked: true }),
+    ])
+      .then(([demandData, supplyData]) => {
+        setHistoryDemandLines(demandData.filter(l => lockedIds.has(l.period_id)));
+        setHistorySupplyLines(supplyData.filter(l => lockedIds.has(l.period_id)));
+      })
+      .catch((err: unknown) => {
+        historyLoadedRef.current = false; // allow retry on next visit
+        setError(formatApiError(err, 'Failed to load historical planning data'));
+      })
+      .finally(() => setHistoryLoading(false));
+  }, [viewMode, lockedRecentPeriods]);
+
+  const isHistory = viewMode === 'history';
+  const displayPeriods = isHistory ? lockedRecentPeriods : openPeriods;
 
   const loadAll = async (open: Period[]) => {
     if (!user?.tenant_id) return;
@@ -456,8 +519,11 @@ export const ResourcePlanning: React.FC = () => {
     );
   }, [costCenters, user?.id, isAnyManager]);
 
+  const sourceDemandLines = isHistory ? historyDemandLines : demandLines;
+  const sourceSupplyLines = isHistory ? historySupplyLines : supplyLines;
+
   const filteredDemandLines = useMemo(() => {
-    return demandLines.filter(d => {
+    return sourceDemandLines.filter(d => {
       if (selectedProjectId && d.project_id !== selectedProjectId) return false;
       if (selectedCostCenterId && d.cost_center_id !== selectedCostCenterId) return false;
       if (debouncedSearchResource) {
@@ -468,10 +534,10 @@ export const ResourcePlanning: React.FC = () => {
       }
       return true;
     });
-  }, [demandLines, selectedProjectId, selectedCostCenterId, debouncedSearchResource]);
+  }, [sourceDemandLines, selectedProjectId, selectedCostCenterId, debouncedSearchResource]);
 
   const filteredSupplyLines = useMemo(() => {
-    return supplyLines.filter(s => {
+    return sourceSupplyLines.filter(s => {
       if (selectedProjectId && s.project_id !== selectedProjectId) return false;
       if (selectedCostCenterId && s.cost_center_id !== selectedCostCenterId) return false;
       if (debouncedSearchResource) {
@@ -482,7 +548,7 @@ export const ResourcePlanning: React.FC = () => {
       }
       return true;
     });
-  }, [supplyLines, selectedProjectId, selectedCostCenterId, debouncedSearchResource]);
+  }, [sourceSupplyLines, selectedProjectId, selectedCostCenterId, debouncedSearchResource]);
 
   const selectedDemandLines = useMemo(
     () => filteredDemandLines.filter(d => selectedPeriodIds.has(d.period_id)),
@@ -534,8 +600,8 @@ export const ResourcePlanning: React.FC = () => {
     });
     // Show all periods for 0 or 1 selected; zoom to selection when 2+
     const periodsToShow = selectedPeriodIds.size > 1
-      ? openPeriods.filter(p => selectedPeriodIds.has(p.id))
-      : openPeriods;
+      ? displayPeriods.filter(p => selectedPeriodIds.has(p.id))
+      : displayPeriods;
     return periodsToShow.map(p => {
       const label = fmtPeriodShort(p);
       const rawDemand = demandByPeriod.get(p.id);
@@ -554,7 +620,7 @@ export const ResourcePlanning: React.FC = () => {
         gap_over: supply > demand ? Math.round((supply - demand) * 10) / 10 : 0,
       };
     });
-  }, [filteredDemandLines, filteredSupplyLines, openPeriods, selectedPeriodIds]);
+  }, [filteredDemandLines, filteredSupplyLines, displayPeriods, selectedPeriodIds]);
 
   // Only show CCs that have at least one demand or supply line (matching active filters).
   // For managers: always include managerCcId even if empty (own CC), plus any delegated CCs with lines.
@@ -575,12 +641,41 @@ export const ResourcePlanning: React.FC = () => {
   return (
     <div className={styles.container}>
 
+      {/* Planning / History mode toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: tokens.spacingVerticalM }}>
+        <TabList
+          size="small"
+          selectedValue={viewMode}
+          onTabSelect={(_, d) => switchViewMode(d.value as 'planning' | 'history')}
+        >
+          <Tab value="planning">Planning</Tab>
+          <Tab value="history">History</Tab>
+        </TabList>
+        {isHistory && (
+          <span style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+            🔒 Historical view — locked periods are read-only
+            {lockedRecentPeriods.length === HISTORY_MAX_MONTHS && ` (last ${HISTORY_MAX_MONTHS} locked months)`}
+          </span>
+        )}
+      </div>
+
+      {isHistory && historyLoading && (
+        <LoadingState message="Loading historical planning data..." />
+      )}
+      {isHistory && !historyLoading && lockedRecentPeriods.length === 0 && (
+        <StatusBanner
+          intent="info"
+          title="No historical periods"
+          message="No locked periods yet. Periods appear here after Finance locks them."
+        />
+      )}
+
       {/* Period selector */}
-      {openPeriods.length > 0 && (
+      {displayPeriods.length > 0 && (
         <div className={styles.periodSelectorWrap}>
           <span className={styles.periodSelectorLabel}>Period</span>
           <PeriodPillSelector
-            periods={openPeriods}
+            periods={displayPeriods}
             selectedIds={selectedPeriodIds}
             onChange={setSelectedPeriodIds}
           />
@@ -632,7 +727,7 @@ export const ResourcePlanning: React.FC = () => {
         </div>
       </div>
       {selectedCount > 0 && (() => {
-        const selPeriods = openPeriods.filter(p => selectedPeriodIds.has(p.id));
+        const selPeriods = displayPeriods.filter(p => selectedPeriodIds.has(p.id));
         if (selPeriods.length === 1) {
           return <div className={styles.kpiShowingLabel}>Showing: {fmtPeriodFull(selPeriods[0])}</div>;
         }
@@ -644,7 +739,7 @@ export const ResourcePlanning: React.FC = () => {
       })()}
 
       {/* Resource Planning Overview chart */}
-      {openPeriods.length > 0 && (
+      {displayPeriods.length > 0 && (
         <div className={styles.overviewCard}>
           <div className={styles.overviewCardHeader}>
             <strong style={{ fontSize: tokens.fontSizeBase400, color: tokens.colorNeutralForeground1 }}>
@@ -689,7 +784,7 @@ export const ResourcePlanning: React.FC = () => {
                 />
                 <Legend />
                 {/* Highlight the single selected period when showing all periods */}
-                {selectedPeriodIds.size === 1 && openPeriods
+                {selectedPeriodIds.size === 1 && displayPeriods
                   .filter(p => selectedPeriodIds.has(p.id))
                   .map(p => (
                     <ReferenceArea
@@ -816,11 +911,11 @@ export const ResourcePlanning: React.FC = () => {
         <ResourcePlanningMatrix
           demandLines={filteredDemandLines}
           supplyLines={filteredSupplyLines}
-          periods={openPeriods}
+          periods={displayPeriods}
           projects={projects}
           costCenters={visibleCostCenters}
-          canEditDemand={canEditDemand}
-          canEditSupply={canEditSupply}
+          canEditDemand={canEditDemand && !isHistory}
+          canEditSupply={canEditSupply && !isHistory}
           onReload={reloadLines}
           onDemandSaved={upsertDemandLine}
           onDemandDeleted={removeDemandLine}

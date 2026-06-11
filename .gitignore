@@ -17,11 +17,9 @@ htmlcov/
 *.log
 
 # Database
-#*.db
+*.db
 *.sqlite
 *.sqlite3
-#dev.db
-test.db
 
 # Environment variables
 .env
@@ -71,6 +69,7 @@ logs/
 *.tmp
 *.temp
 .cache/
+*.zip
 frontend/.env.production
 infra/prod.parameters.json
 infra/dev.parameters.json

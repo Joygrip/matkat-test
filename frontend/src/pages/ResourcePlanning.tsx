@@ -35,14 +35,25 @@ const _cache: {
   supplyLines: SupplyLine[] | null
   loadedAt: number | null
   tenantId: string | null
+  loading: boolean
 } = {
   demandLines: null, supplyLines: null,
   loadedAt: null, tenantId: null,
+  loading: false,
 }
 const CACHE_TTL_MS = 60_000
 
 const fmtPeriodShort = (p: Period) => `${MONTH_SHORT[p.month - 1]} '${String(p.year).slice(2)}`;
 const fmtPeriodFull = (p: Period) => `${MONTH_NAMES[p.month - 1]} ${p.year}`;
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState<T>(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+  return debounced;
+}
 
 const useStyles = makeStyles({
   container: {
@@ -193,6 +204,10 @@ export const ResourcePlanning: React.FC = () => {
 
   const [openPeriods, setOpenPeriods] = useState<Period[]>([]);
   const openPeriodsRef = useRef<Period[]>([]);
+  const selectedProjectIdRef = useRef<string | null>(null);
+  const selectedCostCenterIdRef = useRef<string>('');
+  // null = first run not yet recorded; distinguishes "no filter yet" from "filter is empty string"
+  const previousFilterKeyRef = useRef<string | null>(null);
   const [demandLines, setDemandLines] = useState<DemandLine[]>([]);
   const [supplyLines, setSupplyLines] = useState<SupplyLine[]>([]);
   const [loading, setLoading] = useState(true);
@@ -202,6 +217,7 @@ export const ResourcePlanning: React.FC = () => {
   const [scopedCcIds, setScopedCcIds] = useState<Set<string>>(new Set());
 
   const [searchResource, setSearchResource] = useState('');
+  const debouncedSearchResource = useDebouncedValue(searchResource, 250);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedCostCenterId, setSelectedCostCenterId] = useState<string>('');
   const [selectedPeriodIds, setSelectedPeriodIds] = useState<Set<string>>(new Set());
@@ -225,8 +241,30 @@ export const ResourcePlanning: React.FC = () => {
     loadAll(open);
   }, [user?.tenant_id, contextPeriods.length > 0 ? 'ready' : 'waiting']);
 
-  // Keep ref in sync so reloadLines always has the latest periods without stale closure
+  // Keep refs in sync so reloadLines always has the latest values without stale closures
   useEffect(() => { openPeriodsRef.current = openPeriods; }, [openPeriods]);
+  useEffect(() => { selectedProjectIdRef.current = selectedProjectId; }, [selectedProjectId]);
+  useEffect(() => { selectedCostCenterIdRef.current = selectedCostCenterId; }, [selectedCostCenterId]);
+
+  // When project or CC filter changes, fetch server-side filtered lines.
+  // Normalized primitive filterKey avoids object-identity pitfalls.
+  // First run (previousFilterKeyRef === null): record key and return — initial load is
+  // handled by loadAll, not here. StrictMode remount: ref persists (useRef survives simulated
+  // unmount), key unchanged → skip. Genuine filter change: key differs → reloadLines once.
+  useEffect(() => {
+    const normalizedProjectId = selectedProjectId ?? '';
+    const normalizedCostCenterId = selectedCostCenterId ?? '';
+    const filterKey = `${normalizedProjectId}|${normalizedCostCenterId}`;
+    if (previousFilterKeyRef.current === null) {
+      previousFilterKeyRef.current = filterKey;
+      return;
+    }
+    if (previousFilterKeyRef.current === filterKey) return;
+    previousFilterKeyRef.current = filterKey;
+    if (import.meta.env.DEV) console.log('[RP fetch] filter changed → reloadLines', { filterKey, stack: new Error().stack });
+    reloadLines();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProjectId, selectedCostCenterId]);
 
   // Derive the manager's own CC from the cached resource record (context) + scoped resources list.
   // Scoped resources always includes the manager's own resource even when they have no supply lines.
@@ -273,6 +311,12 @@ export const ResourcePlanning: React.FC = () => {
 
   const loadAll = async (open: Period[]) => {
     if (!user?.tenant_id) return;
+    // In-flight guard: prevents concurrent calls (e.g. React 18 StrictMode double-mount)
+    // from both making network requests before the first resolves and sets _cache.loadedAt.
+    if (_cache.loading) {
+      if (import.meta.env.DEV) console.log('[RP fetch] loadAll SKIPPED (already in-flight)', new Error().stack);
+      return;
+    }
     const now = Date.now();
     const cacheValid =
       _cache.tenantId === user?.tenant_id &&
@@ -281,6 +325,7 @@ export const ResourcePlanning: React.FC = () => {
       _cache.demandLines !== null;
 
     if (cacheValid) {
+      if (import.meta.env.DEV) console.log('[RP fetch] loadAll HIT cache');
       setDemandLines(_cache.demandLines!);
       setSupplyLines(_cache.supplyLines!);
       setLoading(false);
@@ -298,6 +343,8 @@ export const ResourcePlanning: React.FC = () => {
       return;
     }
 
+    _cache.loading = true;
+    if (import.meta.env.DEV) console.log('[RP fetch] loadAll FETCH', new Error().stack);
     try {
       setLoading(true);
       const [demandData, supplyData] = await Promise.all([
@@ -315,23 +362,67 @@ export const ResourcePlanning: React.FC = () => {
     } catch (err: unknown) {
       setError(formatApiError(err, 'Failed to load resource planning data'));
     } finally {
+      _cache.loading = false;
       setLoading(false);
     }
   };
 
-  // Lightweight reload: only re-fetches lines, no loading spinner; always bypasses cache
+  // --- Local state patchers for A1 (no full reload on individual cell edits) ---
+  const upsertDemandLine = useCallback((line: DemandLine) => {
+    setDemandLines(prev => {
+      const idx = prev.findIndex(x => x.id === line.id);
+      if (idx === -1) return [...prev, line];
+      const next = [...prev];
+      next[idx] = line;
+      return next;
+    });
+    _cache.loadedAt = null; // invalidate so next remount re-fetches
+  }, []);
+
+  const removeDemandLine = useCallback((id: string) => {
+    setDemandLines(prev => prev.filter(x => x.id !== id));
+    _cache.loadedAt = null;
+  }, []);
+
+  const upsertSupplyLine = useCallback((line: SupplyLine) => {
+    setSupplyLines(prev => {
+      const idx = prev.findIndex(x => x.id === line.id);
+      if (idx === -1) return [...prev, line];
+      const next = [...prev];
+      next[idx] = line;
+      return next;
+    });
+    _cache.loadedAt = null;
+  }, []);
+
+  const removeSupplyLine = useCallback((id: string) => {
+    setSupplyLines(prev => prev.filter(x => x.id !== id));
+    _cache.loadedAt = null;
+  }, []);
+
+  // Lightweight reload: only re-fetches lines, no loading spinner; always bypasses cache.
+  // Passes active project/CC filters so backend returns only the relevant subset.
   const reloadLines = useCallback(async () => {
     if (openPeriodsRef.current.length === 0) return;
+    if (import.meta.env.DEV) console.log('[RP fetch] reloadLines', { projectId: selectedProjectIdRef.current, costCenterId: selectedCostCenterIdRef.current, stack: new Error().stack });
+    const projectId = selectedProjectIdRef.current || undefined;
+    const costCenterId = selectedCostCenterIdRef.current || undefined;
+    const filters = (projectId || costCenterId) ? { projectId, costCenterId } : undefined;
     try {
       const [demandData, supplyData] = await Promise.all([
-        planningApi.getAllDemandLines(),
-        planningApi.getAllSupplyLines(),
+        planningApi.getAllDemandLines(filters),
+        planningApi.getAllSupplyLines(filters),
       ]);
       setDemandLines(demandData);
       setSupplyLines(supplyData);
-      _cache.demandLines = demandData;
-      _cache.supplyLines = supplyData;
-      _cache.loadedAt = Date.now();
+      // Only update the module cache for unfiltered fetches
+      if (!filters) {
+        _cache.demandLines = demandData;
+        _cache.supplyLines = supplyData;
+        _cache.loadedAt = Date.now();
+      } else {
+        _cache.loadedAt = null; // stale after a filtered reload
+      }
     } catch {
       // silent — the edited cell already reflects the change optimistically
     }
@@ -369,29 +460,29 @@ export const ResourcePlanning: React.FC = () => {
     return demandLines.filter(d => {
       if (selectedProjectId && d.project_id !== selectedProjectId) return false;
       if (selectedCostCenterId && d.cost_center_id !== selectedCostCenterId) return false;
-      if (searchResource) {
-        const q = searchResource.toLowerCase();
+      if (debouncedSearchResource) {
+        const q = debouncedSearchResource.toLowerCase();
         const name = (d.resource_name || d.placeholder_name || '').toLowerCase();
         const initials = (d.resource_initials || '').toLowerCase();
         if (!name.includes(q) && !initials.includes(q)) return false;
       }
       return true;
     });
-  }, [demandLines, selectedProjectId, selectedCostCenterId, searchResource]);
+  }, [demandLines, selectedProjectId, selectedCostCenterId, debouncedSearchResource]);
 
   const filteredSupplyLines = useMemo(() => {
     return supplyLines.filter(s => {
       if (selectedProjectId && s.project_id !== selectedProjectId) return false;
       if (selectedCostCenterId && s.cost_center_id !== selectedCostCenterId) return false;
-      if (searchResource) {
-        const q = searchResource.toLowerCase();
+      if (debouncedSearchResource) {
+        const q = debouncedSearchResource.toLowerCase();
         const name = (s.resource_name || '').toLowerCase();
         const initials = (s.resource_initials || '').toLowerCase();
         if (!name.includes(q) && !initials.includes(q)) return false;
       }
       return true;
     });
-  }, [supplyLines, selectedProjectId, selectedCostCenterId, searchResource]);
+  }, [supplyLines, selectedProjectId, selectedCostCenterId, debouncedSearchResource]);
 
   const selectedDemandLines = useMemo(
     () => filteredDemandLines.filter(d => selectedPeriodIds.has(d.period_id)),
@@ -731,6 +822,10 @@ export const ResourcePlanning: React.FC = () => {
           canEditDemand={canEditDemand}
           canEditSupply={canEditSupply}
           onReload={reloadLines}
+          onDemandSaved={upsertDemandLine}
+          onDemandDeleted={removeDemandLine}
+          onSupplySaved={upsertSupplyLine}
+          onSupplyDeleted={removeSupplyLine}
           userRole={user?.role ?? ''}
           managedCcIds={managedCcIds}
           allCostCenters={costCenters}

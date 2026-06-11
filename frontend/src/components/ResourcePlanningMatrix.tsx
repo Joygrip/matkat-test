@@ -493,6 +493,14 @@ export interface ResourcePlanningMatrixProps {
   editableCcIds?: Set<string>;
   /** True when user has effective PM capability (primary PM or Manager+PM secondary role). */
   canPM?: boolean;
+  /** Called after a single demand cell is successfully created or updated (optimistic patch). */
+  onDemandSaved?: (line: DemandLine) => void;
+  /** Called after a single demand cell is successfully deleted (optimistic patch). */
+  onDemandDeleted?: (id: string) => void;
+  /** Called after a single supply cell is successfully created or updated (optimistic patch). */
+  onSupplySaved?: (line: SupplyLine) => void;
+  /** Called after a single supply cell is successfully deleted (optimistic patch). */
+  onSupplyDeleted?: (id: string) => void;
 }
 
 function parseResOrPh(val: string): { resourceId?: string; placeholderId?: string } {
@@ -559,7 +567,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   allCostCenters,
   editableCcIds,
   canPM = false,
+  onDemandSaved,
+  onDemandDeleted,
+  onSupplySaved,
+  onSupplyDeleted,
 }) => {
+  if (import.meta.env.DEV) console.count('[RPM] render');
   const styles = useStyles();
   const { showApiError, showSuccess, showInfo } = useToast();
 
@@ -602,6 +615,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const phantomRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const isSyncingScrollRef = useRef(false);
+  // Per-CC resource/placeholder fetch cache — keyed by ccId. Prevents duplicate fetches
+  // when the same CC's Add Line button is clicked more than once per page session.
+  const ccDataCacheRef = useRef<Set<string>>(new Set());
+  // Mirrors dlgAllResources state so openAddLineDialog (useCallback with [] deps) can read
+  // its length without adding dlgAllResources to the callback's dependency array.
+  const dlgAllResourcesRef = useRef<Resource[]>([]);
   // Refs for portal-positioned inline add-row dropdowns
   const addDemandResInputRef = useRef<HTMLInputElement>(null);
   const addDemandProjectInputRef = useRef<HTMLInputElement>(null);
@@ -738,6 +757,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [dlgPeriodDragAdd, setDlgPeriodDragAdd] = useState(true);
 
   const groups = useMemo((): MatrixGroup[] => {
+    if (import.meta.env.DEV) console.count('[RPM] groups recompute');
     const groupMap = new Map<string, { ccName: string; rowMap: Map<string, MergedMatrixRow> }>();
 
     const getOrCreate = (ccId: string, ccName: string) => {
@@ -995,23 +1015,25 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   }, [addSupplyProjectQuery, projects]);
 
   const loadCcData = useCallback(async (ccId: string) => {
-    const promises: Promise<void>[] = [];
-    if (!ccResources[ccId]) {
+    // Ref-based guard: if this CC is already fetched (or in-flight), return immediately.
+    // Using a ref instead of closing over state avoids stale-closure duplicate fetches.
+    if (ccDataCacheRef.current.has(ccId)) return;
+    ccDataCacheRef.current.add(ccId);
+    try {
       // Use write-scoped endpoint so the resource picker never shows resources outside the user's
       // writable reporting line. For Finance/Admin the scoped endpoint returns all CC resources
       // (no scope applied), so their Add Line experience is unchanged.
-      promises.push(
+      await Promise.all([
         lookupsApi.listResourcesScoped({ costCenterId: ccId, forWrite: true })
-          .then(r => setCcResources(prev => ({ ...prev, [ccId]: r })))
-      );
+          .then(r => setCcResources(prev => ({ ...prev, [ccId]: r }))),
+        lookupsApi.listPlaceholders(ccId)
+          .then(p => setCcPlaceholders(prev => ({ ...prev, [ccId]: p }))),
+      ]);
+    } catch {
+      // Allow retry on error
+      ccDataCacheRef.current.delete(ccId);
     }
-    if (!ccPlaceholders[ccId]) {
-      promises.push(
-        lookupsApi.listPlaceholders(ccId).then(p => setCcPlaceholders(prev => ({ ...prev, [ccId]: p })))
-      );
-    }
-    await Promise.all(promises);
-  }, [ccResources, ccPlaceholders]);
+  }, []);
 
   const handleExpandCC = useCallback((ccId: string) => {
     setExpandedCCs(prev => {
@@ -1033,10 +1055,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     try {
       if (existingLine && newValue === 0) {
         await planningApi.deleteDemandLine(existingLine.id);
+        onDemandDeleted?.(existingLine.id);
       } else if (existingLine) {
-        await planningApi.updateDemandLine(existingLine.id, { fte_percent: newValue });
+        const updated = await planningApi.updateDemandLine(existingLine.id, { fte_percent: newValue });
+        onDemandSaved?.(updated);
       } else if (newValue > 0) {
-        await planningApi.createDemandLine({
+        const created = await planningApi.createDemandLine({
           period_id: period.id,
           project_id: row.projectId || '',
           resource_id: row.resourceId || undefined,
@@ -1045,15 +1069,15 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
           year: period.year,
           month: period.month,
         });
+        onDemandSaved?.(created);
       }
-      onReload();
     } catch (err) {
       showApiError(err as Error, 'Failed to save demand');
     } finally {
       setSavingCells(prev => { const s = new Set(prev); s.delete(cellKey); return s; });
       setEditingCell(null);
     }
-  }, [onReload, showApiError]);
+  }, [onDemandSaved, onDemandDeleted, showApiError]);
 
   const saveSupplyCell = useCallback(async (
     cellKey: string,
@@ -1066,10 +1090,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     try {
       if (existingLine && newValue === 0) {
         await planningApi.deleteSupplyLine(existingLine.id);
+        onSupplyDeleted?.(existingLine.id);
       } else if (existingLine) {
-        await planningApi.updateSupplyLine(existingLine.id, { fte_percent: newValue });
+        const updated = await planningApi.updateSupplyLine(existingLine.id, { fte_percent: newValue });
+        onSupplySaved?.(updated);
       } else if (newValue > 0) {
-        await planningApi.createSupplyLine({
+        const created = await planningApi.createSupplyLine({
           period_id: period.id,
           resource_id: row.resourceId || '',
           project_id: row.projectId || undefined,
@@ -1077,15 +1103,15 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
           year: period.year,
           month: period.month,
         });
+        onSupplySaved?.(created);
       }
-      onReload();
     } catch (err) {
       showApiError(err as Error, 'Failed to save supply');
     } finally {
       setSavingCells(prev => { const s = new Set(prev); s.delete(cellKey); return s; });
       setEditingCell(null);
     }
-  }, [onReload, showApiError]);
+  }, [onSupplySaved, onSupplyDeleted, showApiError]);
 
   const handleDeleteGroup = useCallback(async () => {
     if (!deleteGroupRow) return;
@@ -2052,6 +2078,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   if (isRoleManager && dlgCcId && dlgLineType === 'supply') loadCcData(dlgCcId);
   }, [dlgCcId, dlgLineType]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Keep ref in sync so openAddLineDialog (stable callback, no deps) can guard the fetch
+  useEffect(() => { dlgAllResourcesRef.current = dlgAllResources; }, [dlgAllResources]);
+
   // For demand mode: ensure the full resource list is loaded when dialog is open.
   // Covers Manager+PM and Finance/Admin who switch to demand via the line-type radio.
   useEffect(() => {
@@ -2100,8 +2129,6 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDlgSaving(false);
     setDlgError(null);
     setDlgShowResourceDropdown(false);
-    setDlgAllResources([]);
-    setDlgAllPlaceholders([]);
     setDlgPmProjects([]);
     setDlgPeriodDragging(false);
     // Supply mode (Manager or Manager+PM): load CC-scoped resources.
@@ -2109,7 +2136,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     const isSupplyMode = isRoleManager && defaultLineType === 'supply';
     if (isSupplyMode) {
       if (defaultCcId) loadCcData(defaultCcId);
-    } else {
+    } else if (dlgAllResourcesRef.current.length === 0) {
+      // First-open-only: dlgAllResources persists across dialog closes so we skip on re-open
       lookupsApi.listResources().then(setDlgAllResources).catch(() => {});
       if (defaultLineType === 'demand') {
         lookupsApi.listPlaceholders().then(setDlgAllPlaceholders).catch(() => {});

@@ -4,7 +4,7 @@ from dateutil.relativedelta import relativedelta
 from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, func
 
 from api.app.models.planning import DemandLine, SupplyLine
 from api.app.models.core import Period, Project, ProjectPM, Resource, Placeholder, User, PeriodStatus, UserRole
@@ -66,10 +66,11 @@ def _build_demand_line_ctx(demand: "DemandLine", project=None, resource=None, pl
 
 class DemandService:
     """Service for demand line operations."""
-    
+
     def __init__(self, db: Session, current_user: CurrentUser):
         self.db = db
         self.current_user = current_user
+        self._scoped_ids_cache: dict[bool, Optional[list[str]]] = {}
     
     def _check_period_open(self, year: int, month: int) -> Period:
         """Check if the period exists and is open."""
@@ -124,11 +125,14 @@ class DemandService:
         """Return the list of resource IDs the current user may access, or None for full access.
         Includes resources accessible via active delegation grants.
         Manager+Reader bypasses CC scoping for reads; for_write=True preserves write guards.
+        Result is cached per (for_write) flag for the lifetime of this service instance.
         """
         if self.current_user.role not in _SCOPED_ROLES:
             return None
         if not for_write and self.current_user.is_manager_reader:
             return None
+        if for_write in self._scoped_ids_cache:
+            return self._scoped_ids_cache[for_write]
         from api.app.services.reporting import ReportingService
         svc = ReportingService(self.db, self.current_user)
         ids = list(svc.get_accessible_resource_ids())
@@ -142,6 +146,7 @@ class DemandService:
             for rid in svc.get_delegated_resource_ids(user.id):
                 if rid not in ids:
                     ids.append(rid)
+        self._scoped_ids_cache[for_write] = ids
         return ids
 
     def get_all(self, year: Optional[int] = None, month: Optional[int] = None, project_id: Optional[str] = None, resource_id: Optional[str] = None, *, period_id: Optional[str] = None, open_periods_only: bool = False, cost_center_id: Optional[str] = None) -> list[DemandLine]:
@@ -187,21 +192,16 @@ class DemandService:
 
         if is_manager_pm:
             # Manager+PM: UNION of CC-scoped resources AND PM-assigned project demand
-            pm_user = self.db.query(User).filter(
-                and_(
+            pm_project_ids = [
+                row.project_id
+                for row in self.db.query(ProjectPM.project_id)
+                .join(User, and_(
+                    User.id == ProjectPM.user_id,
                     User.tenant_id == self.current_user.tenant_id,
                     User.object_id == self.current_user.object_id,
-                )
-            ).first()
-            if pm_user:
-                pm_project_ids = [
-                    r.project_id
-                    for r in self.db.query(ProjectPM.project_id)
-                    .filter(ProjectPM.user_id == pm_user.id)
-                    .all()
-                ]
-            else:
-                pm_project_ids = []
+                ))
+                .all()
+            ]
             if scoped_ids is not None:
                 query = query.filter(
                     or_(
@@ -217,19 +217,17 @@ class DemandService:
 
             # Primary PM: restrict to assigned projects
             if self.current_user.role == UserRole.PM:
-                pm_user = self.db.query(User).filter(
-                    and_(
+                pm_project_ids = [
+                    row.project_id
+                    for row in self.db.query(ProjectPM.project_id)
+                    .join(User, and_(
+                        User.id == ProjectPM.user_id,
                         User.tenant_id == self.current_user.tenant_id,
                         User.object_id == self.current_user.object_id,
-                    )
-                ).first()
-                if pm_user:
-                    pm_project_ids = [
-                        r.project_id
-                        for r in self.db.query(ProjectPM.project_id)
-                        .filter(ProjectPM.user_id == pm_user.id)
-                        .all()
-                    ]
+                    ))
+                    .all()
+                ]
+                if pm_project_ids:
                     query = query.filter(DemandLine.project_id.in_(pm_project_ids))
                 else:
                     query = query.filter(False)
@@ -1231,16 +1229,20 @@ class SupplyService:
     def __init__(self, db: Session, current_user: CurrentUser):
         self.db = db
         self.current_user = current_user
+        self._scoped_ids_cache: dict[bool, Optional[list[str]]] = {}
 
     def _get_scoped_resource_ids(self, for_write: bool = False) -> Optional[list[str]]:
         """Return cost-center-scoped resource IDs for Manager, or None for full access.
         Includes resources accessible via active delegation grants.
         Manager+Reader bypasses CC scoping for reads; for_write=True preserves write guards.
+        Result is cached per (for_write) flag for the lifetime of this service instance.
         """
         if self.current_user.role not in _SCOPED_ROLES:
             return None
         if not for_write and self.current_user.is_manager_reader:
             return None
+        if for_write in self._scoped_ids_cache:
+            return self._scoped_ids_cache[for_write]
         from api.app.services.reporting import ReportingService
         svc = ReportingService(self.db, self.current_user)
         ids = list(svc.get_cost_center_resource_ids())
@@ -1254,6 +1256,7 @@ class SupplyService:
             for rid in svc.get_delegated_resource_ids(user.id):
                 if rid not in ids:
                     ids.append(rid)
+        self._scoped_ids_cache[for_write] = ids
         return ids
 
     def _check_ro_resource_authorized(self, resource_id: str) -> None:
@@ -1314,6 +1317,8 @@ class SupplyService:
             query = query.filter(SupplyLine.month == month)
         if resource_id:
             query = query.filter(SupplyLine.resource_id == resource_id)
+        if project_id:
+            query = query.filter(SupplyLine.project_id == project_id)
         if cost_center_id:
             query = query.filter(
                 SupplyLine.resource_id.in_(
@@ -1356,18 +1361,18 @@ class SupplyService:
         exclude_supply_id: Optional[str] = None,
     ) -> None:
         """Check that total supply for a resource/month does not exceed 100%."""
-        query = self.db.query(SupplyLine).filter(
-            and_(
-                SupplyLine.tenant_id == self.current_user.tenant_id,
-                SupplyLine.resource_id == resource_id,
-                SupplyLine.year == year,
-                SupplyLine.month == month,
-            )
-        )
+        filters = [
+            SupplyLine.tenant_id == self.current_user.tenant_id,
+            SupplyLine.resource_id == resource_id,
+            SupplyLine.year == year,
+            SupplyLine.month == month,
+        ]
         if exclude_supply_id:
-            query = query.filter(SupplyLine.id != exclude_supply_id)
+            filters.append(SupplyLine.id != exclude_supply_id)
 
-        existing_total = sum(line.fte_percent for line in query.all())
+        existing_total = self.db.query(
+            func.coalesce(func.sum(SupplyLine.fte_percent), 0)
+        ).filter(and_(*filters)).scalar()
         new_total = existing_total + new_fte
 
         if new_total > 100:

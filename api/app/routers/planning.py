@@ -367,6 +367,7 @@ async def bulk_demand_lines(
 @router.get("/supply-lines/all", response_model=list[SupplyLineResponse])
 async def list_all_open_supply_lines(
     cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
+    project_id: Optional[str] = Query(None, description="Filter by project_id"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER,
@@ -375,7 +376,7 @@ async def list_all_open_supply_lines(
 ):
     """Return all supply lines across every open period in a single query."""
     service = SupplyService(db, current_user)
-    lines = service.get_all(open_periods_only=True, cost_center_id=cost_center_id)
+    lines = service.get_all(open_periods_only=True, cost_center_id=cost_center_id, project_id=project_id)
     return [_enrich_supply(line) for line in lines]
 
 

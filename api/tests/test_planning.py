@@ -285,6 +285,62 @@ def test_create_supply_line(client, ro_headers, setup_planning_data):
     assert response.json()["fte_percent"] == 100
 
 
+def test_supply_over_100_percent_rejected(client, admin_headers, ro_headers, setup_planning_data):
+    """Total supply for a resource/month cannot exceed 100% — SQL aggregate enforced."""
+    data = setup_planning_data
+
+    # Create a second project so we can have two distinct supply lines for the same resource/month.
+    prj2 = client.post(
+        "/admin/projects",
+        json={"code": "PRJ-TEST2", "name": "Test Project 2"},
+        headers=admin_headers,
+    )
+    project2_id = prj2.json()["id"]
+
+    # First supply line on project 1: 60%
+    r1 = client.post(
+        "/supply-lines",
+        json={
+            "resource_id": data["resource_id"],
+            "project_id": data["project_id"],
+            "year": data["current_year"],
+            "month": data["current_month"],
+            "fte_percent": 60,
+        },
+        headers=ro_headers,
+    )
+    assert r1.status_code == 200
+
+    # Second supply line on project 2: 50% (total would be 110%) — must be rejected
+    r2 = client.post(
+        "/supply-lines",
+        json={
+            "resource_id": data["resource_id"],
+            "project_id": project2_id,
+            "year": data["current_year"],
+            "month": data["current_month"],
+            "fte_percent": 50,
+        },
+        headers=ro_headers,
+    )
+    assert r2.status_code == 400
+    assert r2.json()["code"] == "SUPPLY_OVER_100"
+
+    # Second supply line on project 2: 40% (total would be 100%) — must be accepted
+    r3 = client.post(
+        "/supply-lines",
+        json={
+            "resource_id": data["resource_id"],
+            "project_id": project2_id,
+            "year": data["current_year"],
+            "month": data["current_month"],
+            "fte_percent": 40,
+        },
+        headers=ro_headers,
+    )
+    assert r3.status_code == 200
+
+
 def test_supply_fte_validation(client, ro_headers, setup_planning_data):
     """Supply line FTE must be valid."""
     data = setup_planning_data

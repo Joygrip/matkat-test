@@ -132,14 +132,27 @@ export interface MoveCapPeriodDetail {
   capped_total: number;
 }
 
+export interface AllLinesFilter {
+  projectId?: string;
+  costCenterId?: string;
+}
+
 export const planningApi = {
   // Demand Lines
-  async getAllDemandLines(): Promise<DemandLine[]> {
-    return apiClient.get<DemandLine[]>('/demand-lines/all');
+  async getAllDemandLines(filters?: AllLinesFilter): Promise<DemandLine[]> {
+    const params = new URLSearchParams();
+    if (filters?.projectId) params.set('project_id', filters.projectId);
+    if (filters?.costCenterId) params.set('cost_center_id', filters.costCenterId);
+    const qs = params.toString();
+    return apiClient.get<DemandLine[]>(`/demand-lines/all${qs ? `?${qs}` : ''}`);
   },
 
-  async getAllSupplyLines(): Promise<SupplyLine[]> {
-    return apiClient.get<SupplyLine[]>('/supply-lines/all');
+  async getAllSupplyLines(filters?: AllLinesFilter): Promise<SupplyLine[]> {
+    const params = new URLSearchParams();
+    if (filters?.projectId) params.set('project_id', filters.projectId);
+    if (filters?.costCenterId) params.set('cost_center_id', filters.costCenterId);
+    const qs = params.toString();
+    return apiClient.get<SupplyLine[]>(`/supply-lines/all${qs ? `?${qs}` : ''}`);
   },
 
   async getDemandLines(periodId?: string, filters?: Omit<PlanningFilters, 'periodId'>): Promise<DemandLine[]> {

@@ -90,7 +90,7 @@ ResourceAllocation/
 ```powershell
 python -m venv venv
 .\venv\Scripts\Activate.ps1
-pip install -r api/requirements.txt
+pip install -r api/requirements-dev.txt
 cd api
 Copy-Item env.example.txt .env
 # Edit .env: set DEV_AUTH_BYPASS=true for local dev
@@ -104,7 +104,7 @@ uvicorn api.app.main:app --reload
 ```bash
 python -m venv venv
 source venv/bin/activate
-pip install -r api/requirements.txt
+pip install -r api/requirements-dev.txt
 cd api
 cp env.example.txt .env
 # Edit .env: set DEV_AUTH_BYPASS=true for local dev

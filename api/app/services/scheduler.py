@@ -83,9 +83,7 @@ def _should_fire(schedule: NotificationSchedule, now_local: datetime, db) -> boo
     trigger = schedule.trigger_type
 
     if trigger == TriggerType.DAY_OF_MONTH:
-        result = today.day == schedule.trigger_value
-        print(f"[SCHEDULER] _should_fire: day={today.day}==trigger={schedule.trigger_value}? {result}, time={current_hhmm}>={schedule.time_of_day}? {current_hhmm >= schedule.time_of_day}, last_run={schedule.last_run_at}")
-        return result
+        return today.day == schedule.trigger_value
 
     if trigger == TriggerType.DAY_OF_WEEK:
         # 0=Monday … 6=Sunday, matching Python's weekday()

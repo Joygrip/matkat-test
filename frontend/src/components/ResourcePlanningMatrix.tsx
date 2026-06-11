@@ -509,6 +509,33 @@ function parseResOrPh(val: string): { resourceId?: string; placeholderId?: strin
   return {};
 }
 
+// Row identity comparator: returns true when all fields that affect ResourcePlanningLinePair
+// rendering are identical. Used by the groups useMemo to preserve stable row object references
+// across renders so React.memo can skip unaffected rows.
+function rowIsEqual(a: MergedMatrixRow, b: MergedMatrixRow): boolean {
+  if (
+    a.resourceId !== b.resourceId ||
+    a.resourceName !== b.resourceName ||
+    a.resourceInitials !== b.resourceInitials ||
+    a.placeholderId !== b.placeholderId ||
+    a.projectId !== b.projectId ||
+    a.projectName !== b.projectName ||
+    a.isGeneral !== b.isGeneral ||
+    a.isPlaceholder !== b.isPlaceholder
+  ) return false;
+  if (a.demandByPeriod.size !== b.demandByPeriod.size) return false;
+  for (const [pid, aLine] of a.demandByPeriod) {
+    const bLine = b.demandByPeriod.get(pid);
+    if (!bLine || aLine.id !== bLine.id || aLine.fte_percent !== bLine.fte_percent) return false;
+  }
+  if (a.supplyByPeriod.size !== b.supplyByPeriod.size) return false;
+  for (const [pid, aLine] of a.supplyByPeriod) {
+    const bLine = b.supplyByPeriod.get(pid);
+    if (!bLine || aLine.id !== bLine.id || aLine.fte_percent !== bLine.fte_percent) return false;
+  }
+  return true;
+}
+
 function buildResourceGroups(rows: MergedMatrixRow[]): ResourceGroup[] {
   const map = new Map<string, ResourceGroup>();
   for (const row of rows) {
@@ -607,6 +634,13 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const isDraggingRef = useRef(false);
   const hasDraggedRef = useRef(false);
   const popoverRef = useRef<HTMLDivElement>(null);
+  // Stable-callback support: read current drag/transfer state from refs instead of stale closures
+  const dragStartRef = useRef<typeof dragStart>(null);
+  const dragTypeRef = useRef<typeof dragType>(null);
+  const allGroupRowsRef = useRef<Map<string, MergedMatrixRow[]>>(new Map());
+  const transferSelectionRef = useRef<SelectedPlanningCell[]>([]);
+  // Stable row identity: stores last-rendered row objects keyed by row.key
+  const prevRowsRef = useRef<Map<string, MergedMatrixRow>>(new Map());
 
   // Refs for sticky header + synced horizontal scrollbar
   const headerWrapRef = useRef<HTMLDivElement>(null);
@@ -838,6 +872,21 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
         groupMap.set(cc.id, { ccName: cc.name, rowMap: new Map() });
       }
     }
+
+    // Stable row identity: reuse previous object reference when row content is unchanged.
+    // Rows whose reference is stable will pass React.memo's shallow prop check and skip re-render.
+    const prevRows = prevRowsRef.current;
+    const nextRows = new Map<string, MergedMatrixRow>();
+    for (const { rowMap } of groupMap.values()) {
+      for (const [key, newRow] of rowMap) {
+        const prev = prevRows.get(key);
+        if (prev && rowIsEqual(prev, newRow)) {
+          rowMap.set(key, prev);
+        }
+        nextRows.set(key, rowMap.get(key)!);
+      }
+    }
+    prevRowsRef.current = nextRows;
 
     const result: MatrixGroup[] = Array.from(groupMap.entries()).map(([ccId, { ccName, rowMap }]) => ({
       ccId,
@@ -1544,40 +1593,44 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setEditError(null);
   }, []);
 
+  // Stable drag-enter handler: reads all mutable values from refs so the callback
+  // reference never changes — prevents ResourcePlanningLinePair from re-rendering when
+  // drag state changes. allGroupRows is looked up via allGroupRowsRef; periods via periodsRef.
   const handleCellMouseEnter = useCallback((
     rowIndex: number,
     colIndex: number,
-    allGroupRows: MergedMatrixRow[],
     ccId: string,
   ) => {
-    if (!isDragging || !dragStart || !dragType) return;
-    if (dragStart.ccId !== ccId) return; // restrict to same cost center
+    if (!isDraggingRef.current || !dragStartRef.current || !dragTypeRef.current) return;
+    if (dragStartRef.current.ccId !== ccId) return;
 
-    const minRow = Math.min(dragStart.rowIndex, rowIndex);
-    const maxRow = Math.max(dragStart.rowIndex, rowIndex);
-    const minCol = Math.min(dragStart.colIndex, colIndex);
-    const maxCol = Math.max(dragStart.colIndex, colIndex);
+    const ds = dragStartRef.current;
+    const minRow = Math.min(ds.rowIndex, rowIndex);
+    const maxRow = Math.max(ds.rowIndex, rowIndex);
+    const minCol = Math.min(ds.colIndex, colIndex);
+    const maxCol = Math.max(ds.colIndex, colIndex);
 
     hasDraggedRef.current = true;
     const newSelection = new Set<string>();
+    const allGroupRows = allGroupRowsRef.current.get(ccId) ?? [];
     allGroupRows.forEach((row, flatIdx) => {
       const demandRowIdx = flatIdx * 2;
       const supplyRowIdx = flatIdx * 2 + 1;
 
-      periods.forEach((period, pColIdx) => {
+      periodsRef.current.forEach((period, pColIdx) => {
         if (pColIdx < minCol || pColIdx > maxCol) return;
 
-        if (dragType === 'demand' && demandRowIdx >= minRow && demandRowIdx <= maxRow) {
+        if (dragTypeRef.current === 'demand' && demandRowIdx >= minRow && demandRowIdx <= maxRow) {
           newSelection.add(buildCellKey('demand', row.resourceId, row.placeholderId, row.projectId, period.id));
         }
-        if (dragType === 'supply' && supplyRowIdx >= minRow && supplyRowIdx <= maxRow) {
+        if (dragTypeRef.current === 'supply' && supplyRowIdx >= minRow && supplyRowIdx <= maxRow) {
           newSelection.add(buildCellKey('supply', row.resourceId, row.placeholderId, row.projectId, period.id));
         }
       });
     });
 
     setSelectedCells(newSelection);
-  }, [isDragging, dragStart, dragType, periods]);
+  }, []); // stable — all mutable values read from refs
 
   const handleApply = useCallback(async () => {
     const numVal = parseInt(applyValue, 10);
@@ -1728,11 +1781,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
   // Toggle a cell in/out of the transfer selection (Ctrl/Meta+click).
   // Constraint: all selected cells must share the same rowKey and lineType.
+  // Reads transferSelection from transferSelectionRef so the callback reference stays stable.
   const handleTransferToggle = useCallback((cell: SelectedPlanningCell) => {
     if (cell.value === 0) return;
+    const sel = transferSelectionRef.current;
 
-    // Deselect if already in selection
-    const existingIdx = transferSelection.findIndex(
+    const existingIdx = sel.findIndex(
       c => c.rowKey === cell.rowKey && c.lineType === cell.lineType && c.periodId === cell.periodId,
     );
     if (existingIdx >= 0) {
@@ -1740,9 +1794,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       return;
     }
 
-    // Restart if different row or line type
-    if (transferSelection.length > 0) {
-      const first = transferSelection[0];
+    if (sel.length > 0) {
+      const first = sel[0];
       if (first.rowKey !== cell.rowKey || first.lineType !== cell.lineType) {
         showInfo('Selection restarted', 'Select cells from one row only.');
         setTransferSelection([cell]);
@@ -1750,9 +1803,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       }
     }
 
-    // Add to existing (same row) or start fresh
     setTransferSelection(prev => [...prev, cell]);
-  }, [transferSelection, showInfo]);
+  }, [showInfo]); // stable if showInfo is stable (it is — useToast returns memoized fns)
 
   const openTransferDialog = useCallback(async (mode: 'copy' | 'move') => {
     if (transferSelection.length === 0) return;
@@ -2244,6 +2296,17 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     }
   }, [dlgSelectedResources, dlgFte, dlgSelectedPeriods, dlgLineType, dlgProjectId, periods, onReload]);
 
+  // Sync refs used by stable callbacks so they always see the current render's values
+  dragStartRef.current = dragStart;
+  dragTypeRef.current = dragType;
+  transferSelectionRef.current = transferSelection;
+  // Build per-CC flat row arrays for handleCellMouseEnter (avoids passing unstable array as prop)
+  const nextGroupRowsMap = new Map<string, MergedMatrixRow[]>();
+  for (const g of groups) {
+    nextGroupRowsMap.set(g.ccId, g.resourceGroups.flatMap(rg => rg.rows));
+  }
+  allGroupRowsRef.current = nextGroupRowsMap;
+
   const totalCols = 3 + periods.length;
 
   const getPopoverStyle = (pos: { x: number; y: number }): React.CSSProperties => {
@@ -2580,471 +2643,52 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                             const supplyRowIndex = flatRowIndex * 2 + 1;
                             const isFirstRow = rowIdx === 0;
                             const isLastProject = rowIdx === rg.rows.length - 1;
-
                             return (
-                              <React.Fragment key={row.key}>
-                                {/* Demand row */}
-                                <tr style={{ backgroundColor: DEMAND_ROW_BG }}>
-                                  {isFirstRow && (() => {
-                                    const initials = row.isPlaceholder
-                                      ? '?'
-                                      : (row.resourceInitials || row.resourceName.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2));
-                                    const avatarBg = row.isPlaceholder ? '#9b9997' : getAvatarBg(row.resourceName);
-                                    return (
-                                      <td
-                                        className={styles.resourceCell}
-                                        rowSpan={totalRowSpan}
-                                        title={row.resourceName}
-                                        style={{
-                                          ...(row.isPlaceholder ? { fontStyle: 'italic' } : {}),
-                                          fontSize: '12.5px',
-                                          fontWeight: 600,
-                                          backgroundColor: '#ffffff',
-                                          borderTop: '1px solid #e5e4e0',
-                                        }}
-                                      >
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                          <div style={{
-                                            flexShrink: 0,
-                                            width: 40,
-                                            height: 40,
-                                            minWidth: 40,
-                                            borderRadius: '50%',
-                                            backgroundColor: avatarBg,
-                                            color: '#ffffff',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            fontSize: '10px',
-                                            fontWeight: 700,
-                                          }}>
-                                            {initials}
-                                          </div>
-                                          <div style={{ minWidth: 0 }}>
-                                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                              {row.resourceName}
-                                            </div>
-                                            {row.isPlaceholder && (
-                                              <div style={{
-                                                fontSize: tokens.fontSizeBase100,
-                                                color: tokens.colorNeutralForeground3,
-                                              }}>
-                                                [TBD]
-                                              </div>
-                                            )}
-                                          </div>
-                                        </div>
-                                      </td>
-                                    );
-                                  })()}
-                                  <td
-                                    className={styles.projectCell}
-                                    rowSpan={2}
-                                    title={row.projectName}
-                                    onMouseEnter={() => setHoveredProject(row.key)}
-                                    onMouseLeave={() => setHoveredProject(null)}
-                                    style={{
-                                      ...(row.isGeneral ? { fontStyle: 'italic' } : {}),
-                                      paddingLeft: '12px',
-                                      paddingRight: '4px',
-                                      color: tokens.colorNeutralForeground2,
-                                      fontSize: '12.5px',
-                                      fontWeight: 600,
-                                      borderBottom: '1px solid #efeeea',
-                                      borderTop: rowIdx > 0 ? '2px solid #c8c4be' : '1px solid #e5e4e0',
-                                      background: hoveredProject === row.key ? 'rgba(30,58,95,0.08), #ffffff' : '#ffffff',
-                                      overflow: 'visible',
-                                    }}
-                                  >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, overflow: 'hidden' }}>
-                                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
-                                        {row.projectName}
-                                        {row.isGeneral && ' *'}
-                                      </span>
-                                    </div>
-                                  </td>
-                                  <td
-                                    className={styles.typeCellDemand}
-                                    onMouseEnter={() => setHoveredProject(row.key)}
-                                    onMouseLeave={() => setHoveredProject(null)}
-                                    style={{
-                                      borderTop: rowIdx > 0 ? '2px solid #c8c4be' : '1px solid #e5e4e0',
-                                      ...(hoveredProject === row.key ? { background: 'rgba(30,58,95,0.08), rgba(217,119,6,0.10), #ffffff' } : {}),
-                                    }}
-                                  >
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                                      <span>Demand</span>
-                                      {canEditDemand && !row.isGeneral && (
-                                        <Menu>
-                                          <MenuTrigger disableButtonEnhancement>
-                                            <Tooltip content="Demand actions" relationship="label" appearance="inverted" withArrow>
-                                              <Button
-                                                size="small"
-                                                appearance="subtle"
-                                                icon={<MoreHorizontalRegular />}
-                                                aria-label={`Demand actions for ${row.projectName}`}
-                                                style={{
-                                                  opacity: hoveredProject === row.key ? 1 : 0.35,
-                                                  flexShrink: 0,
-                                                  minWidth: '24px',
-                                                  height: '20px',
-                                                  padding: 0,
-                                                }}
-                                              />
-                                            </Tooltip>
-                                          </MenuTrigger>
-                                          <MenuPopover>
-                                            <MenuList>
-                                              <MenuItem
-                                                onClick={() => openMoveDialog(row)}
-                                              >
-                                                Move demand line
-                                              </MenuItem>
-                                              <MenuItem
-                                                onClick={() => {
-                                                  setDeleteGroupRow(row);
-                                                  setDeleteGroupError(null);
-                                                }}
-                                              >
-                                                Delete demand line
-                                              </MenuItem>
-                                            </MenuList>
-                                          </MenuPopover>
-                                        </Menu>
-                                      )}
-                                    </span>
-                                  </td>
-                                  {periods.map((period, colIndex) => {
-                                    const dLine = row.demandByPeriod.get(period.id);
-                                    const dVal = dLine?.fte_percent ?? 0;
-                                    const existingCellKey = `d-${row.key}-${period.id}`;
-                                    const dragCellKey = buildCellKey('demand', row.resourceId, row.placeholderId, row.projectId, period.id);
-                                    const isSelectable = canEditDemand && !row.isGeneral;
-                                    const canEdit = isSelectable && !isDragging;
-                                    const isSelected = selectedCells.has(dragCellKey);
-                                    const isTransferSelected = transferSelection.some(
-                                      c => c.lineType === 'demand' && c.periodId === period.id && c.rowKey === row.key,
-                                    );
-                                    const isDimmed = isDragging && dragType !== 'demand' && dragStart?.ccId === group.ccId;
-                                    const isCurPeriod = isCurrentPeriod(period);
-                                    const isColHov = hoveredColIdx === colIndex;
-                                    const isRowHov = hoveredProject === row.key;
-                                    // Suppress hover tint while a payload drag is in progress
-                                    const demandCellBgStyle: React.CSSProperties = (!isSelected && !isTransferSelected && !isPayloadDragging && (isColHov || isRowHov)) ? (
-                                      isColHov && isRowHov
-                                        ? { background: isCurPeriod ? 'rgba(30,58,95,0.14), rgba(217,119,6,0.26)' : 'rgba(30,58,95,0.12), rgba(217,119,6,0.22)' }
-                                        : isColHov
-                                          ? { backgroundColor: isCurPeriod ? 'rgba(217,119,6,0.22)' : 'rgba(217,119,6,0.18)' }
-                                          : { background: 'rgba(30,58,95,0.08), rgba(217,119,6,0.10)' }
-                                    ) : {};
-                                    // Payload drag: is this cell the handle anchor (last selected)?
-                                    const isLastTransferHandleCell = lastTransferCell !== null
-                                      && lastTransferCell.lineType === 'demand'
-                                      && lastTransferCell.rowKey === row.key
-                                      && lastTransferCell.periodId === period.id;
-                                    // Payload drag: is this cell a valid preview target?
-                                    const isPayloadPreviewTarget = isPayloadDragging
-                                      && !payloadDropError
-                                      && payloadDropTarget !== null
-                                      && payloadDropTarget.lineType === 'demand'
-                                      && payloadDropTarget.rowKey === row.key
-                                      && payloadPreviewPeriodIds.has(period.id);
-                                    // Payload drag: is this the invalid drop-start cell?
-                                    const isPayloadDropErrorCell = isPayloadDragging
-                                      && payloadDropError !== null
-                                      && payloadDropTarget !== null
-                                      && payloadDropTarget.lineType === 'demand'
-                                      && payloadDropTarget.rowKey === row.key
-                                      && period.id === payloadDropTarget.periodId;
-                                    return (
-                                      <td
-                                        key={period.id}
-                                        className={mergeClasses(
-                                          styles.valueCell,
-                                          isSelectable && styles.cellEditable,
-                                          isSelected && styles.cellSelected,
-                                          isTransferSelected && styles.cellTransferSelected,
-                                          isDimmed && styles.cellDimmed,
-                                          isPayloadPreviewTarget && styles.cellPayloadPreviewTarget,
-                                          isPayloadDropErrorCell && styles.cellPayloadDropError,
-                                        )}
-                                        style={{
-                                          borderTop: rowIdx > 0 ? '2px solid #c8c4be' : '1px solid #e5e4e0',
-                                          // position:relative needed so the drag handle can be absolute
-                                          ...(isTransferSelected ? { position: 'relative' as const } : {}),
-                                          ...demandCellBgStyle,
-                                        }}
-                                        data-row-index={demandRowIndex}
-                                        data-col-index={colIndex}
-                                        data-cell-key={dragCellKey}
-                                        data-type="demand"
-                                        data-period-id={period.id}
-                                        data-row-key={row.key}
-                                        data-resource-id={row.resourceId ?? ''}
-                                        data-placeholder-id={row.placeholderId ?? ''}
-                                        data-project-id={row.projectId ?? ''}
-                                        data-year={period.year}
-                                        data-month={period.month}
-                                        data-period-status={period.status}
-                                        onMouseDown={isSelectable
-                                          ? (e) => {
-                                            if (e.ctrlKey || e.metaKey) {
-                                              e.preventDefault();
-                                              e.stopPropagation();
-                                              if (dVal > 0 && period.status !== 'locked') {
-                                                handleTransferToggle({
-                                                  rowKey: row.key,
-                                                  lineType: 'demand',
-                                                  sourceResourceId: row.resourceId,
-                                                  sourcePlaceholderId: row.placeholderId,
-                                                  sourceProjectId: row.projectId,
-                                                  periodId: period.id,
-                                                  year: period.year,
-                                                  month: period.month,
-                                                  value: dVal,
-                                                  costCenterId: group.ccId,
-                                                  sourceName: row.resourceName,
-                                                  sourceProjectName: row.projectName,
-                                                });
-                                              }
-                                              return;
-                                            }
-                                            handleCellMouseDown(e, dragCellKey, 'demand', demandRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, group.ccId);
-                                          }
-                                          : undefined}
-                                        onMouseEnter={() => {
-                                          setHoveredColIdx(colIndex);
-                                          setHoveredProject(row.key);
-                                          if (isDragging) handleCellMouseEnter(demandRowIndex, colIndex, allRows, group.ccId);
-                                        }}
-                                        onMouseLeave={() => { setHoveredColIdx(null); setHoveredProject(null); }}
-                                      >
-                                        <CellEditor
-                                          value={dVal}
-                                          colorStyle={getFteColor(dVal)}
-                                          isEditing={editingCell === existingCellKey}
-                                          isSaving={savingCells.has(existingCellKey)}
-                                          canEdit={canEdit}
-                                          onStartEdit={() => canEdit && setEditingCell(existingCellKey)}
-                                          onCancel={() => setEditingCell(null)}
-                                          onSave={val => saveDemandCell(existingCellKey, dLine, row, period, val)}
-                                          styles={styles}
-                                        />
-                                        {isLastTransferHandleCell && (
-                                          <div
-                                            title="Drag to move. Hold Alt to copy."
-                                            onMouseDown={e => handlePayloadDragStart(e, e.altKey)}
-                                            style={{
-                                              position: 'absolute',
-                                              bottom: 2,
-                                              right: 2,
-                                              width: 10,
-                                              height: 10,
-                                              borderRadius: 2,
-                                              backgroundColor: 'rgba(118, 74, 188, 0.85)',
-                                              cursor: 'grab',
-                                              zIndex: 2,
-                                              flexShrink: 0,
-                                            }}
-                                          />
-                                        )}
-                                      </td>
-                                    );
-                                  })}
-                                </tr>
-                                {/* Supply row */}
-                                <tr style={{ backgroundColor: SUPPLY_ROW_BG }}>
-                                  {/* resource and project cells spanned by rowSpan above */}
-                                  <td
-                                    className={styles.typeCellSupply}
-                                    onMouseEnter={() => setHoveredProject(row.key)}
-                                    onMouseLeave={() => setHoveredProject(null)}
-                                    style={{
-                                      boxShadow: isLastProject ? `inset 3px 0 0 ${SUPPLY_ACCENT}` : `inset 3px 0 0 ${SUPPLY_ACCENT}, inset 0 -3px 0 #c8c4be`,
-                                      ...(hoveredProject === row.key ? { background: 'rgba(30,58,95,0.08), rgba(13,148,136,0.10), #ffffff' } : {}),
-                                    }}
-                                  >
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                                      <span>Supply</span>
-                                      {canEditSupply && !row.isPlaceholder && (!editableCcIds || editableCcIds.has(group.ccId)) && (
-                                        <Menu>
-                                          <MenuTrigger disableButtonEnhancement>
-                                            <Tooltip content="Supply actions" relationship="label" appearance="inverted" withArrow>
-                                              <Button
-                                                size="small"
-                                                appearance="subtle"
-                                                icon={<MoreHorizontalRegular />}
-                                                aria-label={`Supply actions for ${row.projectName}`}
-                                                style={{
-                                                  opacity: hoveredProject === row.key ? 1 : 0.35,
-                                                  flexShrink: 0,
-                                                  minWidth: '24px',
-                                                  height: '20px',
-                                                  padding: 0,
-                                                }}
-                                              />
-                                            </Tooltip>
-                                          </MenuTrigger>
-                                          <MenuPopover>
-                                            <MenuList>
-                                              <MenuItem
-                                                onClick={() => openMoveSupplyDialog(row)}
-                                              >
-                                                Move supply line
-                                              </MenuItem>
-                                              <MenuItem
-                                                onClick={() => {
-                                                  setDeleteSupplyGroupRow(row);
-                                                  setDeleteSupplyGroupError(null);
-                                                }}
-                                              >
-                                                Delete supply line
-                                              </MenuItem>
-                                            </MenuList>
-                                          </MenuPopover>
-                                        </Menu>
-                                      )}
-                                    </span>
-                                  </td>
-                                  {periods.map((period, colIndex) => {
-                                    const sLine = row.supplyByPeriod.get(period.id);
-                                    const sVal = sLine?.fte_percent ?? 0;
-                                    const existingCellKey = `s-${row.key}-${period.id}`;
-                                    const dragCellKey = buildCellKey('supply', row.resourceId, row.placeholderId, row.projectId, period.id);
-                                    const isSelectable = canEditSupply && !row.isPlaceholder && (!editableCcIds || editableCcIds.has(group.ccId));
-                                    const canEdit = isSelectable && !isDragging;
-                                    const isSelected = selectedCells.has(dragCellKey);
-                                    const isTransferSelected = transferSelection.some(
-                                      c => c.lineType === 'supply' && c.periodId === period.id && c.rowKey === row.key,
-                                    );
-                                    const isDimmed = isDragging && dragType !== 'supply' && dragStart?.ccId === group.ccId;
-                                    const isCurPeriod = isCurrentPeriod(period);
-                                    const isColHov = hoveredColIdx === colIndex;
-                                    const isRowHov = hoveredProject === row.key;
-                                    // Suppress hover tint while a payload drag is in progress
-                                    const supplyCellBgStyle: React.CSSProperties = (!isSelected && !isTransferSelected && !isPayloadDragging && (isColHov || isRowHov)) ? (
-                                      isColHov && isRowHov
-                                        ? { background: isCurPeriod ? 'rgba(30,58,95,0.14), rgba(13,148,136,0.26)' : 'rgba(30,58,95,0.12), rgba(13,148,136,0.22)' }
-                                        : isColHov
-                                          ? { backgroundColor: isCurPeriod ? 'rgba(13,148,136,0.22)' : 'rgba(13,148,136,0.18)' }
-                                          : { background: 'rgba(30,58,95,0.08), rgba(13,148,136,0.10)' }
-                                    ) : {};
-                                    // Payload drag: is this cell the handle anchor (last selected)?
-                                    const isLastTransferHandleCell = lastTransferCell !== null
-                                      && lastTransferCell.lineType === 'supply'
-                                      && lastTransferCell.rowKey === row.key
-                                      && lastTransferCell.periodId === period.id;
-                                    // Payload drag: is this cell a valid preview target?
-                                    const isPayloadPreviewTarget = isPayloadDragging
-                                      && !payloadDropError
-                                      && payloadDropTarget !== null
-                                      && payloadDropTarget.lineType === 'supply'
-                                      && payloadDropTarget.rowKey === row.key
-                                      && payloadPreviewPeriodIds.has(period.id);
-                                    // Payload drag: is this the invalid drop-start cell?
-                                    const isPayloadDropErrorCell = isPayloadDragging
-                                      && payloadDropError !== null
-                                      && payloadDropTarget !== null
-                                      && payloadDropTarget.lineType === 'supply'
-                                      && payloadDropTarget.rowKey === row.key
-                                      && period.id === payloadDropTarget.periodId;
-                                    return (
-                                      <td
-                                        key={period.id}
-                                        className={mergeClasses(
-                                          styles.valueCell,
-                                          isSelectable && styles.cellEditable,
-                                          isSelected && styles.cellSelected,
-                                          isTransferSelected && styles.cellTransferSelected,
-                                          isDimmed && styles.cellDimmed,
-                                          isPayloadPreviewTarget && styles.cellPayloadPreviewTarget,
-                                          isPayloadDropErrorCell && styles.cellPayloadDropError,
-                                        )}
-                                        style={{
-                                          ...(!isLastProject ? { boxShadow: 'inset 0 -3px 0 #c8c4be' } : {}),
-                                          // position:relative needed so the drag handle can be absolute
-                                          ...(isTransferSelected ? { position: 'relative' as const } : {}),
-                                          ...supplyCellBgStyle,
-                                        }}
-                                        data-row-index={supplyRowIndex}
-                                        data-col-index={colIndex}
-                                        data-cell-key={dragCellKey}
-                                        data-type="supply"
-                                        data-period-id={period.id}
-                                        data-row-key={row.key}
-                                        data-resource-id={row.resourceId ?? ''}
-                                        data-placeholder-id={row.placeholderId ?? ''}
-                                        data-project-id={row.projectId ?? ''}
-                                        data-year={period.year}
-                                        data-month={period.month}
-                                        data-period-status={period.status}
-                                        onMouseDown={isSelectable
-                                          ? (e) => {
-                                            if (e.ctrlKey || e.metaKey) {
-                                              e.preventDefault();
-                                              e.stopPropagation();
-                                              if (sVal > 0 && period.status !== 'locked') {
-                                                handleTransferToggle({
-                                                  rowKey: row.key,
-                                                  lineType: 'supply',
-                                                  sourceResourceId: row.resourceId,
-                                                  sourcePlaceholderId: row.placeholderId,
-                                                  sourceProjectId: row.projectId,
-                                                  periodId: period.id,
-                                                  year: period.year,
-                                                  month: period.month,
-                                                  value: sVal,
-                                                  costCenterId: group.ccId,
-                                                  sourceName: row.resourceName,
-                                                  sourceProjectName: row.projectName,
-                                                });
-                                              }
-                                              return;
-                                            }
-                                            handleCellMouseDown(e, dragCellKey, 'supply', supplyRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, group.ccId);
-                                          }
-                                          : undefined}
-                                        onMouseEnter={() => {
-                                          setHoveredColIdx(colIndex);
-                                          setHoveredProject(row.key);
-                                          if (isDragging) handleCellMouseEnter(supplyRowIndex, colIndex, allRows, group.ccId);
-                                        }}
-                                        onMouseLeave={() => { setHoveredColIdx(null); setHoveredProject(null); }}
-                                      >
-                                        <CellEditor
-                                          value={sVal}
-                                          colorStyle={getFteColor(sVal)}
-                                          isEditing={editingCell === existingCellKey}
-                                          isSaving={savingCells.has(existingCellKey)}
-                                          canEdit={canEdit}
-                                          onStartEdit={() => canEdit && setEditingCell(existingCellKey)}
-                                          onCancel={() => setEditingCell(null)}
-                                          onSave={val => saveSupplyCell(existingCellKey, sLine, row, period, val)}
-                                          styles={styles}
-                                        />
-                                        {isLastTransferHandleCell && (
-                                          <div
-                                            title="Drag to move. Hold Alt to copy."
-                                            onMouseDown={e => handlePayloadDragStart(e, e.altKey)}
-                                            style={{
-                                              position: 'absolute',
-                                              bottom: 2,
-                                              right: 2,
-                                              width: 10,
-                                              height: 10,
-                                              borderRadius: 2,
-                                              backgroundColor: 'rgba(118, 74, 188, 0.85)',
-                                              cursor: 'grab',
-                                              zIndex: 2,
-                                              flexShrink: 0,
-                                            }}
-                                          />
-                                        )}
-                                      </td>
-                                    );
-                                  })}
-                                </tr>
-                              </React.Fragment>
+                              <ResourcePlanningLinePair
+                                key={row.key}
+                                row={row}
+                                rowIdx={rowIdx}
+                                isFirstRow={isFirstRow}
+                                isLastProject={isLastProject}
+                                totalRowSpan={totalRowSpan}
+                                demandRowIndex={demandRowIndex}
+                                supplyRowIndex={supplyRowIndex}
+                                ccId={group.ccId}
+                                isSupplyEditableInCC={!editableCcIds || editableCcIds.has(group.ccId)}
+                                periods={periods}
+                                styles={styles}
+                                canEditDemand={canEditDemand}
+                                canEditSupply={canEditSupply}
+                                selectedCells={selectedCells}
+                                editingCell={editingCell}
+                                savingCells={savingCells}
+                                isDragging={isDragging}
+                                dragType={dragType}
+                                dragStartCcId={dragStart?.ccId ?? null}
+                                hoveredColIdx={hoveredColIdx}
+                                isRowHovered={hoveredProject === row.key}
+                                isPayloadDragging={isPayloadDragging}
+                                payloadDropError={payloadDropError}
+                                payloadDropTarget={payloadDropTarget}
+                                payloadPreviewPeriodIds={payloadPreviewPeriodIds}
+                                lastTransferCell={lastTransferCell}
+                                transferSelection={transferSelection}
+                                onDemandSave={saveDemandCell}
+                                onSupplySave={saveSupplyCell}
+                                onCellMouseDown={handleCellMouseDown}
+                                onCellMouseEnter={handleCellMouseEnter}
+                                onHoverColIdx={setHoveredColIdx}
+                                onHoverProject={setHoveredProject}
+                                onSetEditingCell={setEditingCell}
+                                onTransferToggle={handleTransferToggle}
+                                onPayloadDragStart={handlePayloadDragStart}
+                                onOpenMoveDialog={openMoveDialog}
+                                onSetDeleteGroupRow={setDeleteGroupRow}
+                                onSetDeleteGroupError={setDeleteGroupError}
+                                onOpenMoveSupplyDialog={openMoveSupplyDialog}
+                                onSetDeleteSupplyGroupRow={setDeleteSupplyGroupRow}
+                                onSetDeleteSupplyGroupError={setDeleteSupplyGroupError}
+                              />
                             );
                           })}
 
@@ -4493,6 +4137,556 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     </>
   );
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ResourcePlanningLinePair — memoized demand+supply row pair for one resource-project
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ResourcePlanningLinePairProps {
+  row: MergedMatrixRow;
+  rowIdx: number;
+  isFirstRow: boolean;
+  isLastProject: boolean;
+  totalRowSpan: number;
+  demandRowIndex: number;
+  supplyRowIndex: number;
+  ccId: string;
+  isSupplyEditableInCC: boolean;
+  periods: Period[];
+  styles: ReturnType<typeof useStyles>;
+  canEditDemand: boolean;
+  canEditSupply: boolean;
+  selectedCells: Set<string>;
+  editingCell: string | null;
+  savingCells: Set<string>;
+  isDragging: boolean;
+  dragType: 'demand' | 'supply' | null;
+  dragStartCcId: string | null;
+  hoveredColIdx: number | null;
+  isRowHovered: boolean;
+  isPayloadDragging: boolean;
+  payloadDropError: string | null;
+  payloadDropTarget: {
+    periodId: string; year: number; month: number;
+    rowKey: string; lineType: 'demand' | 'supply';
+    resourceId: string | null; placeholderId: string | null; projectId: string | null;
+  } | null;
+  payloadPreviewPeriodIds: Set<string>;
+  lastTransferCell: SelectedPlanningCell | null;
+  transferSelection: SelectedPlanningCell[];
+  onDemandSave: (cellKey: string, line: DemandLine | undefined, row: MergedMatrixRow, period: Period, val: number) => void;
+  onSupplySave: (cellKey: string, line: SupplyLine | undefined, row: MergedMatrixRow, period: Period, val: number) => void;
+  onCellMouseDown: (e: React.MouseEvent, cellKey: string, type: 'demand' | 'supply', rowIndex: number, colIndex: number, resourceId: string | null, placeholderId: string | null, projectId: string | null, periodId: string, ccId: string) => void;
+  onCellMouseEnter: (rowIndex: number, colIndex: number, ccId: string) => void;
+  onHoverColIdx: (idx: number | null) => void;
+  onHoverProject: (key: string | null) => void;
+  onSetEditingCell: (key: string | null) => void;
+  onTransferToggle: (cell: SelectedPlanningCell) => void;
+  onPayloadDragStart: (e: React.MouseEvent, altKey: boolean) => void;
+  onOpenMoveDialog: (row: MergedMatrixRow) => void;
+  onSetDeleteGroupRow: (row: MergedMatrixRow | null) => void;
+  onSetDeleteGroupError: (error: string | null) => void;
+  onOpenMoveSupplyDialog: (row: MergedMatrixRow) => void;
+  onSetDeleteSupplyGroupRow: (row: MergedMatrixRow | null) => void;
+  onSetDeleteSupplyGroupError: (error: string | null) => void;
+}
+
+const ResourcePlanningLinePair = React.memo(({
+  row,
+  rowIdx,
+  isFirstRow,
+  isLastProject,
+  totalRowSpan,
+  demandRowIndex,
+  supplyRowIndex,
+  ccId,
+  isSupplyEditableInCC,
+  periods,
+  styles,
+  canEditDemand,
+  canEditSupply,
+  selectedCells,
+  editingCell,
+  savingCells,
+  isDragging,
+  dragType,
+  dragStartCcId,
+  hoveredColIdx,
+  isRowHovered,
+  isPayloadDragging,
+  payloadDropError,
+  payloadDropTarget,
+  payloadPreviewPeriodIds,
+  lastTransferCell,
+  transferSelection,
+  onDemandSave,
+  onSupplySave,
+  onCellMouseDown,
+  onCellMouseEnter,
+  onHoverColIdx,
+  onHoverProject,
+  onSetEditingCell,
+  onTransferToggle,
+  onPayloadDragStart,
+  onOpenMoveDialog,
+  onSetDeleteGroupRow,
+  onSetDeleteGroupError,
+  onOpenMoveSupplyDialog,
+  onSetDeleteSupplyGroupRow,
+  onSetDeleteSupplyGroupError,
+}: ResourcePlanningLinePairProps) => {
+  if (import.meta.env.DEV) console.count('[RPM] line pair render ' + row.key);
+  return (
+    <React.Fragment>
+      {/* Demand row */}
+      <tr style={{ backgroundColor: DEMAND_ROW_BG }}>
+        {isFirstRow && (() => {
+          const initials = row.isPlaceholder
+            ? '?'
+            : (row.resourceInitials || row.resourceName.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2));
+          const avatarBg = row.isPlaceholder ? '#9b9997' : getAvatarBg(row.resourceName);
+          return (
+            <td
+              className={styles.resourceCell}
+              rowSpan={totalRowSpan}
+              title={row.resourceName}
+              style={{
+                ...(row.isPlaceholder ? { fontStyle: 'italic' } : {}),
+                fontSize: '12.5px',
+                fontWeight: 600,
+                backgroundColor: '#ffffff',
+                borderTop: '1px solid #e5e4e0',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{
+                  flexShrink: 0,
+                  width: 40,
+                  height: 40,
+                  minWidth: 40,
+                  borderRadius: '50%',
+                  backgroundColor: avatarBg,
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '10px',
+                  fontWeight: 700,
+                }}>
+                  {initials}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {row.resourceName}
+                  </div>
+                  {row.isPlaceholder && (
+                    <div style={{
+                      fontSize: tokens.fontSizeBase100,
+                      color: tokens.colorNeutralForeground3,
+                    }}>
+                      [TBD]
+                    </div>
+                  )}
+                </div>
+              </div>
+            </td>
+          );
+        })()}
+        <td
+          className={styles.projectCell}
+          rowSpan={2}
+          title={row.projectName}
+          onMouseEnter={() => onHoverProject(row.key)}
+          onMouseLeave={() => onHoverProject(null)}
+          style={{
+            ...(row.isGeneral ? { fontStyle: 'italic' } : {}),
+            paddingLeft: '12px',
+            paddingRight: '4px',
+            color: tokens.colorNeutralForeground2,
+            fontSize: '12.5px',
+            fontWeight: 600,
+            borderBottom: '1px solid #efeeea',
+            borderTop: rowIdx > 0 ? '2px solid #c8c4be' : '1px solid #e5e4e0',
+            background: isRowHovered ? 'rgba(30,58,95,0.08), #ffffff' : '#ffffff',
+            overflow: 'visible',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2, overflow: 'hidden' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
+              {row.projectName}
+              {row.isGeneral && ' *'}
+            </span>
+          </div>
+        </td>
+        <td
+          className={styles.typeCellDemand}
+          onMouseEnter={() => onHoverProject(row.key)}
+          onMouseLeave={() => onHoverProject(null)}
+          style={{
+            borderTop: rowIdx > 0 ? '2px solid #c8c4be' : '1px solid #e5e4e0',
+            ...(isRowHovered ? { background: 'rgba(30,58,95,0.08), rgba(217,119,6,0.10), #ffffff' } : {}),
+          }}
+        >
+          <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <span>Demand</span>
+            {canEditDemand && !row.isGeneral && (
+              <Menu>
+                <MenuTrigger disableButtonEnhancement>
+                  <Tooltip content="Demand actions" relationship="label" appearance="inverted" withArrow>
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      icon={<MoreHorizontalRegular />}
+                      aria-label={`Demand actions for ${row.projectName}`}
+                      style={{
+                        opacity: isRowHovered ? 1 : 0.35,
+                        flexShrink: 0,
+                        minWidth: '24px',
+                        height: '20px',
+                        padding: 0,
+                      }}
+                    />
+                  </Tooltip>
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    <MenuItem onClick={() => onOpenMoveDialog(row)}>
+                      Move demand line
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => {
+                        onSetDeleteGroupRow(row);
+                        onSetDeleteGroupError(null);
+                      }}
+                    >
+                      Delete demand line
+                    </MenuItem>
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
+            )}
+          </span>
+        </td>
+        {periods.map((period, colIndex) => {
+          const dLine = row.demandByPeriod.get(period.id);
+          const dVal = dLine?.fte_percent ?? 0;
+          const existingCellKey = `d-${row.key}-${period.id}`;
+          const dragCellKey = buildCellKey('demand', row.resourceId, row.placeholderId, row.projectId, period.id);
+          const isSelectable = canEditDemand && !row.isGeneral;
+          const canEdit = isSelectable && !isDragging;
+          const isSelected = selectedCells.has(dragCellKey);
+          const isTransferSelected = transferSelection.some(
+            c => c.lineType === 'demand' && c.periodId === period.id && c.rowKey === row.key,
+          );
+          const isDimmed = isDragging && dragType !== 'demand' && dragStartCcId === ccId;
+          const isCurPeriod = isCurrentPeriod(period);
+          const isColHov = hoveredColIdx === colIndex;
+          const demandCellBgStyle: React.CSSProperties = (!isSelected && !isTransferSelected && !isPayloadDragging && (isColHov || isRowHovered)) ? (
+            isColHov && isRowHovered
+              ? { background: isCurPeriod ? 'rgba(30,58,95,0.14), rgba(217,119,6,0.26)' : 'rgba(30,58,95,0.12), rgba(217,119,6,0.22)' }
+              : isColHov
+                ? { backgroundColor: isCurPeriod ? 'rgba(217,119,6,0.22)' : 'rgba(217,119,6,0.18)' }
+                : { background: 'rgba(30,58,95,0.08), rgba(217,119,6,0.10)' }
+          ) : {};
+          const isLastTransferHandleCell = lastTransferCell !== null
+            && lastTransferCell.lineType === 'demand'
+            && lastTransferCell.rowKey === row.key
+            && lastTransferCell.periodId === period.id;
+          const isPayloadPreviewTarget = isPayloadDragging
+            && !payloadDropError
+            && payloadDropTarget !== null
+            && payloadDropTarget.lineType === 'demand'
+            && payloadDropTarget.rowKey === row.key
+            && payloadPreviewPeriodIds.has(period.id);
+          const isPayloadDropErrorCell = isPayloadDragging
+            && payloadDropError !== null
+            && payloadDropTarget !== null
+            && payloadDropTarget.lineType === 'demand'
+            && payloadDropTarget.rowKey === row.key
+            && period.id === payloadDropTarget.periodId;
+          return (
+            <td
+              key={period.id}
+              className={mergeClasses(
+                styles.valueCell,
+                isSelectable && styles.cellEditable,
+                isSelected && styles.cellSelected,
+                isTransferSelected && styles.cellTransferSelected,
+                isDimmed && styles.cellDimmed,
+                isPayloadPreviewTarget && styles.cellPayloadPreviewTarget,
+                isPayloadDropErrorCell && styles.cellPayloadDropError,
+              )}
+              style={{
+                borderTop: rowIdx > 0 ? '2px solid #c8c4be' : '1px solid #e5e4e0',
+                ...(isTransferSelected ? { position: 'relative' as const } : {}),
+                ...demandCellBgStyle,
+              }}
+              data-row-index={demandRowIndex}
+              data-col-index={colIndex}
+              data-cell-key={dragCellKey}
+              data-type="demand"
+              data-period-id={period.id}
+              data-row-key={row.key}
+              data-resource-id={row.resourceId ?? ''}
+              data-placeholder-id={row.placeholderId ?? ''}
+              data-project-id={row.projectId ?? ''}
+              data-year={period.year}
+              data-month={period.month}
+              data-period-status={period.status}
+              onMouseDown={isSelectable
+                ? (e) => {
+                  if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (dVal > 0 && period.status !== 'locked') {
+                      onTransferToggle({
+                        rowKey: row.key,
+                        lineType: 'demand',
+                        sourceResourceId: row.resourceId,
+                        sourcePlaceholderId: row.placeholderId,
+                        sourceProjectId: row.projectId,
+                        periodId: period.id,
+                        year: period.year,
+                        month: period.month,
+                        value: dVal,
+                        costCenterId: ccId,
+                        sourceName: row.resourceName,
+                        sourceProjectName: row.projectName,
+                      });
+                    }
+                    return;
+                  }
+                  onCellMouseDown(e, dragCellKey, 'demand', demandRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, ccId);
+                }
+                : undefined}
+              onMouseEnter={() => {
+                onHoverColIdx(colIndex);
+                onHoverProject(row.key);
+                if (isDragging) onCellMouseEnter(demandRowIndex, colIndex, ccId);
+              }}
+              onMouseLeave={() => { onHoverColIdx(null); onHoverProject(null); }}
+            >
+              <CellEditor
+                value={dVal}
+                colorStyle={getFteColor(dVal)}
+                isEditing={editingCell === existingCellKey}
+                isSaving={savingCells.has(existingCellKey)}
+                canEdit={canEdit}
+                onStartEdit={() => canEdit && onSetEditingCell(existingCellKey)}
+                onCancel={() => onSetEditingCell(null)}
+                onSave={val => onDemandSave(existingCellKey, dLine, row, period, val)}
+                styles={styles}
+              />
+              {isLastTransferHandleCell && (
+                <div
+                  title="Drag to move. Hold Alt to copy."
+                  onMouseDown={e => onPayloadDragStart(e, e.altKey)}
+                  style={{
+                    position: 'absolute',
+                    bottom: 2,
+                    right: 2,
+                    width: 10,
+                    height: 10,
+                    borderRadius: 2,
+                    backgroundColor: 'rgba(118, 74, 188, 0.85)',
+                    cursor: 'grab',
+                    zIndex: 2,
+                    flexShrink: 0,
+                  }}
+                />
+              )}
+            </td>
+          );
+        })}
+      </tr>
+      {/* Supply row */}
+      <tr style={{ backgroundColor: SUPPLY_ROW_BG }}>
+        {/* resource and project cells spanned by rowSpan above */}
+        <td
+          className={styles.typeCellSupply}
+          onMouseEnter={() => onHoverProject(row.key)}
+          onMouseLeave={() => onHoverProject(null)}
+          style={{
+            boxShadow: isLastProject ? `inset 3px 0 0 ${SUPPLY_ACCENT}` : `inset 3px 0 0 ${SUPPLY_ACCENT}, inset 0 -3px 0 #c8c4be`,
+            ...(isRowHovered ? { background: 'rgba(30,58,95,0.08), rgba(13,148,136,0.10), #ffffff' } : {}),
+          }}
+        >
+          <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <span>Supply</span>
+            {canEditSupply && !row.isPlaceholder && isSupplyEditableInCC && (
+              <Menu>
+                <MenuTrigger disableButtonEnhancement>
+                  <Tooltip content="Supply actions" relationship="label" appearance="inverted" withArrow>
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      icon={<MoreHorizontalRegular />}
+                      aria-label={`Supply actions for ${row.projectName}`}
+                      style={{
+                        opacity: isRowHovered ? 1 : 0.35,
+                        flexShrink: 0,
+                        minWidth: '24px',
+                        height: '20px',
+                        padding: 0,
+                      }}
+                    />
+                  </Tooltip>
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    <MenuItem onClick={() => onOpenMoveSupplyDialog(row)}>
+                      Move supply line
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => {
+                        onSetDeleteSupplyGroupRow(row);
+                        onSetDeleteSupplyGroupError(null);
+                      }}
+                    >
+                      Delete supply line
+                    </MenuItem>
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
+            )}
+          </span>
+        </td>
+        {periods.map((period, colIndex) => {
+          const sLine = row.supplyByPeriod.get(period.id);
+          const sVal = sLine?.fte_percent ?? 0;
+          const existingCellKey = `s-${row.key}-${period.id}`;
+          const dragCellKey = buildCellKey('supply', row.resourceId, row.placeholderId, row.projectId, period.id);
+          const isSelectable = canEditSupply && !row.isPlaceholder && isSupplyEditableInCC;
+          const canEdit = isSelectable && !isDragging;
+          const isSelected = selectedCells.has(dragCellKey);
+          const isTransferSelected = transferSelection.some(
+            c => c.lineType === 'supply' && c.periodId === period.id && c.rowKey === row.key,
+          );
+          const isDimmed = isDragging && dragType !== 'supply' && dragStartCcId === ccId;
+          const isCurPeriod = isCurrentPeriod(period);
+          const isColHov = hoveredColIdx === colIndex;
+          const supplyCellBgStyle: React.CSSProperties = (!isSelected && !isTransferSelected && !isPayloadDragging && (isColHov || isRowHovered)) ? (
+            isColHov && isRowHovered
+              ? { background: isCurPeriod ? 'rgba(30,58,95,0.14), rgba(13,148,136,0.26)' : 'rgba(30,58,95,0.12), rgba(13,148,136,0.22)' }
+              : isColHov
+                ? { backgroundColor: isCurPeriod ? 'rgba(13,148,136,0.22)' : 'rgba(13,148,136,0.18)' }
+                : { background: 'rgba(30,58,95,0.08), rgba(13,148,136,0.10)' }
+          ) : {};
+          const isLastTransferHandleCell = lastTransferCell !== null
+            && lastTransferCell.lineType === 'supply'
+            && lastTransferCell.rowKey === row.key
+            && lastTransferCell.periodId === period.id;
+          const isPayloadPreviewTarget = isPayloadDragging
+            && !payloadDropError
+            && payloadDropTarget !== null
+            && payloadDropTarget.lineType === 'supply'
+            && payloadDropTarget.rowKey === row.key
+            && payloadPreviewPeriodIds.has(period.id);
+          const isPayloadDropErrorCell = isPayloadDragging
+            && payloadDropError !== null
+            && payloadDropTarget !== null
+            && payloadDropTarget.lineType === 'supply'
+            && payloadDropTarget.rowKey === row.key
+            && period.id === payloadDropTarget.periodId;
+          return (
+            <td
+              key={period.id}
+              className={mergeClasses(
+                styles.valueCell,
+                isSelectable && styles.cellEditable,
+                isSelected && styles.cellSelected,
+                isTransferSelected && styles.cellTransferSelected,
+                isDimmed && styles.cellDimmed,
+                isPayloadPreviewTarget && styles.cellPayloadPreviewTarget,
+                isPayloadDropErrorCell && styles.cellPayloadDropError,
+              )}
+              style={{
+                ...(!isLastProject ? { boxShadow: 'inset 0 -3px 0 #c8c4be' } : {}),
+                ...(isTransferSelected ? { position: 'relative' as const } : {}),
+                ...supplyCellBgStyle,
+              }}
+              data-row-index={supplyRowIndex}
+              data-col-index={colIndex}
+              data-cell-key={dragCellKey}
+              data-type="supply"
+              data-period-id={period.id}
+              data-row-key={row.key}
+              data-resource-id={row.resourceId ?? ''}
+              data-placeholder-id={row.placeholderId ?? ''}
+              data-project-id={row.projectId ?? ''}
+              data-year={period.year}
+              data-month={period.month}
+              data-period-status={period.status}
+              onMouseDown={isSelectable
+                ? (e) => {
+                  if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (sVal > 0 && period.status !== 'locked') {
+                      onTransferToggle({
+                        rowKey: row.key,
+                        lineType: 'supply',
+                        sourceResourceId: row.resourceId,
+                        sourcePlaceholderId: row.placeholderId,
+                        sourceProjectId: row.projectId,
+                        periodId: period.id,
+                        year: period.year,
+                        month: period.month,
+                        value: sVal,
+                        costCenterId: ccId,
+                        sourceName: row.resourceName,
+                        sourceProjectName: row.projectName,
+                      });
+                    }
+                    return;
+                  }
+                  onCellMouseDown(e, dragCellKey, 'supply', supplyRowIndex, colIndex, row.resourceId, row.placeholderId, row.projectId, period.id, ccId);
+                }
+                : undefined}
+              onMouseEnter={() => {
+                onHoverColIdx(colIndex);
+                onHoverProject(row.key);
+                if (isDragging) onCellMouseEnter(supplyRowIndex, colIndex, ccId);
+              }}
+              onMouseLeave={() => { onHoverColIdx(null); onHoverProject(null); }}
+            >
+              <CellEditor
+                value={sVal}
+                colorStyle={getFteColor(sVal)}
+                isEditing={editingCell === existingCellKey}
+                isSaving={savingCells.has(existingCellKey)}
+                canEdit={canEdit}
+                onStartEdit={() => canEdit && onSetEditingCell(existingCellKey)}
+                onCancel={() => onSetEditingCell(null)}
+                onSave={val => onSupplySave(existingCellKey, sLine, row, period, val)}
+                styles={styles}
+              />
+              {isLastTransferHandleCell && (
+                <div
+                  title="Drag to move. Hold Alt to copy."
+                  onMouseDown={e => onPayloadDragStart(e, e.altKey)}
+                  style={{
+                    position: 'absolute',
+                    bottom: 2,
+                    right: 2,
+                    width: 10,
+                    height: 10,
+                    borderRadius: 2,
+                    backgroundColor: 'rgba(118, 74, 188, 0.85)',
+                    cursor: 'grab',
+                    zIndex: 2,
+                    flexShrink: 0,
+                  }}
+                />
+              )}
+            </td>
+          );
+        })}
+      </tr>
+    </React.Fragment>
+  );
+});
+ResourcePlanningLinePair.displayName = 'ResourcePlanningLinePair';
 
 interface CellEditorProps {
   value: number;

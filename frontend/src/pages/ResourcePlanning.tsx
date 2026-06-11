@@ -261,7 +261,7 @@ export const ResourcePlanning: React.FC = () => {
     }
     if (previousFilterKeyRef.current === filterKey) return;
     previousFilterKeyRef.current = filterKey;
-    if (import.meta.env.DEV) console.log('[RP fetch] filter changed → reloadLines', { filterKey, stack: new Error().stack });
+    if (import.meta.env.DEV) console.log('[RP fetch] filter changed → reloadLines', { filterKey });
     reloadLines();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProjectId, selectedCostCenterId]);
@@ -314,7 +314,7 @@ export const ResourcePlanning: React.FC = () => {
     // In-flight guard: prevents concurrent calls (e.g. React 18 StrictMode double-mount)
     // from both making network requests before the first resolves and sets _cache.loadedAt.
     if (_cache.loading) {
-      if (import.meta.env.DEV) console.log('[RP fetch] loadAll SKIPPED (already in-flight)', new Error().stack);
+      if (import.meta.env.DEV) console.log('[RP fetch] loadAll SKIPPED (already in-flight)');
       return;
     }
     const now = Date.now();
@@ -344,7 +344,7 @@ export const ResourcePlanning: React.FC = () => {
     }
 
     _cache.loading = true;
-    if (import.meta.env.DEV) console.log('[RP fetch] loadAll FETCH', new Error().stack);
+    if (import.meta.env.DEV) console.log('[RP fetch] loadAll FETCH');
     try {
       setLoading(true);
       const [demandData, supplyData] = await Promise.all([
@@ -404,7 +404,7 @@ export const ResourcePlanning: React.FC = () => {
   // Passes active project/CC filters so backend returns only the relevant subset.
   const reloadLines = useCallback(async () => {
     if (openPeriodsRef.current.length === 0) return;
-    if (import.meta.env.DEV) console.log('[RP fetch] reloadLines', { projectId: selectedProjectIdRef.current, costCenterId: selectedCostCenterIdRef.current, stack: new Error().stack });
+    if (import.meta.env.DEV) console.log('[RP fetch] reloadLines', { projectId: selectedProjectIdRef.current, costCenterId: selectedCostCenterIdRef.current });
     const projectId = selectedProjectIdRef.current || undefined;
     const costCenterId = selectedCostCenterIdRef.current || undefined;
     const filters = (projectId || costCenterId) ? { projectId, costCenterId } : undefined;

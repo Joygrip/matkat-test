@@ -89,6 +89,15 @@ function buildCellKey(
   return `${type}::${resourceId ?? ''}::${placeholderId ?? ''}::${projectId ?? 'general'}::${periodId}`;
 }
 
+const EMPTY_STRING_SET = new Set<string>();
+
+function buildCellPrefix(
+  type: 'demand' | 'supply',
+  row: { resourceId: string | null; placeholderId: string | null; projectId: string | null },
+): string {
+  return `${type}::${row.resourceId ?? ''}::${row.placeholderId ?? ''}::${row.projectId ?? 'general'}::`;
+}
+
 function parseCellKey(key: string): {
   type: 'demand' | 'supply';
   resourceId: string | null;
@@ -2643,6 +2652,16 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                             const supplyRowIndex = flatRowIndex * 2 + 1;
                             const isFirstRow = rowIdx === 0;
                             const isLastProject = rowIdx === rg.rows.length - 1;
+                            const dSavePfx = 'd-' + row.key + '-';
+                            const sSavePfx = 's-' + row.key + '-';
+                            const rowSavingSig = [...savingCells].filter(k => k.startsWith(dSavePfx) || k.startsWith(sSavePfx)).sort().join('\n');
+                            const rowEditingSig = editingCell !== null && (editingCell.startsWith(dSavePfx) || editingCell.startsWith(sSavePfx)) ? editingCell : '';
+                            const rowTransferSig = transferSelection.filter(c => c.rowKey === row.key).map(c => `${c.lineType}:${c.periodId}`).sort().join('\n');
+                            const demandPfx = buildCellPrefix('demand', row);
+                            const supplyPfx = buildCellPrefix('supply', row);
+                            const rowSelectedSig = [...selectedCells].filter(k => k.startsWith(demandPfx) || k.startsWith(supplyPfx)).sort().join('\n');
+                            const rowLastTransferPeriodId = lastTransferCell?.rowKey === row.key ? lastTransferCell.periodId : null;
+                            const rowLastTransferLineType = lastTransferCell?.rowKey === row.key ? lastTransferCell.lineType : null;
                             return (
                               <ResourcePlanningLinePair
                                 key={row.key}
@@ -2659,9 +2678,12 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                 styles={styles}
                                 canEditDemand={canEditDemand}
                                 canEditSupply={canEditSupply}
-                                selectedCells={selectedCells}
-                                editingCell={editingCell}
-                                savingCells={savingCells}
+                                rowSelectedSig={rowSelectedSig}
+                                rowEditingSig={rowEditingSig}
+                                rowSavingSig={rowSavingSig}
+                                rowLastTransferPeriodId={rowLastTransferPeriodId}
+                                rowLastTransferLineType={rowLastTransferLineType}
+                                rowTransferSig={rowTransferSig}
                                 isDragging={isDragging}
                                 dragType={dragType}
                                 dragStartCcId={dragStart?.ccId ?? null}
@@ -2671,8 +2693,6 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                 payloadDropError={payloadDropError}
                                 payloadDropTarget={payloadDropTarget}
                                 payloadPreviewPeriodIds={payloadPreviewPeriodIds}
-                                lastTransferCell={lastTransferCell}
-                                transferSelection={transferSelection}
                                 onDemandSave={saveDemandCell}
                                 onSupplySave={saveSupplyCell}
                                 onCellMouseDown={handleCellMouseDown}
@@ -4156,9 +4176,12 @@ interface ResourcePlanningLinePairProps {
   styles: ReturnType<typeof useStyles>;
   canEditDemand: boolean;
   canEditSupply: boolean;
-  selectedCells: Set<string>;
-  editingCell: string | null;
-  savingCells: Set<string>;
+  rowSelectedSig: string;
+  rowEditingSig: string;
+  rowSavingSig: string;
+  rowLastTransferPeriodId: string | null;
+  rowLastTransferLineType: 'demand' | 'supply' | null;
+  rowTransferSig: string;
   isDragging: boolean;
   dragType: 'demand' | 'supply' | null;
   dragStartCcId: string | null;
@@ -4172,8 +4195,6 @@ interface ResourcePlanningLinePairProps {
     resourceId: string | null; placeholderId: string | null; projectId: string | null;
   } | null;
   payloadPreviewPeriodIds: Set<string>;
-  lastTransferCell: SelectedPlanningCell | null;
-  transferSelection: SelectedPlanningCell[];
   onDemandSave: (cellKey: string, line: DemandLine | undefined, row: MergedMatrixRow, period: Period, val: number) => void;
   onSupplySave: (cellKey: string, line: SupplyLine | undefined, row: MergedMatrixRow, period: Period, val: number) => void;
   onCellMouseDown: (e: React.MouseEvent, cellKey: string, type: 'demand' | 'supply', rowIndex: number, colIndex: number, resourceId: string | null, placeholderId: string | null, projectId: string | null, periodId: string, ccId: string) => void;
@@ -4205,9 +4226,12 @@ const ResourcePlanningLinePair = React.memo(({
   styles,
   canEditDemand,
   canEditSupply,
-  selectedCells,
-  editingCell,
-  savingCells,
+  rowSelectedSig,
+  rowEditingSig,
+  rowSavingSig,
+  rowLastTransferPeriodId,
+  rowLastTransferLineType,
+  rowTransferSig,
   isDragging,
   dragType,
   dragStartCcId,
@@ -4217,8 +4241,6 @@ const ResourcePlanningLinePair = React.memo(({
   payloadDropError,
   payloadDropTarget,
   payloadPreviewPeriodIds,
-  lastTransferCell,
-  transferSelection,
   onDemandSave,
   onSupplySave,
   onCellMouseDown,
@@ -4236,6 +4258,9 @@ const ResourcePlanningLinePair = React.memo(({
   onSetDeleteSupplyGroupError,
 }: ResourcePlanningLinePairProps) => {
   if (import.meta.env.DEV) console.count('[RPM] line pair render ' + row.key);
+  const rowSavingSet = useMemo(() => rowSavingSig ? new Set(rowSavingSig.split('\n')) : EMPTY_STRING_SET, [rowSavingSig]);
+  const rowSelectedSet = useMemo(() => rowSelectedSig ? new Set(rowSelectedSig.split('\n')) : EMPTY_STRING_SET, [rowSelectedSig]);
+  const rowTransferSet = useMemo(() => rowTransferSig ? new Set(rowTransferSig.split('\n')) : EMPTY_STRING_SET, [rowTransferSig]);
   return (
     <React.Fragment>
       {/* Demand row */}
@@ -4374,10 +4399,8 @@ const ResourcePlanningLinePair = React.memo(({
           const dragCellKey = buildCellKey('demand', row.resourceId, row.placeholderId, row.projectId, period.id);
           const isSelectable = canEditDemand && !row.isGeneral;
           const canEdit = isSelectable && !isDragging;
-          const isSelected = selectedCells.has(dragCellKey);
-          const isTransferSelected = transferSelection.some(
-            c => c.lineType === 'demand' && c.periodId === period.id && c.rowKey === row.key,
-          );
+          const isSelected = rowSelectedSet.has(dragCellKey);
+          const isTransferSelected = rowTransferSet.has('demand:' + period.id);
           const isDimmed = isDragging && dragType !== 'demand' && dragStartCcId === ccId;
           const isCurPeriod = isCurrentPeriod(period);
           const isColHov = hoveredColIdx === colIndex;
@@ -4388,10 +4411,7 @@ const ResourcePlanningLinePair = React.memo(({
                 ? { backgroundColor: isCurPeriod ? 'rgba(217,119,6,0.22)' : 'rgba(217,119,6,0.18)' }
                 : { background: 'rgba(30,58,95,0.08), rgba(217,119,6,0.10)' }
           ) : {};
-          const isLastTransferHandleCell = lastTransferCell !== null
-            && lastTransferCell.lineType === 'demand'
-            && lastTransferCell.rowKey === row.key
-            && lastTransferCell.periodId === period.id;
+          const isLastTransferHandleCell = rowLastTransferLineType === 'demand' && rowLastTransferPeriodId === period.id;
           const isPayloadPreviewTarget = isPayloadDragging
             && !payloadDropError
             && payloadDropTarget !== null
@@ -4469,8 +4489,8 @@ const ResourcePlanningLinePair = React.memo(({
               <CellEditor
                 value={dVal}
                 colorStyle={getFteColor(dVal)}
-                isEditing={editingCell === existingCellKey}
-                isSaving={savingCells.has(existingCellKey)}
+                isEditing={rowEditingSig === existingCellKey}
+                isSaving={rowSavingSet.has(existingCellKey)}
                 canEdit={canEdit}
                 onStartEdit={() => canEdit && onSetEditingCell(existingCellKey)}
                 onCancel={() => onSetEditingCell(null)}
@@ -4558,10 +4578,8 @@ const ResourcePlanningLinePair = React.memo(({
           const dragCellKey = buildCellKey('supply', row.resourceId, row.placeholderId, row.projectId, period.id);
           const isSelectable = canEditSupply && !row.isPlaceholder && isSupplyEditableInCC;
           const canEdit = isSelectable && !isDragging;
-          const isSelected = selectedCells.has(dragCellKey);
-          const isTransferSelected = transferSelection.some(
-            c => c.lineType === 'supply' && c.periodId === period.id && c.rowKey === row.key,
-          );
+          const isSelected = rowSelectedSet.has(dragCellKey);
+          const isTransferSelected = rowTransferSet.has('supply:' + period.id);
           const isDimmed = isDragging && dragType !== 'supply' && dragStartCcId === ccId;
           const isCurPeriod = isCurrentPeriod(period);
           const isColHov = hoveredColIdx === colIndex;
@@ -4572,10 +4590,7 @@ const ResourcePlanningLinePair = React.memo(({
                 ? { backgroundColor: isCurPeriod ? 'rgba(13,148,136,0.22)' : 'rgba(13,148,136,0.18)' }
                 : { background: 'rgba(30,58,95,0.08), rgba(13,148,136,0.10)' }
           ) : {};
-          const isLastTransferHandleCell = lastTransferCell !== null
-            && lastTransferCell.lineType === 'supply'
-            && lastTransferCell.rowKey === row.key
-            && lastTransferCell.periodId === period.id;
+          const isLastTransferHandleCell = rowLastTransferLineType === 'supply' && rowLastTransferPeriodId === period.id;
           const isPayloadPreviewTarget = isPayloadDragging
             && !payloadDropError
             && payloadDropTarget !== null
@@ -4653,8 +4668,8 @@ const ResourcePlanningLinePair = React.memo(({
               <CellEditor
                 value={sVal}
                 colorStyle={getFteColor(sVal)}
-                isEditing={editingCell === existingCellKey}
-                isSaving={savingCells.has(existingCellKey)}
+                isEditing={rowEditingSig === existingCellKey}
+                isSaving={rowSavingSet.has(existingCellKey)}
                 canEdit={canEdit}
                 onStartEdit={() => canEdit && onSetEditingCell(existingCellKey)}
                 onCancel={() => onSetEditingCell(null)}

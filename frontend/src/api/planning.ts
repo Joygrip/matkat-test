@@ -161,11 +161,7 @@ export const planningApi = {
     if (filters?.costCenterId) params.set('cost_center_id', filters.costCenterId);
     if (filters?.resourceId) params.set('resource_id', filters.resourceId);
     const qs = params.toString();
-    const url = `/demand-lines${qs ? `?${qs}` : ''}`;
-    console.log('[planningApi] GET', url);
-    const result = await apiClient.get<DemandLine[]>(url);
-    console.log('[planningApi] Response:', result.length, 'lines');
-    return result;
+    return apiClient.get<DemandLine[]>(`/demand-lines${qs ? `?${qs}` : ''}`);
   },
   
   async createDemandLine(data: CreateDemandLine): Promise<DemandLine> {

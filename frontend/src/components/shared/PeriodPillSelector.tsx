@@ -241,11 +241,15 @@ export const PeriodPillSelector: React.FC<Props> = ({
         list.push({ label: `Last ${n} locked months`, pick: lockedPeriods.slice(0, n) });
       }
     });
-    const prevYear = new Date().getFullYear() - 1;
-    const prevYearPeriods = lockedPeriods.filter(p => p.year === prevYear);
-    if (prevYearPeriods.length > 0) {
-      list.push({ label: `Year ${prevYear}`, pick: prevYearPeriods });
-    }
+    // One whole-year preset per locked year, newest first
+    const years = [...new Set(lockedPeriods.map(p => p.year))].sort((a, b) => b - a);
+    years.forEach(year => {
+      const yearPeriods = lockedPeriods.filter(p => p.year === year);
+      list.push({
+        label: `Year ${year}${yearPeriods.length < 12 ? ` (${yearPeriods.length} locked months)` : ''}`,
+        pick: yearPeriods,
+      });
+    });
     return list;
   }, [lockedPeriods]);
 

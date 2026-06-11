@@ -7,12 +7,17 @@ Today's calendar date does not influence which open period is selected.
 Historical years are expected to be LOCKED, which automatically excludes them.
 """
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
 from api.app.models.core import Period, PeriodStatus
-from api.app.services.scheduler import _get_open_period
+from api.app.models.notification_schedule import (
+    NotificationSchedule,
+    NotificationScheduleType,
+    TriggerType,
+)
+from api.app.services.scheduler import _claim_schedule, _get_open_period, _release_claim
 from api.app.routers.notification_schedules import _current_open_period
 
 TENANT = "test-tenant-001"
@@ -140,3 +145,72 @@ class TestCurrentOpenPeriod:
 
         result = _current_open_period(db, TENANT)
         assert result == (today.year, today.month)
+
+
+# ── _claim_schedule / _release_claim (multi-worker dedup) ─────────────────────
+
+def _schedule(last_run_at=None) -> NotificationSchedule:
+    return NotificationSchedule(
+        id=str(uuid.uuid4()),
+        tenant_id=TENANT,
+        notification_type=NotificationScheduleType.PLANNING_REMINDER.value,
+        trigger_type=TriggerType.DAY_OF_MONTH,
+        trigger_value=1,
+        time_of_day="07:00",
+        is_active=True,
+        last_run_at=last_run_at,
+        created_by="test",
+    )
+
+
+class TestClaimSchedule:
+    def test_claim_succeeds_when_never_run(self, db):
+        schedule = _schedule(last_run_at=None)
+        db.add(schedule)
+        db.commit()
+
+        now = datetime(2026, 6, 11, 7, 0, 0)
+        assert _claim_schedule(db, schedule, now) is True
+
+        db.expire_all()
+        assert db.get(NotificationSchedule, schedule.id).last_run_at == now
+
+    def test_second_claim_with_stale_read_fails(self, db):
+        """Two workers read the same last_run_at; only one claim may win."""
+        schedule = _schedule(last_run_at=None)
+        db.add(schedule)
+        db.commit()
+
+        # Worker B's view of the row before A claims: same id, last_run_at=None.
+        # A detached object models B's separate session — commit in this session
+        # would otherwise refresh the stale value away.
+        workers_b_view = _schedule(last_run_at=None)
+        workers_b_view.id = schedule.id
+
+        assert _claim_schedule(db, schedule, datetime(2026, 6, 11, 7, 0, 0)) is True
+        assert _claim_schedule(db, workers_b_view, datetime(2026, 6, 11, 7, 0, 5)) is False
+
+    def test_claim_succeeds_with_matching_previous_run(self, db):
+        prev = datetime(2026, 6, 10, 7, 0, 0)
+        schedule = _schedule(last_run_at=prev)
+        db.add(schedule)
+        db.commit()
+
+        now = datetime(2026, 6, 11, 7, 0, 0)
+        assert _claim_schedule(db, schedule, now) is True
+
+        db.expire_all()
+        assert db.get(NotificationSchedule, schedule.id).last_run_at == now
+
+    def test_release_claim_restores_previous_value(self, db):
+        """Failed dispatch puts last_run_at back so the next tick retries."""
+        prev = datetime(2026, 6, 10, 7, 0, 0)
+        schedule = _schedule(last_run_at=prev)
+        db.add(schedule)
+        db.commit()
+
+        assert _claim_schedule(db, schedule, datetime(2026, 6, 11, 7, 0, 0)) is True
+        _release_claim(db, schedule, prev)
+
+        db.expire_all()
+        assert db.get(NotificationSchedule, schedule.id).last_run_at == prev

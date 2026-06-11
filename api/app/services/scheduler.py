@@ -140,6 +140,35 @@ def _dispatch(service: NotificationsService, schedule: NotificationSchedule, yea
     return {}
 
 
+def _claim_schedule(db, schedule: NotificationSchedule, now_utc: datetime) -> bool:
+    """Atomically claim a schedule for dispatch by advancing last_run_at.
+
+    The conditional UPDATE only succeeds if last_run_at still holds the value
+    we read when evaluating _should_fire. With multiple uvicorn workers (or
+    App Service instances) each running its own scheduler, exactly one
+    process wins the claim — the others see 0 rows updated and skip.
+    """
+    prev_last_run = schedule.last_run_at
+    claimed = (
+        db.query(NotificationSchedule)
+        .filter(
+            NotificationSchedule.id == schedule.id,
+            NotificationSchedule.last_run_at == prev_last_run,
+        )
+        .update({"last_run_at": now_utc}, synchronize_session=False)
+    )
+    db.commit()
+    return bool(claimed)
+
+
+def _release_claim(db, schedule: NotificationSchedule, prev_last_run) -> None:
+    """Restore last_run_at after a failed dispatch so the next tick retries."""
+    db.query(NotificationSchedule).filter(
+        NotificationSchedule.id == schedule.id
+    ).update({"last_run_at": prev_last_run}, synchronize_session=False)
+    db.commit()
+
+
 def _run_tick() -> None:
     """Check all active schedules and fire those whose conditions are met."""
     db = _open_session()
@@ -155,6 +184,8 @@ def _run_tick() -> None:
         )
 
         for schedule in schedules:
+            prev_last_run = schedule.last_run_at
+            claimed = False
             try:
                 if schedule.notification_type == NotificationScheduleType.APPROVAL_REJECTION.value:
                     continue  # event-driven — never fired by the scheduler
@@ -173,6 +204,12 @@ def _run_tick() -> None:
                     continue
                 year, month = period_ym
 
+                # Claim before dispatch (stored as UTC) so concurrent workers
+                # cannot double-send; a failed dispatch releases the claim below.
+                if not _claim_schedule(db, schedule, datetime.utcnow()):
+                    continue  # another worker/instance claimed this schedule
+                claimed = True
+
                 system_user = CurrentUser(
                     id="00000000-0000-0000-0000-000000000000",
                     tenant_id=schedule.tenant_id,
@@ -184,9 +221,6 @@ def _run_tick() -> None:
 
                 service = NotificationsService(db, system_user)
                 result = _dispatch(service, schedule, year, month)
-
-                # Store last_run_at as UTC
-                schedule.last_run_at = datetime.utcnow()
                 db.commit()
 
                 logger.info(
@@ -205,6 +239,14 @@ def _run_tick() -> None:
                     schedule.tenant_id,
                 )
                 db.rollback()
+                if claimed:
+                    try:
+                        _release_claim(db, schedule, prev_last_run)
+                    except Exception:
+                        logger.exception(
+                            "scheduler: failed to release claim for schedule %s", schedule.id
+                        )
+                        db.rollback()
     finally:
         db.close()
 

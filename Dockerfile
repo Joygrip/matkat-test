@@ -24,4 +24,7 @@ COPY api/ api/
 
 EXPOSE 8000
 
-CMD ["uvicorn", "api.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 2 workers: avoids single-process serialization under peak load. The
+# notification scheduler runs in each worker but dispatch is deduplicated
+# via an atomic last_run_at claim (see api/app/services/scheduler.py).
+CMD ["uvicorn", "api.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

@@ -180,7 +180,10 @@ async def startup_event():
             "Set DATABASE_URL to a SQL Server connection string in Azure App Service."
         )
 
-    if os.getenv("TESTING", "").lower() not in ("1", "true", "yes"):
+    if (
+        settings.notification_scheduler_enabled
+        and os.getenv("TESTING", "").lower() not in ("1", "true", "yes")
+    ):
         notification_scheduler.start()
 
     if settings.dev_auth_bypass:

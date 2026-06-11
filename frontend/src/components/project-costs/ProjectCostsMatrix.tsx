@@ -516,6 +516,8 @@ export const ProjectCostsMatrix: React.FC = () => {
 
   // Planning shows open periods (editable); History shows locked periods read-only
   const [viewMode, setViewMode] = useState<'planning' | 'history'>('planning');
+  // 'recent' = the most recent locked months; a number = all locked months of that year
+  const [historyYear, setHistoryYear] = useState<'recent' | number>('recent');
 
   const canEditProject = useCallback((_pmUserIds: string[]): boolean => {
     return viewMode !== 'history' && (isFinanceOrAdmin || isPM);
@@ -679,12 +681,22 @@ export const ProjectCostsMatrix: React.FC = () => {
 
   // ── Displayed periods: open (Planning) or the most recent locked months (History) ──
   const openPeriods = useMemo(() => allPeriods.filter(p => p.status === 'open'), [allPeriods]);
-  const lockedRecentPeriods = useMemo(
-    // allPeriods is sorted ascending; cap History to the most recent months for render cost
-    () => allPeriods.filter(p => p.status !== 'open').slice(-HISTORY_MAX_MONTHS),
+  const lockedPeriodsAll = useMemo(
+    () => allPeriods.filter(p => p.status !== 'open'),  // allPeriods is sorted ascending
     [allPeriods]
   );
-  const displayPeriods = viewMode === 'history' ? lockedRecentPeriods : openPeriods;
+  const lockedYears = useMemo(
+    () => [...new Set(lockedPeriodsAll.map(p => p.year))].sort((a, b) => b - a),
+    [lockedPeriodsAll]
+  );
+  // Column count stays capped: 'recent' shows HISTORY_MAX_MONTHS, a year shows ≤12
+  const historyPeriods = useMemo(
+    () => historyYear === 'recent'
+      ? lockedPeriodsAll.slice(-HISTORY_MAX_MONTHS)
+      : lockedPeriodsAll.filter(p => p.year === historyYear),
+    [lockedPeriodsAll, historyYear]
+  );
+  const displayPeriods = viewMode === 'history' ? historyPeriods : openPeriods;
   const displayPeriodIds = useMemo(() => new Set(displayPeriods.map(p => p.id)), [displayPeriods]);
 
   // ── Build matrix groups ──
@@ -968,16 +980,33 @@ export const ProjectCostsMatrix: React.FC = () => {
         <Tab value="planning">Planning</Tab>
         <Tab value="history">History</Tab>
       </TabList>
+      {viewMode === 'history' && lockedYears.length > 0 && (
+        <select
+          value={historyYear === 'recent' ? 'recent' : String(historyYear)}
+          onChange={e => setHistoryYear(e.target.value === 'recent' ? 'recent' : Number(e.target.value))}
+          style={{
+            padding: '4px 8px',
+            border: `1px solid ${tokens.colorNeutralStroke1}`,
+            borderRadius: tokens.borderRadiusMedium,
+            fontSize: tokens.fontSizeBase300,
+          }}
+          aria-label="Historical year"
+        >
+          <option value="recent">Last {HISTORY_MAX_MONTHS} locked months</option>
+          {lockedYears.map(y => (
+            <option key={y} value={String(y)}>Year {y}</option>
+          ))}
+        </select>
+      )}
       {viewMode === 'history' && (
         <span style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
           🔒 Historical view — locked periods are read-only
-          {lockedRecentPeriods.length === HISTORY_MAX_MONTHS && ` (last ${HISTORY_MAX_MONTHS} locked months)`}
         </span>
       )}
     </div>
   );
 
-  if (viewMode === 'history' && lockedRecentPeriods.length === 0) {
+  if (viewMode === 'history' && lockedPeriodsAll.length === 0) {
     return (
       <div className={styles.cardWrapper}>
         {modeToggle}

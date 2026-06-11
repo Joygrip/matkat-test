@@ -238,12 +238,23 @@ export const ResourcePlanning: React.FC = () => {
   const [historyLoading, setHistoryLoading] = useState(false);
   const historyLoadedRef = useRef(false);
 
-  const lockedRecentPeriods = useMemo(
+  const lockedPeriodsAll = useMemo(
     () => contextPeriods
       .filter(p => p.status !== 'open')
-      .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month))
-      .slice(-HISTORY_MAX_MONTHS),
+      .sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month)),
     [contextPeriods]
+  );
+  const lockedYears = useMemo(
+    () => [...new Set(lockedPeriodsAll.map(p => p.year))].sort((a, b) => b - a),
+    [lockedPeriodsAll]
+  );
+  // 'recent' = the most recent locked months; a number = all locked months of that year
+  const [historyYear, setHistoryYear] = useState<'recent' | number>('recent');
+  const historyPeriods = useMemo(
+    () => historyYear === 'recent'
+      ? lockedPeriodsAll.slice(-HISTORY_MAX_MONTHS)
+      : lockedPeriodsAll.filter(p => p.year === historyYear),
+    [lockedPeriodsAll, historyYear]
   );
 
   // Derive open periods from context whenever it updates
@@ -340,20 +351,30 @@ export const ResourcePlanning: React.FC = () => {
   const switchViewMode = useCallback((mode: 'planning' | 'history') => {
     setViewMode(mode);
     if (mode === 'history') {
-      setSelectedPeriodIds(new Set(lockedRecentPeriods.map(p => p.id)));
+      setSelectedPeriodIds(new Set(historyPeriods.map(p => p.id)));
     } else {
       const defaultPeriod = getEarliestOpenPeriod(openPeriods);
       setSelectedPeriodIds(defaultPeriod ? new Set([defaultPeriod.id]) : new Set());
     }
-  }, [lockedRecentPeriods, openPeriods]);
+  }, [historyPeriods, openPeriods]);
 
-  // Lazily load historical (locked-period) lines once, on first History visit.
+  // Year picker: switch the displayed locked-month window and select all of it.
+  const switchHistoryYear = useCallback((year: 'recent' | number) => {
+    setHistoryYear(year);
+    const next = year === 'recent'
+      ? lockedPeriodsAll.slice(-HISTORY_MAX_MONTHS)
+      : lockedPeriodsAll.filter(p => p.year === year);
+    setSelectedPeriodIds(new Set(next.map(p => p.id)));
+  }, [lockedPeriodsAll]);
+
+  // Lazily load ALL historical (locked-period) lines once, on first History visit.
+  // One fetch covers every locked year; the year picker filters client-side.
   // Kept out of the planning module cache on purpose.
   useEffect(() => {
     if (viewMode !== 'history' || historyLoadedRef.current) return;
     historyLoadedRef.current = true;
     setHistoryLoading(true);
-    const lockedIds = new Set(lockedRecentPeriods.map(p => p.id));
+    const lockedIds = new Set(lockedPeriodsAll.map(p => p.id));
     Promise.all([
       planningApi.getAllDemandLines({ includeLocked: true }),
       planningApi.getAllSupplyLines({ includeLocked: true }),
@@ -367,10 +388,10 @@ export const ResourcePlanning: React.FC = () => {
         setError(formatApiError(err, 'Failed to load historical planning data'));
       })
       .finally(() => setHistoryLoading(false));
-  }, [viewMode, lockedRecentPeriods]);
+  }, [viewMode, lockedPeriodsAll]);
 
   const isHistory = viewMode === 'history';
-  const displayPeriods = isHistory ? lockedRecentPeriods : openPeriods;
+  const displayPeriods = isHistory ? historyPeriods : openPeriods;
 
   const loadAll = async (open: Period[]) => {
     if (!user?.tenant_id) return;
@@ -651,10 +672,27 @@ export const ResourcePlanning: React.FC = () => {
           <Tab value="planning">Planning</Tab>
           <Tab value="history">History</Tab>
         </TabList>
+        {isHistory && lockedYears.length > 0 && (
+          <select
+            value={historyYear === 'recent' ? 'recent' : String(historyYear)}
+            onChange={e => switchHistoryYear(e.target.value === 'recent' ? 'recent' : Number(e.target.value))}
+            style={{
+              padding: '4px 8px',
+              border: `1px solid ${tokens.colorNeutralStroke1}`,
+              borderRadius: tokens.borderRadiusMedium,
+              fontSize: tokens.fontSizeBase300,
+            }}
+            aria-label="Historical year"
+          >
+            <option value="recent">Last {HISTORY_MAX_MONTHS} locked months</option>
+            {lockedYears.map(y => (
+              <option key={y} value={String(y)}>Year {y}</option>
+            ))}
+          </select>
+        )}
         {isHistory && (
           <span style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
             🔒 Historical view — locked periods are read-only
-            {lockedRecentPeriods.length === HISTORY_MAX_MONTHS && ` (last ${HISTORY_MAX_MONTHS} locked months)`}
           </span>
         )}
       </div>
@@ -662,7 +700,7 @@ export const ResourcePlanning: React.FC = () => {
       {isHistory && historyLoading && (
         <LoadingState message="Loading historical planning data..." />
       )}
-      {isHistory && !historyLoading && lockedRecentPeriods.length === 0 && (
+      {isHistory && !historyLoading && lockedPeriodsAll.length === 0 && (
         <StatusBanner
           intent="info"
           title="No historical periods"

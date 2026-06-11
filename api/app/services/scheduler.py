@@ -146,7 +146,7 @@ def _run_tick() -> None:
     try:
         # All time comparisons use UTC+2; last_run_at is stored as UTC
         now_local = datetime.now(tz=_UTC2)
-        print(f"[SCHEDULER TICK] {now_local.isoformat()}")
+        logger.debug("scheduler tick at %s", now_local.isoformat())
 
         schedules = (
             db.query(NotificationSchedule)
@@ -197,8 +197,7 @@ def _run_tick() -> None:
                     month,
                     result,
                 )
-            except Exception as e:
-                print(f"[SCHEDULER ERROR] schedule={schedule.id}: {e}")
+            except Exception:
                 logger.exception(
                     "scheduler: error processing schedule %s (type=%s tenant=%s)",
                     schedule.id,

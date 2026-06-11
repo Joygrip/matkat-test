@@ -208,16 +208,46 @@ export const PeriodPillSelector: React.FC<Props> = ({
       .sort((a, b) => a.year !== b.year ? b.year - a.year : b.month - a.month);
   }, [allPeriods, allowArchive]);
 
-  // Derive active locked period from selectedIds (at most one)
+  // All selected locked periods, newest-first (multi-select supported)
   const activeLocked = useMemo(
-    () => lockedPeriods.find(p => selectedIds.has(p.id)) ?? null,
+    () => lockedPeriods.filter(p => selectedIds.has(p.id)),
     [lockedPeriods, selectedIds]
   );
 
-  const selectLocked = (p: Period) => {
-    onChange(new Set([p.id]));
+  // IDs of selected locked periods — preserved when open-period pills are clicked/dragged
+  const selectedLockedIds = useMemo(
+    () => activeLocked.map(p => p.id),
+    [activeLocked]
+  );
+
+  const toggleLocked = (p: Period) => {
+    const next = new Set(selectedIds);
+    if (next.has(p.id)) next.delete(p.id);
+    else next.add(p.id);
+    onChange(next);
+    // Dropdown stays open so several months can be picked in one go
+  };
+
+  // Presets replace the whole selection with the picked locked months
+  const applyPreset = (pick: Period[]) => {
+    onChange(new Set(pick.map(p => p.id)));
     setDropdownOpen(false);
   };
+
+  const presets = useMemo(() => {
+    const list: { label: string; pick: Period[] }[] = [];
+    [3, 6, 12].forEach(n => {
+      if (lockedPeriods.length >= n) {
+        list.push({ label: `Last ${n} locked months`, pick: lockedPeriods.slice(0, n) });
+      }
+    });
+    const prevYear = new Date().getFullYear() - 1;
+    const prevYearPeriods = lockedPeriods.filter(p => p.year === prevYear);
+    if (prevYearPeriods.length > 0) {
+      list.push({ label: `Year ${prevYear}`, pick: prevYearPeriods });
+    }
+    return list;
+  }, [lockedPeriods]);
 
   return (
     <div
@@ -237,14 +267,30 @@ export const PeriodPillSelector: React.FC<Props> = ({
           </button>
           {dropdownOpen && (
             <div className={styles.dropdown}>
+              {presets.map(preset => (
+                <div
+                  key={preset.label}
+                  className={styles.dropdownItem}
+                  style={{ fontWeight: 600 }}
+                  onMouseDown={e => { e.preventDefault(); applyPreset(preset.pick); }}
+                >
+                  <span>{preset.label}</span>
+                </div>
+              ))}
+              {presets.length > 0 && (
+                <div style={{ borderTop: '1px solid #e8e6e3', margin: '4px 0' }} />
+              )}
               {lockedPeriods.map(p => (
                 <div
                   key={p.id}
                   className={styles.dropdownItem}
-                  onMouseDown={e => { e.preventDefault(); selectLocked(p); }}
+                  onMouseDown={e => { e.preventDefault(); toggleLocked(p); }}
                 >
                   <span>{fmtPeriodLong(p)}</span>
-                  <LockIcon size={11} />
+                  <span>
+                    {selectedIds.has(p.id) && <span style={{ marginRight: 4 }}>✓</span>}
+                    <LockIcon size={11} />
+                  </span>
                 </div>
               ))}
             </div>
@@ -252,19 +298,23 @@ export const PeriodPillSelector: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Active locked period pill */}
-      {activeLocked && (
+      {/* Selected locked period pills — click removes from selection */}
+      {activeLocked.length > 0 && (
         <>
-          <button
-            className={selectedIds.has(activeLocked.id) ? styles.periodPillLockedActive : styles.periodPillLocked}
-            onMouseDown={e => {
-              e.preventDefault();
-              onChange(new Set([activeLocked.id]));
-            }}
-          >
-            {fmtPeriodShort(activeLocked)}
-            <LockIcon />
-          </button>
+          {activeLocked.map(p => (
+            <button
+              key={p.id}
+              className={styles.periodPillLockedActive}
+              title="Locked period (read-only) — click to remove"
+              onMouseDown={e => {
+                e.preventDefault();
+                toggleLocked(p);
+              }}
+            >
+              {fmtPeriodShort(p)}
+              <LockIcon />
+            </button>
+          ))}
           <div className={styles.separator} />
         </>
       )}
@@ -284,14 +334,14 @@ export const PeriodPillSelector: React.FC<Props> = ({
               e.preventDefault();
               setIsDragging(true);
               setDragStartIdx(i);
-              // Selecting an open period clears any locked selection
-              onChange(new Set([p.id]));
+              // Open-period click/drag resets the open range but keeps locked picks
+              onChange(new Set([...selectedLockedIds, p.id]));
             }}
             onMouseEnter={() => {
               if (!isDragging || dragStartIdx === null) return;
               const lo = Math.min(dragStartIdx, i);
               const hi = Math.max(dragStartIdx, i);
-              onChange(new Set(periods.slice(lo, hi + 1).map(x => x.id)));
+              onChange(new Set([...selectedLockedIds, ...periods.slice(lo, hi + 1).map(x => x.id)]));
             }}
           >
             {fmtPeriodShort(p)}

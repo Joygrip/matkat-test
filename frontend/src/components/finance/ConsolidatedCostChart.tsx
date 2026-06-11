@@ -186,25 +186,30 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
       .finally(() => setLoading(false));
   }, [groupBy, scope]);
 
-  // Lazily fetch data for a selected locked period and cache it
+  // Lazily fetch data for all selected locked periods (one call per uncached month).
+  // Locked-period data never changes, so the per-month cache lives for the session.
   useEffect(() => {
-    const lockedPeriod = periods.find(p => selectedPeriodIds.has(p.id) && p.status !== 'open');
-    if (!lockedPeriod) {
+    const lockedSelected = periods.filter(p => selectedPeriodIds.has(p.id) && p.status !== 'open');
+    if (lockedSelected.length === 0) {
       setLockedRawData([]);
       return;
     }
-    const key = `${lockedPeriod.year}-${lockedPeriod.month}`;
-    const cached = lockedCacheRef.current.get(key);
-    if (cached) {
-      setLockedRawData(cached);
-      return;
-    }
-    getConsolidatedCosts({ year: lockedPeriod.year, month: lockedPeriod.month, group_by: groupBy, scope })
-      .then(res => {
-        lockedCacheRef.current.set(key, res.data);
-        setLockedRawData(res.data);
-      })
-      .catch(() => setLockedRawData([]));
+    let cancelled = false;
+    const fetches = lockedSelected.map(p => {
+      const key = `${p.year}-${p.month}`;
+      const cached = lockedCacheRef.current.get(key);
+      if (cached) return Promise.resolve(cached);
+      return getConsolidatedCosts({ year: p.year, month: p.month, group_by: groupBy, scope })
+        .then(res => {
+          lockedCacheRef.current.set(key, res.data);
+          return res.data;
+        })
+        .catch(() => [] as ConsolidatedCostRow[]);
+    });
+    Promise.all(fetches).then(results => {
+      if (!cancelled) setLockedRawData(results.flat());
+    });
+    return () => { cancelled = true; };
   }, [selectedPeriodIds, periods, groupBy, scope]);
 
 

@@ -560,26 +560,34 @@ export const ProjectCostsMatrix: React.FC = () => {
   const [addLineState, setAddLineState] = useState<{ projectId: string; type: 'oop'|'equip'; desc: string } | null>(null);
 
   // ── Load ──
+  const loadingPromiseRef = useRef<Promise<void> | null>(null);
+
   const load = useCallback(async (showSpinner = true) => {
+    if (loadingPromiseRef.current) return loadingPromiseRef.current;
     if (showSpinner) setLoading(true);
-    try {
-      const [periodsData, projectsData, extData, equipData] = await Promise.all([
-        periodsApi.list(),
-        lookupsApi.listProjectsScoped(),
-        projectCostsApi.listExternals(),
-        projectCostsApi.listEquipment(),
-      ]);
-      periodsData.sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
-      projectsData.sort((a, b) => a.name.localeCompare(b.name));
-      setAllPeriods(periodsData);
-      setProjects(projectsData as Array<{ id: string; name: string; pm_user_ids: string[] }>);
-      setExtLines(extData);
-      setEquipLines(equipData);
-    } catch (err) {
-      showApiError(err as Error, 'loading project costs');
-    } finally {
-      setLoading(false);
-    }
+    const promise = (async () => {
+      try {
+        const [periodsData, projectsData, extData, equipData] = await Promise.all([
+          periodsApi.list(),
+          lookupsApi.listProjectsScoped(),
+          projectCostsApi.listExternals(),
+          projectCostsApi.listEquipment(),
+        ]);
+        periodsData.sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+        projectsData.sort((a, b) => a.name.localeCompare(b.name));
+        setAllPeriods(periodsData);
+        setProjects(projectsData as Array<{ id: string; name: string; pm_user_ids: string[] }>);
+        setExtLines(extData);
+        setEquipLines(equipData);
+      } catch (err) {
+        showApiError(err as Error, 'loading project costs');
+      } finally {
+        setLoading(false);
+        loadingPromiseRef.current = null;
+      }
+    })();
+    loadingPromiseRef.current = promise;
+    await promise;
   }, [showApiError]);
 
   useEffect(() => { load(); }, [load]);

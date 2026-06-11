@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   makeStyles,
   tokens,
@@ -147,20 +147,36 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
+  const loadingKeyRef = useRef<string | null>(null);
+  const loadingPromiseRef = useRef<Promise<void> | null>(null);
+
   const load = useCallback(async () => {
     if (!periodId) return;
-    setLoading(true);
-    try {
-      const data = await projectCostsApi.listExternals({
-        period_id: periodId,
-        project_id: projectId || undefined,
-      });
-      setLines(data);
-    } catch (err) {
-      showApiError(err as Error, 'loading externals');
-    } finally {
-      setLoading(false);
+    const loadKey = `${periodId}|${projectId}`;
+    if (loadingPromiseRef.current && loadingKeyRef.current === loadKey) {
+      return loadingPromiseRef.current;
     }
+    setLoading(true);
+    const promise = (async () => {
+      try {
+        const data = await projectCostsApi.listExternals({
+          period_id: periodId,
+          project_id: projectId || undefined,
+        });
+        setLines(data);
+      } catch (err) {
+        showApiError(err as Error, 'loading externals');
+      } finally {
+        setLoading(false);
+        if (loadingKeyRef.current === loadKey) {
+          loadingKeyRef.current = null;
+          loadingPromiseRef.current = null;
+        }
+      }
+    })();
+    loadingKeyRef.current = loadKey;
+    loadingPromiseRef.current = promise;
+    await promise;
   }, [periodId, projectId, showApiError]);
 
   useEffect(() => { load(); }, [load]);
@@ -199,14 +215,16 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
     setSaving(true);
     try {
       if (editingLine) {
-        await projectCostsApi.updateExternal(editingLine.id, {
+        const updated = await projectCostsApi.updateExternal(editingLine.id, {
           description: form.description,
           notes: form.notes || undefined,
           cost,
         });
         showSuccess('External line updated');
+        closeDialog();
+        setLines(prev => prev.map(l => l.id === updated.id ? updated : l));
       } else {
-        await projectCostsApi.createExternal({
+        const created = await projectCostsApi.createExternal({
           project_id: form.project_id,
           period_id: periodId,
           description: form.description,
@@ -214,9 +232,13 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
           cost,
         });
         showSuccess('External line added');
+        closeDialog();
+        if (!projectId || created.project_id === projectId) {
+          setLines(prev => [...prev, created]);
+        } else {
+          load();
+        }
       }
-      closeDialog();
-      load();
     } catch (err) {
       showApiError(err as Error, 'saving external line');
     } finally {
@@ -230,7 +252,7 @@ export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects 
     try {
       await projectCostsApi.deleteExternal(line.id);
       showSuccess('External line deleted');
-      load();
+      setLines(prev => prev.filter(l => l.id !== line.id));
     } catch (err) {
       showApiError(err as Error, 'deleting external line');
     }

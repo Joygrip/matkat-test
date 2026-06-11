@@ -12,6 +12,8 @@ import {
   Input,
   Label,
   Spinner,
+  Tab,
+  TabList,
   tokens,
   makeStyles,
   mergeClasses,
@@ -26,6 +28,9 @@ import type { Period } from '../../types';
 import { MONTH_SHORT } from '../../utils/format';
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
+
+// History view shows at most this many locked months (most recent first)
+const HISTORY_MAX_MONTHS = 12;
 
 const PROJECT_COL_WIDTH = 180;
 const DESC_COL_WIDTH = 210;
@@ -508,9 +513,13 @@ export const ProjectCostsMatrix: React.FC = () => {
   // pm_user_ids in the response contains internal DB UUIDs, not Azure AD object_ids,
   // so we cannot reliably compare them in the frontend.
   const isPM = user?.role === 'PM' || !!(user?.can_pm ?? user?.secondary_role === 'PM');
+
+  // Planning shows open periods (editable); History shows locked periods read-only
+  const [viewMode, setViewMode] = useState<'planning' | 'history'>('planning');
+
   const canEditProject = useCallback((_pmUserIds: string[]): boolean => {
-    return isFinanceOrAdmin || isPM;
-  }, [isFinanceOrAdmin, isPM]);
+    return viewMode !== 'history' && (isFinanceOrAdmin || isPM);
+  }, [isFinanceOrAdmin, isPM, viewMode]);
 
   // ── Data ──
   const [allPeriods, setAllPeriods] = useState<Period[]>([]);
@@ -668,21 +677,27 @@ export const ProjectCostsMatrix: React.FC = () => {
     };
   }, [loading]);
 
-  // ── Open periods only ──
+  // ── Displayed periods: open (Planning) or the most recent locked months (History) ──
   const openPeriods = useMemo(() => allPeriods.filter(p => p.status === 'open'), [allPeriods]);
-  const openPeriodIds = useMemo(() => new Set(openPeriods.map(p => p.id)), [openPeriods]);
+  const lockedRecentPeriods = useMemo(
+    // allPeriods is sorted ascending; cap History to the most recent months for render cost
+    () => allPeriods.filter(p => p.status !== 'open').slice(-HISTORY_MAX_MONTHS),
+    [allPeriods]
+  );
+  const displayPeriods = viewMode === 'history' ? lockedRecentPeriods : openPeriods;
+  const displayPeriodIds = useMemo(() => new Set(displayPeriods.map(p => p.id)), [displayPeriods]);
 
   // ── Build matrix groups ──
   const matrixGroups = useMemo<ProjectGroup[]>(() => {
     return projects.map(proj => {
-      const lines = buildProjectLines(proj.id, extLines, equipLines, localLines, openPeriodIds);
+      const lines = buildProjectLines(proj.id, extLines, equipLines, localLines, displayPeriodIds);
       const totalsByPeriod = new Map<string, number>();
-      for (const period of openPeriods) {
+      for (const period of displayPeriods) {
         totalsByPeriod.set(period.id, periodTotal(lines, period.id));
       }
       return { projectId: proj.id, projectName: proj.name, pmUserIds: proj.pm_user_ids ?? [], lines, totalsByPeriod };
     });
-  }, [projects, extLines, equipLines, localLines, openPeriods, openPeriodIds]);
+  }, [projects, extLines, equipLines, localLines, displayPeriods, displayPeriodIds]);
 
   // ── Cross-project totals by type ──
   const totalsByType = useMemo(() => {
@@ -866,13 +881,13 @@ export const ProjectCostsMatrix: React.FC = () => {
     group.lines.forEach((line, lIdx) => {
       if (line.type !== dragType) return;
       if (lIdx < minRow || lIdx > maxRow) return;
-      openPeriods.forEach((period, pIdx) => {
+      displayPeriods.forEach((period, pIdx) => {
         if (pIdx < minCol || pIdx > maxCol) return;
         newSel.add(makeCellKey(projectId, line.lineKey, period.id));
       });
     });
     setSelectedCells(newSel);
-  }, [isDragging, dragStart, dragType, matrixGroups, openPeriods]);
+  }, [isDragging, dragStart, dragType, matrixGroups, displayPeriods]);
 
   // ── Bulk apply ──
   const handleApplyValue = useCallback(async (dkkValue: number) => {
@@ -938,13 +953,44 @@ export const ProjectCostsMatrix: React.FC = () => {
     return { left, top };
   };
 
-  const totalCols = 3 + openPeriods.length;
-  const tableWidth = FIXED_AREA_WIDTH + openPeriods.length * PERIOD_COL_WIDTH;
+  const totalCols = 3 + displayPeriods.length;
+  const tableWidth = FIXED_AREA_WIDTH + displayPeriods.length * PERIOD_COL_WIDTH;
 
   if (loading) return <div className={styles.loading}><Spinner label="Loading project costs…" /></div>;
 
+  const modeToggle = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+      <TabList
+        size="small"
+        selectedValue={viewMode}
+        onTabSelect={(_, d) => setViewMode(d.value as 'planning' | 'history')}
+      >
+        <Tab value="planning">Planning</Tab>
+        <Tab value="history">History</Tab>
+      </TabList>
+      {viewMode === 'history' && (
+        <span style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+          🔒 Historical view — locked periods are read-only
+          {lockedRecentPeriods.length === HISTORY_MAX_MONTHS && ` (last ${HISTORY_MAX_MONTHS} locked months)`}
+        </span>
+      )}
+    </div>
+  );
+
+  if (viewMode === 'history' && lockedRecentPeriods.length === 0) {
+    return (
+      <div className={styles.cardWrapper}>
+        {modeToggle}
+        <div style={{ padding: '32px 16px', textAlign: 'center', color: tokens.colorNeutralForeground3 }}>
+          No locked periods yet. Periods appear here after Finance locks them.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.cardWrapper}>
+      {modeToggle}
       {/* Floating popover for drag-select bulk editing */}
       {popoverPos && selectedCells.size > 0 && (
         <div
@@ -992,7 +1038,7 @@ export const ProjectCostsMatrix: React.FC = () => {
               <col style={{ width: PROJECT_COL_PX }} />
               <col style={{ width: DESC_COL_PX }} />
               <col style={{ width: TYPE_COL_PX }} />
-              {openPeriods.map(period => (
+              {displayPeriods.map(period => (
                 <col key={period.id} style={{ width: PERIOD_COL_PX }} />
               ))}
             </colgroup>
@@ -1001,7 +1047,7 @@ export const ProjectCostsMatrix: React.FC = () => {
                 <th className={mergeClasses(styles.th, styles.thProject)} style={{ textAlign: 'left' }}>Project</th>
                 <th className={mergeClasses(styles.th, styles.thDesc)}    style={{ textAlign: 'left' }}>Name</th>
                 <th className={mergeClasses(styles.th, styles.thType)}    style={{ textAlign: 'left' }}>Type</th>
-                {openPeriods.map((p, idx) => {
+                {displayPeriods.map((p, idx) => {
                   const isColHovered = hoveredMonth === idx;
                   return (
                     <th
@@ -1035,7 +1081,7 @@ export const ProjectCostsMatrix: React.FC = () => {
               <col style={{ width: PROJECT_COL_PX }} />
               <col style={{ width: DESC_COL_PX }} />
               <col style={{ width: TYPE_COL_PX }} />
-              {openPeriods.map(period => (
+              {displayPeriods.map(period => (
                 <col key={period.id} style={{ width: PERIOD_COL_PX }} />
               ))}
             </colgroup>
@@ -1073,7 +1119,7 @@ export const ProjectCostsMatrix: React.FC = () => {
                         )}
                       </span>
                     </td>
-                    {openPeriods.map((p, colIdx) => {
+                    {displayPeriods.map((p, colIdx) => {
                       const total = group.totalsByPeriod.get(p.id) ?? 0;
                       const isColHovered = hoveredMonth === colIdx;
                       return (
@@ -1165,7 +1211,7 @@ export const ProjectCostsMatrix: React.FC = () => {
                           </span>
                         </td>
 
-                        {openPeriods.map((period, colIdx) => {
+                        {displayPeriods.map((period, colIdx) => {
                           const cell = line.costsByPeriod.get(period.id);
                           const cellKey = makeCellKey(group.projectId, line.lineKey, period.id);
                           const isSelected = selectedCells.has(cellKey);
@@ -1263,7 +1309,7 @@ export const ProjectCostsMatrix: React.FC = () => {
               >
                 Total OoP
               </td>
-              {openPeriods.map((p, colIdx) => {
+              {displayPeriods.map((p, colIdx) => {
                 const val = totalsByType.oopByPeriod.get(p.id) ?? 0;
                 return (
                   <td
@@ -1285,7 +1331,7 @@ export const ProjectCostsMatrix: React.FC = () => {
               >
                 Total Equipment
               </td>
-              {openPeriods.map((p, colIdx) => {
+              {displayPeriods.map((p, colIdx) => {
                 const val = totalsByType.equipByPeriod.get(p.id) ?? 0;
                 return (
                   <td
@@ -1301,7 +1347,7 @@ export const ProjectCostsMatrix: React.FC = () => {
             </tr>
             <tr className={styles.totalsGrandRow}>
               <td className={styles.grandTotalCellLabel} colSpan={3}>Grand Total</td>
-              {openPeriods.map((p, colIdx) => {
+              {displayPeriods.map((p, colIdx) => {
                 const total = (totalsByType.oopByPeriod.get(p.id) ?? 0) + (totalsByType.equipByPeriod.get(p.id) ?? 0);
                 return (
                   <td

@@ -544,3 +544,187 @@ def test_finance_manager_pm_default_scope_includes_delegated_cc(client, db):
     rows = res.json()["data"]
     deleg_cc_ids = {r.get("cost_center_id") for r in rows if r["project_id"] == "proj-fin-deleg"}
     assert "cc-fin-deleg" in deleg_cc_ids, "Union scope must include delegated-CC demand"
+
+
+# ─── OoP/Equipment visibility in consolidated costs ───────────────────────────
+
+
+def _add_finance_ext_equip(db, tenant_id: str):
+    """Layer OoP/Equipment lines onto _setup_finance_manager_pm_fixture.
+
+    ext-fin-other deliberately sits on a managed-CC resource (res-fin-a) but a
+    non-PM project — the case where Manager resource scope must NOT grant access.
+    """
+    from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
+
+    db.add(ProjectExternalLine(id="ext-fin-alpha", tenant_id=tenant_id, project_id="proj-fin-alpha", period_id="period-fin-mpm-1", resource_id="res-fin-a", description="Alpha vendor", cost=10000, created_by="t"))
+    db.add(ProjectExternalLine(id="ext-fin-other", tenant_id=tenant_id, project_id="proj-fin-other", period_id="period-fin-mpm-1", resource_id="res-fin-a", description="Other vendor", cost=20000, created_by="t"))
+    db.add(ProjectEquipmentLine(id="eq-fin-alpha", tenant_id=tenant_id, project_id="proj-fin-alpha", period_id="period-fin-mpm-1", description="Alpha rig", cost=30000, created_by="t"))
+    db.add(ProjectEquipmentLine(id="eq-fin-other", tenant_id=tenant_id, project_id="proj-fin-other", period_id="period-fin-mpm-1", description="Other rig", cost=40000, created_by="t"))
+    db.commit()
+
+
+def _ext_equip_by_project(rows):
+    ext: dict = {}
+    equip: dict = {}
+    for r in rows:
+        ext[r["project_id"]] = ext.get(r["project_id"], 0) + r["externals_cost"]
+        equip[r["project_id"]] = equip.get(r["project_id"], 0) + r["equipment_cost"]
+    return ext, equip
+
+
+_MPM_HEADERS = {
+    "X-Dev-Role": "Manager",
+    "X-Dev-Secondary-Role": "PM",
+    "X-Dev-Tenant": "test-tenant-001",
+    "X-Dev-User-Id": "fin-mpm-obj-001",
+}
+# Same DB user demoted to plain Manager (secondary role cleared via dev header)
+_PLAIN_MGR_HEADERS = {
+    "X-Dev-Role": "Manager",
+    "X-Dev-Secondary-Role": "",
+    "X-Dev-Tenant": "test-tenant-001",
+    "X-Dev-User-Id": "fin-mpm-obj-001",
+}
+# Same DB user as pure PM
+_PURE_PM_HEADERS = {
+    "X-Dev-Role": "PM",
+    "X-Dev-Tenant": "test-tenant-001",
+    "X-Dev-User-Id": "fin-mpm-obj-001",
+}
+_FINANCE_HEADERS = {
+    "X-Dev-Role": "Finance",
+    "X-Dev-Tenant": "test-tenant-001",
+    "X-Dev-User-Id": "fin-viewer-obj-001",
+}
+
+
+def test_oop_equip_manager_pm_limited_to_pm_projects(client, db):
+    """Manager+PM sees OoP/Equipment only for PM-assigned projects, not via Manager CC scope."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get("/finance/consolidated-costs?year=2026&month=9", headers=_MPM_HEADERS)
+    assert res.status_code == 200
+    ext, equip = _ext_equip_by_project(res.json()["data"])
+    assert ext.get("proj-fin-alpha", 0) == 10000, "PM project OoP must be visible"
+    assert equip.get("proj-fin-alpha", 0) == 30000, "PM project equipment must be visible"
+    assert ext.get("proj-fin-other", 0) == 0, "Non-PM project OoP must be hidden despite managed-CC resource"
+    assert equip.get("proj-fin-other", 0) == 0, "Non-PM project equipment must be hidden"
+
+
+def test_oop_equip_plain_manager_sees_none(client, db):
+    """Plain Manager sees no OoP/Equipment in cost overview, but keeps labor data."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get("/finance/consolidated-costs?year=2026&month=9", headers=_PLAIN_MGR_HEADERS)
+    assert res.status_code == 200
+    rows = res.json()["data"]
+    assert sum(r["externals_cost"] for r in rows) == 0, "Plain Manager must not see any OoP cost"
+    assert sum(r["equipment_cost"] for r in rows) == 0, "Plain Manager must not see any equipment cost"
+    assert sum(r["demand_cost"] for r in rows) > 0, "Plain Manager must still see managed-CC labor data"
+
+
+def test_oop_equip_pure_pm_limited_to_assigned_projects(client, db):
+    """Pure PM sees OoP/Equipment for assigned projects only."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get("/finance/consolidated-costs?year=2026&month=9", headers=_PURE_PM_HEADERS)
+    assert res.status_code == 200
+    ext, equip = _ext_equip_by_project(res.json()["data"])
+    assert ext.get("proj-fin-alpha", 0) == 10000
+    assert equip.get("proj-fin-alpha", 0) == 30000
+    assert "proj-fin-other" not in ext or ext["proj-fin-other"] == 0
+    assert "proj-fin-other" not in equip or equip["proj-fin-other"] == 0
+
+
+def test_oop_equip_finance_sees_all(client, db):
+    """Finance keeps full OoP/Equipment visibility."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get("/finance/consolidated-costs?year=2026&month=9", headers=_FINANCE_HEADERS)
+    assert res.status_code == 200
+    ext, equip = _ext_equip_by_project(res.json()["data"])
+    assert ext.get("proj-fin-alpha", 0) == 10000
+    assert ext.get("proj-fin-other", 0) == 20000
+    assert equip.get("proj-fin-alpha", 0) == 30000
+    assert equip.get("proj-fin-other", 0) == 40000
+
+
+def test_oop_equip_detail_manager_pm_pm_project_visible(client, db):
+    """Manager+PM project drilldown for an assigned PM project includes OoP/Equipment lines."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get(
+        "/finance/consolidated-costs/detail?year=2026&month=9&project_id=proj-fin-alpha",
+        headers=_MPM_HEADERS,
+    )
+    assert res.status_code == 200
+    d = res.json()[0]
+    assert len(d["external_lines"]) == 1
+    assert len(d["equipment_lines"]) == 1
+
+
+def test_oop_equip_detail_manager_pm_non_pm_project_hidden(client, db):
+    """Manager+PM project drilldown for a non-PM project hides OoP/Equipment lines."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get(
+        "/finance/consolidated-costs/detail?year=2026&month=9&project_id=proj-fin-other",
+        headers=_MPM_HEADERS,
+    )
+    assert res.status_code == 200
+    d = res.json()[0]
+    assert d["external_lines"] == [], "Non-PM project OoP lines must be hidden from Manager+PM"
+    assert d["equipment_lines"] == [], "Non-PM project equipment lines must be hidden from Manager+PM"
+
+
+def test_oop_equip_detail_plain_manager_hidden(client, db):
+    """Plain Manager project drilldown never includes OoP/Equipment lines."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get(
+        "/finance/consolidated-costs/detail?year=2026&month=9&project_id=proj-fin-alpha",
+        headers=_PLAIN_MGR_HEADERS,
+    )
+    assert res.status_code == 200
+    d = res.json()[0]
+    assert d["external_lines"] == []
+    assert d["equipment_lines"] == []
+
+
+def test_oop_equip_detail_cc_mode_scoping(client, db):
+    """CC drilldown: Manager+PM sees only PM-project OoP lines; plain Manager sees none."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get(
+        "/finance/consolidated-costs/detail?year=2026&month=9&cost_center_id=cc-fin-managed",
+        headers=_MPM_HEADERS,
+    )
+    assert res.status_code == 200
+    d = res.json()[0]
+    descriptions = {l["description"] for l in d["external_lines"]}
+    assert "Alpha vendor" in descriptions, "PM-project OoP line in managed CC must be visible"
+    assert "Other vendor" not in descriptions, "Non-PM project OoP line must be hidden despite managed CC"
+
+    res2 = client.get(
+        "/finance/consolidated-costs/detail?year=2026&month=9&cost_center_id=cc-fin-managed",
+        headers=_PLAIN_MGR_HEADERS,
+    )
+    assert res2.status_code == 200
+    assert res2.json()[0]["external_lines"] == [], "Plain Manager must see no OoP lines in CC drilldown"

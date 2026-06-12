@@ -814,20 +814,30 @@ class FinanceService:
             actual_q = _apply_cc_scope(actual_q, Resource.id, ActualLine.project_id)
             actual_rows = actual_q.all()
 
-            # External lines — outerjoin Resource, filter by Resource.cost_center_id
-            ext_q = (
-                self.db.query(ProjectExternalLine, Resource)
-                .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
-                .filter(
-                    ProjectExternalLine.tenant_id == self.current_user.tenant_id,
-                    ProjectExternalLine.period_id == period.id,
-                    Resource.cost_center_id.in_(cc_id_list),
+            # External lines — outerjoin Resource, filter by Resource.cost_center_id.
+            # OoP visibility is project-based, never Manager-resource based: plain
+            # Manager sees none; Manager+PM sees only PM-assigned projects; pure PM is
+            # restricted by cc_pm_project_ids; Admin/Finance/Manager+Reader see all.
+            cc_ext_project_ids: Optional[list] = None
+            if cc_manager_resource_ids is not None:
+                cc_ext_project_ids = cc_union_pm_project_ids  # [] for plain Manager
+            if cc_ext_project_ids is not None and not cc_ext_project_ids:
+                ext_rows = []
+            else:
+                ext_q = (
+                    self.db.query(ProjectExternalLine, Resource)
+                    .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
+                    .filter(
+                        ProjectExternalLine.tenant_id == self.current_user.tenant_id,
+                        ProjectExternalLine.period_id == period.id,
+                        Resource.cost_center_id.in_(cc_id_list),
+                    )
                 )
-            )
-            if cc_pm_project_ids is not None:
-                ext_q = ext_q.filter(ProjectExternalLine.project_id.in_(cc_pm_project_ids))
-            ext_q = _apply_cc_scope(ext_q, Resource.id, ProjectExternalLine.project_id)
-            ext_rows = ext_q.all()
+                if cc_pm_project_ids is not None:
+                    ext_q = ext_q.filter(ProjectExternalLine.project_id.in_(cc_pm_project_ids))
+                if cc_ext_project_ids is not None:
+                    ext_q = ext_q.filter(ProjectExternalLine.project_id.in_(cc_ext_project_ids))
+                ext_rows = ext_q.all()
 
             # Equipment lines — no resource FK, cannot filter by cost center; skip in CC mode
             # (matches get_consolidated_costs behaviour)
@@ -926,15 +936,15 @@ class FinanceService:
         # Manager restriction (non-Reader): scope demand/actual to accessible resources.
         # Manager+PM default scope: PM-assigned projects are fully visible (PM entitlement,
         # union scope); other projects stay restricted to the Manager resource scope.
+        is_own_pm_project = (
+            is_union_scope_for_manager_pm and project_id in _assigned_pm_project_ids()
+        )
         proj_manager_resource_ids: Optional[list] = None
         if (
             self.current_user.role == "Manager"
             and not self.current_user.is_manager_reader
             and not is_pm_scope_for_manager_pm
-            and not (
-                is_union_scope_for_manager_pm
-                and project_id in _assigned_pm_project_ids()
-            )
+            and not is_own_pm_project
         ):
             from api.app.services.reporting import ReportingService
             _rs = ReportingService(self.db, self.current_user)
@@ -1000,8 +1010,21 @@ class FinanceService:
             for line, resource, cc in actual_rows
         ]
 
+        # OoP/Equipment in project detail are project/finance lines — Manager scope does
+        # not grant access. Visible to Admin/Finance/Manager+Reader, and to effective PMs
+        # for their assigned projects (pure PM and Manager+PM pm-scope requests are
+        # already 403-guarded above). Plain Manager, and Manager+PM drilling into a
+        # non-PM project, get empty OoP/Equipment sections.
+        show_ext_equip = True
+        if (
+            self.current_user.role == "Manager"
+            and not self.current_user.is_manager_reader
+            and not is_pm_scope_for_manager_pm
+        ):
+            show_ext_equip = is_own_pm_project
+
         # External lines — join Resource for display name, description is the notes field
-        ext_rows = (
+        ext_rows = [] if not show_ext_equip else (
             self.db.query(ProjectExternalLine, Resource)
             .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
             .filter(
@@ -1024,7 +1047,7 @@ class FinanceService:
         ]
 
         # Equipment lines
-        equip_rows = (
+        equip_rows = [] if not show_ext_equip else (
             self.db.query(ProjectEquipmentLine)
             .filter(
                 ProjectEquipmentLine.tenant_id == self.current_user.tenant_id,
@@ -1236,6 +1259,19 @@ class FinanceService:
                 ))
             return query.filter(resource_id_col.in_(scoped_resource_ids))
 
+        # OoP/Equipment visibility — these are project/finance lines, not cost-center
+        # planning data, so Manager scope does not grant access to them:
+        #   None      → unrestricted (Admin, Finance, Manager+Reader; pure PM is already
+        #               restricted to assigned projects by _pm_allowed on every row)
+        #   set(...)  → only these PM-assigned project IDs (Manager+PM, both scopes)
+        #   empty set → none at all (plain Manager)
+        ext_equip_project_ids: Optional[set] = None
+        if self.current_user.role == "Manager" and not self.current_user.is_manager_reader:
+            if is_union_scope_for_manager_pm:
+                ext_equip_project_ids = union_pm_project_ids
+            else:
+                ext_equip_project_ids = pm_project_ids or set()
+
         # 4. Build project name lookup and cost center name lookup
         proj_rows = (
             self.db.query(Project.id, Project.name)
@@ -1316,35 +1352,40 @@ class FinanceService:
             rate = monthly_fte_costs_by_period.get(line.period_id, fallback_monthly_fte_cost)
             agg[(line.project_id, _cc_key(cc_id), yr, mo)]["actuals_cost"] += int(line.actual_fte_percent * rate // 100)
 
-        # 8. External lines → contractor cost, keyed by Resource.cost_center_id when available
-        ext_q = (
-            self.db.query(ProjectExternalLine, Resource.cost_center_id)
-            .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
-            .filter(
-                ProjectExternalLine.tenant_id == self.current_user.tenant_id,
-                ProjectExternalLine.period_id.in_(period_ids),
+        # 8. External lines → contractor cost, keyed by Resource.cost_center_id when available.
+        #    Visibility is project-based (ext_equip_project_ids), never Manager-resource based.
+        if ext_equip_project_ids is None or ext_equip_project_ids:
+            ext_q = (
+                self.db.query(ProjectExternalLine, Resource.cost_center_id)
+                .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
+                .filter(
+                    ProjectExternalLine.tenant_id == self.current_user.tenant_id,
+                    ProjectExternalLine.period_id.in_(period_ids),
+                )
             )
-        )
-        if project_id:
-            ext_q = ext_q.filter(ProjectExternalLine.project_id == project_id)
-        if cost_center_id:
-            ext_q = ext_q.filter(Resource.cost_center_id == cost_center_id)
-        ext_q = _apply_resource_scope(ext_q, Resource.id, ProjectExternalLine.project_id)
-        for line, cc_id in ext_q.all():
-            if not _pm_allowed(line.project_id):
-                continue
-            yr, mo = period_map[line.period_id]
-            agg[(line.project_id, _cc_key(cc_id), yr, mo)]["externals_cost"] += line.cost
+            if project_id:
+                ext_q = ext_q.filter(ProjectExternalLine.project_id == project_id)
+            if cost_center_id:
+                ext_q = ext_q.filter(Resource.cost_center_id == cost_center_id)
+            if ext_equip_project_ids is not None:
+                ext_q = ext_q.filter(ProjectExternalLine.project_id.in_(ext_equip_project_ids))
+            for line, cc_id in ext_q.all():
+                if not _pm_allowed(line.project_id):
+                    continue
+                yr, mo = period_map[line.period_id]
+                agg[(line.project_id, _cc_key(cc_id), yr, mo)]["externals_cost"] += line.cost
 
         # 9. Equipment lines → equipment cost (no resource link, cc_id=None)
         #    Skip when filtering by cost_center_id since there is no resource to filter on.
-        if not cost_center_id:
+        if not cost_center_id and (ext_equip_project_ids is None or ext_equip_project_ids):
             equip_q = self.db.query(ProjectEquipmentLine).filter(
                 ProjectEquipmentLine.tenant_id == self.current_user.tenant_id,
                 ProjectEquipmentLine.period_id.in_(period_ids),
             )
             if project_id:
                 equip_q = equip_q.filter(ProjectEquipmentLine.project_id == project_id)
+            if ext_equip_project_ids is not None:
+                equip_q = equip_q.filter(ProjectEquipmentLine.project_id.in_(ext_equip_project_ids))
             for line in equip_q.all():
                 if not _pm_allowed(line.project_id):
                     continue

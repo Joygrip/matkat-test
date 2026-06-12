@@ -6,6 +6,7 @@
  */
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { periodsApi, Period } from '../api/periods';
+import { useAuth } from '../auth/AuthProvider';
 import { getEarliestOpenPeriod } from '../utils/periodUtils';
 
 interface PeriodContextValue {
@@ -21,6 +22,7 @@ interface PeriodContextValue {
 const PeriodContext = createContext<PeriodContextValue | null>(null);
 
 export function PeriodProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
   const [periods, setPeriods] = useState<Period[]>([]);
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -41,9 +43,15 @@ export function PeriodProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   };
 
+  // Gate on `user` (set only after /auth/me succeeded with a working token), the same
+  // pattern AppDataProvider uses. MSAL can report isAuthenticated before a token is
+  // actually acquirable (silent refresh pending/failed), and an ungated mount-time
+  // fetch then hits /periods without an Authorization header → 401 console spam.
+  // A 401 logged after this gate is a real auth failure, not a startup race.
   useEffect(() => {
-    loadPeriods();
-  }, []);
+    if (user) loadPeriods();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   const selectedPeriod = periods.find((p) => p.id === selectedPeriodId);
 

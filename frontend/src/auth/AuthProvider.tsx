@@ -60,7 +60,13 @@ function AuthProviderInner({ children }: { children: ReactNode }) {
       });
       return response.accessToken;
     } catch {
-      // Silent refresh failed – fall back to popup
+      // Silent refresh failed – fall back to popup.
+      // Note: MSAL's popup flow polls `popup.closed`, and login.microsoftonline.com
+      // serves Cross-Origin-Opener-Policy headers that sever the opener relationship.
+      // Browsers log "COOP would block the window.closed call" for this — it is a
+      // benign warning from inside msal-browser, not an app misconfiguration (we set
+      // no COOP headers ourselves), and auth completes normally. The only way to
+      // remove it entirely is switching to the redirect flow.
       try {
         const response = await instance.acquireTokenPopup({
           ...loginRequest,

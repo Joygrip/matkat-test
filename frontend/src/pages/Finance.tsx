@@ -20,7 +20,7 @@ import {
 } from '../api/consolidation';
 import { usePeriod } from '../contexts/PeriodContext';
 import { useToast } from '../hooks/useToast';
-import { useAuth, useHasRole, useCanPM, useIsManagerPM } from '../auth/AuthProvider';
+import { useAuth, useHasRole, useCanPM } from '../auth/AuthProvider';
 
 // Tab components
 import { ConsolidatedCostChart } from '../components/finance/ConsolidatedCostChart';
@@ -73,7 +73,6 @@ export const Finance: React.FC = () => {
   const { showApiError } = useToast();
   const { user } = useAuth();
   const canPM = useCanPM();
-  const isManagerPM = useIsManagerPM();
   const canSeeStats = useHasRole('Finance', 'Manager', 'Admin');
   const canSeeSnapshots = useHasRole('Finance', 'Admin');
   const canSeeProjectCosts = useHasRole('Finance', 'Admin', 'PM') || canPM;
@@ -151,7 +150,9 @@ export const Finance: React.FC = () => {
       )}
       {activeTab === 'costoverview' && (canSeeStats || isPM) && (
         <>
-          <ConsolidatedCostChart latestSnapshot={latestSnapshot} scope={isManagerPM ? 'pm' : undefined} />
+          {/* Manager+PM: backend default scope is the union of Manager (incl. delegated
+              CCs) and assigned PM project scope — no forced PM-only scope here. */}
+          <ConsolidatedCostChart latestSnapshot={latestSnapshot} />
         </>
       )}
     </div>

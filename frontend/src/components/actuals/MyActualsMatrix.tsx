@@ -14,7 +14,10 @@ import { Add16Regular, Edit16Regular } from '@fluentui/react-icons';
 import { DashboardSection } from '../dashboard/DashboardSection';
 import { actualsApi, ActualLine, ActualApprovalStatus } from '../../api/actuals';
 import { planningApi, DemandLine, SupplyLine } from '../../api/planning';
+import { lookupsApi } from '../../api/lookups';
+import type { Project } from '../../api/admin';
 import { useAppData } from '../../contexts/AppDataContext';
+import { useAuth } from '../../auth/AuthProvider';
 import { useToast } from '../../hooks/useToast';
 import type { Period } from '../../types/index';
 import { MONTH_SHORT } from '../../utils/format';
@@ -214,6 +217,25 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
   const styles = useStyles();
   const { showError } = useToast();
   const { myResource, appDataLoading, projects } = useAppData();
+  const { user } = useAuth();
+  const isPurePM = user?.role === 'PM';
+
+  // For pure PM users the shared `projects` list is ProjectPM-scoped (AppDataContext uses
+  // listProjectsScoped), but My Actuals covers the PM's own time — including ad-hoc,
+  // last-minute work on projects they don't manage. Fetch the full project list so the
+  // Add Project picker offers every active project, same as for Employees. Other roles
+  // already have the full list in context, so no extra request is made for them.
+  const [pmAllProjects, setPmAllProjects] = useState<Project[] | null>(null);
+  useEffect(() => {
+    if (!isPurePM) return;
+    let cancelled = false;
+    lookupsApi.listProjects()
+      .then(p => { if (!cancelled) setPmAllProjects(p); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isPurePM]);
+
+  const pickerProjects = isPurePM ? (pmAllProjects ?? projects) : projects;
 
   const myResourceId = myResource?.resource_id ?? null;
 
@@ -304,13 +326,12 @@ export function MyActualsMatrix({ periods }: MyActualsMatrixProps) {
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [myDemandLines, mySupplyLines, myActuals, additionalProjects, projects, visiblePeriodIdSet]);
 
-  // NOTE: For PM users, `projects` from useAppData() is scoped to PM-assigned projects
-  // (AppDataContext uses listProjectsScoped for PM/Finance/Admin roles). PM's Add Project
-  // picker shows only their assigned projects; Employee sees all active projects.
+  // All roles entering their own actuals (Employee, PM, Manager) can pick any active
+  // project — the backend only enforces resource ownership for own-actuals submission.
   const availableToAdd = useMemo(() => {
     const shownIds = new Set(matrixProjects.map(p => p.id));
-    return projects.filter(p => p.is_active && !shownIds.has(p.id));
-  }, [projects, matrixProjects]);
+    return pickerProjects.filter(p => p.is_active && !shownIds.has(p.id));
+  }, [pickerProjects, matrixProjects]);
 
   const handleAddProject = useCallback((projectId: string, projectName: string) => {
     setAdditionalProjects(prev => [...prev, { id: projectId, name: projectName }]);

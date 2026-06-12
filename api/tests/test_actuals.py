@@ -437,3 +437,202 @@ def test_employee_cannot_create_actuals_for_other_resource(client, employee_head
     )
     assert response.status_code == 403
     assert response.json()["code"] == "UNAUTHORIZED_RESOURCE"
+
+
+# ─── PM own-actuals submission (any project, own resource only) ───────────────
+
+
+@pytest.fixture
+def setup_pm_actuals_data(client, admin_headers, finance_headers, db):
+    """PM user with linked resource, one PM-assigned project, one demand-planned
+    project, and one unrelated project (for ad-hoc work)."""
+    from api.app.models.core import ProjectPM
+    from api.app.models.planning import DemandLine
+    from api.app.models.core import Period
+
+    pm_user = User(
+        tenant_id="test-tenant-001",
+        object_id="pm-001",
+        email="pm@test.com",
+        display_name="PM User",
+        role=UserRole.PM,
+        is_active=True,
+    )
+    db.add(pm_user)
+    db.commit()
+    db.refresh(pm_user)
+
+    cc_resp = client.post(
+        "/admin/cost-centers",
+        json={"code": "CC-PMACT", "name": "PM Actuals CC"},
+        headers=admin_headers,
+    )
+    cc_id = cc_resp.json()["id"]
+
+    resource_resp = client.post(
+        "/admin/resources",
+        json={
+            "cost_center_id": cc_id,
+            "employee_id": "EMP-PMACT",
+            "display_name": "PM Resource",
+            "user_id": pm_user.id,
+        },
+        headers=admin_headers,
+    )
+    resource_id = resource_resp.json()["id"]
+
+    other_resource_resp = client.post(
+        "/admin/resources",
+        json={
+            "cost_center_id": cc_id,
+            "employee_id": "EMP-PMOTHER",
+            "display_name": "Other PM CC Resource",
+        },
+        headers=admin_headers,
+    )
+    other_resource_id = other_resource_resp.json()["id"]
+
+    assigned_resp = client.post(
+        "/admin/projects",
+        json={"code": "PRJ-PMA", "name": "PM Assigned", "pm_user_ids": [pm_user.id]},
+        headers=admin_headers,
+    )
+    assigned_project_id = assigned_resp.json()["id"]
+
+    planned_resp = client.post(
+        "/admin/projects",
+        json={"code": "PRJ-PMD", "name": "PM Demand Planned"},
+        headers=admin_headers,
+    )
+    planned_project_id = planned_resp.json()["id"]
+
+    unrelated_resp = client.post(
+        "/admin/projects",
+        json={"code": "PRJ-PMU", "name": "PM Unrelated"},
+        headers=admin_headers,
+    )
+    unrelated_project_id = unrelated_resp.json()["id"]
+
+    now = datetime.utcnow()
+    client.post(
+        "/periods",
+        json={"year": now.year, "month": now.month},
+        headers=finance_headers,
+    )
+    period = db.query(Period).filter(
+        Period.tenant_id == "test-tenant-001",
+        Period.year == now.year,
+        Period.month == now.month,
+    ).first()
+
+    # Demand planned for the PM's own resource on planned_project (no ProjectPM row)
+    db.add(DemandLine(
+        tenant_id="test-tenant-001",
+        period_id=period.id,
+        project_id=planned_project_id,
+        resource_id=resource_id,
+        year=now.year,
+        month=now.month,
+        fte_percent=50,
+        created_by="admin-001",
+    ))
+    db.commit()
+
+    return {
+        "resource_id": resource_id,
+        "other_resource_id": other_resource_id,
+        "assigned_project_id": assigned_project_id,
+        "planned_project_id": planned_project_id,
+        "unrelated_project_id": unrelated_project_id,
+        "year": now.year,
+        "month": now.month,
+    }
+
+
+def test_pm_can_create_actual_for_assigned_project_without_demand(client, pm_headers, setup_pm_actuals_data):
+    """PM with no demand assignment can still submit actuals for a PM-assigned project."""
+    data = setup_pm_actuals_data
+    response = client.post(
+        "/actuals",
+        json={
+            "resource_id": data["resource_id"],
+            "project_id": data["assigned_project_id"],
+            "year": data["year"],
+            "month": data["month"],
+            "actual_fte_percent": 50,
+        },
+        headers=pm_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["project_id"] == data["assigned_project_id"]
+
+
+def test_pm_can_create_actual_for_demand_planned_project(client, pm_headers, setup_pm_actuals_data):
+    """PM can submit actuals for a project planned for their resource via demand lines."""
+    data = setup_pm_actuals_data
+    response = client.post(
+        "/actuals",
+        json={
+            "resource_id": data["resource_id"],
+            "project_id": data["planned_project_id"],
+            "year": data["year"],
+            "month": data["month"],
+            "actual_fte_percent": 30,
+        },
+        headers=pm_headers,
+    )
+    assert response.status_code == 200
+
+
+def test_pm_can_create_actual_for_any_project_ad_hoc(client, pm_headers, setup_pm_actuals_data):
+    """PM can submit own actuals for a project they neither manage nor are planned on
+    (ad-hoc last-minute work), same as an Employee."""
+    data = setup_pm_actuals_data
+    response = client.post(
+        "/actuals",
+        json={
+            "resource_id": data["resource_id"],
+            "project_id": data["unrelated_project_id"],
+            "year": data["year"],
+            "month": data["month"],
+            "actual_fte_percent": 20,
+        },
+        headers=pm_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["project_id"] == data["unrelated_project_id"]
+
+
+def test_pm_cannot_create_actual_for_other_resource(client, pm_headers, setup_pm_actuals_data):
+    """PM remains restricted to their own resource when submitting actuals."""
+    data = setup_pm_actuals_data
+    response = client.post(
+        "/actuals",
+        json={
+            "resource_id": data["other_resource_id"],
+            "project_id": data["assigned_project_id"],
+            "year": data["year"],
+            "month": data["month"],
+            "actual_fte_percent": 20,
+        },
+        headers=pm_headers,
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "UNAUTHORIZED_RESOURCE"
+
+
+def test_employee_project_scope_unchanged(client, employee_headers, setup_actuals_data):
+    """Employees remain unrestricted by project scope (own resource, any project)."""
+    data = setup_actuals_data
+    response = client.post(
+        "/actuals",
+        json={
+            "resource_id": data["resource_id"],
+            "project_id": data["project2_id"],
+            "year": data["year"],
+            "month": data["month"],
+            "actual_fte_percent": 25,
+        },
+        headers=employee_headers,
+    )
+    assert response.status_code == 200

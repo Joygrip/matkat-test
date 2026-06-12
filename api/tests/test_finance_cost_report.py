@@ -268,7 +268,8 @@ def _setup_finance_manager_pm_fixture(db, tenant_id: str):
 
     Plain Manager (scope=default): sees only res-fin-a costs (managed CC only).
     Manager+PM (scope=pm): sees all costs for proj-fin-alpha (both CCs), NOT proj-fin-other.
-    Manager+PM (scope=default): sees only managed-CC costs, same as plain Manager.
+    Manager+PM (scope=default): union — managed-CC costs PLUS all costs of assigned PM
+    projects (proj-fin-alpha across both CCs), but NOT proj-fin-other's unmanaged demand.
     """
     from api.app.models.core import User, CostCenter, Resource, Project, ProjectPM, Period, UserRole
     from api.app.models.planning import DemandLine
@@ -381,8 +382,8 @@ def test_finance_plain_manager_scope_pm_still_sees_managed_cc_only(client, db):
     assert "cc-fp2-other" not in cc_ids, "Plain Manager + scope=pm must not bypass Manager resource filtering"
 
 
-def test_finance_manager_pm_default_scope_sees_managed_cc_only(client, db):
-    """Manager+PM default scope (Manager tab) sees only managed-CC resource costs."""
+def test_finance_manager_pm_default_scope_is_union_of_manager_and_pm(client, db):
+    """Manager+PM default scope sees managed-CC costs plus assigned-PM-project costs."""
     tenant_id = "test-tenant-001"
     _setup_finance_manager_pm_fixture(db, tenant_id)
 
@@ -395,8 +396,16 @@ def test_finance_manager_pm_default_scope_sees_managed_cc_only(client, db):
     res = client.get("/finance/consolidated-costs?year=2026&month=9", headers=headers)
     assert res.status_code == 200
     rows = res.json()["data"]
-    cc_ids = {r.get("cost_center_id") for r in rows}
-    assert "cc-fin-other" not in cc_ids, "Manager tab must not expose costs from unmanaged CCs"
+    # Manager side: managed-CC demand visible
+    alpha_cc_ids = {r.get("cost_center_id") for r in rows if r["project_id"] == "proj-fin-alpha"}
+    assert "cc-fin-managed" in alpha_cc_ids, "Union scope must include managed-CC demand"
+    # PM side: assigned PM project demand visible even from unmanaged CC
+    assert "cc-fin-other" in alpha_cc_ids, "Union scope must include PM-project demand from other CCs"
+    # Not broadened: unassigned project's unmanaged-CC demand stays hidden
+    project_ids = {r["project_id"] for r in rows}
+    assert "proj-fin-other" not in project_ids, (
+        "Union scope must not expose non-PM projects outside the Manager resource scope"
+    )
 
 
 def test_finance_manager_pm_scope_pm_sees_pm_project_costs(client, db):
@@ -447,8 +456,8 @@ def test_finance_manager_pm_scope_pm_detail_project_mode(client, db):
     assert "Res B Fin" in demand_resource_names, "PM project detail must include other-CC resource for PM project"
 
 
-def test_finance_manager_pm_default_scope_detail_project_mode_restricted(client, db):
-    """Manager+PM default scope project-mode detail is restricted to managed-CC resources."""
+def test_finance_manager_pm_default_scope_detail_pm_project_full(client, db):
+    """Manager+PM default-scope detail for an assigned PM project shows all its lines (union)."""
     tenant_id = "test-tenant-001"
     _setup_finance_manager_pm_fixture(db, tenant_id)
 
@@ -466,5 +475,72 @@ def test_finance_manager_pm_default_scope_detail_project_mode_restricted(client,
     details = res.json()
     assert len(details) == 1
     demand_resource_names = {d["resource_name"] for d in details[0]["demand_lines"]}
-    assert "Res A Fin" in demand_resource_names, "Manager tab must include managed-CC resource"
-    assert "Res B Fin" not in demand_resource_names, "Manager tab must not include unmanaged-CC resource"
+    assert "Res A Fin" in demand_resource_names, "Union detail must include managed-CC resource"
+    assert "Res B Fin" in demand_resource_names, "Union detail must include other-CC resource for PM project"
+
+
+def test_finance_manager_pm_default_scope_detail_non_pm_project_restricted(client, db):
+    """Manager+PM default-scope detail for a NON-PM project stays Manager-resource scoped."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+
+    headers = {
+        "X-Dev-Role": "Manager",
+        "X-Dev-Secondary-Role": "PM",
+        "X-Dev-Tenant": tenant_id,
+        "X-Dev-User-Id": "fin-mpm-obj-001",
+    }
+    res = client.get(
+        "/finance/consolidated-costs/detail?year=2026&month=9&project_id=proj-fin-other",
+        headers=headers,
+    )
+    assert res.status_code == 200
+    details = res.json()
+    assert len(details) == 1
+    demand_resource_names = {d["resource_name"] for d in details[0]["demand_lines"]}
+    # proj-fin-other's only demand is res-fin-b in an unmanaged CC — must stay hidden
+    assert "Res B Fin" not in demand_resource_names, (
+        "Non-PM project detail must not expose unmanaged-CC resources"
+    )
+
+
+def test_finance_manager_pm_default_scope_includes_delegated_cc(client, db):
+    """Manager+PM default scope includes resources from actively delegated cost centers."""
+    from api.app.models.core import User, CostCenter, Resource, Project, Period, UserRole, ApprovalDelegate
+    from api.app.models.planning import DemandLine
+
+    tenant_id = "test-tenant-001"
+    mpm_user = _setup_finance_manager_pm_fixture(db, tenant_id)
+
+    # A delegator manager owning a third CC with demand on a non-PM project
+    delegator = User(
+        tenant_id=tenant_id, object_id="fin-deleg-obj-001", email="fin-deleg@test.com",
+        display_name="Fin Delegator", role=UserRole.MANAGER, is_active=True,
+    )
+    db.add(delegator)
+    db.flush()
+    db.add(CostCenter(id="cc-fin-deleg", tenant_id=tenant_id, name="Delegated CC Fin", code="DCF", ro_user_id=delegator.id))
+    db.add(Resource(id="res-fin-d", tenant_id=tenant_id, display_name="Res D Fin", cost_center_id="cc-fin-deleg", employee_id="FIN-D"))
+    db.add(Project(id="proj-fin-deleg", tenant_id=tenant_id, name="Deleg Fin", code="DLGF"))
+    db.add(DemandLine(
+        id="dl-fin-d", tenant_id=tenant_id, period_id="period-fin-mpm-1",
+        project_id="proj-fin-deleg", resource_id="res-fin-d",
+        year=2026, month=9, fte_percent=40, created_by="fin-deleg-obj-001",
+    ))
+    db.add(ApprovalDelegate(
+        tenant_id=tenant_id, delegator_id=delegator.id, delegate_id=mpm_user.id,
+        is_active=True, created_by="fin-deleg-obj-001",
+    ))
+    db.commit()
+
+    headers = {
+        "X-Dev-Role": "Manager",
+        "X-Dev-Secondary-Role": "PM",
+        "X-Dev-Tenant": tenant_id,
+        "X-Dev-User-Id": "fin-mpm-obj-001",
+    }
+    res = client.get("/finance/consolidated-costs?year=2026&month=9", headers=headers)
+    assert res.status_code == 200
+    rows = res.json()["data"]
+    deleg_cc_ids = {r.get("cost_center_id") for r in rows if r["project_id"] == "proj-fin-deleg"}
+    assert "cc-fin-deleg" in deleg_cc_ids, "Union scope must include delegated-CC demand"

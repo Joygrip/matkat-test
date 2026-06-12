@@ -243,6 +243,24 @@ def test_crud_placeholder(client, admin_headers, db):
     assert update_resp.json()["name"] == "Senior Developer TBH"
     assert update_resp.json()["cost_center_id"] == cc_id
 
+    # Admin can create additional placeholders in the same cost center
+    extra_resp = client.post(
+        "/admin/placeholders",
+        json={"cost_center_id": cc_id, "name": "TBD Extra"},
+        headers=admin_headers,
+    )
+    assert extra_resp.status_code == 200
+    assert extra_resp.json()["created_by"] is not None
+
+    # Duplicate active name in the same cost center is rejected
+    dup_resp = client.post(
+        "/admin/placeholders",
+        json={"cost_center_id": cc_id, "name": "tbd extra"},
+        headers=admin_headers,
+    )
+    assert dup_resp.status_code == 409
+    assert dup_resp.json()["code"] == "PLACEHOLDER_EXISTS"
+
 
 def test_crud_settings(client, admin_headers, db):
     """Test CRUD for settings."""

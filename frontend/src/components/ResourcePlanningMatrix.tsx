@@ -923,6 +923,33 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const isRoleManager = userRole === 'Manager';
   const isRolePM = userRole === 'PM';
 
+  // Placeholder creation — effective PMs (incl. Manager+PM), Admin and Finance.
+  // Mirrors the backend role gate on POST /placeholders.
+  const canCreatePlaceholder = isRolePM || canPM || userRole === 'Admin' || userRole === 'Finance';
+  const [creatingPlaceholder, setCreatingPlaceholder] = useState(false);
+  const [dlgPhFormOpen, setDlgPhFormOpen] = useState(false);
+  const [dlgPhName, setDlgPhName] = useState('');
+  const [dlgPhCcId, setDlgPhCcId] = useState('');
+
+  const handleCreatePlaceholder = useCallback(async (ccId: string, name: string): Promise<Placeholder | null> => {
+    const trimmed = name.trim();
+    if (!trimmed || !ccId) return null;
+    setCreatingPlaceholder(true);
+    try {
+      const ph = await lookupsApi.createPlaceholder({ cost_center_id: ccId, name: trimmed });
+      // Patch the per-CC and dialog caches locally — no demand/supply reload needed.
+      setCcPlaceholders(prev => ({ ...prev, [ccId]: [...(prev[ccId] ?? []), ph] }));
+      setDlgAllPlaceholders(prev => (prev.length > 0 ? [...prev, ph] : prev));
+      showSuccess(`Placeholder "${ph.name}" created${ph.cost_center_name ? ` for ${ph.cost_center_name}` : ''}`);
+      return ph;
+    } catch (err) {
+      showApiError(err as Error, 'Create placeholder');
+      return null;
+    } finally {
+      setCreatingPlaceholder(false);
+    }
+  }, [showSuccess, showApiError]);
+
   /*
    * Manager+PM scope model:
    *
@@ -2192,6 +2219,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDlgShowResourceDropdown(false);
     setDlgPmProjects([]);
     setDlgPeriodDragging(false);
+    setDlgPhFormOpen(false);
+    setDlgPhName('');
+    setDlgPhCcId('');
     // Supply mode (Manager or Manager+PM): load CC-scoped resources.
     // Demand mode (PM, Manager+PM, Finance, Admin): load full resource list.
     const isSupplyMode = isRoleManager && defaultLineType === 'supply';
@@ -2870,6 +2900,25 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                           ))}
                                         </>
                                       )}
+                                      {canCreatePlaceholder && addDemandResQuery.trim() && !addDemandForm.resOrPh && (
+                                        <div
+                                          onMouseDown={async e => {
+                                            e.preventDefault();
+                                            const ph = await handleCreatePlaceholder(group.ccId, addDemandResQuery);
+                                            if (ph) {
+                                              setAddDemandForm(f => ({ ...f, resOrPh: `ph:${ph.id}` }));
+                                              setAddDemandResQuery(ph.name);
+                                              setAddDemandResDropdownOpen(false);
+                                            }
+                                          }}
+                                          style={{ padding: '6px 8px', cursor: creatingPlaceholder ? 'wait' : 'pointer', fontSize: tokens.fontSizeBase200, color: tokens.colorBrandForeground1, borderTop: `1px solid ${tokens.colorNeutralStroke1}`, fontWeight: tokens.fontWeightSemibold }}
+                                          onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                                          onMouseLeave={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground1; }}
+                                          title="Creates a placeholder in this cost center; its planned FTE counts as planned cost for this cost center"
+                                        >
+                                          ＋ Create placeholder “{addDemandResQuery.trim()}”
+                                        </div>
+                                      )}
                                     </div>
                                   </FluentProvider>,
                                   document.body
@@ -3306,6 +3355,76 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                     </div>
                   )}
                 </div>
+
+                {/* Create placeholder — effective PM / Admin / Finance, demand only */}
+                {dlgLineType === 'demand' && canCreatePlaceholder && (
+                  <div style={{ marginTop: 6 }}>
+                    {!dlgPhFormOpen ? (
+                      <Button
+                        size="small"
+                        appearance="subtle"
+                        onClick={() => {
+                          setDlgPhFormOpen(true);
+                          setDlgPhName(dlgResourceQuery.trim());
+                          setDlgPhCcId(dlgCcId || '');
+                        }}
+                      >
+                        ＋ New placeholder
+                      </Button>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 8, border: `1px dashed ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium }}>
+                        <input
+                          type="text"
+                          value={dlgPhName}
+                          onChange={e => setDlgPhName(e.target.value)}
+                          placeholder="Placeholder name (e.g. TBD Senior Engineer)"
+                          style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, boxSizing: 'border-box' }}
+                        />
+                        <select
+                          value={dlgPhCcId}
+                          onChange={e => setDlgPhCcId(e.target.value)}
+                          style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, backgroundColor: tokens.colorNeutralBackground1 }}
+                        >
+                          <option value="">Select cost center…</option>
+                          {(allCostCenters.length > 0 ? allCostCenters : costCenters).map(c => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                        <div style={{ fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3 }}>
+                          Planned FTE on this placeholder counts as planned cost for the selected cost center.
+                        </div>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <Button
+                            size="small"
+                            appearance="primary"
+                            disabled={!dlgPhName.trim() || !dlgPhCcId || creatingPlaceholder}
+                            onClick={async () => {
+                              const ph = await handleCreatePlaceholder(dlgPhCcId, dlgPhName);
+                              if (ph) {
+                                setDlgSelectedResources(prev => [...prev, {
+                                  id: ph.id,
+                                  name: ph.name,
+                                  initials: '?',
+                                  ccId: ph.cost_center_id,
+                                  type: 'placeholder',
+                                }]);
+                                setDlgCcId(ph.cost_center_id);
+                                setDlgResourceQuery('');
+                                setDlgPhFormOpen(false);
+                                setDlgPhName('');
+                              }
+                            }}
+                          >
+                            Create
+                          </Button>
+                          <Button size="small" appearance="subtle" onClick={() => { setDlgPhFormOpen(false); setDlgPhName(''); }}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Project — required for Demand, optional for Supply */}

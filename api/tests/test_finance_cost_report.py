@@ -728,3 +728,136 @@ def test_oop_equip_detail_cc_mode_scoping(client, db):
     )
     assert res2.status_code == 200
     assert res2.json()[0]["external_lines"] == [], "Plain Manager must see no OoP lines in CC drilldown"
+
+
+# ─── Placeholder planned cost ──────────────────────────────────────────────────
+
+def _create_placeholder_demand_fixture(db, tenant_id: str, period_id: str, year: int, month: int, suffix: str, fte_percent: int = 50):
+    """Demand carried by a placeholder instead of a resource."""
+    from api.app.models.core import Placeholder
+
+    cc = CostCenter(id=f"cc-{suffix}", tenant_id=tenant_id, code=f"CC{suffix}", name=f"Cost Center {suffix}")
+    project = Project(id=f"proj-{suffix}", tenant_id=tenant_id, code=f"PRJ{suffix}", name=f"Project {suffix}")
+    placeholder = Placeholder(
+        id=f"ph-{suffix}",
+        tenant_id=tenant_id,
+        cost_center_id=cc.id,
+        name=f"TBD {suffix}",
+    )
+    demand = DemandLine(
+        id=f"dem-{suffix}",
+        tenant_id=tenant_id,
+        period_id=period_id,
+        project_id=project.id,
+        placeholder_id=placeholder.id,
+        year=year,
+        month=month,
+        fte_percent=fte_percent,
+        created_by="finance-001",
+    )
+    db.add_all([cc, project, placeholder, demand])
+    db.commit()
+    return {
+        "cost_center_id": cc.id,
+        "project_id": project.id,
+        "placeholder_id": placeholder.id,
+    }
+
+
+def test_placeholder_demand_counts_as_planned_cost(client, db, finance_headers):
+    """Placeholder demand contributes planned cost at the period rate, attributed to the demand's project and the placeholder's cost center."""
+    period = client.post("/periods", json={"year": 2028, "month": 1}, headers=finance_headers).json()
+    assert client.put(
+        f"/finance/settings/monthly_fte_cost?period_id={period['id']}",
+        json={"setting_value": "100000"},
+        headers=finance_headers,
+    ).status_code == 200
+
+    fixture = _create_placeholder_demand_fixture(db, "test-tenant-001", period["id"], 2028, 1, "ph1", fte_percent=50)
+
+    res = client.get("/finance/consolidated-costs?year=2028&month=1", headers=finance_headers)
+    assert res.status_code == 200
+    rows = [r for r in res.json()["data"] if r["project_id"] == fixture["project_id"]]
+    assert len(rows) == 1
+    assert rows[0]["demand_cost"] == 50000
+    assert rows[0]["cost_center_id"] == fixture["cost_center_id"]
+
+
+def test_placeholder_and_resource_demand_aggregate_together(client, db, finance_headers):
+    """Resource and placeholder demand in the same CC and project sum into one planned total."""
+    period = client.post("/periods", json={"year": 2028, "month": 2}, headers=finance_headers).json()
+    assert client.put(
+        f"/finance/settings/monthly_fte_cost?period_id={period['id']}",
+        json={"setting_value": "100000"},
+        headers=finance_headers,
+    ).status_code == 200
+
+    from api.app.models.core import Placeholder
+
+    fixture = _create_demand_fixture(db, "test-tenant-001", period["id"], 2028, 2, "mix", fte_percent=50)
+    placeholder = Placeholder(
+        id="ph-mix",
+        tenant_id="test-tenant-001",
+        cost_center_id=fixture["cost_center_id"],
+        name="TBD mix",
+    )
+    demand = DemandLine(
+        id="dem-mix-ph",
+        tenant_id="test-tenant-001",
+        period_id=period["id"],
+        project_id=fixture["project_id"],
+        placeholder_id=placeholder.id,
+        year=2028,
+        month=2,
+        fte_percent=25,
+        created_by="finance-001",
+    )
+    db.add_all([placeholder, demand])
+    db.commit()
+
+    res = client.get("/finance/consolidated-costs?year=2028&month=2", headers=finance_headers)
+    assert res.status_code == 200
+    rows = [r for r in res.json()["data"] if r["project_id"] == fixture["project_id"]]
+    assert len(rows) == 1
+    # 50% resource + 25% placeholder of 100000
+    assert rows[0]["demand_cost"] == 75000
+
+
+def test_placeholder_demand_in_project_detail(client, db, finance_headers):
+    """Project drill-down shows the placeholder line with its name and cost center."""
+    period = client.post("/periods", json={"year": 2028, "month": 3}, headers=finance_headers).json()
+    assert client.put(
+        f"/finance/settings/monthly_fte_cost?period_id={period['id']}",
+        json={"setting_value": "120000"},
+        headers=finance_headers,
+    ).status_code == 200
+
+    fixture = _create_placeholder_demand_fixture(db, "test-tenant-001", period["id"], 2028, 3, "phd", fte_percent=50)
+
+    res = client.get(
+        f"/finance/consolidated-costs/detail?year=2028&month=3&project_id={fixture['project_id']}",
+        headers=finance_headers,
+    )
+    assert res.status_code == 200
+    details = res.json()
+    assert len(details) == 1
+    line = details[0]["demand_lines"][0]
+    assert line["resource_name"] == "TBD phd"
+    assert line["cost"] == 60000
+    assert line["cost_center_name"] == "Cost Center phd"
+
+
+def test_placeholder_demand_in_cost_center_detail(client, db, finance_headers):
+    """Cost-center drill-down includes placeholder demand for that cost center."""
+    period = client.post("/periods", json={"year": 2028, "month": 4}, headers=finance_headers).json()
+    fixture = _create_placeholder_demand_fixture(db, "test-tenant-001", period["id"], 2028, 4, "phcc", fte_percent=100)
+
+    res = client.get(
+        f"/finance/consolidated-costs/detail?year=2028&month=4&cost_center_id={fixture['cost_center_id']}",
+        headers=finance_headers,
+    )
+    assert res.status_code == 200
+    details = res.json()
+    assert len(details) == 1
+    names = [l["resource_name"] for l in details[0]["demand_lines"]]
+    assert "TBD phcc" in names

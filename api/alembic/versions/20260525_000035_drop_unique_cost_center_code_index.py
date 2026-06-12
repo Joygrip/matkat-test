@@ -14,6 +14,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
+    if op.get_bind().dialect.name == "sqlite":
+        op.execute("DROP INDEX IF EXISTS ix_cost_centers_tenant_code")
+        op.execute("CREATE INDEX IF NOT EXISTS ix_cost_centers_tenant_code ON cost_centers (tenant_id, code)")
+        return
     # Drop unique index if it exists (may not exist on all environments)
     op.execute("""
         IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_cost_centers_tenant_code' AND object_id = OBJECT_ID('cost_centers'))
@@ -27,6 +31,10 @@ def upgrade():
 
 
 def downgrade():
+    if op.get_bind().dialect.name == "sqlite":
+        op.execute("DROP INDEX IF EXISTS ix_cost_centers_tenant_code")
+        op.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_cost_centers_tenant_code ON cost_centers (tenant_id, code)")
+        return
     op.execute("""
         IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_cost_centers_tenant_code' AND object_id = OBJECT_ID('cost_centers'))
             DROP INDEX ix_cost_centers_tenant_code ON cost_centers

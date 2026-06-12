@@ -76,6 +76,24 @@ class DemandLineResponse(DemandLineBase):
         from_attributes = True
 
 
+# ============== PLACEHOLDERS ==============
+
+class PlaceholderCreateRequest(BaseModel):
+    """Create a placeholder from the planning UI. Name is required (unlike admin auto-creation)."""
+    cost_center_id: str
+    name: str
+    description: Optional[str] = None
+    skill_profile: Optional[str] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError(f'{ErrorCode.VALIDATION_ERROR}: Placeholder name must not be empty')
+        return v
+
+
 # ============== SUPPLY ==============
 
 class SupplyLineBase(BaseModel):

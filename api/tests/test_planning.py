@@ -75,6 +75,7 @@ def setup_planning_data(client, admin_headers, finance_headers, db):
     )
     
     return {
+        "cost_center_id": cc_id,
         "project_id": project_id,
         "resource_id": resource_id,
         "placeholder_id": placeholder_id,
@@ -146,8 +147,8 @@ def test_xor_blocks_neither_id(client, pm_headers, setup_planning_data):
     assert response.json()["code"] == "DEMAND_XOR"
 
 
-def test_placeholder_blocked_in_4mfc(client, pm_headers, setup_planning_data):
-    """Placeholders are blocked within 4MFC window."""
+def test_placeholder_allowed_in_current_month(client, pm_headers, setup_planning_data):
+    """Placeholders are allowed in any open period (the 4MFC rule was removed)."""
     data = setup_planning_data
     response = client.post(
         "/demand-lines",
@@ -160,12 +161,12 @@ def test_placeholder_blocked_in_4mfc(client, pm_headers, setup_planning_data):
         },
         headers=pm_headers,
     )
-    assert response.status_code == 400
-    assert response.json()["code"] == "PLACEHOLDER_BLOCKED_4MFC"
+    assert response.status_code == 200
+    assert response.json()["placeholder_id"] == data["placeholder_id"]
 
 
-def test_placeholder_allowed_outside_4mfc(client, pm_headers, setup_planning_data):
-    """Placeholders are allowed outside 4MFC window."""
+def test_placeholder_allowed_in_future_month(client, pm_headers, setup_planning_data):
+    """Placeholders are allowed in future open periods."""
     data = setup_planning_data
     response = client.post(
         "/demand-lines",
@@ -180,6 +181,32 @@ def test_placeholder_allowed_outside_4mfc(client, pm_headers, setup_planning_dat
     )
     assert response.status_code == 200
     assert response.json()["placeholder_id"] == data["placeholder_id"]
+
+
+def test_placeholder_blocked_in_locked_period(client, pm_headers, finance_headers, setup_planning_data):
+    """Removing the 4MFC rule must not allow placeholder demand in locked periods."""
+    data = setup_planning_data
+    periods = client.get("/periods", headers=finance_headers).json()
+    current = next(
+        p for p in periods
+        if p["year"] == data["current_year"] and p["month"] == data["current_month"]
+    )
+    lock = client.post(f"/periods/{current['id']}/lock", headers=finance_headers)
+    assert lock.status_code == 200
+
+    response = client.post(
+        "/demand-lines",
+        json={
+            "project_id": data["project_id"],
+            "placeholder_id": data["placeholder_id"],
+            "year": data["current_year"],
+            "month": data["current_month"],
+            "fte_percent": 50,
+        },
+        headers=pm_headers,
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "PERIOD_LOCKED"
 
 
 def test_fte_invalid_range(client, pm_headers, setup_planning_data):
@@ -526,3 +553,151 @@ def test_employee_cannot_create_demand(client, employee_headers, setup_planning_
         headers=employee_headers,
     )
     assert response.status_code == 403
+
+
+# ============== PLACEHOLDER CREATION (PLANNING) ==============
+
+@pytest.fixture
+def manager_pm_headers():
+    """Headers for Manager+PM user (Manager with secondary_role=PM)."""
+    return {
+        "X-Dev-Role": "Manager",
+        "X-Dev-Secondary-Role": "PM",
+        "X-Dev-Tenant": "test-tenant-001",
+        "X-Dev-User-Id": "manager-pm-001",
+        "X-Dev-Email": "manager.pm@test.com",
+        "X-Dev-Name": "Manager PM User",
+    }
+
+
+def test_pm_can_create_placeholder(client, pm_headers, setup_planning_data):
+    """PM can create a placeholder for a cost center; creator is recorded."""
+    data = setup_planning_data
+    response = client.post(
+        "/placeholders",
+        json={"cost_center_id": data["cost_center_id"], "name": "TBD Senior Engineer"},
+        headers=pm_headers,
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["name"] == "TBD Senior Engineer"
+    assert result["cost_center_id"] == data["cost_center_id"]
+    assert result["created_by"] is not None
+    assert result["is_active"] is True
+
+    # Visible in the lookups list used by the planning UI
+    listed = client.get(
+        f"/lookups/placeholders?cost_center_id={data['cost_center_id']}",
+        headers=pm_headers,
+    ).json()
+    assert any(p["id"] == result["id"] for p in listed)
+
+
+def test_multiple_placeholders_per_cost_center(client, pm_headers, setup_planning_data):
+    """A cost center can hold several placeholders (one-per-CC limit removed)."""
+    data = setup_planning_data
+    first = client.post(
+        "/placeholders",
+        json={"cost_center_id": data["cost_center_id"], "name": "TBD Tester"},
+        headers=pm_headers,
+    )
+    second = client.post(
+        "/placeholders",
+        json={"cost_center_id": data["cost_center_id"], "name": "TBD Developer"},
+        headers=pm_headers,
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    listed = client.get(
+        f"/lookups/placeholders?cost_center_id={data['cost_center_id']}",
+        headers=pm_headers,
+    ).json()
+    # auto-created default + the two new ones
+    assert len(listed) == 3
+
+
+def test_duplicate_placeholder_name_rejected(client, pm_headers, setup_planning_data):
+    """Duplicate active placeholder name (case-insensitive) in the same CC is rejected."""
+    data = setup_planning_data
+    first = client.post(
+        "/placeholders",
+        json={"cost_center_id": data["cost_center_id"], "name": "TBD Engineer"},
+        headers=pm_headers,
+    )
+    assert first.status_code == 200
+    duplicate = client.post(
+        "/placeholders",
+        json={"cost_center_id": data["cost_center_id"], "name": "tbd engineer"},
+        headers=pm_headers,
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["code"] == "PLACEHOLDER_EXISTS"
+
+
+def test_manager_pm_can_create_placeholder(client, manager_pm_headers, setup_planning_data):
+    """Manager+PM (secondary role) can create placeholders."""
+    data = setup_planning_data
+    response = client.post(
+        "/placeholders",
+        json={"cost_center_id": data["cost_center_id"], "name": "TBD DSP Specialist"},
+        headers=manager_pm_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["created_by"] is not None
+
+
+def test_manager_cannot_create_placeholder(client, ro_headers, setup_planning_data):
+    """Plain Manager cannot create placeholders via the planning endpoint."""
+    data = setup_planning_data
+    response = client.post(
+        "/placeholders",
+        json={"cost_center_id": data["cost_center_id"], "name": "TBD Blocked"},
+        headers=ro_headers,
+    )
+    assert response.status_code == 403
+
+
+def test_employee_cannot_create_placeholder(client, employee_headers, setup_planning_data):
+    """Employee cannot create placeholders."""
+    data = setup_planning_data
+    response = client.post(
+        "/placeholders",
+        json={"cost_center_id": data["cost_center_id"], "name": "TBD Blocked"},
+        headers=employee_headers,
+    )
+    assert response.status_code == 403
+
+
+def test_create_placeholder_unknown_cost_center(client, pm_headers, setup_planning_data):
+    """Unknown or cross-tenant cost center yields 404."""
+    response = client.post(
+        "/placeholders",
+        json={"cost_center_id": "no-such-cc", "name": "TBD Nowhere"},
+        headers=pm_headers,
+    )
+    assert response.status_code == 404
+
+
+def test_created_placeholder_usable_in_demand(client, pm_headers, setup_planning_data):
+    """A PM-created placeholder can immediately carry demand in an open period."""
+    data = setup_planning_data
+    ph = client.post(
+        "/placeholders",
+        json={"cost_center_id": data["cost_center_id"], "name": "TBD Usable"},
+        headers=pm_headers,
+    ).json()
+    response = client.post(
+        "/demand-lines",
+        json={
+            "project_id": data["project_id"],
+            "placeholder_id": ph["id"],
+            "year": data["current_year"],
+            "month": data["current_month"],
+            "fte_percent": 25,
+        },
+        headers=pm_headers,
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["placeholder_id"] == ph["id"]
+    assert result["cost_center_id"] == data["cost_center_id"]

@@ -6,7 +6,7 @@ from api.app.auth.dependencies import CurrentUser
 from api.app.models.actuals import ActualLine
 from sqlalchemy import exists as sa_exists
 from fastapi import HTTPException
-from api.app.models.core import User, Project, ProjectPM, Resource, CostCenter, Period, PeriodStatus
+from api.app.models.core import User, Project, ProjectPM, Resource, CostCenter, Period, PeriodStatus, Placeholder
 from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalStatus, StepStatus
 from api.app.models.finance import FinanceSetting
 from api.app.services.period import PeriodService
@@ -472,6 +472,8 @@ class FinanceService:
             DemandLine.tenant_id == self.current_user.tenant_id,
             DemandLine.year == year,
             DemandLine.month == month,
+            # Per-employee view: placeholder demand has no employee, so it is
+            # intentionally excluded here (it still counts in cost overviews).
             DemandLine.resource_id.isnot(None),
         ]
         if project_id:
@@ -781,20 +783,39 @@ class FinanceService:
             external_lines: list[ExternalLineDetail] = []
             equipment_lines: list[EquipmentLineDetail] = []
 
-            # Demand lines — join Resource, filter by Resource.cost_center_id
+            # Demand lines — resource lines keyed by Resource.cost_center_id,
+            # placeholder lines keyed by Placeholder.cost_center_id (placeholders
+            # count as planned cost like real resources)
+            detail_demand_cc = func.coalesce(Resource.cost_center_id, Placeholder.cost_center_id)
             demand_q = (
-                self.db.query(DemandLine, Resource)
-                .join(Resource, DemandLine.resource_id == Resource.id)
+                self.db.query(DemandLine, Resource, Placeholder)
+                .outerjoin(Resource, DemandLine.resource_id == Resource.id)
+                .outerjoin(Placeholder, DemandLine.placeholder_id == Placeholder.id)
                 .filter(
                     DemandLine.tenant_id == self.current_user.tenant_id,
                     DemandLine.period_id == period.id,
-                    DemandLine.resource_id.isnot(None),
-                    Resource.cost_center_id.in_(cc_id_list),
+                    detail_demand_cc.in_(cc_id_list),
                 )
             )
             if cc_pm_project_ids is not None:
                 demand_q = demand_q.filter(DemandLine.project_id.in_(cc_pm_project_ids))
-            demand_q = _apply_cc_scope(demand_q, Resource.id, DemandLine.project_id)
+            # Manager resource scope cannot match placeholder lines; widen it with the
+            # cost centers of the manager's accessible resources (see get_consolidated_costs).
+            if cc_manager_resource_ids is not None:
+                demand_scope_arms = [Resource.id.in_(cc_manager_resource_ids)]
+                cc_manager_cc_ids = {
+                    row[0]
+                    for row in self.db.query(Resource.cost_center_id)
+                    .filter(Resource.id.in_(cc_manager_resource_ids))
+                    .distinct()
+                    .all()
+                    if row[0]
+                }
+                if cc_manager_cc_ids:
+                    demand_scope_arms.append(Placeholder.cost_center_id.in_(cc_manager_cc_ids))
+                if cc_union_pm_project_ids:
+                    demand_scope_arms.append(DemandLine.project_id.in_(cc_union_pm_project_ids))
+                demand_q = demand_q.filter(or_(*demand_scope_arms))
             demand_rows = demand_q.all()
 
             # Actual lines — join Resource, filter by Resource.cost_center_id
@@ -844,7 +865,7 @@ class FinanceService:
 
             # Load project names from all collected project IDs
             cc_all_project_ids = (
-                {line.project_id for line, _ in demand_rows}
+                {line.project_id for line, _, _ in demand_rows}
                 | {line.project_id for line, _ in actual_rows}
                 | {line.project_id for line, _ in ext_rows}
             )
@@ -859,12 +880,12 @@ class FinanceService:
 
             demand_lines = [
                 DemandLineDetail(
-                    resource_name=resource.display_name,
+                    resource_name=resource.display_name if resource else (placeholder.name if placeholder else "Placeholder"),
                     fte_percent=line.fte_percent,
                     cost=int(line.fte_percent * monthly_fte_cost // 100),
                     project_name=project_map.get(line.project_id),
                 )
-                for line, resource in demand_rows
+                for line, resource, placeholder in demand_rows
             ]
             actual_lines = [
                 ActualLineDetail(
@@ -959,29 +980,43 @@ class FinanceService:
                         _ids.append(_rid)
             proj_manager_resource_ids = _ids
 
-        # Demand lines (planned labor) — skip placeholders
+        # Demand lines (planned labor) — placeholder lines count like resource lines,
+        # with cost center context resolved from the placeholder
         demand_q = (
-            self.db.query(DemandLine, Resource, CostCenter)
-            .join(Resource, DemandLine.resource_id == Resource.id)
-            .outerjoin(CostCenter, Resource.cost_center_id == CostCenter.id)
+            self.db.query(DemandLine, Resource, Placeholder, CostCenter)
+            .outerjoin(Resource, DemandLine.resource_id == Resource.id)
+            .outerjoin(Placeholder, DemandLine.placeholder_id == Placeholder.id)
+            .outerjoin(CostCenter, func.coalesce(Resource.cost_center_id, Placeholder.cost_center_id) == CostCenter.id)
             .filter(
                 DemandLine.tenant_id == self.current_user.tenant_id,
                 DemandLine.project_id == project_id,
                 DemandLine.period_id == period.id,
-                DemandLine.resource_id.isnot(None),
             )
         )
         if proj_manager_resource_ids is not None:
-            demand_q = demand_q.filter(Resource.id.in_(proj_manager_resource_ids))
+            # Manager resource scope cannot match placeholder lines; widen it with
+            # the cost centers of the manager's accessible resources.
+            proj_scope_arms = [Resource.id.in_(proj_manager_resource_ids)]
+            proj_manager_cc_ids = {
+                row[0]
+                for row in self.db.query(Resource.cost_center_id)
+                .filter(Resource.id.in_(proj_manager_resource_ids))
+                .distinct()
+                .all()
+                if row[0]
+            }
+            if proj_manager_cc_ids:
+                proj_scope_arms.append(Placeholder.cost_center_id.in_(proj_manager_cc_ids))
+            demand_q = demand_q.filter(or_(*proj_scope_arms))
         demand_rows = demand_q.all()
         demand_lines = [
             DemandLineDetail(
-                resource_name=resource.display_name,
+                resource_name=resource.display_name if resource else (placeholder.name if placeholder else "Placeholder"),
                 fte_percent=line.fte_percent,
                 cost=int(line.fte_percent * monthly_fte_cost // 100),
                 cost_center_name=cc.name if cc else None,
             )
-            for line, resource, cc in demand_rows
+            for line, resource, placeholder, cc in demand_rows
         ]
 
         # Actual lines — approved only
@@ -1307,21 +1342,43 @@ class FinanceService:
                 return code if code else cc_id  # fallback to UUID when code is empty
             return cc_id
 
-        # 6. Demand lines → planned labor cost, keyed by Resource.cost_center_id
+        # 6. Demand lines → planned labor cost. Resource lines are keyed by
+        #    Resource.cost_center_id; placeholder lines count exactly the same way,
+        #    keyed by Placeholder.cost_center_id, at the same period rate.
+        demand_cc_col = func.coalesce(Resource.cost_center_id, Placeholder.cost_center_id)
         demand_q = (
-            self.db.query(DemandLine, Resource.cost_center_id)
-            .join(Resource, DemandLine.resource_id == Resource.id)
+            self.db.query(DemandLine, demand_cc_col)
+            .outerjoin(Resource, DemandLine.resource_id == Resource.id)
+            .outerjoin(Placeholder, DemandLine.placeholder_id == Placeholder.id)
             .filter(
                 DemandLine.tenant_id == self.current_user.tenant_id,
                 DemandLine.period_id.in_(period_ids),
-                DemandLine.resource_id.isnot(None),
             )
         )
         if project_id:
             demand_q = demand_q.filter(DemandLine.project_id == project_id)
         if cost_center_id:
-            demand_q = demand_q.filter(Resource.cost_center_id == cost_center_id)
-        demand_q = _apply_resource_scope(demand_q, Resource.id, DemandLine.project_id)
+            demand_q = demand_q.filter(demand_cc_col == cost_center_id)
+        # Manager resource scope cannot match placeholder lines (they have no
+        # resource), so widen it with the cost centers of the manager's accessible
+        # resources: a manager sees the placeholder planned cost of their own CCs.
+        if scoped_resource_ids is None:
+            pass
+        else:
+            scope_arms = [Resource.id.in_(scoped_resource_ids)]
+            manager_cc_ids = {
+                row[0]
+                for row in self.db.query(Resource.cost_center_id)
+                .filter(Resource.id.in_(scoped_resource_ids))
+                .distinct()
+                .all()
+                if row[0]
+            }
+            if manager_cc_ids:
+                scope_arms.append(Placeholder.cost_center_id.in_(manager_cc_ids))
+            if union_pm_project_ids:
+                scope_arms.append(DemandLine.project_id.in_(union_pm_project_ids))
+            demand_q = demand_q.filter(or_(*scope_arms))
         for line, cc_id in demand_q.all():
             if not _pm_allowed(line.project_id):
                 continue

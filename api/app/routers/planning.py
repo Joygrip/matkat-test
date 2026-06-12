@@ -2,12 +2,16 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import and_, func
 
 from api.app.db.engine import get_db
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
-from api.app.models.core import UserRole, Resource, User
+from api.app.models.core import UserRole, Resource, User, CostCenter, Placeholder
 from api.app.config import get_settings
+from api.app.services.audit import log_audit
+from api.app.schemas.admin import PlaceholderResponse
 from api.app.schemas.planning import (
+    PlaceholderCreateRequest,
     DemandLineCreate, DemandLineUpdate, DemandLineResponse,
     DemandGroupDeleteRequest, DemandGroupMoveRequest,
     SupplyLineCreate, SupplyLineUpdate, SupplyLineResponse,
@@ -193,7 +197,6 @@ async def create_demand_line(
     
     Rules:
     - Must specify either resource_id OR placeholder_id (XOR)
-    - Placeholders not allowed within 4MFC window
     - FTE must be 5-100 in steps of 5
     - Period must be open
     
@@ -361,6 +364,77 @@ async def bulk_demand_lines(
                     ))
                 break
     return BulkDemandLineResponse(results=results)
+
+
+# ============== PLACEHOLDERS ==============
+
+@router.post("/placeholders", response_model=PlaceholderResponse)
+async def create_planning_placeholder(
+    data: PlaceholderCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE, UserRole.PM)),
+):
+    """
+    Create a placeholder for a cost center from the planning UI.
+
+    Accessible to: PM (incl. Manager+PM via secondary role), Finance, Admin.
+    The creator is recorded in created_by; the placeholder is visible and usable
+    by anyone who can plan demand in the tenant.
+    """
+    cc = db.query(CostCenter).filter(
+        and_(CostCenter.id == data.cost_center_id, CostCenter.tenant_id == current_user.tenant_id)
+    ).first()
+    if not cc:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Cost center not found"})
+    if not cc.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "VALIDATION_ERROR", "message": "Cannot create a placeholder for an inactive cost center"},
+        )
+
+    duplicate = db.query(Placeholder).filter(
+        and_(
+            Placeholder.tenant_id == current_user.tenant_id,
+            Placeholder.cost_center_id == data.cost_center_id,
+            Placeholder.is_active == True,
+            func.lower(Placeholder.name) == data.name.lower(),
+        )
+    ).first()
+    if duplicate:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "PLACEHOLDER_EXISTS", "message": "This cost center already has a placeholder with that name."},
+        )
+
+    placeholder = Placeholder(
+        tenant_id=current_user.tenant_id,
+        cost_center_id=data.cost_center_id,
+        name=data.name,
+        description=data.description,
+        skill_profile=data.skill_profile,
+        created_by=current_user.id,
+    )
+    db.add(placeholder)
+    db.commit()
+    db.refresh(placeholder)
+    log_audit(
+        db, current_user, "create", "Placeholder", placeholder.id,
+        new_values={"name": placeholder.name, "cost_center_id": placeholder.cost_center_id, "cost_center_name": cc.name},
+    )
+    return {
+        "id": placeholder.id,
+        "tenant_id": placeholder.tenant_id,
+        "name": placeholder.name,
+        "cost_center_id": placeholder.cost_center_id,
+        "description": placeholder.description,
+        "skill_profile": placeholder.skill_profile,
+        "estimated_cost": placeholder.estimated_cost,
+        "created_by": placeholder.created_by,
+        "is_active": placeholder.is_active,
+        "created_at": placeholder.created_at,
+        "updated_at": placeholder.updated_at,
+        "cost_center_name": cc.name,
+    }
 
 
 # ============== SUPPLY LINES ==============

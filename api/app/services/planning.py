@@ -1,6 +1,4 @@
 """Planning services - Demand and Supply line management."""
-from datetime import datetime, timezone
-from dateutil.relativedelta import relativedelta
 from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
@@ -14,27 +12,6 @@ from api.app.services.period import PeriodService
 from api.app.schemas.common import ErrorCode
 
 _SCOPED_ROLES = (UserRole.MANAGER,)
-
-
-def get_4mfc_boundary() -> tuple[int, int]:
-    """
-    Get the boundary date for 4MFC (4 Month Forward Commitment).
-    Returns (year, month) of the first month where placeholders are allowed.
-    """
-    now = datetime.now(timezone.utc)
-    boundary = now + relativedelta(months=4)
-    return boundary.year, boundary.month
-
-
-def is_within_4mfc(year: int, month: int) -> bool:
-    """Check if a given year/month is within the 4MFC window."""
-    boundary_year, boundary_month = get_4mfc_boundary()
-
-    # Convert to comparable values (year * 12 + month)
-    target = year * 12 + month
-    boundary = boundary_year * 12 + boundary_month
-
-    return target < boundary
 
 
 def _build_demand_line_ctx(demand: "DemandLine", project=None, resource=None, placeholder=None) -> dict:
@@ -286,17 +263,6 @@ class DemandService:
                 }
             )
         
-        # Validate 4MFC rule for placeholders
-        if placeholder_id and is_within_4mfc(year, month):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "code": ErrorCode.PLACEHOLDER_BLOCKED_4MFC,
-                    "message": f"Placeholders are not allowed within the 4-month forward commitment window. "
-                               f"Use named resources for {year}-{month:02d}.",
-                }
-            )
-        
         # Validate FTE
         if fte_percent < 5 or fte_percent > 100 or fte_percent % 5 != 0:
             raise HTTPException(
@@ -459,17 +425,6 @@ class DemandService:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={"code": ErrorCode.DEMAND_XOR, "message": "Must specify either resource_id or placeholder_id"},
-                )
-
-            # 4MFC check for placeholders
-            if new_placeholder_id and is_within_4mfc(demand.year, demand.month):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={
-                        "code": ErrorCode.PLACEHOLDER_BLOCKED_4MFC,
-                        "message": f"Placeholders are not allowed within the 4-month forward commitment window. "
-                                   f"Use named resources for {demand.year}-{demand.month:02d}.",
-                    },
                 )
 
             # Validate resource/placeholder exists
@@ -748,19 +703,6 @@ class DemandService:
                     detail={"code": ErrorCode.PERIOD_LOCKED, "message": f"Period {p.year}-{p.month:02d} is locked. No edits allowed."},
                 )
 
-        # 4MFC check for placeholder target
-        if to_placeholder_id:
-            for pid in to_period_ids_set:
-                p = period_id_map[pid]
-                if is_within_4mfc(p.year, p.month):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={
-                            "code": ErrorCode.PLACEHOLDER_BLOCKED_4MFC,
-                            "message": f"Placeholders are not allowed within the 4-month forward commitment window. Use named resources for {p.year}-{p.month:02d}.",
-                        },
-                    )
-
         # Fetch source lines; snapshot FTE values BEFORE any writes
         source_query = self.db.query(DemandLine).filter(
             and_(
@@ -988,21 +930,6 @@ class DemandService:
                         "message": f"Period {period.year}-{period.month:02d} is locked. No edits allowed.",
                     },
                 )
-
-        # 4MFC check when moving to a placeholder
-        if to_placeholder_id:
-            for period in periods:
-                if is_within_4mfc(period.year, period.month):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={
-                            "code": ErrorCode.PLACEHOLDER_BLOCKED_4MFC,
-                            "message": (
-                                f"Placeholders are not allowed within the 4-month forward commitment window. "
-                                f"Use named resources for {period.year}-{period.month:02d}."
-                            ),
-                        },
-                    )
 
         # Validate target resource/placeholder exists and is active
         target_name: str

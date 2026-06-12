@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 from typing import Optional
 
 from api.app.db.engine import get_db, SessionLocal, _get_or_create_engine
@@ -668,6 +668,7 @@ def _enrich_placeholder(placeholder: Placeholder) -> dict:
         "description": placeholder.description,
         "skill_profile": placeholder.skill_profile,
         "estimated_cost": placeholder.estimated_cost,
+        "created_by": placeholder.created_by,
         "is_active": placeholder.is_active,
         "created_at": placeholder.created_at,
         "updated_at": placeholder.updated_at,
@@ -709,20 +710,22 @@ async def create_placeholder(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(*MASTER_DATA_WRITE_ROLES)),
 ):
-    """Create a new placeholder for a cost center. (Admin, Finance) One per cost center."""
+    """Create a new placeholder for a cost center. (Admin, Finance)"""
+    dump = data.model_dump(exclude_unset=True)
+    name = (dump.pop("name", None) or "Placeholder").strip() or "Placeholder"
     existing = db.query(Placeholder).filter(
         and_(
             Placeholder.tenant_id == current_user.tenant_id,
             Placeholder.cost_center_id == data.cost_center_id,
+            Placeholder.is_active == True,
+            func.lower(Placeholder.name) == name.lower(),
         )
     ).first()
     if existing:
         raise HTTPException(
             status_code=409,
-            detail={"code": "PLACEHOLDER_EXISTS", "message": "This cost center already has a placeholder."},
+            detail={"code": "PLACEHOLDER_EXISTS", "message": "This cost center already has a placeholder with that name."},
         )
-    dump = data.model_dump(exclude_unset=True)
-    name = dump.pop("name", None) or "Placeholder"
     placeholder = Placeholder(
         tenant_id=current_user.tenant_id,
         cost_center_id=data.cost_center_id,
@@ -730,6 +733,7 @@ async def create_placeholder(
         description=dump.get("description"),
         skill_profile=dump.get("skill_profile"),
         estimated_cost=dump.get("estimated_cost"),
+        created_by=current_user.id,
     )
     db.add(placeholder)
     db.commit()

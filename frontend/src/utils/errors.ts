@@ -6,6 +6,7 @@ import { ApiError } from '../types';
 const codeMessages: Record<string, string> = {
   FTE_INVALID: 'FTE must be 0 or between 5 and 100 in steps of 5.',
   DEMAND_XOR: 'Demand must include either a resource or a placeholder (not both).',
+  PLACEHOLDER_EXISTS: 'This cost center already has a placeholder with that name.',
   ACTUALS_OVER_100: 'Total actuals exceed 100% for this resource.',
   PERIOD_LOCKED: 'This period is locked. Select an open period or ask Finance to unlock.',
   UNAUTHORIZED_ROLE: 'You do not have permission to perform this action.',

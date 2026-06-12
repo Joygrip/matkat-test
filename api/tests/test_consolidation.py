@@ -498,12 +498,15 @@ def _setup_manager_pm_fixture(db, tenant_id: str):
       res-mpm-a  in cc-mpm-managed
       res-mpm-b  in cc-mpm-other
 
-      project-mpm-alpha  has demand for both resources (spans both CCs)
+      project-mpm-alpha  assigned to the user via ProjectPM; has demand for
+                         both resources (spans both CCs)
+      project-mpm-beta   NOT assigned; has demand for res-mpm-b in cc-mpm-other
 
-    This lets tests verify that scope=pm returns both CCs while scope=default
+    This lets tests verify that scope=pm returns both CCs (assigned PM project
+    touches them) but excludes unassigned-project data, while scope=default
     (Manager tab) returns only cc-mpm-managed.
     """
-    from api.app.models.core import User, CostCenter, Resource, Project, UserRole
+    from api.app.models.core import User, CostCenter, Resource, Project, ProjectPM, UserRole
     from api.app.models.planning import DemandLine, SupplyLine
 
     # Create the Manager+PM user directly so we get their DB id for the CC link
@@ -559,6 +562,19 @@ def _setup_manager_pm_fixture(db, tenant_id: str):
         code="ALP",
     )
     db.add(project)
+    db.add(ProjectPM(
+        project_id="proj-mpm-alpha",
+        user_id=manager_pm_user.id,
+        tenant_id=tenant_id,
+    ))
+    # A project the user is NOT assigned to as PM — its demand must never
+    # appear in scope=pm responses.
+    db.add(Project(
+        id="proj-mpm-beta",
+        tenant_id=tenant_id,
+        name="Beta",
+        code="BET",
+    ))
 
     from api.app.models.core import Period
     period = Period(
@@ -586,6 +602,15 @@ def _setup_manager_pm_fixture(db, tenant_id: str):
         project_id="proj-mpm-alpha",
         resource_id="res-mpm-b",
         year=2026, month=7, fte_percent=60, created_by="mpm-obj-001",
+    ))
+    # Demand on the unassigned project — must be filtered out under scope=pm
+    db.add(DemandLine(
+        id="dl-mpm-beta",
+        tenant_id=tenant_id,
+        period_id="period-mpm-1",
+        project_id="proj-mpm-beta",
+        resource_id="res-mpm-b",
+        year=2026, month=7, fte_percent=30, created_by="mpm-obj-001",
     ))
     db.commit()
 
@@ -697,8 +722,9 @@ def test_manager_pm_default_scope_returns_managed_cc_only(client, db):
     assert "Other CC" not in cc_names, "Manager tab must not expose cost centers outside manager scope"
 
 
-def test_manager_pm_scope_pm_returns_full_org_data(client, db):
-    """Manager+PM scope=pm (PM tab) returns all CCs so frontend can filter by PM project IDs."""
+def test_manager_pm_scope_pm_returns_assigned_pm_project_data(client, db):
+    """Manager+PM scope=pm (PM tab) returns all CCs touched by assigned PM projects,
+    with data filtered server-side to those projects."""
     tenant_id = "test-tenant"
     _setup_manager_pm_fixture(db, tenant_id)
 
@@ -714,6 +740,80 @@ def test_manager_pm_scope_pm_returns_full_org_data(client, db):
     cc_names = [cc["cost_center_name"] for cc in data["cost_centers"]]
     assert "Managed CC" in cc_names, "PM tab must include manager's own CC"
     assert "Other CC" in cc_names, "PM tab must include CCs outside manager scope that PM project touches"
+
+    # Unassigned-project data must be filtered out server-side
+    for cc in data["cost_centers"]:
+        assert "proj-mpm-beta" not in cc["project_ids"], "Unassigned PM project must not be exposed"
+        for r in cc["resources"]:
+            for pa in r["project_allocations"]:
+                assert pa["project_id"] != "proj-mpm-beta"
+    # res-mpm-b has 60 FTE on the assigned project + 30 on the unassigned one;
+    # only the assigned demand may be counted.
+    other_cc = next(cc for cc in data["cost_centers"] if cc["cost_center_name"] == "Other CC")
+    res_b = next(r for r in other_cc["resources"] if r["resource_id"] == "res-mpm-b")
+    assert res_b["demand_fte"] == 60
+
+
+def test_manager_pm_scope_pm_without_assignments_returns_empty(client, db):
+    """Manager+PM with no ProjectPM rows gets an empty PM-tab payload, not full org."""
+    from api.app.models.core import ProjectPM
+
+    tenant_id = "test-tenant"
+    _setup_manager_pm_fixture(db, tenant_id)
+    db.query(ProjectPM).filter(ProjectPM.project_id == "proj-mpm-alpha").delete()
+    db.commit()
+
+    headers = {
+        "X-Dev-Role": "Manager",
+        "X-Dev-Secondary-Role": "PM",
+        "X-Dev-Tenant": tenant_id,
+        "X-Dev-User-Id": "mpm-obj-001",
+    }
+    response = client.get("/consolidation/dashboard/period-mpm-1?scope=pm", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["cost_centers"] == []
+    assert data["summary"]["total_demand_fte"] == 0
+
+
+def test_pure_pm_dashboard_scoped_to_assigned_projects(client, db):
+    """Pure PM users are always restricted to their assigned PM projects —
+    they must not receive the full-org payload regardless of the scope param."""
+    from api.app.models.core import User, ProjectPM, UserRole
+
+    tenant_id = "test-tenant"
+    _setup_manager_pm_fixture(db, tenant_id)
+
+    pure_pm = User(
+        tenant_id=tenant_id,
+        object_id="pure-pm-obj-001",
+        email="pure-pm@test.com",
+        display_name="Pure PM",
+        role=UserRole.PM,
+        is_active=True,
+    )
+    db.add(pure_pm)
+    db.flush()
+    db.add(ProjectPM(project_id="proj-mpm-alpha", user_id=pure_pm.id, tenant_id=tenant_id))
+    db.commit()
+
+    headers = {
+        "X-Dev-Role": "PM",
+        "X-Dev-Tenant": tenant_id,
+        "X-Dev-User-Id": "pure-pm-obj-001",
+    }
+    for url in (
+        "/consolidation/dashboard/period-mpm-1",
+        "/consolidation/dashboard/period-mpm-1?scope=pm",
+    ):
+        response = client.get(url, headers=headers)
+        assert response.status_code == 200
+        data = response.json()
+        for cc in data["cost_centers"]:
+            assert "proj-mpm-beta" not in cc["project_ids"]
+            for r in cc["resources"]:
+                for pa in r["project_allocations"]:
+                    assert pa["project_id"] != "proj-mpm-beta"
 
 
 def test_manager_reader_default_scope_still_sees_full_org(client, db):

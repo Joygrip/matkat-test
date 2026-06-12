@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 
-from api.app.models.core import Period, Project, Resource, Placeholder, CostCenter, User, ApprovalDelegate
+from api.app.models.core import Period, Project, ProjectPM, Resource, Placeholder, CostCenter, User, ApprovalDelegate
 from api.app.models.planning import DemandLine, SupplyLine
 from api.app.models.actuals import ActualLine
 from api.app.models.consolidation import PublishSnapshot, PublishSnapshotLine
@@ -56,10 +56,11 @@ class ConsolidationService:
         plus flat over-allocations for quick scanning.
 
         scope="default" — Manager users see only their managed/delegated CCs.
-        scope="pm"      — Manager+PM users bypass the Manager CC filter so
-                          FinanceOverview can apply PM project-ID filtering on
-                          the full org payload.  Plain Manager is unaffected
-                          (Manager CC filter still applies).
+        scope="pm"      — Manager+PM users bypass the Manager CC filter and are
+                          instead restricted server-side to their assigned PM
+                          projects (same as pure PM users, who are always
+                          PM-project scoped regardless of scope).  Plain Manager
+                          is unaffected (Manager CC filter still applies).
         """
         period = PeriodService(self.db, self.current_user).get_by_id(period_id)
 
@@ -247,17 +248,98 @@ class ConsolidationService:
 
         cost_centers_list.sort(key=lambda c: c["cost_center_name"] or "")
 
-        # Manager restriction: filter to cost centers they manage (ro_user_id or director_user_id)
-        # Also include cost centers of any delegators who have granted this manager delegation.
-        # Two bypass conditions skip this filter:
-        #   is_manager_reader — sees full org (existing behaviour)
-        #   is_manager_pm + scope="pm" — PM tab needs full-org data so FinanceOverview
-        #       can apply its own project-ID filtering across all cost centers touched by
-        #       the Manager's assigned PM projects.  Plain Manager is unaffected.
         is_pm_scope_for_manager_pm = (
             scope == "pm"
             and self.current_user.is_manager_pm
         )
+
+        # PM project scoping (server-side enforcement): pure PM users and Manager+PM
+        # users requesting scope="pm" only ever receive data for their assigned PM
+        # projects, resolved here from ProjectPM — never from caller input.
+        # FinanceOverview applies the same filter client-side for display; this guard
+        # ensures a direct API call cannot read the full-org payload.
+        if self.current_user.role == "PM" or is_pm_scope_for_manager_pm:
+            pm_user = self.db.query(User).filter(
+                and_(
+                    User.tenant_id == self.current_user.tenant_id,
+                    User.object_id == self.current_user.object_id,
+                )
+            ).first()
+            assigned_project_ids: set = set()
+            if pm_user:
+                assigned_project_ids = {
+                    row.project_id
+                    for row in self.db.query(ProjectPM.project_id)
+                    .filter(ProjectPM.user_id == pm_user.id)
+                    .all()
+                }
+
+            scoped_ccs = []
+            for cc in cost_centers_list:
+                if not any(pid in assigned_project_ids for pid in cc["project_ids"]):
+                    continue
+                scoped_placeholders = [
+                    ph for ph in cc["placeholders"]
+                    if ph["project_id"] in assigned_project_ids
+                ]
+                scoped_resources = []
+                for r in cc["resources"]:
+                    # General-availability supply (project_id None) stays visible,
+                    # matching the resource detail modal's treatment.
+                    relevant = [
+                        pa for pa in r["project_allocations"]
+                        if pa["project_id"] is None or pa["project_id"] in assigned_project_ids
+                    ]
+                    r_demand = sum(pa["demand_fte"] for pa in relevant)
+                    r_supply = sum(pa["supply_fte"] for pa in relevant)
+                    if r_demand == 0 and r_supply == 0:
+                        continue
+                    r_gap = r_supply - r_demand
+                    scoped_resources.append({
+                        **r,
+                        "demand_fte": r_demand,
+                        "supply_fte": r_supply,
+                        "gap_fte": r_gap,
+                        "status": "under" if r_gap < 0 else ("over" if r_gap > 0 else "balanced"),
+                        "project_allocations": relevant,
+                    })
+                res_demand = sum(r["demand_fte"] for r in scoped_resources)
+                res_supply = sum(r["supply_fte"] for r in scoped_resources)
+                ph_demand = sum(ph["demand_fte"] for ph in scoped_placeholders)
+                scoped_ccs.append({
+                    **cc,
+                    "project_ids": [pid for pid in cc["project_ids"] if pid in assigned_project_ids],
+                    "placeholders": scoped_placeholders,
+                    "resources": scoped_resources,
+                    "total_demand_fte": res_demand + ph_demand,
+                    "total_supply_fte": res_supply,
+                    "gap_fte": res_supply - (res_demand + ph_demand),
+                })
+            cost_centers_list = scoped_ccs
+            # Recompute over-allocations from scoped demand so a resource with
+            # org-wide demand > 100% but scoped demand <= 100% is not flagged.
+            over_allocations = [
+                {
+                    "resource_id": r["resource_id"],
+                    "resource_name": r["resource_name"],
+                    "cost_center_id": cc["cost_center_id"],
+                    "cost_center_name": cc["cost_center_name"],
+                    "total_demand_fte": r["demand_fte"],
+                }
+                for cc in cost_centers_list
+                for r in cc["resources"]
+                if r["demand_fte"] > 100
+            ]
+            total_demand = sum(cc["total_demand_fte"] for cc in cost_centers_list)
+            total_supply = sum(cc["total_supply_fte"] for cc in cost_centers_list)
+            orphans_count = sum(len(cc["placeholders"]) for cc in cost_centers_list)
+
+        # Manager restriction: filter to cost centers they manage (ro_user_id or director_user_id)
+        # Also include cost centers of any delegators who have granted this manager delegation.
+        # Two bypass conditions skip this filter:
+        #   is_manager_reader — sees full org (existing behaviour)
+        #   is_manager_pm + scope="pm" — PM-project scoping above applies instead.
+        #   Plain Manager is unaffected.
         if (
             self.current_user.role == "Manager"
             and not self.current_user.is_manager_reader

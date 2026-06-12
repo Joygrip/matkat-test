@@ -879,7 +879,9 @@ export const ResourcePlanning: React.FC = () => {
           <div className={styles.filterGroup}>
             <span className={styles.filterLabel}>Cost Center</span>
             <SearchableFilter
-              options={costCenters.map(c => ({ id: c.id, label: c.name }))}
+              options={costCenters
+                .filter(c => { const loc = (c.location ?? '').trim().toLowerCase(); return loc === '' || loc === 'denmark' || loc === 'dk'; })
+                .map(c => ({ id: c.id, label: c.name, code: c.code }))}
               value={selectedCostCenterId}
               onChange={setSelectedCostCenterId}
               placeholder="Type to search cost centers…"

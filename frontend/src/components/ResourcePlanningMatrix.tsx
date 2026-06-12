@@ -29,6 +29,14 @@ import { Period } from '../types/index';
 import { MONTH_SHORT } from '../utils/format';
 import { avatarColor, getInitials } from '../utils/avatar';
 import { ferrosanTheme } from '../theme/ferrosanTheme';
+import { SearchableFilter } from './SearchableFilter';
+
+// DK cost center: location is unset (not yet synced) or explicitly matches Denmark/DK.
+// CCs with location = 'Poland' (or other non-DK) are excluded.
+const isDkCC = (cc: CostCenter): boolean => {
+  const loc = (cc.location ?? '').trim().toLowerCase();
+  return loc === '' || loc === 'denmark' || loc === 'dk';
+};
 
 const RESOURCE_COL_WIDTH = 180;
 const PROJECT_COL_WIDTH = 150;
@@ -3380,16 +3388,15 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                           placeholder="Placeholder name (e.g. TBD Senior Engineer)"
                           style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, boxSizing: 'border-box' }}
                         />
-                        <select
+                        <SearchableFilter
+                          options={(allCostCenters.length > 0 ? allCostCenters : costCenters)
+                            .filter(isDkCC)
+                            .map(c => ({ id: c.id, label: c.name, code: c.code }))}
                           value={dlgPhCcId}
-                          onChange={e => setDlgPhCcId(e.target.value)}
-                          style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, backgroundColor: tokens.colorNeutralBackground1 }}
-                        >
-                          <option value="">Select cost center…</option>
-                          {(allCostCenters.length > 0 ? allCostCenters : costCenters).map(c => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
-                          ))}
-                        </select>
+                          onChange={id => setDlgPhCcId(id)}
+                          placeholder="Search by name or code…"
+                          allLabel="Select cost center…"
+                        />
                         <div style={{ fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3 }}>
                           Planned FTE on this placeholder counts as planned cost for the selected cost center.
                         </div>

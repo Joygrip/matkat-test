@@ -19,6 +19,8 @@ import {
   MenuList,
   MenuItem,
   Tooltip,
+  Combobox,
+  Option,
 } from '@fluentui/react-components';
 import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular, MoreHorizontalRegular } from '@fluentui/react-icons';
 import { planningApi, DemandLine, SupplyLine, MoveDemandGroupRequest, DeleteSupplyGroupRequest, MoveSupplyGroupRequest, MoveCapPeriodDetail } from '../api/planning';
@@ -795,6 +797,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [dlgResourceQuery, setDlgResourceQuery] = useState('');
   const [dlgSelectedResources, setDlgSelectedResources] = useState<SelectedResource[]>([]);
   const [dlgProjectId, setDlgProjectId] = useState('');
+  // Visible text of the searchable Project Combobox. dlgProjectId remains the source of truth
+  // for the selected project; this only drives filtering/display of the options list.
+  const [dlgProjectQuery, setDlgProjectQuery] = useState('');
   const [dlgSelectedPeriods, setDlgSelectedPeriods] = useState<Set<string>>(new Set());
   const [dlgFte, setDlgFte] = useState('5');
   const [dlgSaving, setDlgSaving] = useState(false);
@@ -2242,6 +2247,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDlgResourceQuery('');
     setDlgSelectedResources([]);
     setDlgProjectId('');
+    setDlgProjectQuery('');
     setDlgSelectedPeriods(new Set());
     setDlgFte('5');
     setDlgSaving(false);
@@ -2282,6 +2288,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDlgSelectedResources([]);
     setDlgResourceQuery('');
     setDlgCcId(''); // CC auto-derived from resource selection in demand mode
+    setDlgProjectId(''); // project scope differs between demand/supply — clear selection
+    setDlgProjectQuery('');
     lookupsApi.listPlaceholders().then(setDlgAllPlaceholders).catch(() => {});
     if (isRoleManager && canPM) {
       // Manager+PM demand: need full resource list and PM-scoped project list
@@ -2302,6 +2310,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDlgResourceQuery('');
     setDlgAllPlaceholders([]);
     setDlgPmProjects([]);
+    setDlgProjectId(''); // project scope differs between demand/supply — clear selection
+    setDlgProjectQuery('');
     if (isRoleManager) {
       // Manager+PM supply: set default Manager CC so the CC dropdown has a selection
       const defaultCc = [...managedCcIds][0] || (editableCcIds ? [...editableCcIds][0] : '') || '';
@@ -3469,21 +3479,57 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                   <div style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground3, minWidth: 240 }}>
                     No assigned projects — ask Admin to assign you as Project Manager.
                   </div>
-                ) : (
-                  <select
-                    value={dlgProjectId}
-                    onChange={e => setDlgProjectId(e.target.value)}
-                    style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, minWidth: 240 }}
-                  >
-                    <option value="">{dlgLineType === 'supply' ? '— General availability —' : 'Select project…'}</option>
-                    {(isRoleManager && canPM && dlgLineType === 'demand'
-                      ? dlgPmProjects
-                      : projects.filter(p => p.is_active)
-                    ).map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                )}
+                ) : (() => {
+                  // Searchable Project selector. The available list is unchanged from the
+                  // previous <select>: PM-scoped projects for Manager+PM demand, all active
+                  // projects otherwise. The Combobox only changes how that list is presented.
+                  const availableProjects = isRoleManager && canPM && dlgLineType === 'demand'
+                    ? dlgPmProjects
+                    : projects.filter(p => p.is_active);
+                  const q = dlgProjectQuery.trim().toLowerCase();
+                  const filtered = q
+                    ? availableProjects.filter(p => p.name.toLowerCase().includes(q))
+                    : availableProjects;
+                  return (
+                    <Combobox
+                      placeholder={dlgLineType === 'supply' ? '— General availability —' : 'Search and select a project…'}
+                      value={dlgProjectQuery}
+                      selectedOptions={dlgProjectId ? [dlgProjectId] : []}
+                      onChange={e => {
+                        const text = e.target.value;
+                        setDlgProjectQuery(text);
+                        // Typing free text invalidates any prior selection unless it still
+                        // exactly matches the selected project's name. This keeps dlgProjectId
+                        // empty for arbitrary text, so Save validation fails (no free-text projects).
+                        if (dlgProjectId) {
+                          const sel = availableProjects.find(p => p.id === dlgProjectId);
+                          if (!sel || sel.name !== text) setDlgProjectId('');
+                        }
+                      }}
+                      onOptionSelect={(_, data) => {
+                        const proj = availableProjects.find(p => p.id === data.optionValue);
+                        if (proj) {
+                          setDlgProjectId(proj.id);
+                          setDlgProjectQuery(proj.name);
+                        } else {
+                          setDlgProjectId('');
+                          setDlgProjectQuery('');
+                        }
+                      }}
+                      style={{ minWidth: 240 }}
+                    >
+                      {filtered.length === 0 ? (
+                        <Option key="__none__" value="__none__" disabled>
+                          {availableProjects.length === 0 ? 'No projects found' : 'No matching projects'}
+                        </Option>
+                      ) : (
+                        filtered.map(p => (
+                          <Option key={p.id} value={p.id}>{p.name}</Option>
+                        ))
+                      )}
+                    </Combobox>
+                  );
+                })()}
               </div>
 
               {/* Periods — drag to select multiple */}

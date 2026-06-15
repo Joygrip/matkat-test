@@ -91,6 +91,7 @@ def _enrich_placeholder(placeholder: Placeholder) -> dict:
         "description": placeholder.description,
         "skill_profile": placeholder.skill_profile,
         "estimated_cost": placeholder.estimated_cost,
+        "created_by": placeholder.created_by,
         "is_active": placeholder.is_active,
         "created_at": placeholder.created_at,
         "updated_at": placeholder.updated_at,

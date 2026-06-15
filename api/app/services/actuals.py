@@ -388,7 +388,7 @@ class ActualsService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "NOT_FOUND", "message": "Project not found"}
             )
-        
+
         # Check for duplicate
         existing = self.db.query(ActualLine).filter(
             and_(

@@ -219,9 +219,13 @@ class Period(Base):
 
 
 class Placeholder(Base):
-    """Placeholder for future/unknown resource allocation. One per cost center."""
+    """Placeholder for future/unknown resource allocation, scoped to a cost center.
+
+    A cost center can have multiple placeholders. Auto-created defaults have
+    created_by = NULL; user-created placeholders record their creator.
+    """
     __tablename__ = "placeholders"
-    
+
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     cost_center_id: Mapped[str] = mapped_column(String(36), ForeignKey("cost_centers.id"), nullable=False)
@@ -229,19 +233,20 @@ class Placeholder(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     skill_profile: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     estimated_cost: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)  # users.id of creator; NULL = system/auto-created
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Relationships
     cost_center: Mapped["CostCenter"] = relationship(
         "CostCenter",
         back_populates="placeholders",
         foreign_keys=[cost_center_id],
     )
-    
+
     __table_args__ = (
-        Index("ix_placeholders_tenant_cost_center", "tenant_id", "cost_center_id", unique=True),
+        Index("ix_placeholders_tenant_cost_center", "tenant_id", "cost_center_id"),
     )
 
 

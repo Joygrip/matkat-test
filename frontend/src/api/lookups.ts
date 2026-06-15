@@ -29,6 +29,15 @@ export const lookupsApi = {
     return apiClient.get<Placeholder[]>(`/lookups/placeholders${qs ? `?${qs}` : ''}`);
   },
 
+  createPlaceholder: async (data: {
+    cost_center_id: string;
+    name: string;
+    description?: string;
+    skill_profile?: string;
+  }): Promise<Placeholder> => {
+    return apiClient.post<Placeholder>('/placeholders', data);
+  },
+
   listProjectsScoped: async (): Promise<Project[]> => {
     return apiClient.get<Project[]>('/lookups/projects/scoped');
   },

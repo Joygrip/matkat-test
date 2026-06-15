@@ -2,12 +2,16 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import and_, func
 
 from api.app.db.engine import get_db
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
-from api.app.models.core import UserRole, Resource, User
+from api.app.models.core import UserRole, Resource, User, CostCenter, Placeholder
 from api.app.config import get_settings
+from api.app.services.audit import log_audit
+from api.app.schemas.admin import PlaceholderResponse
 from api.app.schemas.planning import (
+    PlaceholderCreateRequest,
     DemandLineCreate, DemandLineUpdate, DemandLineResponse,
     DemandGroupDeleteRequest, DemandGroupMoveRequest,
     SupplyLineCreate, SupplyLineUpdate, SupplyLineResponse,
@@ -128,15 +132,19 @@ def _enrich_supply(line) -> SupplyLineResponse:
 async def list_all_open_demand_lines(
     project_id: Optional[str] = Query(None, description="Filter by project_id"),
     cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
+    open_periods_only: bool = Query(True, description="When false, locked periods are included (read-only historical view)"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER,
-        UserRole.EMPLOYEE,
     )),
 ):
-    """Return all demand lines across every open period in a single query."""
+    """Return all demand lines across every open period in a single query.
+
+    This is the broad Resource Planning matrix feed. Employees are intentionally
+    excluded — they read only their own lines via the filtered /demand-lines endpoint.
+    """
     service = DemandService(db, current_user)
-    lines = service.get_all(project_id=project_id, open_periods_only=True, cost_center_id=cost_center_id)
+    lines = service.get_all(project_id=project_id, open_periods_only=open_periods_only, cost_center_id=cost_center_id)
     return [_enrich_demand(line) for line in lines]
 
 
@@ -192,7 +200,6 @@ async def create_demand_line(
     
     Rules:
     - Must specify either resource_id OR placeholder_id (XOR)
-    - Placeholders not allowed within 4MFC window
     - FTE must be 5-100 in steps of 5
     - Period must be open
     
@@ -227,7 +234,9 @@ async def update_demand_line(
     service = DemandService(db, current_user)
     line = service.update(demand_id, data.fte_percent, data.resource_id, data.placeholder_id)
 
-    return _enrich_demand(line)
+    resp = _enrich_demand(line)
+    resp.deleted_placeholder_ids = service.last_deleted_placeholder_ids or None
+    return resp
 
 
 @router.delete("/demand-lines/{demand_id}")
@@ -243,7 +252,7 @@ async def delete_demand_line(
     """
     service = DemandService(db, current_user)
     service.delete(demand_id)
-    return {"message": "Demand line deleted"}
+    return {"message": "Demand line deleted", "deleted_placeholder_ids": service.last_deleted_placeholder_ids}
 
 
 @router.post("/demand-lines/group/delete")
@@ -272,7 +281,7 @@ async def delete_demand_group(
         resource_id=data.resource_id,
         placeholder_id=data.placeholder_id,
     )
-    return {"deleted": deleted}
+    return {"deleted": deleted, "deleted_placeholder_ids": service.last_deleted_placeholder_ids}
 
 
 @router.post("/demand-lines/group/move")
@@ -311,7 +320,7 @@ async def move_demand_group(
         period_mappings=data.period_mappings,
         merge_mode=data.merge_mode,
     )
-    return {"moved": moved}
+    return {"moved": moved, "deleted_placeholder_ids": service.last_deleted_placeholder_ids}
 
 
 @router.post("/demand-lines/bulk", response_model=BulkDemandLineResponse)
@@ -362,21 +371,96 @@ async def bulk_demand_lines(
     return BulkDemandLineResponse(results=results)
 
 
+# ============== PLACEHOLDERS ==============
+
+@router.post("/placeholders", response_model=PlaceholderResponse)
+async def create_planning_placeholder(
+    data: PlaceholderCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.ADMIN, UserRole.FINANCE, UserRole.PM)),
+):
+    """
+    Create a placeholder for a cost center from the planning UI.
+
+    Accessible to: PM (incl. Manager+PM via secondary role), Finance, Admin.
+    The creator is recorded in created_by; the placeholder is visible and usable
+    by anyone who can plan demand in the tenant.
+    """
+    cc = db.query(CostCenter).filter(
+        and_(CostCenter.id == data.cost_center_id, CostCenter.tenant_id == current_user.tenant_id)
+    ).first()
+    if not cc:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Cost center not found"})
+    if not cc.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "VALIDATION_ERROR", "message": "Cannot create a placeholder for an inactive cost center"},
+        )
+
+    duplicate = db.query(Placeholder).filter(
+        and_(
+            Placeholder.tenant_id == current_user.tenant_id,
+            Placeholder.cost_center_id == data.cost_center_id,
+            Placeholder.is_active == True,
+            func.lower(Placeholder.name) == data.name.lower(),
+        )
+    ).first()
+    if duplicate:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "PLACEHOLDER_EXISTS", "message": "This cost center already has a placeholder with that name."},
+        )
+
+    placeholder = Placeholder(
+        tenant_id=current_user.tenant_id,
+        cost_center_id=data.cost_center_id,
+        name=data.name,
+        description=data.description,
+        skill_profile=data.skill_profile,
+        created_by=current_user.id,
+    )
+    db.add(placeholder)
+    db.commit()
+    db.refresh(placeholder)
+    log_audit(
+        db, current_user, "create", "Placeholder", placeholder.id,
+        new_values={"name": placeholder.name, "cost_center_id": placeholder.cost_center_id, "cost_center_name": cc.name},
+    )
+    return {
+        "id": placeholder.id,
+        "tenant_id": placeholder.tenant_id,
+        "name": placeholder.name,
+        "cost_center_id": placeholder.cost_center_id,
+        "description": placeholder.description,
+        "skill_profile": placeholder.skill_profile,
+        "estimated_cost": placeholder.estimated_cost,
+        "created_by": placeholder.created_by,
+        "is_active": placeholder.is_active,
+        "created_at": placeholder.created_at,
+        "updated_at": placeholder.updated_at,
+        "cost_center_name": cc.name,
+    }
+
+
 # ============== SUPPLY LINES ==============
 
 @router.get("/supply-lines/all", response_model=list[SupplyLineResponse])
 async def list_all_open_supply_lines(
     cost_center_id: Optional[str] = Query(None, description="Filter by cost_center_id"),
     project_id: Optional[str] = Query(None, description="Filter by project_id"),
+    open_periods_only: bool = Query(True, description="When false, locked periods are included (read-only historical view)"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER,
-        UserRole.EMPLOYEE,
     )),
 ):
-    """Return all supply lines across every open period in a single query."""
+    """Return all supply lines across every open period in a single query.
+
+    This is the broad Resource Planning matrix feed. Employees are intentionally
+    excluded — they read only their own lines via the filtered /supply-lines endpoint.
+    """
     service = SupplyService(db, current_user)
-    lines = service.get_all(open_periods_only=True, cost_center_id=cost_center_id, project_id=project_id)
+    lines = service.get_all(open_periods_only=open_periods_only, cost_center_id=cost_center_id, project_id=project_id)
     return [_enrich_supply(line) for line in lines]
 
 

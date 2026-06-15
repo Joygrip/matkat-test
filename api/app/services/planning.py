@@ -1,6 +1,5 @@
 """Planning services - Demand and Supply line management."""
-from datetime import datetime, timezone
-from dateutil.relativedelta import relativedelta
+import json
 from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
@@ -16,25 +15,110 @@ from api.app.schemas.common import ErrorCode
 _SCOPED_ROLES = (UserRole.MANAGER,)
 
 
-def get_4mfc_boundary() -> tuple[int, int]:
+def _own_resource_ids(db: Session, current_user: CurrentUser) -> list[str]:
+    """Resource IDs linked to the current user's own account.
+
+    Used to hard-scope Employee reads to their own demand/supply lines so they can
+    never enumerate other resources by supplying an arbitrary (or no) resource_id.
     """
-    Get the boundary date for 4MFC (4 Month Forward Commitment).
-    Returns (year, month) of the first month where placeholders are allowed.
+    rows = db.query(Resource.id).filter(
+        and_(
+            Resource.tenant_id == current_user.tenant_id,
+            Resource.user_id == current_user.id,
+        )
+    ).all()
+    return [row[0] for row in rows]
+
+
+def cleanup_unused_placeholders(
+    db: Session,
+    tenant_id: str,
+    placeholder_ids: set[str],
+    *,
+    actor_user_id: Optional[str] = None,
+    after_operation: Optional[str] = None,
+) -> dict:
+    """Hard-delete placeholders from the given set that have zero remaining demand lines.
+
+    Bounded cleanup: only the placeholder IDs passed in are checked — never a full-table
+    scan. `created_by` is intentionally NOT considered; eligibility is purely demand-driven.
+    Auto-created default placeholders that were never touched by a demand mutation are not
+    passed in here, so they are left untouched (acceptable for this phase).
+
+    The row is physically removed (DemandLine is the only FK reference, and we delete only
+    when its demand_count is 0, so the delete is safe). Audit details are captured before
+    deletion. Must be called AFTER the demand mutation has committed, so the remaining-demand
+    count reflects committed state.
     """
-    now = datetime.now(timezone.utc)
-    boundary = now + relativedelta(months=4)
-    return boundary.year, boundary.month
+    result = {
+        "checked": 0,
+        "deleted": 0,
+        "skipped_in_use": 0,
+        "skipped_not_found": 0,
+        "deleted_ids": [],
+    }
+    ids = {pid for pid in (placeholder_ids or set()) if pid}
+    if not ids:
+        return result
 
+    from api.app.models.audit import AuditLog
 
-def is_within_4mfc(year: int, month: int) -> bool:
-    """Check if a given year/month is within the 4MFC window."""
-    boundary_year, boundary_month = get_4mfc_boundary()
+    changed = False
+    for pid in ids:
+        result["checked"] += 1
+        placeholder = db.query(Placeholder).filter(
+            and_(
+                Placeholder.id == pid,
+                Placeholder.tenant_id == tenant_id,
+                Placeholder.is_active == True,
+            )
+        ).first()
+        if not placeholder:
+            result["skipped_not_found"] += 1
+            continue
 
-    # Convert to comparable values (year * 12 + month)
-    target = year * 12 + month
-    boundary = boundary_year * 12 + boundary_month
+        remaining = db.query(func.count(DemandLine.id)).filter(
+            and_(
+                DemandLine.tenant_id == tenant_id,
+                DemandLine.placeholder_id == pid,
+            )
+        ).scalar() or 0
 
-    return target < boundary
+        if remaining > 0:
+            result["skipped_in_use"] += 1
+            continue
+
+        # Capture audit details BEFORE deleting the row (no reload afterwards).
+        ph_name = placeholder.name
+        ph_cc_id = placeholder.cost_center_id
+        ph_created_by = placeholder.created_by
+
+        db.delete(placeholder)
+        result["deleted"] += 1
+        result["deleted_ids"].append(pid)
+        changed = True
+
+        db.add(AuditLog(
+            tenant_id=tenant_id,
+            user_id=actor_user_id or "system",
+            user_email="system",
+            action="delete",
+            entity_type="Placeholder",
+            entity_id=pid,
+            reason="auto-cleanup: no remaining demand lines",
+            details=json.dumps({
+                "auto_cleanup": True,
+                "hard_delete": True,
+                "after_operation": after_operation,
+                "placeholder_name": ph_name,
+                "cost_center_id": ph_cc_id,
+                "created_by": ph_created_by,
+            }),
+        ))
+
+    if changed:
+        db.commit()
+    return result
 
 
 def _build_demand_line_ctx(demand: "DemandLine", project=None, resource=None, placeholder=None) -> dict:
@@ -71,11 +155,25 @@ class DemandService:
         self.db = db
         self.current_user = current_user
         self._scoped_ids_cache: dict[bool, Optional[list[str]]] = {}
-    
+        # Placeholder IDs soft-deleted by the most recent mutation (bounded auto-cleanup).
+        # Read by routers to surface `deleted_placeholder_ids` in the response.
+        self.last_deleted_placeholder_ids: list[str] = []
+
+    def _cleanup_placeholders(self, placeholder_ids: set[str], after_operation: str) -> None:
+        """Run bounded placeholder auto-cleanup and record the deleted IDs on the service."""
+        result = cleanup_unused_placeholders(
+            self.db,
+            self.current_user.tenant_id,
+            placeholder_ids,
+            actor_user_id=self.current_user.object_id,
+            after_operation=after_operation,
+        )
+        self.last_deleted_placeholder_ids = result["deleted_ids"]
+
     def _check_period_open(self, year: int, month: int) -> Period:
         """Check if the period exists and is open."""
         period = PeriodService(self.db, self.current_user).get_by_year_month(year, month)
-        
+
         if not period:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -84,7 +182,7 @@ class DemandService:
                     "message": f"Period {year}-{month:02d} does not exist. Finance must create it first.",
                 }
             )
-        
+
         if period.status == PeriodStatus.LOCKED:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -93,9 +191,9 @@ class DemandService:
                     "message": f"Period {year}-{month:02d} is locked. No edits allowed.",
                 }
             )
-        
+
         return period
-    
+
     def _check_pm_authorized(self, project: Project) -> None:
         """Raise 403 if the current user is an effective PM but not assigned to this project.
 
@@ -181,6 +279,12 @@ class DemandService:
                     self.db.query(Placeholder.id).filter(Placeholder.cost_center_id == cost_center_id)
                 ),
             ))
+
+        # Employee: hard-scope to own resource lines, ignoring any broader query params.
+        if self.current_user.role == UserRole.EMPLOYEE:
+            own_ids = _own_resource_ids(self.db, self.current_user)
+            query = query.filter(DemandLine.resource_id.in_(own_ids)) if own_ids else query.filter(False)
+            return query.all()
 
         # RO/Director: restrict to resources within their reporting line
         scoped_ids = self._get_scoped_resource_ids()
@@ -283,17 +387,6 @@ class DemandService:
                 detail={
                     "code": ErrorCode.DEMAND_XOR,
                     "message": "Must specify either resource_id or placeholder_id",
-                }
-            )
-        
-        # Validate 4MFC rule for placeholders
-        if placeholder_id and is_within_4mfc(year, month):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "code": ErrorCode.PLACEHOLDER_BLOCKED_4MFC,
-                    "message": f"Placeholders are not allowed within the 4-month forward commitment window. "
-                               f"Use named resources for {year}-{month:02d}.",
                 }
             )
         
@@ -461,17 +554,6 @@ class DemandService:
                     detail={"code": ErrorCode.DEMAND_XOR, "message": "Must specify either resource_id or placeholder_id"},
                 )
 
-            # 4MFC check for placeholders
-            if new_placeholder_id and is_within_4mfc(demand.year, demand.month):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={
-                        "code": ErrorCode.PLACEHOLDER_BLOCKED_4MFC,
-                        "message": f"Placeholders are not allowed within the 4-month forward commitment window. "
-                                   f"Use named resources for {demand.year}-{demand.month:02d}.",
-                    },
-                )
-
             # Validate resource/placeholder exists
             if new_resource_id:
                 resource = self.db.query(Resource).filter(
@@ -511,6 +593,8 @@ class DemandService:
                     detail={"code": "CONFLICT", "message": "A demand line already exists for this project/resource/month combination"},
                 )
 
+        self.last_deleted_placeholder_ids = []
+        old_placeholder_id = demand.placeholder_id
         old_values = {"fte_percent": demand.fte_percent, "resource_id": demand.resource_id, "placeholder_id": demand.placeholder_id}
         demand.fte_percent = fte_percent
         if changing_assignment:
@@ -529,6 +613,10 @@ class DemandService:
             details=_build_demand_line_ctx(demand),
         )
 
+        # If the assignment moved off a placeholder, the old placeholder may now be unused.
+        if changing_assignment and old_placeholder_id and old_placeholder_id != demand.placeholder_id:
+            self._cleanup_placeholders({old_placeholder_id}, after_operation="demand_update")
+
         return demand
     
     def delete(self, demand_id: str) -> None:
@@ -546,6 +634,8 @@ class DemandService:
         # Check period is open
         self._check_period_open(demand.year, demand.month)
 
+        self.last_deleted_placeholder_ids = []
+        placeholder_id = demand.placeholder_id
         self.db.delete(demand)
         self.db.commit()
 
@@ -555,6 +645,9 @@ class DemandService:
             entity_type="DemandLine",
             entity_id=demand_id,
         )
+
+        if placeholder_id:
+            self._cleanup_placeholders({placeholder_id}, after_operation="demand_delete")
 
     def delete_group(
         self,
@@ -636,6 +729,11 @@ class DemandService:
             self.db.delete(line)
 
         self.db.commit()
+
+        self.last_deleted_placeholder_ids = []
+        if placeholder_id:
+            self._cleanup_placeholders({placeholder_id}, after_operation="demand_group_delete")
+
         return len(lines)
 
     def _move_mapped(
@@ -747,19 +845,6 @@ class DemandService:
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail={"code": ErrorCode.PERIOD_LOCKED, "message": f"Period {p.year}-{p.month:02d} is locked. No edits allowed."},
                 )
-
-        # 4MFC check for placeholder target
-        if to_placeholder_id:
-            for pid in to_period_ids_set:
-                p = period_id_map[pid]
-                if is_within_4mfc(p.year, p.month):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={
-                            "code": ErrorCode.PLACEHOLDER_BLOCKED_4MFC,
-                            "message": f"Placeholders are not allowed within the 4-month forward commitment window. Use named resources for {p.year}-{p.month:02d}.",
-                        },
-                    )
 
         # Fetch source lines; snapshot FTE values BEFORE any writes
         source_query = self.db.query(DemandLine).filter(
@@ -893,6 +978,11 @@ class DemandService:
                     self.db.delete(source_line)
 
         self.db.commit()
+
+        # Move (not copy) off a placeholder source may leave it unused.
+        if operation == "move" and from_placeholder_id:
+            self._cleanup_placeholders({from_placeholder_id}, after_operation="demand_move")
+
         return moved_count
 
     def move_group(
@@ -988,21 +1078,6 @@ class DemandService:
                         "message": f"Period {period.year}-{period.month:02d} is locked. No edits allowed.",
                     },
                 )
-
-        # 4MFC check when moving to a placeholder
-        if to_placeholder_id:
-            for period in periods:
-                if is_within_4mfc(period.year, period.month):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={
-                            "code": ErrorCode.PLACEHOLDER_BLOCKED_4MFC,
-                            "message": (
-                                f"Placeholders are not allowed within the 4-month forward commitment window. "
-                                f"Use named resources for {period.year}-{period.month:02d}."
-                            ),
-                        },
-                    )
 
         # Validate target resource/placeholder exists and is active
         target_name: str
@@ -1220,6 +1295,11 @@ class DemandService:
             moved_count += 1
 
         self.db.commit()
+
+        # Move (not copy) off a placeholder source may leave it unused.
+        if operation == "move" and from_placeholder_id:
+            self._cleanup_placeholders({from_placeholder_id}, after_operation="demand_move")
+
         return moved_count
 
 
@@ -1325,6 +1405,12 @@ class SupplyService:
                     self.db.query(Resource.id).filter(Resource.cost_center_id == cost_center_id)
                 )
             )
+
+        # Employee: hard-scope to own resource lines, ignoring any broader query params.
+        if self.current_user.role == UserRole.EMPLOYEE:
+            own_ids = _own_resource_ids(self.db, self.current_user)
+            query = query.filter(SupplyLine.resource_id.in_(own_ids)) if own_ids else query.filter(False)
+            return query.all()
 
         # RO/Director: restrict to resources within their reporting line
         scoped_ids = self._get_scoped_resource_ids()

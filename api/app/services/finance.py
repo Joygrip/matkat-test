@@ -6,7 +6,7 @@ from api.app.auth.dependencies import CurrentUser
 from api.app.models.actuals import ActualLine
 from sqlalchemy import exists as sa_exists
 from fastapi import HTTPException
-from api.app.models.core import User, Project, ProjectPM, Resource, CostCenter, Period, PeriodStatus
+from api.app.models.core import User, Project, ProjectPM, Resource, CostCenter, Period, PeriodStatus, Placeholder
 from api.app.models.approvals import ApprovalInstance, ApprovalStep, ApprovalStatus, StepStatus
 from api.app.models.finance import FinanceSetting
 from api.app.services.period import PeriodService
@@ -472,6 +472,8 @@ class FinanceService:
             DemandLine.tenant_id == self.current_user.tenant_id,
             DemandLine.year == year,
             DemandLine.month == month,
+            # Per-employee view: placeholder demand has no employee, so it is
+            # intentionally excluded here (it still counts in cost overviews).
             DemandLine.resource_id.isnot(None),
         ]
         if project_id:
@@ -682,6 +684,25 @@ class FinanceService:
             scope == "pm"
             and self.current_user.is_manager_pm
         )
+        # Manager+PM default scope sees the union of Manager resource scope and
+        # assigned PM project scope (matches get_consolidated_costs).
+        is_union_scope_for_manager_pm = (
+            self.current_user.is_manager_pm and not is_pm_scope_for_manager_pm
+        )
+
+        def _assigned_pm_project_ids() -> list:
+            pm_user = self.db.query(User).filter(
+                User.tenant_id == self.current_user.tenant_id,
+                User.object_id == self.current_user.object_id,
+            ).first()
+            if not pm_user:
+                return []
+            return [
+                r.project_id
+                for r in self.db.query(ProjectPM.project_id)
+                .filter(ProjectPM.user_id == pm_user.id)
+                .all()
+            ]
 
         if cost_center_id or cost_center_code:
             # CC mode — filter lines by Resource.cost_center_id.
@@ -716,22 +737,15 @@ class FinanceService:
                 display_id = cc.id
                 display_name = cc.name
 
-            # PM restriction: collect allowed project IDs up front
+            # PM restriction: collect allowed project IDs up front (AND filter).
+            # For Manager+PM default scope the PM projects instead widen the Manager
+            # resource filter (OR), so the dual role sees the union of both scopes.
             cc_pm_project_ids: Optional[list] = None
+            cc_union_pm_project_ids: list = []
             if self.current_user.role == "PM" or is_pm_scope_for_manager_pm:
-                pm_user = self.db.query(User).filter(
-                    User.tenant_id == self.current_user.tenant_id,
-                    User.object_id == self.current_user.object_id,
-                ).first()
-                if pm_user:
-                    cc_pm_project_ids = [
-                        r.project_id
-                        for r in self.db.query(ProjectPM.project_id)
-                        .filter(ProjectPM.user_id == pm_user.id)
-                        .all()
-                    ]
-                else:
-                    cc_pm_project_ids = []
+                cc_pm_project_ids = _assigned_pm_project_ids()
+            elif is_union_scope_for_manager_pm:
+                cc_union_pm_project_ids = _assigned_pm_project_ids()
 
             # Manager restriction (non-Reader): scope to accessible resources only
             cc_manager_resource_ids: Optional[list] = None
@@ -753,26 +767,55 @@ class FinanceService:
                             _ids.append(_rid)
                 cc_manager_resource_ids = _ids
 
+            def _apply_cc_scope(query, resource_id_col, project_id_col):
+                """Apply Manager resource scope, widened by PM projects in union scope."""
+                if cc_manager_resource_ids is None:
+                    return query
+                if cc_union_pm_project_ids:
+                    return query.filter(or_(
+                        resource_id_col.in_(cc_manager_resource_ids),
+                        project_id_col.in_(cc_union_pm_project_ids),
+                    ))
+                return query.filter(resource_id_col.in_(cc_manager_resource_ids))
+
             demand_lines: list[DemandLineDetail] = []
             actual_lines: list[ActualLineDetail] = []
             external_lines: list[ExternalLineDetail] = []
             equipment_lines: list[EquipmentLineDetail] = []
 
-            # Demand lines — join Resource, filter by Resource.cost_center_id
+            # Demand lines — resource lines keyed by Resource.cost_center_id,
+            # placeholder lines keyed by Placeholder.cost_center_id (placeholders
+            # count as planned cost like real resources)
+            detail_demand_cc = func.coalesce(Resource.cost_center_id, Placeholder.cost_center_id)
             demand_q = (
-                self.db.query(DemandLine, Resource)
-                .join(Resource, DemandLine.resource_id == Resource.id)
+                self.db.query(DemandLine, Resource, Placeholder)
+                .outerjoin(Resource, DemandLine.resource_id == Resource.id)
+                .outerjoin(Placeholder, DemandLine.placeholder_id == Placeholder.id)
                 .filter(
                     DemandLine.tenant_id == self.current_user.tenant_id,
                     DemandLine.period_id == period.id,
-                    DemandLine.resource_id.isnot(None),
-                    Resource.cost_center_id.in_(cc_id_list),
+                    detail_demand_cc.in_(cc_id_list),
                 )
             )
             if cc_pm_project_ids is not None:
                 demand_q = demand_q.filter(DemandLine.project_id.in_(cc_pm_project_ids))
+            # Manager resource scope cannot match placeholder lines; widen it with the
+            # cost centers of the manager's accessible resources (see get_consolidated_costs).
             if cc_manager_resource_ids is not None:
-                demand_q = demand_q.filter(Resource.id.in_(cc_manager_resource_ids))
+                demand_scope_arms = [Resource.id.in_(cc_manager_resource_ids)]
+                cc_manager_cc_ids = {
+                    row[0]
+                    for row in self.db.query(Resource.cost_center_id)
+                    .filter(Resource.id.in_(cc_manager_resource_ids))
+                    .distinct()
+                    .all()
+                    if row[0]
+                }
+                if cc_manager_cc_ids:
+                    demand_scope_arms.append(Placeholder.cost_center_id.in_(cc_manager_cc_ids))
+                if cc_union_pm_project_ids:
+                    demand_scope_arms.append(DemandLine.project_id.in_(cc_union_pm_project_ids))
+                demand_q = demand_q.filter(or_(*demand_scope_arms))
             demand_rows = demand_q.all()
 
             # Actual lines — join Resource, filter by Resource.cost_center_id
@@ -789,32 +832,40 @@ class FinanceService:
             )
             if cc_pm_project_ids is not None:
                 actual_q = actual_q.filter(ActualLine.project_id.in_(cc_pm_project_ids))
-            if cc_manager_resource_ids is not None:
-                actual_q = actual_q.filter(Resource.id.in_(cc_manager_resource_ids))
+            actual_q = _apply_cc_scope(actual_q, Resource.id, ActualLine.project_id)
             actual_rows = actual_q.all()
 
-            # External lines — outerjoin Resource, filter by Resource.cost_center_id
-            ext_q = (
-                self.db.query(ProjectExternalLine, Resource)
-                .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
-                .filter(
-                    ProjectExternalLine.tenant_id == self.current_user.tenant_id,
-                    ProjectExternalLine.period_id == period.id,
-                    Resource.cost_center_id.in_(cc_id_list),
-                )
-            )
-            if cc_pm_project_ids is not None:
-                ext_q = ext_q.filter(ProjectExternalLine.project_id.in_(cc_pm_project_ids))
+            # External lines — outerjoin Resource, filter by Resource.cost_center_id.
+            # OoP visibility is project-based, never Manager-resource based: plain
+            # Manager sees none; Manager+PM sees only PM-assigned projects; pure PM is
+            # restricted by cc_pm_project_ids; Admin/Finance/Manager+Reader see all.
+            cc_ext_project_ids: Optional[list] = None
             if cc_manager_resource_ids is not None:
-                ext_q = ext_q.filter(Resource.id.in_(cc_manager_resource_ids))
-            ext_rows = ext_q.all()
+                cc_ext_project_ids = cc_union_pm_project_ids  # [] for plain Manager
+            if cc_ext_project_ids is not None and not cc_ext_project_ids:
+                ext_rows = []
+            else:
+                ext_q = (
+                    self.db.query(ProjectExternalLine, Resource)
+                    .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
+                    .filter(
+                        ProjectExternalLine.tenant_id == self.current_user.tenant_id,
+                        ProjectExternalLine.period_id == period.id,
+                        Resource.cost_center_id.in_(cc_id_list),
+                    )
+                )
+                if cc_pm_project_ids is not None:
+                    ext_q = ext_q.filter(ProjectExternalLine.project_id.in_(cc_pm_project_ids))
+                if cc_ext_project_ids is not None:
+                    ext_q = ext_q.filter(ProjectExternalLine.project_id.in_(cc_ext_project_ids))
+                ext_rows = ext_q.all()
 
             # Equipment lines — no resource FK, cannot filter by cost center; skip in CC mode
             # (matches get_consolidated_costs behaviour)
 
             # Load project names from all collected project IDs
             cc_all_project_ids = (
-                {line.project_id for line, _ in demand_rows}
+                {line.project_id for line, _, _ in demand_rows}
                 | {line.project_id for line, _ in actual_rows}
                 | {line.project_id for line, _ in ext_rows}
             )
@@ -829,12 +880,12 @@ class FinanceService:
 
             demand_lines = [
                 DemandLineDetail(
-                    resource_name=resource.display_name,
+                    resource_name=resource.display_name if resource else (placeholder.name if placeholder else "Placeholder"),
                     fte_percent=line.fte_percent,
                     cost=int(line.fte_percent * monthly_fte_cost // 100),
                     project_name=project_map.get(line.project_id),
                 )
-                for line, resource in demand_rows
+                for line, resource, placeholder in demand_rows
             ]
             actual_lines = [
                 ActualLineDetail(
@@ -903,12 +954,18 @@ class FinanceService:
             if proj is None:
                 raise HTTPException(status_code=404, detail="Project not found.")
 
-        # Manager restriction (non-Reader): scope demand/actual to accessible resources
+        # Manager restriction (non-Reader): scope demand/actual to accessible resources.
+        # Manager+PM default scope: PM-assigned projects are fully visible (PM entitlement,
+        # union scope); other projects stay restricted to the Manager resource scope.
+        is_own_pm_project = (
+            is_union_scope_for_manager_pm and project_id in _assigned_pm_project_ids()
+        )
         proj_manager_resource_ids: Optional[list] = None
         if (
             self.current_user.role == "Manager"
             and not self.current_user.is_manager_reader
             and not is_pm_scope_for_manager_pm
+            and not is_own_pm_project
         ):
             from api.app.services.reporting import ReportingService
             _rs = ReportingService(self.db, self.current_user)
@@ -923,29 +980,43 @@ class FinanceService:
                         _ids.append(_rid)
             proj_manager_resource_ids = _ids
 
-        # Demand lines (planned labor) — skip placeholders
+        # Demand lines (planned labor) — placeholder lines count like resource lines,
+        # with cost center context resolved from the placeholder
         demand_q = (
-            self.db.query(DemandLine, Resource, CostCenter)
-            .join(Resource, DemandLine.resource_id == Resource.id)
-            .outerjoin(CostCenter, Resource.cost_center_id == CostCenter.id)
+            self.db.query(DemandLine, Resource, Placeholder, CostCenter)
+            .outerjoin(Resource, DemandLine.resource_id == Resource.id)
+            .outerjoin(Placeholder, DemandLine.placeholder_id == Placeholder.id)
+            .outerjoin(CostCenter, func.coalesce(Resource.cost_center_id, Placeholder.cost_center_id) == CostCenter.id)
             .filter(
                 DemandLine.tenant_id == self.current_user.tenant_id,
                 DemandLine.project_id == project_id,
                 DemandLine.period_id == period.id,
-                DemandLine.resource_id.isnot(None),
             )
         )
         if proj_manager_resource_ids is not None:
-            demand_q = demand_q.filter(Resource.id.in_(proj_manager_resource_ids))
+            # Manager resource scope cannot match placeholder lines; widen it with
+            # the cost centers of the manager's accessible resources.
+            proj_scope_arms = [Resource.id.in_(proj_manager_resource_ids)]
+            proj_manager_cc_ids = {
+                row[0]
+                for row in self.db.query(Resource.cost_center_id)
+                .filter(Resource.id.in_(proj_manager_resource_ids))
+                .distinct()
+                .all()
+                if row[0]
+            }
+            if proj_manager_cc_ids:
+                proj_scope_arms.append(Placeholder.cost_center_id.in_(proj_manager_cc_ids))
+            demand_q = demand_q.filter(or_(*proj_scope_arms))
         demand_rows = demand_q.all()
         demand_lines = [
             DemandLineDetail(
-                resource_name=resource.display_name,
+                resource_name=resource.display_name if resource else (placeholder.name if placeholder else "Placeholder"),
                 fte_percent=line.fte_percent,
                 cost=int(line.fte_percent * monthly_fte_cost // 100),
                 cost_center_name=cc.name if cc else None,
             )
-            for line, resource, cc in demand_rows
+            for line, resource, placeholder, cc in demand_rows
         ]
 
         # Actual lines — approved only
@@ -974,8 +1045,21 @@ class FinanceService:
             for line, resource, cc in actual_rows
         ]
 
+        # OoP/Equipment in project detail are project/finance lines — Manager scope does
+        # not grant access. Visible to Admin/Finance/Manager+Reader, and to effective PMs
+        # for their assigned projects (pure PM and Manager+PM pm-scope requests are
+        # already 403-guarded above). Plain Manager, and Manager+PM drilling into a
+        # non-PM project, get empty OoP/Equipment sections.
+        show_ext_equip = True
+        if (
+            self.current_user.role == "Manager"
+            and not self.current_user.is_manager_reader
+            and not is_pm_scope_for_manager_pm
+        ):
+            show_ext_equip = is_own_pm_project
+
         # External lines — join Resource for display name, description is the notes field
-        ext_rows = (
+        ext_rows = [] if not show_ext_equip else (
             self.db.query(ProjectExternalLine, Resource)
             .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
             .filter(
@@ -998,7 +1082,7 @@ class FinanceService:
         ]
 
         # Equipment lines
-        equip_rows = (
+        equip_rows = [] if not show_ext_equip else (
             self.db.query(ProjectEquipmentLine)
             .filter(
                 ProjectEquipmentLine.tenant_id == self.current_user.tenant_id,
@@ -1099,7 +1183,9 @@ class FinanceService:
     ) -> ConsolidatedCostResponse:
         """Aggregate planned labor, actual labor, externals, and equipment costs per project/period.
 
-        scope="default" — Manager users are scoped to their reporting-hierarchy resources.
+        scope="default" — Manager users are scoped to their reporting-hierarchy resources
+                          (plus delegations). Manager+PM additionally sees assigned PM
+                          project costs (union of both scopes).
         scope="pm"      — Manager+PM users bypass the Manager resource filter and instead
                           see only their assigned PM projects (same as solo PM behaviour).
                           Plain Manager is unaffected (Manager resource filter still applies).
@@ -1129,13 +1215,17 @@ class FinanceService:
         monthly_fte_costs_by_period = self._get_monthly_fte_costs_by_period(set(period_ids))
 
         # Manager+PM has two valid cost-overview scopes:
-        #   "default" — Manager resource scope (reporting hierarchy), same as plain Manager.
+        #   "default" — union of Manager resource scope (reporting hierarchy + delegations)
+        #               and assigned PM project scope, so the dual role sees both sides.
         #   "pm"      — bypass Manager resource filter; apply PM project filter instead so
-        #               the PM tab can see costs across all CCs touched by assigned PM projects.
-        #               Plain Manager calling scope=pm is NOT bypassed.
+        #               a PM-only view can see costs across all CCs touched by assigned PM
+        #               projects. Plain Manager calling scope=pm is NOT bypassed.
         is_pm_scope_for_manager_pm = (
             scope == "pm"
             and self.current_user.is_manager_pm
+        )
+        is_union_scope_for_manager_pm = (
+            self.current_user.is_manager_pm and not is_pm_scope_for_manager_pm
         )
 
         # 3a. Manager role restriction — scope to accessible resources via reporting hierarchy.
@@ -1158,27 +1248,64 @@ class FinanceService:
                 for rid in rs.get_delegated_resource_ids(cur_user.id):
                     if rid not in ids:
                         ids.append(rid)
-            if not ids:
+            if not ids and not is_union_scope_for_manager_pm:
                 return ConsolidatedCostResponse(data=[], monthly_fte_cost=fallback_monthly_fte_cost)
             scoped_resource_ids = set(ids)
 
         # 3b. PM role restriction — only their own projects.
-        # Applies for primary PM role OR Manager+PM requesting pm scope.
+        # Applies for primary PM role OR Manager+PM requesting pm scope (AND filter).
+        # For Manager+PM default scope the PM projects instead widen the Manager
+        # resource scope (OR filter via union_pm_project_ids below).
         pm_project_ids: Optional[set] = None
-        if self.current_user.role == "PM" or is_pm_scope_for_manager_pm:
+        union_pm_project_ids: set = set()
+        if self.current_user.role == "PM" or self.current_user.is_manager_pm:
             pm_user = self.db.query(User).filter(
                 User.tenant_id == self.current_user.tenant_id,
                 User.object_id == self.current_user.object_id,
             ).first()
+            assigned_ids: set = set()
             if pm_user:
                 pm_rows = (
                     self.db.query(ProjectPM.project_id)
                     .filter(ProjectPM.user_id == pm_user.id)
                     .all()
                 )
-                pm_project_ids = {row.project_id for row in pm_rows}
+                assigned_ids = {row.project_id for row in pm_rows}
+            if is_union_scope_for_manager_pm:
+                union_pm_project_ids = assigned_ids
             else:
-                pm_project_ids = set()
+                pm_project_ids = assigned_ids
+
+        if (
+            is_union_scope_for_manager_pm
+            and not scoped_resource_ids
+            and not union_pm_project_ids
+        ):
+            return ConsolidatedCostResponse(data=[], monthly_fte_cost=fallback_monthly_fte_cost)
+
+        def _apply_resource_scope(query, resource_id_col, project_id_col):
+            """AND-restrict to Manager resources, widened by PM projects in union scope."""
+            if scoped_resource_ids is None:
+                return query
+            if union_pm_project_ids:
+                return query.filter(or_(
+                    resource_id_col.in_(scoped_resource_ids),
+                    project_id_col.in_(union_pm_project_ids),
+                ))
+            return query.filter(resource_id_col.in_(scoped_resource_ids))
+
+        # OoP/Equipment visibility — these are project/finance lines, not cost-center
+        # planning data, so Manager scope does not grant access to them:
+        #   None      → unrestricted (Admin, Finance, Manager+Reader; pure PM is already
+        #               restricted to assigned projects by _pm_allowed on every row)
+        #   set(...)  → only these PM-assigned project IDs (Manager+PM, both scopes)
+        #   empty set → none at all (plain Manager)
+        ext_equip_project_ids: Optional[set] = None
+        if self.current_user.role == "Manager" and not self.current_user.is_manager_reader:
+            if is_union_scope_for_manager_pm:
+                ext_equip_project_ids = union_pm_project_ids
+            else:
+                ext_equip_project_ids = pm_project_ids or set()
 
         # 4. Build project name lookup and cost center name lookup
         proj_rows = (
@@ -1215,22 +1342,43 @@ class FinanceService:
                 return code if code else cc_id  # fallback to UUID when code is empty
             return cc_id
 
-        # 6. Demand lines → planned labor cost, keyed by Resource.cost_center_id
+        # 6. Demand lines → planned labor cost. Resource lines are keyed by
+        #    Resource.cost_center_id; placeholder lines count exactly the same way,
+        #    keyed by Placeholder.cost_center_id, at the same period rate.
+        demand_cc_col = func.coalesce(Resource.cost_center_id, Placeholder.cost_center_id)
         demand_q = (
-            self.db.query(DemandLine, Resource.cost_center_id)
-            .join(Resource, DemandLine.resource_id == Resource.id)
+            self.db.query(DemandLine, demand_cc_col)
+            .outerjoin(Resource, DemandLine.resource_id == Resource.id)
+            .outerjoin(Placeholder, DemandLine.placeholder_id == Placeholder.id)
             .filter(
                 DemandLine.tenant_id == self.current_user.tenant_id,
                 DemandLine.period_id.in_(period_ids),
-                DemandLine.resource_id.isnot(None),
             )
         )
         if project_id:
             demand_q = demand_q.filter(DemandLine.project_id == project_id)
         if cost_center_id:
-            demand_q = demand_q.filter(Resource.cost_center_id == cost_center_id)
-        if scoped_resource_ids is not None:
-            demand_q = demand_q.filter(Resource.id.in_(scoped_resource_ids))
+            demand_q = demand_q.filter(demand_cc_col == cost_center_id)
+        # Manager resource scope cannot match placeholder lines (they have no
+        # resource), so widen it with the cost centers of the manager's accessible
+        # resources: a manager sees the placeholder planned cost of their own CCs.
+        if scoped_resource_ids is None:
+            pass
+        else:
+            scope_arms = [Resource.id.in_(scoped_resource_ids)]
+            manager_cc_ids = {
+                row[0]
+                for row in self.db.query(Resource.cost_center_id)
+                .filter(Resource.id.in_(scoped_resource_ids))
+                .distinct()
+                .all()
+                if row[0]
+            }
+            if manager_cc_ids:
+                scope_arms.append(Placeholder.cost_center_id.in_(manager_cc_ids))
+            if union_pm_project_ids:
+                scope_arms.append(DemandLine.project_id.in_(union_pm_project_ids))
+            demand_q = demand_q.filter(or_(*scope_arms))
         for line, cc_id in demand_q.all():
             if not _pm_allowed(line.project_id):
                 continue
@@ -1253,8 +1401,7 @@ class FinanceService:
             actuals_q = actuals_q.filter(ActualLine.project_id == project_id)
         if cost_center_id:
             actuals_q = actuals_q.filter(Resource.cost_center_id == cost_center_id)
-        if scoped_resource_ids is not None:
-            actuals_q = actuals_q.filter(Resource.id.in_(scoped_resource_ids))
+        actuals_q = _apply_resource_scope(actuals_q, Resource.id, ActualLine.project_id)
         for line, cc_id in actuals_q.all():
             if not _pm_allowed(line.project_id):
                 continue
@@ -1262,36 +1409,40 @@ class FinanceService:
             rate = monthly_fte_costs_by_period.get(line.period_id, fallback_monthly_fte_cost)
             agg[(line.project_id, _cc_key(cc_id), yr, mo)]["actuals_cost"] += int(line.actual_fte_percent * rate // 100)
 
-        # 8. External lines → contractor cost, keyed by Resource.cost_center_id when available
-        ext_q = (
-            self.db.query(ProjectExternalLine, Resource.cost_center_id)
-            .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
-            .filter(
-                ProjectExternalLine.tenant_id == self.current_user.tenant_id,
-                ProjectExternalLine.period_id.in_(period_ids),
+        # 8. External lines → contractor cost, keyed by Resource.cost_center_id when available.
+        #    Visibility is project-based (ext_equip_project_ids), never Manager-resource based.
+        if ext_equip_project_ids is None or ext_equip_project_ids:
+            ext_q = (
+                self.db.query(ProjectExternalLine, Resource.cost_center_id)
+                .outerjoin(Resource, ProjectExternalLine.resource_id == Resource.id)
+                .filter(
+                    ProjectExternalLine.tenant_id == self.current_user.tenant_id,
+                    ProjectExternalLine.period_id.in_(period_ids),
+                )
             )
-        )
-        if project_id:
-            ext_q = ext_q.filter(ProjectExternalLine.project_id == project_id)
-        if cost_center_id:
-            ext_q = ext_q.filter(Resource.cost_center_id == cost_center_id)
-        if scoped_resource_ids is not None:
-            ext_q = ext_q.filter(Resource.id.in_(scoped_resource_ids))
-        for line, cc_id in ext_q.all():
-            if not _pm_allowed(line.project_id):
-                continue
-            yr, mo = period_map[line.period_id]
-            agg[(line.project_id, _cc_key(cc_id), yr, mo)]["externals_cost"] += line.cost
+            if project_id:
+                ext_q = ext_q.filter(ProjectExternalLine.project_id == project_id)
+            if cost_center_id:
+                ext_q = ext_q.filter(Resource.cost_center_id == cost_center_id)
+            if ext_equip_project_ids is not None:
+                ext_q = ext_q.filter(ProjectExternalLine.project_id.in_(ext_equip_project_ids))
+            for line, cc_id in ext_q.all():
+                if not _pm_allowed(line.project_id):
+                    continue
+                yr, mo = period_map[line.period_id]
+                agg[(line.project_id, _cc_key(cc_id), yr, mo)]["externals_cost"] += line.cost
 
         # 9. Equipment lines → equipment cost (no resource link, cc_id=None)
         #    Skip when filtering by cost_center_id since there is no resource to filter on.
-        if not cost_center_id:
+        if not cost_center_id and (ext_equip_project_ids is None or ext_equip_project_ids):
             equip_q = self.db.query(ProjectEquipmentLine).filter(
                 ProjectEquipmentLine.tenant_id == self.current_user.tenant_id,
                 ProjectEquipmentLine.period_id.in_(period_ids),
             )
             if project_id:
                 equip_q = equip_q.filter(ProjectEquipmentLine.project_id == project_id)
+            if ext_equip_project_ids is not None:
+                equip_q = equip_q.filter(ProjectEquipmentLine.project_id.in_(ext_equip_project_ids))
             for line in equip_q.all():
                 if not _pm_allowed(line.project_id):
                     continue

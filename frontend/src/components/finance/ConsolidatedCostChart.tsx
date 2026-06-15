@@ -15,6 +15,7 @@ import {
   ConsolidatedCostDetail,
 } from '../../api/finance';
 import { usePeriod } from '../../contexts/PeriodContext';
+import { useAuth } from '../../auth/AuthProvider';
 import type { Snapshot } from '../../api/consolidation';
 import { MONTH_SHORT, MONTH_NAMES } from '../../utils/format';
 
@@ -133,6 +134,17 @@ interface Props { latestSnapshot?: Snapshot | null; scope?: 'pm' | 'default'; }
 
 export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latestSnapshot, scope }) => {
   const { periods } = usePeriod();
+  const { user } = useAuth();
+
+  // OoP/Equipment are project/finance lines, not cost-center planning data. A plain
+  // Manager (no PM/Reader secondary role) gets none from the backend, so hide the
+  // series, KPI cards, columns, and drilldown tabs for that role. PM and Manager+PM
+  // see them only for PM-assigned projects (enforced server-side).
+  const showOopEquip = !(
+    user?.role === 'Manager' &&
+    user?.secondary_role !== 'PM' &&
+    user?.secondary_role !== 'Reader'
+  );
 
   // Data
   const [rawData, setRawData] = useState<ConsolidatedCostRow[]>([]);
@@ -186,25 +198,30 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
       .finally(() => setLoading(false));
   }, [groupBy, scope]);
 
-  // Lazily fetch data for a selected locked period and cache it
+  // Lazily fetch data for all selected locked periods (one call per uncached month).
+  // Locked-period data never changes, so the per-month cache lives for the session.
   useEffect(() => {
-    const lockedPeriod = periods.find(p => selectedPeriodIds.has(p.id) && p.status !== 'open');
-    if (!lockedPeriod) {
+    const lockedSelected = periods.filter(p => selectedPeriodIds.has(p.id) && p.status !== 'open');
+    if (lockedSelected.length === 0) {
       setLockedRawData([]);
       return;
     }
-    const key = `${lockedPeriod.year}-${lockedPeriod.month}`;
-    const cached = lockedCacheRef.current.get(key);
-    if (cached) {
-      setLockedRawData(cached);
-      return;
-    }
-    getConsolidatedCosts({ year: lockedPeriod.year, month: lockedPeriod.month, group_by: groupBy, scope })
-      .then(res => {
-        lockedCacheRef.current.set(key, res.data);
-        setLockedRawData(res.data);
-      })
-      .catch(() => setLockedRawData([]));
+    let cancelled = false;
+    const fetches = lockedSelected.map(p => {
+      const key = `${p.year}-${p.month}`;
+      const cached = lockedCacheRef.current.get(key);
+      if (cached) return Promise.resolve(cached);
+      return getConsolidatedCosts({ year: p.year, month: p.month, group_by: groupBy, scope })
+        .then(res => {
+          lockedCacheRef.current.set(key, res.data);
+          return res.data;
+        })
+        .catch(() => [] as ConsolidatedCostRow[]);
+    });
+    Promise.all(fetches).then(results => {
+      if (!cancelled) setLockedRawData(results.flat());
+    });
+    return () => { cancelled = true; };
   }, [selectedPeriodIds, periods, groupBy, scope]);
 
 
@@ -679,13 +696,15 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
         </div>
       </div>
 
-      {/* Section 3 — KPI strip (6 cards) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
+      {/* Section 3 — KPI strip (6 cards; OoP/Equipment hidden for plain Manager) */}
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${showOopEquip ? 6 : 4}, 1fr)`, gap: 12 }}>
         {[
           { label: 'Planned Labor', accent: C.accent, curr: kpis.planned, prev: prevKpis?.planned, display: kpis.planned },
           { label: 'Actual Labor', accent: C.planned, curr: kpis.actual, prev: prevKpis?.actual, display: kpis.actual },
-          { label: 'Out-of-Pocket', accent: C.oop, curr: kpis.oop, prev: prevKpis?.oop, display: kpis.oop / 100 },
-          { label: 'Equipment', accent: C.equip, curr: kpis.equipment, prev: prevKpis?.equipment, display: kpis.equipment / 100 },
+          ...(showOopEquip ? [
+            { label: 'Out-of-Pocket', accent: C.oop, curr: kpis.oop, prev: prevKpis?.oop, display: kpis.oop / 100 },
+            { label: 'Equipment', accent: C.equip, curr: kpis.equipment, prev: prevKpis?.equipment, display: kpis.equipment / 100 },
+          ] : []),
           {
             label: 'Planned Total',
             accent: C.planned,
@@ -743,7 +762,11 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
             <div style={{ padding: 20 }}>
               {/* Legend */}
               <div style={{ display: 'flex', gap: 14, marginBottom: 14, flexWrap: 'wrap' }}>
-                {[{ l: 'Planned', c: C.planned }, { l: 'Actual', c: C.actual }, { l: 'OoP', c: C.oop }, { l: 'Equipment', c: C.equip }].map(s => (
+                {[
+                  { l: 'Planned', c: C.planned },
+                  { l: 'Actual', c: C.actual },
+                  ...(showOopEquip ? [{ l: 'OoP', c: C.oop }, { l: 'Equipment', c: C.equip }] : []),
+                ].map(s => (
                   <div key={s.l} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: C.ink3 }}>
                     <div style={{ width: 10, height: 10, borderRadius: 2, background: s.c }} />{s.l}
                   </div>
@@ -932,7 +955,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
               </div>
               {/* KPI strip */}
               <div style={{ display: 'flex', border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden', marginTop: 14 }}>
-                {(drawer.mode === 'cc' ? [
+                {(drawer.mode === 'cc' || !showOopEquip ? [
                   { label: 'Planned', val: drawer.kpis.planned },
                   { label: 'Actual', val: drawer.kpis.actual },
                 ] : [
@@ -957,8 +980,8 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
                 <Tab value="bymonth">By month</Tab>
                 <Tab value="planned">Planned ({drawerDetail ? drawerDetail.reduce((s, d) => s + d.demand_lines.length, 0) : '…'})</Tab>
                 <Tab value="actual">Actual ({drawerDetail ? drawerDetail.reduce((s, d) => s + d.actual_lines.length, 0) : '…'})</Tab>
-                {drawer.mode !== 'cc' && <Tab value="oop">OoP ({drawerDetail ? drawerDetail.reduce((s, d) => s + d.external_lines.length, 0) : '…'})</Tab>}
-                {drawer.mode !== 'cc' && <Tab value="equipment">Equipment ({drawerDetail ? drawerDetail.reduce((s, d) => s + d.equipment_lines.length, 0) : '…'})</Tab>}
+                {drawer.mode !== 'cc' && showOopEquip && <Tab value="oop">OoP ({drawerDetail ? drawerDetail.reduce((s, d) => s + d.external_lines.length, 0) : '…'})</Tab>}
+                {drawer.mode !== 'cc' && showOopEquip && <Tab value="equipment">Equipment ({drawerDetail ? drawerDetail.reduce((s, d) => s + d.equipment_lines.length, 0) : '…'})</Tab>}
               </TabList>
             </div>
 
@@ -967,7 +990,7 @@ export const ConsolidatedCostChart: React.FC<Props> = ({ latestSnapshot: _latest
 
               {/* By month */}
               {drawerTab === 'bymonth' && (() => {
-                const isCc = drawer.mode === 'cc';
+                const isCc = drawer.mode === 'cc' || !showOopEquip;
                 const maxBkt = Math.max(...drawer.monthlyData.map(m => isCc ? m.planned + m.actual : m.planned + m.actual + m.oop + m.equip), 1);
                 return (
                   <div>

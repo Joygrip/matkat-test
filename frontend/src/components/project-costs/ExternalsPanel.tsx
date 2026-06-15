@@ -19,6 +19,7 @@ import {
 import { AddRegular, EditRegular, DeleteRegular, DocumentTableRegular, ArrowDownloadRegular } from '@fluentui/react-icons';
 import { projectCostsApi, ExternalLine } from '../../api/projectCosts';
 import { useHasRole } from '../../auth/AuthProvider';
+import { usePeriod } from '../../contexts/PeriodContext';
 import { useToast } from '../../hooks/useToast';
 import type { Project } from '../../api/lookups';
 import { formatDKKFromCents } from '../../utils/format';
@@ -138,7 +139,10 @@ const emptyForm = { project_id: '', description: '', notes: '', cost: '' };
 export const ExternalsPanel: React.FC<Props> = ({ periodId, projectId, projects }) => {
   const styles = useStyles();
   const { showSuccess, showError, showApiError } = useToast();
-  const canEdit = useHasRole('Admin', 'Finance', 'PM');
+  const { periods } = usePeriod();
+  // Locked periods are read-only regardless of role (backend rejects writes too)
+  const periodIsOpen = periods.find((p) => p.id === periodId)?.status === 'open';
+  const canEdit = useHasRole('Admin', 'Finance', 'PM') && periodIsOpen;
 
   const [lines, setLines] = useState<ExternalLine[]>([]);
   const [loading, setLoading] = useState(false);

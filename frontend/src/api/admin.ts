@@ -74,6 +74,7 @@ export interface Placeholder {
   description: string | null;
   skill_profile: string | null;
   estimated_cost: number | null;
+  created_by: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

@@ -7,7 +7,9 @@ from pydantic import BaseModel, field_validator
 
 from api.app.db.engine import get_db
 from api.app.auth.dependencies import get_current_user, require_roles, CurrentUser
-from api.app.models.core import UserRole, User, Project, ProjectPM, Resource, ResourceType
+from api.app.models.core import (
+    UserRole, User, Project, ProjectPM, Resource, ResourceType, Period, PeriodStatus,
+)
 from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
 
 router = APIRouter(prefix="/project-costs", tags=["Project Costs"])
@@ -156,6 +158,25 @@ def _check_project_access(project_id: str, pm_project_ids: Optional[list[str]]) 
         )
 
 
+def _check_period_not_locked(db: Session, tenant_id: str, period_id: str) -> None:
+    """Reject writes against locked periods (mirrors the planning/actuals guards)."""
+    period = db.query(Period).filter(
+        Period.id == period_id,
+        Period.tenant_id == tenant_id,
+    ).first()
+    if period and period.status == PeriodStatus.LOCKED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "PERIOD_LOCKED",
+                "message": f"Period {period.year}-{period.month:02d} is locked. No edits allowed.",
+                "period_id": period.id,
+                "year": period.year,
+                "month": period.month,
+            },
+        )
+
+
 def _project_name_map(db: Session, tenant_id: str) -> dict[str, str]:
     projects = db.query(Project.id, Project.name).filter(Project.tenant_id == tenant_id).all()
     return {p.id: p.name for p in projects}
@@ -266,6 +287,7 @@ async def create_external(
 ):
     pm_project_ids = _get_pm_project_ids(db, current_user)
     _check_project_access(data.project_id, pm_project_ids)
+    _check_period_not_locked(db, current_user.tenant_id, data.period_id)
     line = ProjectExternalLine(
         tenant_id=current_user.tenant_id,
         project_id=data.project_id,
@@ -303,6 +325,7 @@ async def update_external(
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "External line not found"})
     pm_project_ids = _get_pm_project_ids(db, current_user)
     _check_project_access(line.project_id, pm_project_ids)
+    _check_period_not_locked(db, current_user.tenant_id, line.period_id)
     if data.resource_id is not None:
         line.resource_id = data.resource_id
     if data.description is not None:
@@ -335,6 +358,7 @@ async def delete_external(
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "External line not found"})
     pm_project_ids = _get_pm_project_ids(db, current_user)
     _check_project_access(line.project_id, pm_project_ids)
+    _check_period_not_locked(db, current_user.tenant_id, line.period_id)
     db.delete(line)
     db.commit()
     return {"ok": True}
@@ -376,6 +400,7 @@ async def create_equipment(
 ):
     pm_project_ids = _get_pm_project_ids(db, current_user)
     _check_project_access(data.project_id, pm_project_ids)
+    _check_period_not_locked(db, current_user.tenant_id, data.period_id)
     line = ProjectEquipmentLine(
         tenant_id=current_user.tenant_id,
         project_id=data.project_id,
@@ -410,6 +435,7 @@ async def update_equipment(
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Equipment line not found"})
     pm_project_ids = _get_pm_project_ids(db, current_user)
     _check_project_access(line.project_id, pm_project_ids)
+    _check_period_not_locked(db, current_user.tenant_id, line.period_id)
     if data.description is not None:
         line.description = data.description
     if data.cost is not None:
@@ -437,6 +463,7 @@ async def delete_equipment(
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Equipment line not found"})
     pm_project_ids = _get_pm_project_ids(db, current_user)
     _check_project_access(line.project_id, pm_project_ids)
+    _check_period_not_locked(db, current_user.tenant_id, line.period_id)
     db.delete(line)
     db.commit()
     return {"ok": True}

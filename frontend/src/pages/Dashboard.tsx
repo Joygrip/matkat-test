@@ -84,6 +84,17 @@ export function Dashboard() {
     const role = user.role;
     const isEmployee = role === 'Employee';
 
+    // Employees see only their own scoped lines, fetched inside EmployeeView. They have no
+    // access to the broad planning endpoints (the matrix data), so skip those calls here —
+    // issuing them would only produce a 403 and a spurious dashboard error.
+    if (isEmployee) {
+      setAllDemandLines([]);
+      setAllSupplyLines([]);
+      setApprovalStatuses({});
+      setLoading(false);
+      return;
+    }
+
     const openSorted = (periods as Period[])
       .filter(p => p.status === 'open')
       .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
@@ -94,7 +105,7 @@ export function Dashboard() {
       planningApi.getAllDemandLines(),
       planningApi.getAllSupplyLines(),
     ];
-    if (earliest && !isEmployee) {
+    if (earliest) {
       fetches.push(actualsApi.getApprovalStatuses(earliest.year, earliest.month));
     }
 

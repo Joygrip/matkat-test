@@ -121,17 +121,17 @@ class ResourceResponse(ResourceBase):
         from_attributes = True
 
 
-# Placeholder schemas - one placeholder per cost center; cost_center_id required
+# Placeholder schemas - scoped to a cost center; a cost center can have several
 class PlaceholderBase(BaseModel):
     name: str
-    cost_center_id: str  # Required; one placeholder per cost center
+    cost_center_id: str
     description: Optional[str] = None
     skill_profile: Optional[str] = None
     estimated_cost: Optional[int] = None
 
 
 class PlaceholderCreate(BaseModel):
-    """Create placeholder (e.g. when adding a cost center). Requires cost_center_id."""
+    """Create placeholder for a cost center."""
     cost_center_id: str
     name: Optional[str] = None  # Default "Placeholder" if not set
     description: Optional[str] = None
@@ -153,6 +153,7 @@ class PlaceholderResponse(PlaceholderBase):
     tenant_id: str
     cost_center_id: str
     cost_center_name: Optional[str] = None
+    created_by: Optional[str] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime

@@ -120,7 +120,7 @@ def _to_response(snapshot, include_lines: bool = False):
 @router.get("/dashboard/{period_id}")
 async def get_dashboard(
     period_id: str,
-    scope: str = Query("default", description="Dashboard scope: 'default' or 'pm'. 'pm' bypasses Manager CC filtering for Manager+PM users only."),
+    scope: str = Query("default", description="Dashboard scope: 'default' or 'pm'. 'pm' switches Manager+PM users from Manager CC scoping to assigned-PM-project scoping (enforced server-side)."),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.MANAGER, UserRole.PM
@@ -132,9 +132,10 @@ async def get_dashboard(
     Shows demand vs supply gaps, orphan demands, and over-allocations.
 
     scope="default" — Manager users see only their managed/delegated CCs.
-    scope="pm"      — Manager+PM users receive full-org data so the frontend
-                      FinanceOverview component can apply PM project filtering.
-                      Has no effect for plain Manager, Finance, Admin, or PM.
+    scope="pm"      — Manager+PM users are scoped to their assigned PM projects
+                      instead of their Manager CCs (enforced server-side).
+                      Pure PM users are always PM-project scoped regardless of
+                      scope. Has no effect for plain Manager, Finance, or Admin.
 
     Accessible to: Admin, Finance, Manager, PM (view only)
     """

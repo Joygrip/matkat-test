@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./dev.db"
     
     # Notifications
+    # NOTIFICATION_SCHEDULER_ENABLED — kill switch for the in-process APScheduler
+    # tick. Dispatch is deduplicated across workers/instances via an atomic
+    # last_run_at claim, so multiple schedulers are safe; this flag exists to
+    # disable the in-process scheduler entirely (e.g. if it ever moves to the
+    # Azure Functions app).
+    notification_scheduler_enabled: bool = True
     notify_mode: str = "stub"          # "stub" = log only, "graph" = send via Graph API
     notify_from_email: str = ""        # NOTIFY_FROM_EMAIL — mailbox UPN for Graph sendMail (Mail.Send permission required)
     notify_conflict_schedule: str = "PM_RO"          # NOTIFY_CONFLICT_SCHEDULE — which phase cadence triggers conflict alerts

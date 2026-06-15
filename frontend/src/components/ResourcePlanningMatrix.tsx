@@ -19,6 +19,8 @@ import {
   MenuList,
   MenuItem,
   Tooltip,
+  Combobox,
+  Option,
 } from '@fluentui/react-components';
 import { Add24Regular, ChevronRight20Regular, ChevronDown20Regular, MoreHorizontalRegular } from '@fluentui/react-icons';
 import { planningApi, DemandLine, SupplyLine, MoveDemandGroupRequest, DeleteSupplyGroupRequest, MoveSupplyGroupRequest, MoveCapPeriodDetail } from '../api/planning';
@@ -29,6 +31,14 @@ import { Period } from '../types/index';
 import { MONTH_SHORT } from '../utils/format';
 import { avatarColor, getInitials } from '../utils/avatar';
 import { ferrosanTheme } from '../theme/ferrosanTheme';
+import { SearchableFilter } from './SearchableFilter';
+
+// DK cost center: location is unset (not yet synced) or explicitly matches Denmark/DK.
+// CCs with location = 'Poland' (or other non-DK) are excluded.
+const isDkCC = (cc: CostCenter): boolean => {
+  const loc = (cc.location ?? '').trim().toLowerCase();
+  return loc === '' || loc === 'denmark' || loc === 'dk';
+};
 
 const RESOURCE_COL_WIDTH = 180;
 const PROJECT_COL_WIDTH = 150;
@@ -787,6 +797,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
   const [dlgResourceQuery, setDlgResourceQuery] = useState('');
   const [dlgSelectedResources, setDlgSelectedResources] = useState<SelectedResource[]>([]);
   const [dlgProjectId, setDlgProjectId] = useState('');
+  // Visible text of the searchable Project Combobox. dlgProjectId remains the source of truth
+  // for the selected project; this only drives filtering/display of the options list.
+  const [dlgProjectQuery, setDlgProjectQuery] = useState('');
   const [dlgSelectedPeriods, setDlgSelectedPeriods] = useState<Set<string>>(new Set());
   const [dlgFte, setDlgFte] = useState('5');
   const [dlgSaving, setDlgSaving] = useState(false);
@@ -922,6 +935,48 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
   const isRoleManager = userRole === 'Manager';
   const isRolePM = userRole === 'PM';
+
+  // Placeholder creation — effective PMs (incl. Manager+PM), Admin and Finance.
+  // Mirrors the backend role gate on POST /placeholders.
+  const canCreatePlaceholder = isRolePM || canPM || userRole === 'Admin' || userRole === 'Finance';
+  const [creatingPlaceholder, setCreatingPlaceholder] = useState(false);
+  const [dlgPhFormOpen, setDlgPhFormOpen] = useState(false);
+  const [dlgPhName, setDlgPhName] = useState('');
+  const [dlgPhCcId, setDlgPhCcId] = useState('');
+
+  const handleCreatePlaceholder = useCallback(async (ccId: string, name: string): Promise<Placeholder | null> => {
+    const trimmed = name.trim();
+    if (!trimmed || !ccId) return null;
+    setCreatingPlaceholder(true);
+    try {
+      const ph = await lookupsApi.createPlaceholder({ cost_center_id: ccId, name: trimmed });
+      // Patch the per-CC and dialog caches locally — no demand/supply reload needed.
+      setCcPlaceholders(prev => ({ ...prev, [ccId]: [...(prev[ccId] ?? []), ph] }));
+      setDlgAllPlaceholders(prev => (prev.length > 0 ? [...prev, ph] : prev));
+      showSuccess(`Placeholder "${ph.name}" created${ph.cost_center_name ? ` for ${ph.cost_center_name}` : ''}`);
+      return ph;
+    } catch (err) {
+      showApiError(err as Error, 'Create placeholder');
+      return null;
+    } finally {
+      setCreatingPlaceholder(false);
+    }
+  }, [showSuccess, showApiError]);
+
+  // Drop server-side auto-deleted (unused) placeholders from local picker caches so they
+  // don't linger as stale options after a demand delete/move/update.
+  const removeDeletedPlaceholdersFromCaches = useCallback((deletedIds?: string[]) => {
+    if (!deletedIds || deletedIds.length === 0) return;
+    const gone = new Set(deletedIds);
+    setCcPlaceholders(prev => {
+      const next: Record<string, Placeholder[]> = {};
+      for (const [ccId, list] of Object.entries(prev)) {
+        next[ccId] = list.filter(p => !gone.has(p.id));
+      }
+      return next;
+    });
+    setDlgAllPlaceholders(prev => prev.filter(p => !gone.has(p.id)));
+  }, []);
 
   /*
    * Manager+PM scope model:
@@ -1112,8 +1167,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setSavingCells(prev => new Set(prev).add(cellKey));
     try {
       if (existingLine && newValue === 0) {
-        await planningApi.deleteDemandLine(existingLine.id);
+        const res = await planningApi.deleteDemandLine(existingLine.id);
         onDemandDeleted?.(existingLine.id);
+        removeDeletedPlaceholdersFromCaches(res?.deleted_placeholder_ids);
       } else if (existingLine) {
         const updated = await planningApi.updateDemandLine(existingLine.id, { fte_percent: newValue });
         onDemandSaved?.(updated);
@@ -1135,7 +1191,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       setSavingCells(prev => { const s = new Set(prev); s.delete(cellKey); return s; });
       setEditingCell(null);
     }
-  }, [onDemandSaved, onDemandDeleted, showApiError]);
+  }, [onDemandSaved, onDemandDeleted, showApiError, removeDeletedPlaceholdersFromCaches]);
 
   const saveSupplyCell = useCallback(async (
     cellKey: string,
@@ -1177,7 +1233,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDeleteGroupError(null);
     const { resourceName, projectName } = deleteGroupRow;
     try {
-      await planningApi.deleteDemandGroup({
+      const res = await planningApi.deleteDemandGroup({
         resource_id: deleteGroupRow.resourceId ?? undefined,
         placeholder_id: deleteGroupRow.placeholderId ?? undefined,
         project_id: deleteGroupRow.projectId || '',
@@ -1185,6 +1241,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       });
       setDeleteGroupRow(null);
       onReload();
+      removeDeletedPlaceholdersFromCaches(res?.deleted_placeholder_ids);
       showSuccess('Demand line deleted', `Removed demand for ${resourceName} on ${projectName}.`);
     } catch (err) {
       if (err instanceof ApiError) {
@@ -1342,9 +1399,10 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       period_ids: periods.map(p => p.id),
     };
     try {
-      await planningApi.moveDemandGroup(body);
+      const res = await planningApi.moveDemandGroup(body);
       const targetName = moveAllResources.find(r => r.id === moveTargetId)?.display_name || moveTargetId;
       const targetProjectName = moveDemandAllProjects.find(p => p.id === moveTargetProjectId)?.name || moveGroupRow.projectName;
+      removeDeletedPlaceholdersFromCaches(res?.deleted_placeholder_ids);
       setMoveGroupRow(null);
       setMoveTargetId('');
       setMoveTargetProjectId('');
@@ -1381,9 +1439,10 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     if (!demandCapPendingBody) return;
     setConfirmingDemandCap(true);
     try {
-      await planningApi.moveDemandGroup(demandCapPendingBody);
+      const res = await planningApi.moveDemandGroup(demandCapPendingBody);
       const targetName = moveAllResources.find(r => r.id === moveTargetId)?.display_name || moveTargetId;
       const targetProjectName = moveDemandAllProjects.find(p => p.id === moveTargetProjectId)?.name || moveGroupRow?.projectName;
+      removeDeletedPlaceholdersFromCaches(res?.deleted_placeholder_ids);
       setDemandCapPeriods([]);
       setDemandCapPendingBody(null);
       setMoveGroupRow(null);
@@ -1875,7 +1934,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setTransferDialogError(null);
     try {
       if (demandBody) {
-        await planningApi.moveDemandGroup(demandBody);
+        const res = await planningApi.moveDemandGroup(demandBody);
+        removeDeletedPlaceholdersFromCaches(res?.deleted_placeholder_ids);
       } else {
         await planningApi.moveSupplyGroup(supplyBody!);
       }
@@ -1909,7 +1969,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setConfirmingTransferCap(true);
     try {
       if (transferCapLineType === 'demand') {
-        await planningApi.moveDemandGroup(transferCapPendingBody as MoveDemandGroupRequest);
+        const res = await planningApi.moveDemandGroup(transferCapPendingBody as MoveDemandGroupRequest);
+        removeDeletedPlaceholdersFromCaches(res?.deleted_placeholder_ids);
       } else {
         await planningApi.moveSupplyGroup(transferCapPendingBody as MoveSupplyGroupRequest);
       }
@@ -2003,7 +2064,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
     try {
       if (demandBody) {
-        await planningApi.moveDemandGroup(demandBody);
+        const res = await planningApi.moveDemandGroup(demandBody);
+        removeDeletedPlaceholdersFromCaches(res?.deleted_placeholder_ids);
       } else {
         await planningApi.moveSupplyGroup(supplyBody!);
       }
@@ -2185,6 +2247,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDlgResourceQuery('');
     setDlgSelectedResources([]);
     setDlgProjectId('');
+    setDlgProjectQuery('');
     setDlgSelectedPeriods(new Set());
     setDlgFte('5');
     setDlgSaving(false);
@@ -2192,6 +2255,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDlgShowResourceDropdown(false);
     setDlgPmProjects([]);
     setDlgPeriodDragging(false);
+    setDlgPhFormOpen(false);
+    setDlgPhName('');
+    setDlgPhCcId('');
     // Supply mode (Manager or Manager+PM): load CC-scoped resources.
     // Demand mode (PM, Manager+PM, Finance, Admin): load full resource list.
     const isSupplyMode = isRoleManager && defaultLineType === 'supply';
@@ -2222,6 +2288,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDlgSelectedResources([]);
     setDlgResourceQuery('');
     setDlgCcId(''); // CC auto-derived from resource selection in demand mode
+    setDlgProjectId(''); // project scope differs between demand/supply — clear selection
+    setDlgProjectQuery('');
     lookupsApi.listPlaceholders().then(setDlgAllPlaceholders).catch(() => {});
     if (isRoleManager && canPM) {
       // Manager+PM demand: need full resource list and PM-scoped project list
@@ -2242,6 +2310,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDlgResourceQuery('');
     setDlgAllPlaceholders([]);
     setDlgPmProjects([]);
+    setDlgProjectId(''); // project scope differs between demand/supply — clear selection
+    setDlgProjectQuery('');
     if (isRoleManager) {
       // Manager+PM supply: set default Manager CC so the CC dropdown has a selection
       const defaultCc = [...managedCcIds][0] || (editableCcIds ? [...editableCcIds][0] : '') || '';
@@ -2870,6 +2940,25 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                                           ))}
                                         </>
                                       )}
+                                      {canCreatePlaceholder && addDemandResQuery.trim() && !addDemandForm.resOrPh && (
+                                        <div
+                                          onMouseDown={async e => {
+                                            e.preventDefault();
+                                            const ph = await handleCreatePlaceholder(group.ccId, addDemandResQuery);
+                                            if (ph) {
+                                              setAddDemandForm(f => ({ ...f, resOrPh: `ph:${ph.id}` }));
+                                              setAddDemandResQuery(ph.name);
+                                              setAddDemandResDropdownOpen(false);
+                                            }
+                                          }}
+                                          style={{ padding: '6px 8px', cursor: creatingPlaceholder ? 'wait' : 'pointer', fontSize: tokens.fontSizeBase200, color: tokens.colorBrandForeground1, borderTop: `1px solid ${tokens.colorNeutralStroke1}`, fontWeight: tokens.fontWeightSemibold }}
+                                          onMouseEnter={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground3; }}
+                                          onMouseLeave={e => { e.currentTarget.style.backgroundColor = tokens.colorNeutralBackground1; }}
+                                          title="Creates a placeholder in this cost center; its planned FTE counts as planned cost for this cost center"
+                                        >
+                                          ＋ Create placeholder “{addDemandResQuery.trim()}”
+                                        </div>
+                                      )}
                                     </div>
                                   </FluentProvider>,
                                   document.body
@@ -3306,6 +3395,75 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                     </div>
                   )}
                 </div>
+
+                {/* Create placeholder — effective PM / Admin / Finance, demand only */}
+                {dlgLineType === 'demand' && canCreatePlaceholder && (
+                  <div style={{ marginTop: 6 }}>
+                    {!dlgPhFormOpen ? (
+                      <Button
+                        size="small"
+                        appearance="subtle"
+                        onClick={() => {
+                          setDlgPhFormOpen(true);
+                          setDlgPhName(dlgResourceQuery.trim());
+                          setDlgPhCcId(dlgCcId || '');
+                        }}
+                      >
+                        ＋ New placeholder
+                      </Button>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 8, border: `1px dashed ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium }}>
+                        <input
+                          type="text"
+                          value={dlgPhName}
+                          onChange={e => setDlgPhName(e.target.value)}
+                          placeholder="Placeholder name (e.g. TBD Senior Engineer)"
+                          style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, boxSizing: 'border-box' }}
+                        />
+                        <SearchableFilter
+                          options={(allCostCenters.length > 0 ? allCostCenters : costCenters)
+                            .filter(isDkCC)
+                            .map(c => ({ id: c.id, label: c.name, code: c.code }))}
+                          value={dlgPhCcId}
+                          onChange={id => setDlgPhCcId(id)}
+                          placeholder="Search by name or code…"
+                          allLabel="Select cost center…"
+                        />
+                        <div style={{ fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3 }}>
+                          Planned FTE on this placeholder counts as planned cost for the selected cost center.
+                        </div>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <Button
+                            size="small"
+                            appearance="primary"
+                            disabled={!dlgPhName.trim() || !dlgPhCcId || creatingPlaceholder}
+                            onClick={async () => {
+                              const ph = await handleCreatePlaceholder(dlgPhCcId, dlgPhName);
+                              if (ph) {
+                                setDlgSelectedResources(prev => [...prev, {
+                                  id: ph.id,
+                                  name: ph.name,
+                                  initials: '?',
+                                  ccId: ph.cost_center_id,
+                                  type: 'placeholder',
+                                }]);
+                                setDlgCcId(ph.cost_center_id);
+                                setDlgResourceQuery('');
+                                setDlgPhFormOpen(false);
+                                setDlgPhName('');
+                              }
+                            }}
+                          >
+                            Create
+                          </Button>
+                          <Button size="small" appearance="subtle" onClick={() => { setDlgPhFormOpen(false); setDlgPhName(''); }}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Project — required for Demand, optional for Supply */}
@@ -3321,21 +3479,57 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
                   <div style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground3, minWidth: 240 }}>
                     No assigned projects — ask Admin to assign you as Project Manager.
                   </div>
-                ) : (
-                  <select
-                    value={dlgProjectId}
-                    onChange={e => setDlgProjectId(e.target.value)}
-                    style={{ padding: '5px 8px', border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, fontSize: tokens.fontSizeBase300, minWidth: 240 }}
-                  >
-                    <option value="">{dlgLineType === 'supply' ? '— General availability —' : 'Select project…'}</option>
-                    {(isRoleManager && canPM && dlgLineType === 'demand'
-                      ? dlgPmProjects
-                      : projects.filter(p => p.is_active)
-                    ).map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                )}
+                ) : (() => {
+                  // Searchable Project selector. The available list is unchanged from the
+                  // previous <select>: PM-scoped projects for Manager+PM demand, all active
+                  // projects otherwise. The Combobox only changes how that list is presented.
+                  const availableProjects = isRoleManager && canPM && dlgLineType === 'demand'
+                    ? dlgPmProjects
+                    : projects.filter(p => p.is_active);
+                  const q = dlgProjectQuery.trim().toLowerCase();
+                  const filtered = q
+                    ? availableProjects.filter(p => p.name.toLowerCase().includes(q))
+                    : availableProjects;
+                  return (
+                    <Combobox
+                      placeholder={dlgLineType === 'supply' ? '— General availability —' : 'Search and select a project…'}
+                      value={dlgProjectQuery}
+                      selectedOptions={dlgProjectId ? [dlgProjectId] : []}
+                      onChange={e => {
+                        const text = e.target.value;
+                        setDlgProjectQuery(text);
+                        // Typing free text invalidates any prior selection unless it still
+                        // exactly matches the selected project's name. This keeps dlgProjectId
+                        // empty for arbitrary text, so Save validation fails (no free-text projects).
+                        if (dlgProjectId) {
+                          const sel = availableProjects.find(p => p.id === dlgProjectId);
+                          if (!sel || sel.name !== text) setDlgProjectId('');
+                        }
+                      }}
+                      onOptionSelect={(_, data) => {
+                        const proj = availableProjects.find(p => p.id === data.optionValue);
+                        if (proj) {
+                          setDlgProjectId(proj.id);
+                          setDlgProjectQuery(proj.name);
+                        } else {
+                          setDlgProjectId('');
+                          setDlgProjectQuery('');
+                        }
+                      }}
+                      style={{ minWidth: 240 }}
+                    >
+                      {filtered.length === 0 ? (
+                        <Option key="__none__" value="__none__" disabled>
+                          {availableProjects.length === 0 ? 'No projects found' : 'No matching projects'}
+                        </Option>
+                      ) : (
+                        filtered.map(p => (
+                          <Option key={p.id} value={p.id}>{p.name}</Option>
+                        ))
+                      )}
+                    </Combobox>
+                  );
+                })()}
               </div>
 
               {/* Periods — drag to select multiple */}

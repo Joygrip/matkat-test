@@ -675,8 +675,6 @@ export function ReaderView({
 
       return { period: p, headcount, avgUtil: periodAvgUtil, netGapFTE, totalCost };
     });
-    // eslint-disable-next-line no-console
-    console.log('[ReaderView] trendData', rows.map(r => ({ period: `${r.period.year}-${r.period.month}`, headcount: r.headcount, avgUtil: r.avgUtil, netGapFTE: r.netGapFTE, totalCost: r.totalCost })));
     return rows;
   }, [trendPeriods, demandLines, supplyLines, costs]);
 

@@ -27,7 +27,7 @@
       "value": "S1"
     },
     "sqlDatabaseSku": {
-      "value": "S1"
+      "value": "S3"
     },
     "staticWebAppSku": {
       "value": "Standard"

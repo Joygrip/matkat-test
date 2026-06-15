@@ -28,10 +28,11 @@ _ALL_VALUES = (
 
 
 def upgrade() -> None:
-    # Widen the column
-    op.execute(sa.text(
-        "ALTER TABLE notification_schedules ALTER COLUMN notification_type VARCHAR(50) NOT NULL"
-    ))
+    # Widen the column (T-SQL). SQLite does not enforce VARCHAR length, so skip there.
+    if op.get_bind().dialect.name != "sqlite":
+        op.execute(sa.text(
+            "ALTER TABLE notification_schedules ALTER COLUMN notification_type VARCHAR(50) NOT NULL"
+        ))
 
     # Insert the default approval_rejection schedule if not already present.
     # CURRENT_TIMESTAMP is supported by both SQLite and SQL Server.
@@ -68,6 +69,7 @@ def downgrade() -> None:
     op.execute(sa.text(
         "DELETE FROM notification_schedules WHERE notification_type = 'approval_rejection'"
     ))
-    op.execute(sa.text(
-        "ALTER TABLE notification_schedules ALTER COLUMN notification_type VARCHAR(17) NOT NULL"
-    ))
+    if op.get_bind().dialect.name != "sqlite":
+        op.execute(sa.text(
+            "ALTER TABLE notification_schedules ALTER COLUMN notification_type VARCHAR(17) NOT NULL"
+        ))

@@ -268,7 +268,8 @@ def _setup_finance_manager_pm_fixture(db, tenant_id: str):
 
     Plain Manager (scope=default): sees only res-fin-a costs (managed CC only).
     Manager+PM (scope=pm): sees all costs for proj-fin-alpha (both CCs), NOT proj-fin-other.
-    Manager+PM (scope=default): sees only managed-CC costs, same as plain Manager.
+    Manager+PM (scope=default): union — managed-CC costs PLUS all costs of assigned PM
+    projects (proj-fin-alpha across both CCs), but NOT proj-fin-other's unmanaged demand.
     """
     from api.app.models.core import User, CostCenter, Resource, Project, ProjectPM, Period, UserRole
     from api.app.models.planning import DemandLine
@@ -381,8 +382,8 @@ def test_finance_plain_manager_scope_pm_still_sees_managed_cc_only(client, db):
     assert "cc-fp2-other" not in cc_ids, "Plain Manager + scope=pm must not bypass Manager resource filtering"
 
 
-def test_finance_manager_pm_default_scope_sees_managed_cc_only(client, db):
-    """Manager+PM default scope (Manager tab) sees only managed-CC resource costs."""
+def test_finance_manager_pm_default_scope_is_union_of_manager_and_pm(client, db):
+    """Manager+PM default scope sees managed-CC costs plus assigned-PM-project costs."""
     tenant_id = "test-tenant-001"
     _setup_finance_manager_pm_fixture(db, tenant_id)
 
@@ -395,8 +396,16 @@ def test_finance_manager_pm_default_scope_sees_managed_cc_only(client, db):
     res = client.get("/finance/consolidated-costs?year=2026&month=9", headers=headers)
     assert res.status_code == 200
     rows = res.json()["data"]
-    cc_ids = {r.get("cost_center_id") for r in rows}
-    assert "cc-fin-other" not in cc_ids, "Manager tab must not expose costs from unmanaged CCs"
+    # Manager side: managed-CC demand visible
+    alpha_cc_ids = {r.get("cost_center_id") for r in rows if r["project_id"] == "proj-fin-alpha"}
+    assert "cc-fin-managed" in alpha_cc_ids, "Union scope must include managed-CC demand"
+    # PM side: assigned PM project demand visible even from unmanaged CC
+    assert "cc-fin-other" in alpha_cc_ids, "Union scope must include PM-project demand from other CCs"
+    # Not broadened: unassigned project's unmanaged-CC demand stays hidden
+    project_ids = {r["project_id"] for r in rows}
+    assert "proj-fin-other" not in project_ids, (
+        "Union scope must not expose non-PM projects outside the Manager resource scope"
+    )
 
 
 def test_finance_manager_pm_scope_pm_sees_pm_project_costs(client, db):
@@ -447,8 +456,8 @@ def test_finance_manager_pm_scope_pm_detail_project_mode(client, db):
     assert "Res B Fin" in demand_resource_names, "PM project detail must include other-CC resource for PM project"
 
 
-def test_finance_manager_pm_default_scope_detail_project_mode_restricted(client, db):
-    """Manager+PM default scope project-mode detail is restricted to managed-CC resources."""
+def test_finance_manager_pm_default_scope_detail_pm_project_full(client, db):
+    """Manager+PM default-scope detail for an assigned PM project shows all its lines (union)."""
     tenant_id = "test-tenant-001"
     _setup_finance_manager_pm_fixture(db, tenant_id)
 
@@ -466,5 +475,389 @@ def test_finance_manager_pm_default_scope_detail_project_mode_restricted(client,
     details = res.json()
     assert len(details) == 1
     demand_resource_names = {d["resource_name"] for d in details[0]["demand_lines"]}
-    assert "Res A Fin" in demand_resource_names, "Manager tab must include managed-CC resource"
-    assert "Res B Fin" not in demand_resource_names, "Manager tab must not include unmanaged-CC resource"
+    assert "Res A Fin" in demand_resource_names, "Union detail must include managed-CC resource"
+    assert "Res B Fin" in demand_resource_names, "Union detail must include other-CC resource for PM project"
+
+
+def test_finance_manager_pm_default_scope_detail_non_pm_project_restricted(client, db):
+    """Manager+PM default-scope detail for a NON-PM project stays Manager-resource scoped."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+
+    headers = {
+        "X-Dev-Role": "Manager",
+        "X-Dev-Secondary-Role": "PM",
+        "X-Dev-Tenant": tenant_id,
+        "X-Dev-User-Id": "fin-mpm-obj-001",
+    }
+    res = client.get(
+        "/finance/consolidated-costs/detail?year=2026&month=9&project_id=proj-fin-other",
+        headers=headers,
+    )
+    assert res.status_code == 200
+    details = res.json()
+    assert len(details) == 1
+    demand_resource_names = {d["resource_name"] for d in details[0]["demand_lines"]}
+    # proj-fin-other's only demand is res-fin-b in an unmanaged CC — must stay hidden
+    assert "Res B Fin" not in demand_resource_names, (
+        "Non-PM project detail must not expose unmanaged-CC resources"
+    )
+
+
+def test_finance_manager_pm_default_scope_includes_delegated_cc(client, db):
+    """Manager+PM default scope includes resources from actively delegated cost centers."""
+    from api.app.models.core import User, CostCenter, Resource, Project, Period, UserRole, ApprovalDelegate
+    from api.app.models.planning import DemandLine
+
+    tenant_id = "test-tenant-001"
+    mpm_user = _setup_finance_manager_pm_fixture(db, tenant_id)
+
+    # A delegator manager owning a third CC with demand on a non-PM project
+    delegator = User(
+        tenant_id=tenant_id, object_id="fin-deleg-obj-001", email="fin-deleg@test.com",
+        display_name="Fin Delegator", role=UserRole.MANAGER, is_active=True,
+    )
+    db.add(delegator)
+    db.flush()
+    db.add(CostCenter(id="cc-fin-deleg", tenant_id=tenant_id, name="Delegated CC Fin", code="DCF", ro_user_id=delegator.id))
+    db.add(Resource(id="res-fin-d", tenant_id=tenant_id, display_name="Res D Fin", cost_center_id="cc-fin-deleg", employee_id="FIN-D"))
+    db.add(Project(id="proj-fin-deleg", tenant_id=tenant_id, name="Deleg Fin", code="DLGF"))
+    db.add(DemandLine(
+        id="dl-fin-d", tenant_id=tenant_id, period_id="period-fin-mpm-1",
+        project_id="proj-fin-deleg", resource_id="res-fin-d",
+        year=2026, month=9, fte_percent=40, created_by="fin-deleg-obj-001",
+    ))
+    db.add(ApprovalDelegate(
+        tenant_id=tenant_id, delegator_id=delegator.id, delegate_id=mpm_user.id,
+        is_active=True, created_by="fin-deleg-obj-001",
+    ))
+    db.commit()
+
+    headers = {
+        "X-Dev-Role": "Manager",
+        "X-Dev-Secondary-Role": "PM",
+        "X-Dev-Tenant": tenant_id,
+        "X-Dev-User-Id": "fin-mpm-obj-001",
+    }
+    res = client.get("/finance/consolidated-costs?year=2026&month=9", headers=headers)
+    assert res.status_code == 200
+    rows = res.json()["data"]
+    deleg_cc_ids = {r.get("cost_center_id") for r in rows if r["project_id"] == "proj-fin-deleg"}
+    assert "cc-fin-deleg" in deleg_cc_ids, "Union scope must include delegated-CC demand"
+
+
+# ─── OoP/Equipment visibility in consolidated costs ───────────────────────────
+
+
+def _add_finance_ext_equip(db, tenant_id: str):
+    """Layer OoP/Equipment lines onto _setup_finance_manager_pm_fixture.
+
+    ext-fin-other deliberately sits on a managed-CC resource (res-fin-a) but a
+    non-PM project — the case where Manager resource scope must NOT grant access.
+    """
+    from api.app.models.project_costs import ProjectExternalLine, ProjectEquipmentLine
+
+    db.add(ProjectExternalLine(id="ext-fin-alpha", tenant_id=tenant_id, project_id="proj-fin-alpha", period_id="period-fin-mpm-1", resource_id="res-fin-a", description="Alpha vendor", cost=10000, created_by="t"))
+    db.add(ProjectExternalLine(id="ext-fin-other", tenant_id=tenant_id, project_id="proj-fin-other", period_id="period-fin-mpm-1", resource_id="res-fin-a", description="Other vendor", cost=20000, created_by="t"))
+    db.add(ProjectEquipmentLine(id="eq-fin-alpha", tenant_id=tenant_id, project_id="proj-fin-alpha", period_id="period-fin-mpm-1", description="Alpha rig", cost=30000, created_by="t"))
+    db.add(ProjectEquipmentLine(id="eq-fin-other", tenant_id=tenant_id, project_id="proj-fin-other", period_id="period-fin-mpm-1", description="Other rig", cost=40000, created_by="t"))
+    db.commit()
+
+
+def _ext_equip_by_project(rows):
+    ext: dict = {}
+    equip: dict = {}
+    for r in rows:
+        ext[r["project_id"]] = ext.get(r["project_id"], 0) + r["externals_cost"]
+        equip[r["project_id"]] = equip.get(r["project_id"], 0) + r["equipment_cost"]
+    return ext, equip
+
+
+_MPM_HEADERS = {
+    "X-Dev-Role": "Manager",
+    "X-Dev-Secondary-Role": "PM",
+    "X-Dev-Tenant": "test-tenant-001",
+    "X-Dev-User-Id": "fin-mpm-obj-001",
+}
+# Same DB user demoted to plain Manager (secondary role cleared via dev header)
+_PLAIN_MGR_HEADERS = {
+    "X-Dev-Role": "Manager",
+    "X-Dev-Secondary-Role": "",
+    "X-Dev-Tenant": "test-tenant-001",
+    "X-Dev-User-Id": "fin-mpm-obj-001",
+}
+# Same DB user as pure PM
+_PURE_PM_HEADERS = {
+    "X-Dev-Role": "PM",
+    "X-Dev-Tenant": "test-tenant-001",
+    "X-Dev-User-Id": "fin-mpm-obj-001",
+}
+_FINANCE_HEADERS = {
+    "X-Dev-Role": "Finance",
+    "X-Dev-Tenant": "test-tenant-001",
+    "X-Dev-User-Id": "fin-viewer-obj-001",
+}
+
+
+def test_oop_equip_manager_pm_limited_to_pm_projects(client, db):
+    """Manager+PM sees OoP/Equipment only for PM-assigned projects, not via Manager CC scope."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get("/finance/consolidated-costs?year=2026&month=9", headers=_MPM_HEADERS)
+    assert res.status_code == 200
+    ext, equip = _ext_equip_by_project(res.json()["data"])
+    assert ext.get("proj-fin-alpha", 0) == 10000, "PM project OoP must be visible"
+    assert equip.get("proj-fin-alpha", 0) == 30000, "PM project equipment must be visible"
+    assert ext.get("proj-fin-other", 0) == 0, "Non-PM project OoP must be hidden despite managed-CC resource"
+    assert equip.get("proj-fin-other", 0) == 0, "Non-PM project equipment must be hidden"
+
+
+def test_oop_equip_plain_manager_sees_none(client, db):
+    """Plain Manager sees no OoP/Equipment in cost overview, but keeps labor data."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get("/finance/consolidated-costs?year=2026&month=9", headers=_PLAIN_MGR_HEADERS)
+    assert res.status_code == 200
+    rows = res.json()["data"]
+    assert sum(r["externals_cost"] for r in rows) == 0, "Plain Manager must not see any OoP cost"
+    assert sum(r["equipment_cost"] for r in rows) == 0, "Plain Manager must not see any equipment cost"
+    assert sum(r["demand_cost"] for r in rows) > 0, "Plain Manager must still see managed-CC labor data"
+
+
+def test_oop_equip_pure_pm_limited_to_assigned_projects(client, db):
+    """Pure PM sees OoP/Equipment for assigned projects only."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get("/finance/consolidated-costs?year=2026&month=9", headers=_PURE_PM_HEADERS)
+    assert res.status_code == 200
+    ext, equip = _ext_equip_by_project(res.json()["data"])
+    assert ext.get("proj-fin-alpha", 0) == 10000
+    assert equip.get("proj-fin-alpha", 0) == 30000
+    assert "proj-fin-other" not in ext or ext["proj-fin-other"] == 0
+    assert "proj-fin-other" not in equip or equip["proj-fin-other"] == 0
+
+
+def test_oop_equip_finance_sees_all(client, db):
+    """Finance keeps full OoP/Equipment visibility."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get("/finance/consolidated-costs?year=2026&month=9", headers=_FINANCE_HEADERS)
+    assert res.status_code == 200
+    ext, equip = _ext_equip_by_project(res.json()["data"])
+    assert ext.get("proj-fin-alpha", 0) == 10000
+    assert ext.get("proj-fin-other", 0) == 20000
+    assert equip.get("proj-fin-alpha", 0) == 30000
+    assert equip.get("proj-fin-other", 0) == 40000
+
+
+def test_oop_equip_detail_manager_pm_pm_project_visible(client, db):
+    """Manager+PM project drilldown for an assigned PM project includes OoP/Equipment lines."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get(
+        "/finance/consolidated-costs/detail?year=2026&month=9&project_id=proj-fin-alpha",
+        headers=_MPM_HEADERS,
+    )
+    assert res.status_code == 200
+    d = res.json()[0]
+    assert len(d["external_lines"]) == 1
+    assert len(d["equipment_lines"]) == 1
+
+
+def test_oop_equip_detail_manager_pm_non_pm_project_hidden(client, db):
+    """Manager+PM project drilldown for a non-PM project hides OoP/Equipment lines."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get(
+        "/finance/consolidated-costs/detail?year=2026&month=9&project_id=proj-fin-other",
+        headers=_MPM_HEADERS,
+    )
+    assert res.status_code == 200
+    d = res.json()[0]
+    assert d["external_lines"] == [], "Non-PM project OoP lines must be hidden from Manager+PM"
+    assert d["equipment_lines"] == [], "Non-PM project equipment lines must be hidden from Manager+PM"
+
+
+def test_oop_equip_detail_plain_manager_hidden(client, db):
+    """Plain Manager project drilldown never includes OoP/Equipment lines."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get(
+        "/finance/consolidated-costs/detail?year=2026&month=9&project_id=proj-fin-alpha",
+        headers=_PLAIN_MGR_HEADERS,
+    )
+    assert res.status_code == 200
+    d = res.json()[0]
+    assert d["external_lines"] == []
+    assert d["equipment_lines"] == []
+
+
+def test_oop_equip_detail_cc_mode_scoping(client, db):
+    """CC drilldown: Manager+PM sees only PM-project OoP lines; plain Manager sees none."""
+    tenant_id = "test-tenant-001"
+    _setup_finance_manager_pm_fixture(db, tenant_id)
+    _add_finance_ext_equip(db, tenant_id)
+
+    res = client.get(
+        "/finance/consolidated-costs/detail?year=2026&month=9&cost_center_id=cc-fin-managed",
+        headers=_MPM_HEADERS,
+    )
+    assert res.status_code == 200
+    d = res.json()[0]
+    descriptions = {l["description"] for l in d["external_lines"]}
+    assert "Alpha vendor" in descriptions, "PM-project OoP line in managed CC must be visible"
+    assert "Other vendor" not in descriptions, "Non-PM project OoP line must be hidden despite managed CC"
+
+    res2 = client.get(
+        "/finance/consolidated-costs/detail?year=2026&month=9&cost_center_id=cc-fin-managed",
+        headers=_PLAIN_MGR_HEADERS,
+    )
+    assert res2.status_code == 200
+    assert res2.json()[0]["external_lines"] == [], "Plain Manager must see no OoP lines in CC drilldown"
+
+
+# ─── Placeholder planned cost ──────────────────────────────────────────────────
+
+def _create_placeholder_demand_fixture(db, tenant_id: str, period_id: str, year: int, month: int, suffix: str, fte_percent: int = 50):
+    """Demand carried by a placeholder instead of a resource."""
+    from api.app.models.core import Placeholder
+
+    cc = CostCenter(id=f"cc-{suffix}", tenant_id=tenant_id, code=f"CC{suffix}", name=f"Cost Center {suffix}")
+    project = Project(id=f"proj-{suffix}", tenant_id=tenant_id, code=f"PRJ{suffix}", name=f"Project {suffix}")
+    placeholder = Placeholder(
+        id=f"ph-{suffix}",
+        tenant_id=tenant_id,
+        cost_center_id=cc.id,
+        name=f"TBD {suffix}",
+    )
+    demand = DemandLine(
+        id=f"dem-{suffix}",
+        tenant_id=tenant_id,
+        period_id=period_id,
+        project_id=project.id,
+        placeholder_id=placeholder.id,
+        year=year,
+        month=month,
+        fte_percent=fte_percent,
+        created_by="finance-001",
+    )
+    db.add_all([cc, project, placeholder, demand])
+    db.commit()
+    return {
+        "cost_center_id": cc.id,
+        "project_id": project.id,
+        "placeholder_id": placeholder.id,
+    }
+
+
+def test_placeholder_demand_counts_as_planned_cost(client, db, finance_headers):
+    """Placeholder demand contributes planned cost at the period rate, attributed to the demand's project and the placeholder's cost center."""
+    period = client.post("/periods", json={"year": 2028, "month": 1}, headers=finance_headers).json()
+    assert client.put(
+        f"/finance/settings/monthly_fte_cost?period_id={period['id']}",
+        json={"setting_value": "100000"},
+        headers=finance_headers,
+    ).status_code == 200
+
+    fixture = _create_placeholder_demand_fixture(db, "test-tenant-001", period["id"], 2028, 1, "ph1", fte_percent=50)
+
+    res = client.get("/finance/consolidated-costs?year=2028&month=1", headers=finance_headers)
+    assert res.status_code == 200
+    rows = [r for r in res.json()["data"] if r["project_id"] == fixture["project_id"]]
+    assert len(rows) == 1
+    assert rows[0]["demand_cost"] == 50000
+    assert rows[0]["cost_center_id"] == fixture["cost_center_id"]
+
+
+def test_placeholder_and_resource_demand_aggregate_together(client, db, finance_headers):
+    """Resource and placeholder demand in the same CC and project sum into one planned total."""
+    period = client.post("/periods", json={"year": 2028, "month": 2}, headers=finance_headers).json()
+    assert client.put(
+        f"/finance/settings/monthly_fte_cost?period_id={period['id']}",
+        json={"setting_value": "100000"},
+        headers=finance_headers,
+    ).status_code == 200
+
+    from api.app.models.core import Placeholder
+
+    fixture = _create_demand_fixture(db, "test-tenant-001", period["id"], 2028, 2, "mix", fte_percent=50)
+    placeholder = Placeholder(
+        id="ph-mix",
+        tenant_id="test-tenant-001",
+        cost_center_id=fixture["cost_center_id"],
+        name="TBD mix",
+    )
+    demand = DemandLine(
+        id="dem-mix-ph",
+        tenant_id="test-tenant-001",
+        period_id=period["id"],
+        project_id=fixture["project_id"],
+        placeholder_id=placeholder.id,
+        year=2028,
+        month=2,
+        fte_percent=25,
+        created_by="finance-001",
+    )
+    db.add_all([placeholder, demand])
+    db.commit()
+
+    res = client.get("/finance/consolidated-costs?year=2028&month=2", headers=finance_headers)
+    assert res.status_code == 200
+    rows = [r for r in res.json()["data"] if r["project_id"] == fixture["project_id"]]
+    assert len(rows) == 1
+    # 50% resource + 25% placeholder of 100000
+    assert rows[0]["demand_cost"] == 75000
+
+
+def test_placeholder_demand_in_project_detail(client, db, finance_headers):
+    """Project drill-down shows the placeholder line with its name and cost center."""
+    period = client.post("/periods", json={"year": 2028, "month": 3}, headers=finance_headers).json()
+    assert client.put(
+        f"/finance/settings/monthly_fte_cost?period_id={period['id']}",
+        json={"setting_value": "120000"},
+        headers=finance_headers,
+    ).status_code == 200
+
+    fixture = _create_placeholder_demand_fixture(db, "test-tenant-001", period["id"], 2028, 3, "phd", fte_percent=50)
+
+    res = client.get(
+        f"/finance/consolidated-costs/detail?year=2028&month=3&project_id={fixture['project_id']}",
+        headers=finance_headers,
+    )
+    assert res.status_code == 200
+    details = res.json()
+    assert len(details) == 1
+    line = details[0]["demand_lines"][0]
+    assert line["resource_name"] == "TBD phd"
+    assert line["cost"] == 60000
+    assert line["cost_center_name"] == "Cost Center phd"
+
+
+def test_placeholder_demand_in_cost_center_detail(client, db, finance_headers):
+    """Cost-center drill-down includes placeholder demand for that cost center."""
+    period = client.post("/periods", json={"year": 2028, "month": 4}, headers=finance_headers).json()
+    fixture = _create_placeholder_demand_fixture(db, "test-tenant-001", period["id"], 2028, 4, "phcc", fte_percent=100)
+
+    res = client.get(
+        f"/finance/consolidated-costs/detail?year=2028&month=4&cost_center_id={fixture['cost_center_id']}",
+        headers=finance_headers,
+    )
+    assert res.status_code == 200
+    details = res.json()
+    assert len(details) == 1
+    names = [l["resource_name"] for l in details[0]["demand_lines"]]
+    assert "TBD phcc" in names

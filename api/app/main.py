@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 
 from api.app.config import get_settings
 from api.app.routers import health, me, dev, periods, admin, planning, actuals, approvals, consolidation, notifications, lookups
-from api.app.routers import finance, audit, dashboard, reporting, project_costs
+from api.app.routers import finance, audit, reporting, project_costs
 from api.app.routers import notification_schedules
 from api.app.services import scheduler as notification_scheduler
 
@@ -150,7 +150,6 @@ app.include_router(consolidation.router)
 app.include_router(notifications.router)
 app.include_router(finance.router, prefix="/finance")
 app.include_router(audit.router)
-app.include_router(dashboard.router)
 app.include_router(reporting.router)
 app.include_router(project_costs.router)
 app.include_router(notification_schedules.router)
@@ -180,7 +179,10 @@ async def startup_event():
             "Set DATABASE_URL to a SQL Server connection string in Azure App Service."
         )
 
-    if os.getenv("TESTING", "").lower() not in ("1", "true", "yes"):
+    if (
+        settings.notification_scheduler_enabled
+        and os.getenv("TESTING", "").lower() not in ("1", "true", "yes")
+    ):
         notification_scheduler.start()
 
     if settings.dev_auth_bypass:

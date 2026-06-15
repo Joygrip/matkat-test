@@ -83,9 +83,7 @@ def _should_fire(schedule: NotificationSchedule, now_local: datetime, db) -> boo
     trigger = schedule.trigger_type
 
     if trigger == TriggerType.DAY_OF_MONTH:
-        result = today.day == schedule.trigger_value
-        print(f"[SCHEDULER] _should_fire: day={today.day}==trigger={schedule.trigger_value}? {result}, time={current_hhmm}>={schedule.time_of_day}? {current_hhmm >= schedule.time_of_day}, last_run={schedule.last_run_at}")
-        return result
+        return today.day == schedule.trigger_value
 
     if trigger == TriggerType.DAY_OF_WEEK:
         # 0=Monday … 6=Sunday, matching Python's weekday()
@@ -142,13 +140,42 @@ def _dispatch(service: NotificationsService, schedule: NotificationSchedule, yea
     return {}
 
 
+def _claim_schedule(db, schedule: NotificationSchedule, now_utc: datetime) -> bool:
+    """Atomically claim a schedule for dispatch by advancing last_run_at.
+
+    The conditional UPDATE only succeeds if last_run_at still holds the value
+    we read when evaluating _should_fire. With multiple uvicorn workers (or
+    App Service instances) each running its own scheduler, exactly one
+    process wins the claim — the others see 0 rows updated and skip.
+    """
+    prev_last_run = schedule.last_run_at
+    claimed = (
+        db.query(NotificationSchedule)
+        .filter(
+            NotificationSchedule.id == schedule.id,
+            NotificationSchedule.last_run_at == prev_last_run,
+        )
+        .update({"last_run_at": now_utc}, synchronize_session=False)
+    )
+    db.commit()
+    return bool(claimed)
+
+
+def _release_claim(db, schedule: NotificationSchedule, prev_last_run) -> None:
+    """Restore last_run_at after a failed dispatch so the next tick retries."""
+    db.query(NotificationSchedule).filter(
+        NotificationSchedule.id == schedule.id
+    ).update({"last_run_at": prev_last_run}, synchronize_session=False)
+    db.commit()
+
+
 def _run_tick() -> None:
     """Check all active schedules and fire those whose conditions are met."""
     db = _open_session()
     try:
         # All time comparisons use UTC+2; last_run_at is stored as UTC
         now_local = datetime.now(tz=_UTC2)
-        print(f"[SCHEDULER TICK] {now_local.isoformat()}")
+        logger.debug("scheduler tick at %s", now_local.isoformat())
 
         schedules = (
             db.query(NotificationSchedule)
@@ -157,6 +184,8 @@ def _run_tick() -> None:
         )
 
         for schedule in schedules:
+            prev_last_run = schedule.last_run_at
+            claimed = False
             try:
                 if schedule.notification_type == NotificationScheduleType.APPROVAL_REJECTION.value:
                     continue  # event-driven — never fired by the scheduler
@@ -175,6 +204,12 @@ def _run_tick() -> None:
                     continue
                 year, month = period_ym
 
+                # Claim before dispatch (stored as UTC) so concurrent workers
+                # cannot double-send; a failed dispatch releases the claim below.
+                if not _claim_schedule(db, schedule, datetime.utcnow()):
+                    continue  # another worker/instance claimed this schedule
+                claimed = True
+
                 system_user = CurrentUser(
                     id="00000000-0000-0000-0000-000000000000",
                     tenant_id=schedule.tenant_id,
@@ -186,9 +221,6 @@ def _run_tick() -> None:
 
                 service = NotificationsService(db, system_user)
                 result = _dispatch(service, schedule, year, month)
-
-                # Store last_run_at as UTC
-                schedule.last_run_at = datetime.utcnow()
                 db.commit()
 
                 logger.info(
@@ -199,8 +231,7 @@ def _run_tick() -> None:
                     month,
                     result,
                 )
-            except Exception as e:
-                print(f"[SCHEDULER ERROR] schedule={schedule.id}: {e}")
+            except Exception:
                 logger.exception(
                     "scheduler: error processing schedule %s (type=%s tenant=%s)",
                     schedule.id,
@@ -208,6 +239,14 @@ def _run_tick() -> None:
                     schedule.tenant_id,
                 )
                 db.rollback()
+                if claimed:
+                    try:
+                        _release_claim(db, schedule, prev_last_run)
+                    except Exception:
+                        logger.exception(
+                            "scheduler: failed to release claim for schedule %s", schedule.id
+                        )
+                        db.rollback()
     finally:
         db.close()
 

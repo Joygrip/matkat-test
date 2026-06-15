@@ -71,7 +71,10 @@ class DemandLineResponse(DemandLineBase):
     # Cost center context (resolved from resource or placeholder)
     cost_center_id: Optional[str] = None
     cost_center_name: Optional[str] = None
-    
+
+    # Placeholders auto-removed as a side effect of this update (bounded cleanup)
+    deleted_placeholder_ids: Optional[list[str]] = None
+
     class Config:
         from_attributes = True
 

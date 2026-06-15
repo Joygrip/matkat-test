@@ -958,6 +958,21 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     }
   }, [showSuccess, showApiError]);
 
+  // Drop server-side auto-deleted (unused) placeholders from local picker caches so they
+  // don't linger as stale options after a demand delete/move/update.
+  const removeDeletedPlaceholdersFromCaches = useCallback((deletedIds?: string[]) => {
+    if (!deletedIds || deletedIds.length === 0) return;
+    const gone = new Set(deletedIds);
+    setCcPlaceholders(prev => {
+      const next: Record<string, Placeholder[]> = {};
+      for (const [ccId, list] of Object.entries(prev)) {
+        next[ccId] = list.filter(p => !gone.has(p.id));
+      }
+      return next;
+    });
+    setDlgAllPlaceholders(prev => prev.filter(p => !gone.has(p.id)));
+  }, []);
+
   /*
    * Manager+PM scope model:
    *
@@ -1147,8 +1162,9 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setSavingCells(prev => new Set(prev).add(cellKey));
     try {
       if (existingLine && newValue === 0) {
-        await planningApi.deleteDemandLine(existingLine.id);
+        const res = await planningApi.deleteDemandLine(existingLine.id);
         onDemandDeleted?.(existingLine.id);
+        removeDeletedPlaceholdersFromCaches(res?.deleted_placeholder_ids);
       } else if (existingLine) {
         const updated = await planningApi.updateDemandLine(existingLine.id, { fte_percent: newValue });
         onDemandSaved?.(updated);
@@ -1170,7 +1186,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       setSavingCells(prev => { const s = new Set(prev); s.delete(cellKey); return s; });
       setEditingCell(null);
     }
-  }, [onDemandSaved, onDemandDeleted, showApiError]);
+  }, [onDemandSaved, onDemandDeleted, showApiError, removeDeletedPlaceholdersFromCaches]);
 
   const saveSupplyCell = useCallback(async (
     cellKey: string,
@@ -1212,7 +1228,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setDeleteGroupError(null);
     const { resourceName, projectName } = deleteGroupRow;
     try {
-      await planningApi.deleteDemandGroup({
+      const res = await planningApi.deleteDemandGroup({
         resource_id: deleteGroupRow.resourceId ?? undefined,
         placeholder_id: deleteGroupRow.placeholderId ?? undefined,
         project_id: deleteGroupRow.projectId || '',
@@ -1220,6 +1236,7 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       });
       setDeleteGroupRow(null);
       onReload();
+      removeDeletedPlaceholdersFromCaches(res?.deleted_placeholder_ids);
       showSuccess('Demand line deleted', `Removed demand for ${resourceName} on ${projectName}.`);
     } catch (err) {
       if (err instanceof ApiError) {
@@ -1377,9 +1394,10 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
       period_ids: periods.map(p => p.id),
     };
     try {
-      await planningApi.moveDemandGroup(body);
+      const res = await planningApi.moveDemandGroup(body);
       const targetName = moveAllResources.find(r => r.id === moveTargetId)?.display_name || moveTargetId;
       const targetProjectName = moveDemandAllProjects.find(p => p.id === moveTargetProjectId)?.name || moveGroupRow.projectName;
+      removeDeletedPlaceholdersFromCaches(res?.deleted_placeholder_ids);
       setMoveGroupRow(null);
       setMoveTargetId('');
       setMoveTargetProjectId('');
@@ -1416,9 +1434,10 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     if (!demandCapPendingBody) return;
     setConfirmingDemandCap(true);
     try {
-      await planningApi.moveDemandGroup(demandCapPendingBody);
+      const res = await planningApi.moveDemandGroup(demandCapPendingBody);
       const targetName = moveAllResources.find(r => r.id === moveTargetId)?.display_name || moveTargetId;
       const targetProjectName = moveDemandAllProjects.find(p => p.id === moveTargetProjectId)?.name || moveGroupRow?.projectName;
+      removeDeletedPlaceholdersFromCaches(res?.deleted_placeholder_ids);
       setDemandCapPeriods([]);
       setDemandCapPendingBody(null);
       setMoveGroupRow(null);
@@ -1910,7 +1929,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setTransferDialogError(null);
     try {
       if (demandBody) {
-        await planningApi.moveDemandGroup(demandBody);
+        const res = await planningApi.moveDemandGroup(demandBody);
+        removeDeletedPlaceholdersFromCaches(res?.deleted_placeholder_ids);
       } else {
         await planningApi.moveSupplyGroup(supplyBody!);
       }
@@ -1944,7 +1964,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
     setConfirmingTransferCap(true);
     try {
       if (transferCapLineType === 'demand') {
-        await planningApi.moveDemandGroup(transferCapPendingBody as MoveDemandGroupRequest);
+        const res = await planningApi.moveDemandGroup(transferCapPendingBody as MoveDemandGroupRequest);
+        removeDeletedPlaceholdersFromCaches(res?.deleted_placeholder_ids);
       } else {
         await planningApi.moveSupplyGroup(transferCapPendingBody as MoveSupplyGroupRequest);
       }
@@ -2038,7 +2059,8 @@ export const ResourcePlanningMatrix: React.FC<ResourcePlanningMatrixProps> = ({
 
     try {
       if (demandBody) {
-        await planningApi.moveDemandGroup(demandBody);
+        const res = await planningApi.moveDemandGroup(demandBody);
+        removeDeletedPlaceholdersFromCaches(res?.deleted_placeholder_ids);
       } else {
         await planningApi.moveSupplyGroup(supplyBody!);
       }

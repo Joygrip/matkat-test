@@ -22,6 +22,8 @@ export interface DemandLine {
   placeholder_name?: string;
   cost_center_id?: string;
   cost_center_name?: string;
+  // Placeholders auto-removed as a side effect of an update (bounded cleanup)
+  deleted_placeholder_ids?: string[];
 }
 
 export interface SupplyLine {
@@ -175,20 +177,20 @@ export const planningApi = {
     return apiClient.patch<DemandLine>(`/demand-lines/${id}`, data);
   },
   
-  async deleteDemandLine(id: string): Promise<void> {
-    return apiClient.delete(`/demand-lines/${id}`);
+  async deleteDemandLine(id: string): Promise<{ message: string; deleted_placeholder_ids?: string[] }> {
+    return apiClient.delete<{ message: string; deleted_placeholder_ids?: string[] }>(`/demand-lines/${id}`);
   },
-  
+
   async bulkDemandLines(body: BulkRequest<CreateDemandLine>): Promise<BulkResponse> {
     return apiClient.post<BulkResponse>('/demand-lines/bulk', body);
   },
 
-  async deleteDemandGroup(body: DeleteDemandGroupRequest): Promise<{ deleted: number }> {
-    return apiClient.post<{ deleted: number }>('/demand-lines/group/delete', body);
+  async deleteDemandGroup(body: DeleteDemandGroupRequest): Promise<{ deleted: number; deleted_placeholder_ids?: string[] }> {
+    return apiClient.post<{ deleted: number; deleted_placeholder_ids?: string[] }>('/demand-lines/group/delete', body);
   },
 
-  async moveDemandGroup(body: MoveDemandGroupRequest): Promise<{ moved: number }> {
-    return apiClient.post<{ moved: number }>('/demand-lines/group/move', body);
+  async moveDemandGroup(body: MoveDemandGroupRequest): Promise<{ moved: number; deleted_placeholder_ids?: string[] }> {
+    return apiClient.post<{ moved: number; deleted_placeholder_ids?: string[] }>('/demand-lines/group/move', body);
   },
   
   // Supply Lines

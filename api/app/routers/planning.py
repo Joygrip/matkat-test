@@ -231,7 +231,9 @@ async def update_demand_line(
     service = DemandService(db, current_user)
     line = service.update(demand_id, data.fte_percent, data.resource_id, data.placeholder_id)
 
-    return _enrich_demand(line)
+    resp = _enrich_demand(line)
+    resp.deleted_placeholder_ids = service.last_deleted_placeholder_ids or None
+    return resp
 
 
 @router.delete("/demand-lines/{demand_id}")
@@ -247,7 +249,7 @@ async def delete_demand_line(
     """
     service = DemandService(db, current_user)
     service.delete(demand_id)
-    return {"message": "Demand line deleted"}
+    return {"message": "Demand line deleted", "deleted_placeholder_ids": service.last_deleted_placeholder_ids}
 
 
 @router.post("/demand-lines/group/delete")
@@ -276,7 +278,7 @@ async def delete_demand_group(
         resource_id=data.resource_id,
         placeholder_id=data.placeholder_id,
     )
-    return {"deleted": deleted}
+    return {"deleted": deleted, "deleted_placeholder_ids": service.last_deleted_placeholder_ids}
 
 
 @router.post("/demand-lines/group/move")
@@ -315,7 +317,7 @@ async def move_demand_group(
         period_mappings=data.period_mappings,
         merge_mode=data.merge_mode,
     )
-    return {"moved": moved}
+    return {"moved": moved, "deleted_placeholder_ids": service.last_deleted_placeholder_ids}
 
 
 @router.post("/demand-lines/bulk", response_model=BulkDemandLineResponse)

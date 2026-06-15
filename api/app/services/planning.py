@@ -15,6 +15,21 @@ from api.app.schemas.common import ErrorCode
 _SCOPED_ROLES = (UserRole.MANAGER,)
 
 
+def _own_resource_ids(db: Session, current_user: CurrentUser) -> list[str]:
+    """Resource IDs linked to the current user's own account.
+
+    Used to hard-scope Employee reads to their own demand/supply lines so they can
+    never enumerate other resources by supplying an arbitrary (or no) resource_id.
+    """
+    rows = db.query(Resource.id).filter(
+        and_(
+            Resource.tenant_id == current_user.tenant_id,
+            Resource.user_id == current_user.id,
+        )
+    ).all()
+    return [row[0] for row in rows]
+
+
 def cleanup_unused_placeholders(
     db: Session,
     tenant_id: str,
@@ -264,6 +279,12 @@ class DemandService:
                     self.db.query(Placeholder.id).filter(Placeholder.cost_center_id == cost_center_id)
                 ),
             ))
+
+        # Employee: hard-scope to own resource lines, ignoring any broader query params.
+        if self.current_user.role == UserRole.EMPLOYEE:
+            own_ids = _own_resource_ids(self.db, self.current_user)
+            query = query.filter(DemandLine.resource_id.in_(own_ids)) if own_ids else query.filter(False)
+            return query.all()
 
         # RO/Director: restrict to resources within their reporting line
         scoped_ids = self._get_scoped_resource_ids()
@@ -1384,6 +1405,12 @@ class SupplyService:
                     self.db.query(Resource.id).filter(Resource.cost_center_id == cost_center_id)
                 )
             )
+
+        # Employee: hard-scope to own resource lines, ignoring any broader query params.
+        if self.current_user.role == UserRole.EMPLOYEE:
+            own_ids = _own_resource_ids(self.db, self.current_user)
+            query = query.filter(SupplyLine.resource_id.in_(own_ids)) if own_ids else query.filter(False)
+            return query.all()
 
         # RO/Director: restrict to resources within their reporting line
         scoped_ids = self._get_scoped_resource_ids()

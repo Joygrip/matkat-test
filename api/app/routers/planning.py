@@ -136,10 +136,13 @@ async def list_all_open_demand_lines(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER,
-        UserRole.EMPLOYEE,
     )),
 ):
-    """Return all demand lines across every open period in a single query."""
+    """Return all demand lines across every open period in a single query.
+
+    This is the broad Resource Planning matrix feed. Employees are intentionally
+    excluded — they read only their own lines via the filtered /demand-lines endpoint.
+    """
     service = DemandService(db, current_user)
     lines = service.get_all(project_id=project_id, open_periods_only=open_periods_only, cost_center_id=cost_center_id)
     return [_enrich_demand(line) for line in lines]
@@ -449,10 +452,13 @@ async def list_all_open_supply_lines(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(
         UserRole.ADMIN, UserRole.FINANCE, UserRole.PM, UserRole.MANAGER,
-        UserRole.EMPLOYEE,
     )),
 ):
-    """Return all supply lines across every open period in a single query."""
+    """Return all supply lines across every open period in a single query.
+
+    This is the broad Resource Planning matrix feed. Employees are intentionally
+    excluded — they read only their own lines via the filtered /supply-lines endpoint.
+    """
     service = SupplyService(db, current_user)
     lines = service.get_all(open_periods_only=open_periods_only, cost_center_id=cost_center_id, project_id=project_id)
     return [_enrich_supply(line) for line in lines]

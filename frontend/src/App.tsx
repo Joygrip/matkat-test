@@ -37,6 +37,17 @@ function FteInputRoute() {
   return <FteInput />;
 }
 
+// Resource Planning is for Admin, Finance, PM, and Manager only. This deliberately
+// mirrors the nav visibility rule in AppShell so a hidden menu item can never be
+// reached via direct URL. Manager+PM and Manager+Reader have primary role 'Manager'
+// and so pass; Employees and primary Readers are redirected to their dashboard.
+const RESOURCE_PLANNING_ROLES = ['Admin', 'Finance', 'PM', 'Manager'];
+function ResourcePlanningRoute() {
+  const { user } = useAuth();
+  if (!user || !RESOURCE_PLANNING_ROLES.includes(user.role)) return <Navigate to="/" replace />;
+  return <ResourcePlanning />;
+}
+
 const useStyles = makeStyles({
   loading: {
     display: 'flex',
@@ -162,7 +173,7 @@ function App() {
         <Suspense fallback={<Spinner size="large" label="Loading..." />}>
           <Routes>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/resource-planning" element={<ResourcePlanning />} />
+            <Route path="/resource-planning" element={<ResourcePlanningRoute />} />
             <Route path="/demand" element={<Navigate to="/resource-planning" replace />} />
             <Route path="/supply" element={<Navigate to="/resource-planning" replace />} />
             <Route path="/actuals" element={<ActualsRoute />} />

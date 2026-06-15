@@ -1,266 +1,193 @@
-# Resource Allocation App (MatKat 2.0)
+# MatKat 2.0
 
-Multi-tenant resource allocation and planning system built with FastAPI and React.
-
----
-
-## Features
-
-- **Multi-tenant architecture** with strict tenant isolation
-- **Role-based access control**: Admin, Finance, PM, RO, Director, Employee
-- **Planning**: Demand and Supply management with period-based (month/year) planning, 4-month forecast window, and FTE% in 5% increments
-- **Actuals**: Employee time tracking with ≤100% enforcement per resource/month, proxy sign by RO, and approval workflow
-- **Approvals**: RO → Director workflow, automatic skip if RO=Director, inbox refreshes instantly after actions
-- **Consolidation**: Finance dashboard with demand/supply gap analysis, cost center work queue, KPI scoreboard, and snapshot publishing (immutable period snapshots)
-- **Notifications**: Azure Functions stub for scheduled reminders (future)
-- **Audit Trail**: All master data and planning changes are logged with before/after values and user info
-- **Master Data Management**: Finance and Admin can manage departments, cost centers, projects, resources, placeholders, holidays, and settings
-- **Planning Insights**: PM/RO/Finance/Admin can view demand/supply gaps, orphan demand, and over-allocations per cost center
-- **Read-only UI**: Users without edit permissions see clear banners and disabled actions
-- **Dev Auth Bypass**: Switch roles and tenants instantly for local testing
-- **Comprehensive Test Coverage**: 100+ backend tests, frontend smoke/unit tests
+MatKat is a multi-tenant **resource allocation and planning** application. Project
+managers plan **demand** (who is needed on which project), managers plan **supply**
+(who is available from their cost centers), and the system surfaces the **gaps**
+between them across monthly periods. Employees, PMs, and managers record their own
+monthly **actuals** (FTE %), which flow through an **approval** workflow. Finance
+gets a consolidated **cost overview** (monthly FTE cost, out-of-pocket and equipment
+costs, immutable snapshots), and Admin/Finance manage all **configuration** — cost
+centers, projects, PM assignments, periods, resources, placeholders, Microsoft Graph
+sync, notifications, and audit logs.
 
 ---
 
-## Status
+## Current stack
 
-✅ **All core functionality implemented and tested**
-- All major flows verified (see checklist below)
-- All backend tests pass (`pytest`)
-- TypeScript frontend builds cleanly (`npm run build`)
-- Enterprise UI refresh with Fluent UI v9, responsive layouts, and accessibility
-- See [`docs/TODO.md`](docs/TODO.md) and [`docs/VERIFY_LOCAL.md`](docs/VERIFY_LOCAL.md) for completion and verification status
-
----
-
-## Tech Stack
-
-### Backend
-- FastAPI (Python 3.11+)
-- SQLAlchemy 2.x + Alembic (migrations)
-- SQLite (dev) / Azure SQL (production)
-- pytest for testing
-
-### Frontend
-- React 18 + TypeScript
-- Vite
-- Fluent UI v9 (design system)
-- MSAL React (Azure AD authentication)
-- Recharts, D3 (charts)
-
-### Scheduler
-- Azure Functions (Python)
-- Timer triggers for notifications (stub)
+| Layer | Technology |
+|---|---|
+| **Backend** | FastAPI (Python 3.11+), SQLAlchemy 2.x, Alembic migrations |
+| **Frontend** | React 18 + TypeScript, Vite, Fluent UI v9, Recharts/D3 |
+| **Database** | SQLite (local dev) / Azure SQL (production) |
+| **Auth** | Microsoft Entra ID via MSAL (frontend) + JWT validation (backend); dev auth bypass for local work |
+| **Hosting** | Azure App Service / containers (API) + Azure Static Web Apps (frontend) |
+| **Graph / email** | Microsoft Graph for user/department/manager sync and for outbound email notifications |
+| **Scheduler** | Azure Functions timer project (`scheduler/`) that triggers notification phases |
 
 ---
 
-## Project Structure
+## Main app areas
 
-```
-ResourceAllocation/
-├── api/                 # FastAPI backend
-│   ├── app/
-│   │   ├── models/      # SQLAlchemy models
-│   │   ├── routers/     # API endpoints
-│   │   ├── services/    # Business logic
-│   │   └── schemas/     # Pydantic schemas
-│   ├── alembic/         # Database migrations
-│   └── tests/           # pytest tests
-├── frontend/            # React frontend
-│   └── src/
-│       ├── pages/       # Page components
-│       ├── components/  # Reusable components
-│       └── api/         # API client
-├── scheduler/           # Azure Functions (notifications)
-└── scripts/             # Utility scripts (start, migration, etc.)
-```
+- **Dashboard** — role-specific landing view (per-role dashboards and own-actuals entry).
+- **Resource Planning** — demand/supply matrix with gaps and placeholders.
+- **FTE Input** — PMs and managers record their *own* monthly actuals.
+- **FTE Approval** — managers/finance/admin review, approve, reject, and proxy-sign actuals.
+- **Finance** — consolidated cost overview, out-of-pocket + equipment costs, snapshots.
+- **Admin** — master data, PM assignments, periods, Graph sync, notifications.
+- **Audit Logs** — searchable history of master data and planning changes.
 
 ---
 
-## Quick Start
+## Role summary
 
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- Git
+| Role | What they do |
+|---|---|
+| **Employee** | Enter and sign their own monthly actuals (via the Dashboard). No planning access. |
+| **PM** | Plan demand and OoP/equipment for their **assigned projects**; record own actuals. |
+| **Manager** | Plan supply for their **cost-center (and delegated) resources**; approve actuals; record own actuals. |
+| **Finance** | Read-all + consolidated cost overview, period management, publish snapshots, master data. |
+| **Admin** | Full configuration and master-data management; Graph sync; notifications; audit logs. |
+| **Reader** | Read-only visibility (used today as a secondary role). |
+| **Manager+PM** | Additive: manager supply scope **and** PM demand scope (see details below). |
+| **Manager+Reader** | Manager with broad read-only visibility, including Finance views. |
 
-### Backend Setup
+See **[docs/ROLES_AND_ACCESS.md](docs/ROLES_AND_ACCESS.md)** for the full access matrix and scoping rules.
 
-**Windows PowerShell:**
+---
+
+## Local setup
+
+> Use `<repo-root>` to mean the directory where this repository is checked out.
+> Commands below are PowerShell-first (this repo is most often used on Windows); a
+> Bash equivalent follows where syntax differs.
+
+**Prerequisites:** Python 3.11+, Node.js 18+, Git.
+
+### Backend (PowerShell)
+
 ```powershell
+# From <repo-root>
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r api/requirements-dev.txt
+
+# Configure environment (see "Environment files" below)
+Copy-Item api/env.example.txt api/.env
+# Edit api/.env: ENV=dev, DEV_AUTH_BYPASS=true, DATABASE_URL=sqlite:///./api/dev.db
+
+# Run migrations if needed (a fresh dev DB is auto-created and seeded on first start)
 cd api
-Copy-Item env.example.txt .env
-# Edit .env: set DEV_AUTH_BYPASS=true for local dev
-alembic upgrade head
-pytest
+python -m alembic upgrade head
 cd ..
-uvicorn api.app.main:app --reload
+
+# Start the backend from the repo root so `api.app.main` imports resolve
+$env:PYTHONPATH = (Get-Location).Path
+uvicorn api.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-**Linux/Mac (bash):**
+Bash equivalent for the env/start steps:
+
 ```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r api/requirements-dev.txt
-cd api
-cp env.example.txt .env
-# Edit .env: set DEV_AUTH_BYPASS=true for local dev
-alembic upgrade head
-pytest
-cd ..
-uvicorn api.app.main:app --reload
+cp api/env.example.txt api/.env
+export PYTHONPATH="$(pwd)"
+uvicorn api.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-**Note:** Run the backend from the repo root so that `api.app.main` imports work. If running from `api/`, set `PYTHONPATH=..`.
+### Frontend (PowerShell)
 
-### Frontend Setup
-
-**Windows PowerShell:**
 ```powershell
 cd frontend
 npm install
 Copy-Item env.example.txt .env.local
-# Edit .env.local:
-#   VITE_DEV_AUTH_BYPASS=true
-#   VITE_API_BASE_URL=http://localhost:8000
+# Edit .env.local: VITE_DEV_AUTH_BYPASS=true
+# Leave VITE_API_BASE_URL unset so the Vite dev proxy is used (avoids CORS)
 npm run dev
 ```
 
-**Linux/Mac (bash):**
-```bash
-cd frontend
-npm install
-cp env.example.txt .env.local
-# Edit .env.local:
-#   VITE_DEV_AUTH_BYPASS=true
-#   VITE_API_BASE_URL=http://localhost:8000
-npm run dev
+### Start both (Windows helper script)
+
+```powershell
+# Opens backend and frontend in separate PowerShell windows
+.\scripts\start-all.ps1
 ```
 
----
+(`scripts/start-backend.ps1` and `scripts/start-frontend.ps1` start each service individually.)
 
-## Development Mode
+URLs once running:
 
-- Set `DEV_AUTH_BYPASS=true` in both backend and frontend `.env` files
-- Use the Dev Login Panel in the frontend to switch roles and tenants instantly
+- Frontend: <http://localhost:5173>
+- API: <http://localhost:8000>
+- API docs (Swagger): <http://localhost:8000/docs>
+- Health check: <http://localhost:8000/healthz>
 
----
-
-## Example Data
-
-- On first startup (dev mode, empty DB), the backend auto-creates sample data:
-  - **Departments**: Engineering, Operations, Sales & Marketing, Customer Support
-  - **Cost Centers**: Software Development, QA, Infrastructure, DevOps, Marketing, Support Team
-  - **Users**: All roles (Admin, Finance, PMs, ROs, Directors, Employees) with manager chains
-  - **Projects**: Alpha, Beta, Gamma, Infrastructure Upgrade, Marketing Campaign
-  - **Resources**: Employees and external contractors
-  - **Placeholders**: For future hiring
-  - **Periods**: December 2025 (locked), January 2026 (locked), February-May 2026 (open)
-  - **Demand/Supply/Actual lines**: Example planning and actuals data
-  - **Approvals**: Example approval instances for signed actuals
-
-- **To reset example data:**  
-  Delete `api/dev.db` and restart the backend. Data will be recreated.
-
-- **Dev endpoints:**  
-  `/dev/seed`, `/dev/seed/run`, `/dev/seed/wipe` for advanced seeding (see [`frontend/src/api/devSeed.ts`](frontend/src/api/devSeed.ts)).
+In dev (`DEV_AUTH_BYPASS=true`), use the **Dev Login** panel to switch role / tenant
+instantly — no Entra sign-in required. On first startup with an empty database, the
+backend auto-seeds full example data; you can also call `POST /dev/seed-reset` to wipe
+and re-seed.
 
 ---
 
-## Testing
+## Environment files
 
-```bash
-# Backend tests
+- Backend: copy **[api/env.example.txt](api/env.example.txt)** → `api/.env`.
+- Frontend: copy **[frontend/env.example.txt](frontend/env.example.txt)** → `frontend/.env.local`.
+
+The example files document every variable. **Never commit real secrets** (Entra
+client secrets, connection strings, deployment tokens) — keep them only in your local
+`.env` / `.env.local` (both git-ignored).
+
+---
+
+## Tests and build
+
+```powershell
+# Backend tests (run from api/)
 cd api
-pytest -v
+pytest
 
-# Frontend build & test
-cd frontend
+# Targeted examples
+pytest tests/test_planning.py
+pytest tests/test_planning.py -k placeholder -v
+
+# Frontend type-check + build (run from frontend/)
+cd ../frontend
+npx tsc --noEmit
 npm run build
-npm run test
+npm run test     # vitest
 ```
-
-- **All backend tests must pass**
-- Frontend must build without TypeScript errors
-
----
-
-## Local Run Guide
-
-### Prerequisites Check
-1. **Backend running**: `uvicorn api.app.main:app --reload` (http://localhost:8000)
-2. **Frontend running**: `npm run dev` in `frontend/` (http://localhost:5173)
-3. **Dev auth bypass enabled**: `DEV_AUTH_BYPASS=true` in both `.env` files
-4. **Example data**: Auto-created on first startup if DB is empty
-
----
-
-## Manual Test Checklist
-
-#### 1. Finance Role - Period Control
-- [ ] Login as Finance (Dev Login Panel)
-- [ ] Create/lock/unlock periods, verify status changes
-
-#### 2. PM Role - Demand Planning
-- [ ] Create demand lines (FTE 5-100, step 5)
-- [ ] Test XOR resource/placeholder rule
-- [ ] Test 4MFC placeholder rule (future months only)
-- [ ] Finance/Admin see Demand in read-only mode
-
-#### 3. RO Role - Supply Planning
-- [ ] Create supply lines (FTE 5-100, step 5)
-- [ ] Finance/Admin see Supply in read-only mode
-
-#### 4. Employee Role - Actuals Entry
-- [ ] Create actual lines (≤100% per resource/month)
-- [ ] Test over-100% block, sign actuals
-
-#### 5. RO Role - Proxy Sign & Approvals
-- [ ] Proxy sign for employees, verify approval instance, approve Step 1
-
-#### 6. Director Role - Approvals
-- [ ] Approve Step 2, test skip rule if RO=Director
-
-#### 7. Finance Role - Consolidation & Publish
-- [ ] View dashboard, publish snapshot, verify immutability
-
-#### 8. Error Handling
-- [ ] Invalid FTE → FTE_INVALID error
-- [ ] Locked period edit → PERIOD_LOCKED error
-- [ ] Unauthorized action → UNAUTHORIZED_ROLE error
-- [ ] All errors use Problem Details format
-
-#### 9. Multi-tenancy
-- [ ] Switch tenants, verify strict data isolation
-
----
-
-## API Documentation
-
-- Swagger UI: http://localhost:8000/docs
-- Health check: http://localhost:8000/healthz
-
----
-
-## Environment Variables
-
-See [`api/env.example.txt`](api/env.example.txt) and [`frontend/env.example.txt`](frontend/env.example.txt) for required variables.
 
 ---
 
 ## Documentation
 
-- [docs/TODO.md](docs/TODO.md): Full implementation plan and completion status
-- [docs/VERIFY_LOCAL.md](docs/VERIFY_LOCAL.md): Localhost verification checklist
-- [docs/START_LOCAL.md](docs/START_LOCAL.md): Local run and troubleshooting guide
-- [docs/TODO-planning.md](docs/TODO-planning.md): Planning UX improvements and acceptance criteria
-- [frontend/docs/UI_GUIDELINES.md](frontend/docs/UI_GUIDELINES.md): UI design guidelines and component patterns
+| Doc | Contents |
+|---|---|
+| [docs/APP_OVERVIEW.md](docs/APP_OVERVIEW.md) | What MatKat solves, modules, terminology, data sources |
+| [docs/ROLES_AND_ACCESS.md](docs/ROLES_AND_ACCESS.md) | Roles, secondary roles, access matrix, scoping rules |
+| [docs/WORKFLOWS.md](docs/WORKFLOWS.md) | Planning, FTE input, approval, finance, admin workflows |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Repo layout, backend/frontend architecture, auth/data flow |
+| [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | Core models and relationships |
+| [docs/BACKEND.md](docs/BACKEND.md) | Backend startup, routers, services, migrations, config |
+| [docs/FRONTEND.md](docs/FRONTEND.md) | Frontend routes, contexts, components, route guards |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Local run, tests, migrations, Graph sync, troubleshooting |
+| [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md) | Email notifications, Graph mail, scheduler |
+
+---
+
+## Safety notes
+
+- **Do not commit secrets** — Entra client secrets, `DATABASE_URL` connection
+  strings, Graph credentials, and deployment tokens stay in local env files only.
+- **Do not commit local DBs/backups** — `api/dev.db` and similar are dev-only and
+  disposable (delete and restart to re-seed).
+- **Dev auth bypass is dev-only** — `DEV_AUTH_BYPASS` must never be enabled in
+  production. The backend gates dev endpoints behind it.
+- Retired one-off scripts (CSV importers, ad-hoc migrations, diagnostics) are **not**
+  part of the active workflow and have been removed from the repository. Use Alembic
+  for schema changes and the application's own endpoints for data operations.
 
 ---
 
 ## License
 
-Proprietary - Internal use only
+Proprietary — internal use only.

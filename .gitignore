@@ -20,6 +20,24 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
+# Database backups / dumps (dev.db.bak previously slipped past *.db)
+*.bak
+*.db.bak
+*.sqlite.bak
+*.dump
+
+# One-off import/export artifacts (importer default output names)
+import_result*.csv
+import_issues*.csv
+import_summary*.json
+*_result*.csv
+*_fixed.csv
+*_app_ready*.csv
+data/exports/
+
+# Local / off-repo script archive (retired scripts — see docs/RETIRED_SCRIPTS.md)
+_local_archive/
+matkat-local-script-archive/
 
 # Environment variables
 .env

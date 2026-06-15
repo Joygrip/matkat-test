@@ -1,48 +1,11 @@
-"""Tests for period endpoints and add_period_years helpers."""
+"""Tests for period endpoints and service behavior.
+
+Note: the auto/open/locked status rule is exercised end-to-end against the real
+PeriodService via the POST /periods/years tests (TestCreateYear) below.
+"""
 from datetime import datetime, timezone
 
 from api.app.models.finance import FinanceSetting
-from api.add_period_years import _resolve_status_for_year
-
-_CURRENT_YEAR = datetime.now(tz=timezone.utc).year
-
-
-# ── _resolve_status_for_year — pure unit tests, no DB needed ──────────────────
-
-class TestResolveStatusForYear:
-    def test_auto_past_year_is_locked(self):
-        assert _resolve_status_for_year(_CURRENT_YEAR - 1, _CURRENT_YEAR, "auto") == "locked"
-
-    def test_auto_two_years_ago_is_locked(self):
-        assert _resolve_status_for_year(_CURRENT_YEAR - 2, _CURRENT_YEAR, "auto") == "locked"
-
-    def test_auto_current_year_is_open(self):
-        assert _resolve_status_for_year(_CURRENT_YEAR, _CURRENT_YEAR, "auto") == "open"
-
-    def test_auto_future_year_is_open(self):
-        assert _resolve_status_for_year(_CURRENT_YEAR + 1, _CURRENT_YEAR, "auto") == "open"
-
-    def test_auto_is_default_mode(self):
-        assert _resolve_status_for_year(_CURRENT_YEAR - 1, _CURRENT_YEAR) == "locked"
-        assert _resolve_status_for_year(_CURRENT_YEAR, _CURRENT_YEAR) == "open"
-
-    def test_open_override_past_year(self):
-        assert _resolve_status_for_year(_CURRENT_YEAR - 5, _CURRENT_YEAR, "open") == "open"
-
-    def test_open_override_current_year(self):
-        assert _resolve_status_for_year(_CURRENT_YEAR, _CURRENT_YEAR, "open") == "open"
-
-    def test_open_override_future_year(self):
-        assert _resolve_status_for_year(_CURRENT_YEAR + 2, _CURRENT_YEAR, "open") == "open"
-
-    def test_locked_override_past_year(self):
-        assert _resolve_status_for_year(_CURRENT_YEAR - 1, _CURRENT_YEAR, "locked") == "locked"
-
-    def test_locked_override_current_year(self):
-        assert _resolve_status_for_year(_CURRENT_YEAR, _CURRENT_YEAR, "locked") == "locked"
-
-    def test_locked_override_future_year(self):
-        assert _resolve_status_for_year(_CURRENT_YEAR + 3, _CURRENT_YEAR, "locked") == "locked"
 
 
 def test_create_period_as_finance(client, finance_headers, db):
